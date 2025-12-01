@@ -1,5 +1,6 @@
 import { openStreamDeck, listStreamDecks, StreamDeck } from '@elgato-stream-deck/node';
 import { encodeJPEG } from '@elgato-stream-deck/node-lib';
+import { createCanvas } from '@napi-rs/canvas';
 import { DatabaseService } from '../db';
 
 export class StreamDeckDriver {
@@ -194,6 +195,87 @@ export class StreamDeckDriver {
     return buffer;
   }
 
+  generateButtonImage(buttonData: any): Buffer {
+    const width = 72;
+    const height = 72;
+    
+    // Create canvas
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    
+    // Fill with black background
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Set text properties
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Determine what text to display
+    let displayText = '';
+    
+    if (buttonData.emoji && buttonData.emoji.trim()) {
+      displayText = buttonData.emoji.trim();
+      ctx.font = '32px Arial';
+    } else if (buttonData.label && buttonData.label.trim()) {
+      displayText = buttonData.label.trim();
+      // Adjust font size based on text length
+      const fontSize = displayText.length > 10 ? 14 : displayText.length > 5 ? 18 : 24;
+      ctx.font = `${fontSize}px Arial`;
+    } else if (buttonData.textTop && buttonData.textTop.trim()) {
+      displayText = buttonData.textTop.trim();
+      ctx.font = '16px Arial';
+    } else if (buttonData.textBottom && buttonData.textBottom.trim()) {
+      displayText = buttonData.textBottom.trim();
+      ctx.font = '16px Arial';
+    }
+    
+    // Draw text centered
+    if (displayText) {
+      ctx.fillText(displayText, width / 2, height / 2);
+    }
+    
+    // Flip the canvas vertically to correct orientation
+    const flippedCanvas = createCanvas(width, height);
+    const flippedCtx = flippedCanvas.getContext('2d');
+    flippedCtx.scale(1, -1);
+    flippedCtx.translate(0, -height);
+    flippedCtx.drawImage(canvas, 0, 0);
+    
+    // Convert to raw RGB buffer for StreamDeck
+    return this.canvasToRGBBuffer(flippedCanvas);
+  }
+
+  canvasToRGBBuffer(canvas: any): Buffer {
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Get image data
+    const imageData = canvas.getContext('2d').getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    // For StreamDeck, we need raw RGB data (no BMP header)
+    // StreamDeck expects BGR format, bottom-up
+    const buffer = Buffer.alloc(width * height * 3);
+    let offset = 0;
+    
+    for (let y = height - 1; y >= 0; y--) {
+      for (let x = 0; x < width; x++) {
+        const pixelIndex = (y * width + x) * 4;
+        const r = data[pixelIndex];
+        const g = data[pixelIndex + 1];
+        const b = data[pixelIndex + 2];
+        
+        buffer[offset++] = b; // Blue
+        buffer[offset++] = g; // Green
+        buffer[offset++] = r; // Red
+      }
+    }
+    
+    return buffer;
+  }
+
   async updateButtonStates(buttonStates: boolean[]): Promise<void> {
     if (!this.streamDeck) {
       console.log('❌ StreamDeck not connected, skipping button update');
@@ -206,9 +288,10 @@ export class StreamDeckDriver {
       for (let i = 0; i < Math.min(buttonStates.length, 15); i++) {
         const hasContent = buttonStates[i];
         if (hasContent) {
-          // Azul para botones con contenido (color que funciona bien en StreamDeck)
-          await this.setButtonColor(i, 0, 0, 255);
-          console.log(`🔵 Set button ${i} to BLUE (has content)`);
+          // Generate image with white text on black background
+          const imageBuffer = this.generateButtonImage({ label: 'Botón', emoji: '' });
+          await this.setButtonImage(i, imageBuffer);
+          console.log(`📝 Set button ${i} to TEXT (has content)`);
         } else {
           // Rojo para botones vacíos (color que funciona bien en StreamDeck)
           await this.setButtonColor(i, 255, 0, 0);
@@ -219,6 +302,52 @@ export class StreamDeckDriver {
       console.log('✅ StreamDeck button states updated successfully');
     } catch (error) {
       console.error('❌ Error updating StreamDeck buttons:', error);
+    }
+  }
+
+  async updateButtonsWithData(buttons: any[]): Promise<void> {
+    if (!this.streamDeck) {
+      console.log('❌ StreamDeck not connected, skipping button update');
+      return;
+    }
+
+    console.log(`🎛️ Updating StreamDeck buttons with data for ${buttons.length} buttons`);
+
+    try {
+      for (let i = 0; i < Math.min(buttons.length, 15); i++) {
+        const button = buttons[i];
+        
+        if (button && button.data) {
+          // Check if button has content
+          const hasContent = !!(
+            button.data.label?.trim() ||
+            button.data.textTop?.trim() ||
+            button.data.textBottom?.trim() ||
+            button.data.emoji?.trim() ||
+            button.data.icon ||
+            (button.data.actions && button.data.actions.length > 0)
+          );
+
+          if (hasContent) {
+            // Generate image with button data
+            const imageBuffer = this.generateButtonImage(button.data);
+            await this.setButtonImage(i, imageBuffer);
+            console.log(`📝 Set button ${i} to TEXT: "${button.data.label || button.data.emoji || 'BTN'}"`);
+          } else {
+            // Rojo para botones vacíos
+            await this.setButtonColor(i, 255, 0, 0);
+            console.log(`🔴 Set button ${i} to RED (empty)`);
+          }
+        } else {
+          // Rojo para botones vacíos
+          await this.setButtonColor(i, 255, 0, 0);
+          console.log(`🔴 Set button ${i} to RED (empty)`);
+        }
+      }
+
+      console.log('✅ StreamDeck buttons updated with data successfully');
+    } catch (error) {
+      console.error('❌ Error updating StreamDeck buttons with data:', error);
     }
   }
 
@@ -236,16 +365,16 @@ export class StreamDeckDriver {
 
       console.log(`📊 Found ${buttons.length} buttons in page ${pageId}`);
 
-      // Calculate button states based on content
-      const buttonStates: boolean[] = [];
+      // Create array of buttons in position order
+      const buttonsByPosition: any[] = [];
       const maxButtons = 15; // StreamDeck has 15 buttons (5x3 grid)
 
       for (let i = 0; i < maxButtons; i++) {
         const button = buttons.find(b => b.position === i);
-        let hasContent = false;
-
+        buttonsByPosition.push(button || null);
+        
         if (button && button.data) {
-          hasContent = !!(
+          const hasContent = !!(
             button.data.label?.trim() ||
             button.data.textTop?.trim() ||
             button.data.textBottom?.trim() ||
@@ -265,12 +394,10 @@ export class StreamDeckDriver {
         } else {
           console.log(`Button ${i}: no button data`);
         }
-
-        buttonStates.push(hasContent);
       }
 
-      console.log('🎛️ Button states for page update:', buttonStates);
-      await this.updateButtonStates(buttonStates);
+      console.log('🎛️ Updating buttons with full data');
+      await this.updateButtonsWithData(buttonsByPosition);
 
     } catch (error) {
       console.error('❌ Error updating StreamDeck from page:', error);

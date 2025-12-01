@@ -18,6 +18,7 @@
     "@elgato-stream-deck/node": "^7.4.0",
     "@elgato-stream-deck/node-lib": "^7.4.0",
     "@julusian/jpeg-turbo": "^2.3.0",
+    "@napi-rs/canvas": "^0.1.82",
     "chokidar": "^3.5.3",
     "mime-types": "^2.1.35",
     "uuid": "^9.0.1"

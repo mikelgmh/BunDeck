@@ -7,6 +7,7 @@
         "@elgato-stream-deck/node": "^7.4.0",
         "@elgato-stream-deck/node-lib": "^7.4.0",
         "@julusian/jpeg-turbo": "^2.3.0",
+        "@napi-rs/canvas": "^0.1.82",
         "chokidar": "^3.5.3",
         "mime-types": "^2.1.35",
         "uuid": "^9.0.1",
@@ -50,6 +51,28 @@
     "@humanwhocodes/object-schema": ["@humanwhocodes/object-schema@2.0.3", "", {}, "sha512-93zYdMES/c1D69yZiKDBj0V24vqNzB/koF26KPaagAfd3P/4gUlh3Dys5ogAK+Exi9QyzlD8x/08Zt7wIKcDcA=="],
 
     "@julusian/jpeg-turbo": ["@julusian/jpeg-turbo@2.3.0", "", { "dependencies": { "cmake-js": "^7.3.1", "node-addon-api": "^6.1.0", "pkg-prebuilds": "^1.0.0" } }, "sha512-gq/OXsZ03aQ66TZgROoOgQ1yesR9ElB5hrTc9y54t+20ijTY7L+EAL2KBAgwF2uwkyaS965wOKpOlqB1QbtuGA=="],
+
+    "@napi-rs/canvas": ["@napi-rs/canvas@0.1.82", "", { "optionalDependencies": { "@napi-rs/canvas-android-arm64": "0.1.82", "@napi-rs/canvas-darwin-arm64": "0.1.82", "@napi-rs/canvas-darwin-x64": "0.1.82", "@napi-rs/canvas-linux-arm-gnueabihf": "0.1.82", "@napi-rs/canvas-linux-arm64-gnu": "0.1.82", "@napi-rs/canvas-linux-arm64-musl": "0.1.82", "@napi-rs/canvas-linux-riscv64-gnu": "0.1.82", "@napi-rs/canvas-linux-x64-gnu": "0.1.82", "@napi-rs/canvas-linux-x64-musl": "0.1.82", "@napi-rs/canvas-win32-x64-msvc": "0.1.82" } }, "sha512-FGjyUBoF0sl1EenSiE4UV2WYu76q6F9GSYedq5EiOCOyGYoQ/Owulcv6rd7v/tWOpljDDtefXXIaOCJrVKem4w=="],
+
+    "@napi-rs/canvas-android-arm64": ["@napi-rs/canvas-android-arm64@0.1.82", "", { "os": "android", "cpu": "arm64" }, "sha512-bvZhN0iI54ouaQOrgJV96H2q7J3ZoufnHf4E1fUaERwW29Rz4rgicohnAg4venwBJZYjGl5Yl3CGmlAl1LZowQ=="],
+
+    "@napi-rs/canvas-darwin-arm64": ["@napi-rs/canvas-darwin-arm64@0.1.82", "", { "os": "darwin", "cpu": "arm64" }, "sha512-InuBHKCyuFqhNwNr4gpqazo5Xp6ltKflqOLiROn4hqAS8u21xAHyYCJRgHwd+a5NKmutFTaRWeUIT/vxWbU/iw=="],
+
+    "@napi-rs/canvas-darwin-x64": ["@napi-rs/canvas-darwin-x64@0.1.82", "", { "os": "darwin", "cpu": "x64" }, "sha512-aQGV5Ynn96onSXcuvYb2y7TRXD/t4CL2EGmnGqvLyeJX1JLSNisKQlWN/1bPDDXymZYSdUqbXehj5qzBlOx+RQ=="],
+
+    "@napi-rs/canvas-linux-arm-gnueabihf": ["@napi-rs/canvas-linux-arm-gnueabihf@0.1.82", "", { "os": "linux", "cpu": "arm" }, "sha512-YIUpmHWeHGGRhWitT1KJkgj/JPXPfc9ox8oUoyaGPxolLGPp5AxJkq8wIg8CdFGtutget968dtwmx71m8o3h5g=="],
+
+    "@napi-rs/canvas-linux-arm64-gnu": ["@napi-rs/canvas-linux-arm64-gnu@0.1.82", "", { "os": "linux", "cpu": "arm64" }, "sha512-AwLzwLBgmvk7kWeUgItOUor/QyG31xqtD26w1tLpf4yE0hiXTGp23yc669aawjB6FzgIkjh1NKaNS52B7/qEBQ=="],
+
+    "@napi-rs/canvas-linux-arm64-musl": ["@napi-rs/canvas-linux-arm64-musl@0.1.82", "", { "os": "linux", "cpu": "arm64" }, "sha512-moZWuqepAwWBffdF4JDadt8TgBD02iMhG6I1FHZf8xO20AsIp9rB+p0B8Zma2h2vAF/YMjeFCDmW5un6+zZz9g=="],
+
+    "@napi-rs/canvas-linux-riscv64-gnu": ["@napi-rs/canvas-linux-riscv64-gnu@0.1.82", "", { "os": "linux", "cpu": "none" }, "sha512-w9++2df2kG9eC9LWYIHIlMLuhIrKGQYfUxs97CwgxYjITeFakIRazI9LYWgVzEc98QZ9x9GQvlicFsrROV59MQ=="],
+
+    "@napi-rs/canvas-linux-x64-gnu": ["@napi-rs/canvas-linux-x64-gnu@0.1.82", "", { "os": "linux", "cpu": "x64" }, "sha512-lZulOPwrRi6hEg/17CaqdwWEUfOlIJuhXxincx1aVzsVOCmyHf+xFq4i6liJl1P+x2v6Iz2Z/H5zHvXJCC7Bwg=="],
+
+    "@napi-rs/canvas-linux-x64-musl": ["@napi-rs/canvas-linux-x64-musl@0.1.82", "", { "os": "linux", "cpu": "x64" }, "sha512-Be9Wf5RTv1w6GXlTph55K3PH3vsAh1Ax4T1FQY1UYM0QfD0yrwGdnJ8/fhqw7dEgMjd59zIbjJQC8C3msbGn5g=="],
+
+    "@napi-rs/canvas-win32-x64-msvc": ["@napi-rs/canvas-win32-x64-msvc@0.1.82", "", { "os": "win32", "cpu": "x64" }, "sha512-LN/i8VrvxTDmEEK1c10z2cdOTkWT76LlTGtyZe5Kr1sqoSomKeExAjbilnu1+oee5lZUgS5yfZ2LNlVhCeARuw=="],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
