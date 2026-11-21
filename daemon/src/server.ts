@@ -62,9 +62,9 @@ class LibreDeckDaemon {
       // Propagar eventos de plugins externos (api.emitEvent) por WS
       this.pluginLoader.setWebSocketManager(this.wsManager);
 
-      // Módulo remoto E2E (relay client + pairing + allowlist). Sin RELAY_URL
-      // queda en 'disabled' pero el pairing local/QR y la policy siguen
-      // disponibles por REST. Best-effort: nunca tumba el arranque.
+      // Módulo remoto E2E (relay client + pairing + allowlist). Por defecto
+      // usa el relay público; setting `remote.relay.url` a '' lo deja en
+      // 'disabled' (el pairing local/QR y la policy siguen por REST).
       try {
         const { initRemote } = await import('./remote/index');
         const dbForRemote = new DatabaseService();

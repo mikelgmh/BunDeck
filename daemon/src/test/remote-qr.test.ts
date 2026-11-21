@@ -109,12 +109,12 @@ describe('remote-qr: GET /qr', () => {
     expect(String(reuse.body.error)).toMatch(/utilizado/i);
   });
 
-  it('relay vacío cuando no hay URL configurada; relay presente cuando hay RELAY_URL', async () => {
-    // Sin configuración → relay ""
-    const empty = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
-    expect(empty.status).toBe(200);
-    expect(empty.body.relayUrl).toBe('');
-    expect(JSON.parse(empty.body.qr as string).relay).toBe('');
+  it('relay público por defecto; override por env/setting; "" explícito lo desactiva', async () => {
+    // Sin configuración → relay público por defecto
+    const def = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
+    expect(def.status).toBe(200);
+    expect(def.body.relayUrl).toBe('wss://bundeck.mikelgranero.com');
+    expect(JSON.parse(def.body.qr as string).relay).toBe('wss://bundeck.mikelgranero.com');
 
     // Con RELAY_URL en env → se propaga a relayUrl y al payload
     process.env.RELAY_URL = 'wss://relay.example.test';
@@ -128,5 +128,12 @@ describe('remote-qr: GET /qr', () => {
     const viaSetting = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
     expect(viaSetting.body.relayUrl).toBe('wss://relay-settings.example.test');
     expect(JSON.parse(viaSetting.body.qr as string).relay).toBe('wss://relay-settings.example.test');
+
+    // Setting a cadena vacía explícita → desactivado ("")
+    db.setSetting('remote.relay.url', '');
+    const off = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
+    expect(off.status).toBe(200);
+    expect(off.body.relayUrl).toBe('');
+    expect(JSON.parse(off.body.qr as string).relay).toBe('');
   });
 });

@@ -22,10 +22,7 @@ import {
 } from '../remote/ui-policy';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
-
-function single(db: DatabaseService, key: string): string {
-  return db.getSetting(key) ?? '';
-}
+import { resolveRelayUrl } from '../remote/public-relay';
 
 export const handleRemote: ApiHandler = async (req, { url, method, path, db, services }) => {
   const remote: any = (globalThis as any).__libredeckRemote;
@@ -37,7 +34,7 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
       fingerprint: pub.fingerprint,
       publicKey: pub.publicKey,
       relay: {
-        url: process.env.RELAY_URL ?? single(db, 'remote.relay.url') ?? '',
+        url: resolveRelayUrl(db),
         status: remote?.relay?.getState?.() ?? 'unknown',
       },
       pending: listPending(db).length,
@@ -82,7 +79,7 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
       pubKey: pub.publicKey,
       fingerprint: pub.fingerprint,
     });
-    const relayUrl = process.env.RELAY_URL ?? single(db, 'remote.relay.url') ?? '';
+    const relayUrl = resolveRelayUrl(db);
     const payload = {
       v: 1,
       relay: relayUrl,

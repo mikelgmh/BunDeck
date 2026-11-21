@@ -591,7 +591,7 @@
         "remoteConnecting": "Conectando…",
         "remoteDisconnected": "Desconectado",
         "remoteDisabledShort": "Desactivado",
-        "remoteDisabled": "Relay sin configurar (pon RELAY_URL en el daemon). El emparejamiento local por QR sigue funcionando.",
+        "remoteDisabled": "Relay desactivado en este equipo. El emparejamiento local por QR sigue funcionando.",
         "remoteGenCode": "Generar código de emparejamiento",
         "remotePairHint": "Un código de 6 dígitos (10 min) más la huella de la clave de este equipo. El otro BunDeck teclea el código y verifica la huella.",
         "remoteAccept": "Aceptar código de otro BunDeck",

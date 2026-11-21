@@ -103,15 +103,16 @@ export function getTunnelClient(): any {
   }
 }
 
+import { resolveRelayUrl } from '../remote/public-relay';
+
 /**
- * HTTPS pública del relay derivada de la RELAY_URL configurada
- * (`RELAY_URL` env o `remote.relay.url`): wss→https, ws→http.
- * `""` si no hay relay configurado (la UI remota necesita relay).
+ * HTTPS pública del relay (URL efectiva: env, settings o relay público):
+ * wss→https, ws→http. `""` si el relay está desactivado explícitamente.
  */
-export function relayHttpsUrl(db: DatabaseService): string {
+export function relayHttpsUrl(db: { getSetting: (key: string) => string | null }): string {
   let raw = '';
   try {
-    raw = (process.env.RELAY_URL ?? db.getSetting('remote.relay.url') ?? '').trim();
+    raw = resolveRelayUrl(db).trim();
   } catch {
     return '';
   }

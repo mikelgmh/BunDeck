@@ -591,7 +591,7 @@
         "remoteConnecting": "Connecting…",
         "remoteDisconnected": "Disconnected",
         "remoteDisabledShort": "Disabled",
-        "remoteDisabled": "Relay not configured (set RELAY_URL on the daemon). Local QR pairing still works.",
+        "remoteDisabled": "Relay disabled on this machine. Local QR pairing still works.",
         "remoteGenCode": "Generate pairing code",
         "remotePairHint": "A 6-digit code (10 min) plus this device's key fingerprint. The other BunDeck types the code and verifies the fingerprint.",
         "remoteAccept": "Accept another BunDeck's code",

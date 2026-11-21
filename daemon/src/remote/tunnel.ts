@@ -27,6 +27,8 @@
  * códigos vigentes.
  */
 
+import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
+
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
 export interface UiPendingRequest {
@@ -150,7 +152,7 @@ function randomSessionToken(): string {
 
 export interface TunnelClientOpts {
   deviceId: string;
-  /** URL override (tests). Si no, `RELAY_URL` env o `remote.relay.url` en settings. */
+  /** URL override (tests). Si no, `RELAY_URL` env, `remote.relay.url` o relay público por defecto. */
   relayUrl?: string;
   now?: () => number;
 }
@@ -203,7 +205,11 @@ export class TunnelClient {
 
   relayUrl(): string {
     if (this.opts.relayUrl) return this.opts.relayUrl;
-    return process.env.RELAY_URL ?? this.db.getSetting('remote.relay.url') ?? '';
+    return resolveRelayUrl(this.db);
+  }
+
+  relayToken(): string {
+    return resolveRelayToken(this.db);
   }
 
   /** UI remota habilitada (`remote.ui.enabled`, default false). */
@@ -264,11 +270,12 @@ export class TunnelClient {
 
   private connect(): void {
     if (this.closed) return;
-    const url = this.relayUrl();
-    if (!url) {
+    const base = this.relayUrl();
+    if (!base) {
       this.setStatus('disabled');
       return;
     }
+    const url = withRelayToken(base, this.relayToken());
     this.setStatus('connecting');
     try {
       this.ws = new WebSocket(url);

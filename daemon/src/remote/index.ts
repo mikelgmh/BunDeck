@@ -80,7 +80,8 @@ export function initRemote(deps: { db?: DatabaseService; wsManager?: WebSocketMa
   relay.start();
 
   // Túnel UI: misma URL de relay, protocolo `kind:` multiplexado en su
-  // propia conexión WS (ver `tunnel.ts`). Sin RELAY_URL queda en 'disabled'.
+  // propia conexión WS (ver `tunnel.ts`). Por defecto usa el relay público;
+  // setting `remote.relay.url` a '' lo deja en 'disabled'.
   const tunnel = new TunnelClient(db, (deps.wsManager as any) ?? null, { deviceId: identity.deviceId });
   tunnel.start();
   return {
