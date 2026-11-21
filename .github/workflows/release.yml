@@ -24,6 +24,9 @@ jobs:
       with:
         node-version: '22'
 
+    - name: Install dependencies (Root)
+      run: bun install
+
     - name: Install dependencies (CLI)
       run: |
         cd cli
