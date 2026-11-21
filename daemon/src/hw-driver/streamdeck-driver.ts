@@ -109,7 +109,7 @@ export class StreamDeckDriver {
       this.setupEventHandlers();
       console.log('🎧 Event handlers set up');
 
-      // Initialize all buttons to red (for testing)
+      // Initialize all buttons to black (for testing)
       console.log('🎨 Initializing buttons...');
       await this.initializeButtons();
 
