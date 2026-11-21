@@ -353,6 +353,19 @@ export class DatabaseService {
     this.db = getDatabase();
   }
 
+  /**
+   * Checkpoint WAL para que el backup de db.sqlite sea consistente.
+   * Best-effort: lo llama POST /api/v1/admin/prepare-update antes de un
+   * update gestionado. Nunca lanza.
+   */
+  checkpoint(): void {
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch {
+      // noop: no bloquear el update por esto
+    }
+  }
+
   // Settings
   getSetting(key: string): string | null {
     const stmt = this.db.prepare('SELECT value FROM settings WHERE key = ?');

@@ -489,76 +489,49 @@ program
     }
   });
 
-// Update
+// Update (manifiesto versionado + sha256; gestionadas -> launcher)
 program
   .command('update')
-  .description('Check for updates and update BunDeck daemon')
-  .action(async () => {
-    const spinner = ora('Checking for updates...').start();
-
+  .description('Comprobar y aplicar actualizaciones de BunDeck')
+  .option('--check', 'Solo comprobar, sin descargar')
+  .option('--channel <channel>', 'Canal de updates (solo "stable" en v1)', 'stable')
+  .action(async (options) => {
+    const spinner = ora('Buscando actualizaciones...').start();
     try {
-      const currentVersion = getVersion();
-      const response = await fetch('https://api.github.com/repos/mikelgmh/libredeck/releases/latest');
+      const { checkForUpdate, downloadStandaloneDaemon, isManagedInstall } = await import('./update');
+      if (options.channel !== 'stable') {
+        spinner.fail(`Canal "${options.channel}" no soportado (solo "stable" en v1)`);
+        process.exit(1);
+      }
+      const check = await checkForUpdate();
+      if (!check) {
+        const { getVersion: gv } = await import('./version');
+        spinner.succeed(`BunDeck está al día (v${gv()})`);
+        return;
+      }
+      spinner.succeed(`Nueva versión: v${check.current} → v${check.latest}`);
+      console.log(chalk.gray(`Notas: ${check.notesUrl}`));
+      console.log(chalk.gray(`Bundle: ${check.asset.bundle} (${(check.asset.size / 1_048_576).toFixed(1)} MB)`));
+      if (options.check) return;
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch latest release');
+      if (isManagedInstall()) {
+        console.log(chalk.yellow('Instalación gestionada por el launcher:'));
+        console.log('  Abre el launcher → ACTUALIZACIÓN → Descargar → Aplicar ahora.');
+        console.log('  El launcher verifica sha256+firma, respalda la DB y revierte si falla.');
+        return;
       }
 
-      const release = await response.json();
-      const latestVersion = release.tag_name.replace('v', '');
-
-      if (latestVersion > currentVersion) {
-        spinner.text = `Updating daemon to v${latestVersion}...`;
-
-        // Find assets for daemon on current platform
-        const platform = process.platform;
-        const arch = process.arch;
-        const platformName = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'darwin' : 'linux';
-        const assetExt = platform === 'win32' ? '.exe' : '';
-
-        console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
-        console.log(`Platform: ${process.platform}, Arch: ${process.arch}`);
-        console.log('Available assets:', release.assets.map((a: any) => a.name));
-
-        const asset = release.assets.find((a: any) => {
-          const isDaemon = a.name.includes('libredeck-daemon');
-          const isX64 = a.name.includes('x64');
-          const hasExe = a.name.endsWith('.exe');
-          return isDaemon && isX64 && hasExe;
-        });
-
-        console.log('Found asset:', asset ? asset.name : 'NONE');
-
-        if (!asset) {
-          throw new Error(`No daemon asset found for ${platformName}-${arch}`);
-        }
-
-        // Download to a versioned file
-        const downloadResponse = await fetch(asset.browser_download_url);
-        const buffer = await downloadResponse.arrayBuffer();
-
-        const fs = await import('fs');
-        const path = await import('path');
-        const currentDir = path.dirname(process.execPath);
-
-        // Extract version from asset name (e.g., libredeck-daemon-v1.3.0-windows-x64.exe -> v1.3.0)
-        const versionMatch = asset.name.match(/libredeck-daemon-v([0-9]+\.[0-9]+\.[0-9]+)/);
-        const assetVersion = versionMatch ? versionMatch[1] : latestVersion;
-
-        const newDaemonPath = path.join(currentDir, `libredeck-daemon-v${assetVersion}${assetExt}`);
-
-        // Write new daemon executable
-        fs.writeFileSync(newDaemonPath, Buffer.from(buffer));
-
-        spinner.succeed(`Downloaded daemon v${latestVersion}!`);
-
-        // The update will be applied on next restart
-        spinner.succeed(`Daemon updated to v${latestVersion}! The update will be applied when you restart the application.`);
-      } else {
-        spinner.succeed('BunDeck is up to date');
-      }
+      // Standalone: descarga verificada a fichero versionado; se aplica al reiniciar.
+      const dl = ora(`Descargando daemon v${check.latest}...`).start();
+      const dest = await downloadStandaloneDaemon(check, (got, total) => {
+        dl.text = total
+          ? `Descargando daemon v${check.latest}... ${(100 * got / total).toFixed(0)}%`
+          : `Descargando daemon v${check.latest}... ${(got / 1_048_576).toFixed(1)} MB`;
+      });
+      dl.succeed(`Daemon v${check.latest} listo: ${dest}`);
+      console.log(chalk.green('Reinicia el daemon para aplicar (stop + start). Tu DB y plugins se conservan.'));
     } catch (error) {
-      spinner.fail(`Update failed: ${error}`);
+      spinner.fail(`Update falló: ${error}`);
       process.exit(1);
     }
   });

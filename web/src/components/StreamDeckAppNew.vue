@@ -132,8 +132,9 @@
       @check-updates="showUpdateModal"
     />
     
-    <!-- Update Modal (solo bajo Electrobun: el daemon devuelve 501 en
-      /api/v1/version/check y /api/v1/update; Electrobun Updater es canónico) -->
+    <!-- Update Modal (solo bajo Electrobun dev; en producción el dueño
+      del update es el launcher — ver UPDATE_SYSTEM.md — y el daemon
+      devuelve 501 en /api/v1/version/check y /api/v1/update) -->
     <UpdateModal 
       v-if="hasElectrobunUpdater"
       ref="updateModal"

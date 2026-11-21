@@ -1,163 +1,90 @@
-# BunDeck Auto-Update System (DEPRECATED — Electrobun Updater is canonical)
+# BunDeck Auto-Update (gestionado por el launcher)
 
-> **Estado actual**: el flujo GitHub-ZIP descrito abajo fue eliminado en la
-> limpieza de obsoletos. El updater canónico es el **Electrobun `Updater`**
-> en `src/bun/index.ts` (artefactos en `.../releases/latest/download` según
-> `electrobun.config.ts`). `daemon/src/update.ts` ya no existe;
-> `GET /api/v1/version/check` y `POST /api/v1/update` devuelven `501 Gone`.
-> Solo `GET /api/v1/version` (lectura) sigue activo.
-> Lo que sigue es documentación histórica, no el comportamiento vigente.
+> El updater canónico es el **launcher Rust** (`launcher/src/updater.rs`).
+> Electrobun es dev-only y queda fuera del release canónico.
 
-## Overview (histórico)
+Cada release publica un **bundle gestionado** por plataforma y un
+**manifiesto versionado**:
 
-BunDeck includes a built-in automatic update system that can download, install, and restart the application when new versions are available on GitHub.
+- `bundeck-v<ver>-windows-x64.zip` / `-linux-x64.zip` / `-darwin-x64.zip`
+  (daemon + CLI + launcher + `libredeck-updater` + `web-dist/`)
+- `bundeck-update-manifest.json`:
+  `{ version, channel, assets: { <target>: { bundle, url, sha256, size, signature } } }`
 
-## How It Works
+La firma es ed25519 sobre `"<version>|<target>|<sha256>"`
+(`scripts/build-update-manifest.mjs` firma con `LIBREDECK_UPDATE_PRIVKEY`;
+la pública vive en `launcher/UPDATE_PUBKEY` y se compila dentro del
+launcher — ver `scripts/gen-update-keys.mjs`).
 
-### 1. Version Checking
-- The system reads the current version from `package.json`
-- Fetches the latest release information from GitHub API
-- Compares versions to determine if an update is needed
+## Layout gestionado
 
-### 2. Download Process
-- Downloads the ZIP file from the latest GitHub release
-- Extracts the archive to a temporary directory
-- Verifies that required files are present
-
-### 3. Backup & Installation
-- Creates a backup of the current installation
-- Replaces existing files with the new version
-- Cleans up temporary files
-
-### 4. Restart
-- Automatically restarts the application
-- The new version becomes active immediately
-
-## Security Measures
-
-### Release Verification
-- Only accepts releases from the verified author (`mikelgmh`)
-- Only allows stable releases (no drafts or pre-releases)
-- Validates that required files are present in the downloaded package
-
-### Backup System
-- Creates a complete backup before making any changes
-- Automatically restores backup if update fails
-- Preserves user data and configurations
-
-### Rollback Capability
-- If an update fails, the system attempts to restore from backup
-- Users can manually restore from the `backup/` directory if needed
-
-## API Endpoints
-
-### GET `/api/v1/version`
-Returns current version information.
-```json
-{
-  "version": "1.0.0",
-  "buildDate": "2025-01-19T..."
-}
+```text
+<install>/                    # junto al launcher, o $LIBREDECK_INSTALL_DIR
+  libredeck-launcher(.exe)    # en ejecución
+  libredeck-updater(.exe)     # reemplaza al launcher (fichero bloqueado en Windows)
+  versions/<ver>/             # daemon, cli, launcher, updater, web-dist/
+  active.json                 # {"version":"1.6.0"}
+  backups/db-<ts>/db.sqlite* # copia antes de cada update
 ```
 
-### GET `/api/v1/version/check`
-Checks for available updates.
-```json
-{
-  "currentVersion": "1.0.0",
-  "latestVersion": "1.1.0",
-  "hasUpdate": true,
-  "releaseUrl": "https://github.com/mikelgmh/libredeck/releases/tag/v1.1.0",
-  "releaseNotes": "Release notes...",
-  "publishedAt": "2025-01-19T..."
-}
-```
+Instalaciones planas legacy (Windows installer antiguo) se migran solas al
+primer update. Los datos del usuario (`db.sqlite`, `plugins/`, `assets/`,
+`logs/`) nunca se tocan salvo el backup previo.
 
-### POST `/api/v1/update`
-Triggers the update process.
-```json
-{
-  "success": true,
-  "message": "Update completed successfully. Application will restart in a few seconds.",
-  "previousVersion": "1.0.0",
-  "newVersion": "1.1.0",
-  "restarted": true
-}
-```
+## Flujo
 
-## Manual Update Process
+1. **Buscar**: el launcher descarga el manifiesto
+   (`.../releases/latest/download/bundeck-update-manifest.json`) y compara
+   con `GET /api/v1/version`. Sin manifiesto (release antigua) informa con
+   la API de GitHub y sugiere descarga manual.
+2. **Descargar**: hilo de fondo con progreso en la tarjeta ACTUALIZACIÓN
+   de GPUI (porcentaje real por `Content-Length`, etapas legibles para el
+   resto: verificar, extraer, aplicar…).
+3. **Verificar**: sha256 obligatorio; firma ed25519 si hay pubkey compilada
+   (sin pubkey: aviso, no bloqueo — solo en builds dev).
+4. **Stage**: extracción a `versions/<ver>/` + `chmod +x` (unix).
+5. **Aplicar**: `POST /api/v1/admin/prepare-update` (checkpoint WAL),
+   backup DB, `POST /api/v1/admin/shutdown`, cambio atómico de
+   `active.json`, arranque y health-check; si el nuevo daemon no responde,
+   **rollback** a la versión anterior. Se conservan activa + 2 anteriores.
+6. **Self-update del launcher**: `libredeck-updater --wait-pid …` copia el
+   nuevo launcher tras salir este proceso y lo relanza.
 
-1. Click the "Comprobar actualizaciones" button in the toolbar
-2. The system checks for new versions
-3. If an update is available, click "Actualizar Ahora"
-4. The system will:
-   - Download the latest version
-   - Create a backup
-   - Install the update
-   - Restart automatically
+## CLI
 
-## Troubleshooting
+- `libredeck-cli update` → comprueba el manifiesto.
+- Instalación **gestionada**: indica usar el launcher (único dueño).
+- Instalación **standalone** (binarios sueltos): descarga verificada
+  (sha256) a `libredeck-daemon-v<ver>[.exe]` versionado; `getLatestDaemonExe()`
+  ya elige el más nuevo, basta `stop` + `start`.
+- `libredeck-cli update --check` solo informa.
 
-### Update Fails
-- Check the application logs for error details
-- Verify internet connection
-- Ensure the application has write permissions
+## Endpoints del daemon
 
-### Restore from Backup
-If something goes wrong, you can manually restore:
+- `GET /api/v1/version` → `{ version, channel: 'stable', buildDate }`.
+- `POST /api/v1/admin/prepare-update` → `{ ok: true }` (gancho pre-update).
+- `GET /api/v1/version/check` y `POST /api/v1/update` → `501 Gone`
+  (el update lo hace el launcher, no la API).
 
-```bash
-# Stop the application
-# Copy backup files back
-cp -r backup/* .
-# Restart the application
-```
+## CI / releases
 
-### Force Update Check
-The system checks for updates every 4 hours automatically, but you can manually trigger a check using the toolbar button.
+- `build` (matriz 3 OS): daemon + CLI + launcher + updater + web-dist →
+  `dist/` → `scripts/make-bundle.sh` → `bundeck-v<ver>-<target>.zip`.
+- `release`: junta artefactos, `scripts/build-update-manifest.mjs`
+  (firma si existe el secret `LIBREDECK_UPDATE_PRIVKEY`) y
+  `semantic-release` publica bundle + manifiesto + binarios sueltos legacy.
+- Secret requerido: `LIBREDECK_UPDATE_PRIVKEY` (seed hex).
+  Opcional en build: `LIBREDECK_UPDATE_PUBKEY` (si no, `UPDATE_PUBKEY`).
+- macOS necesita firma/notarización para no pedir Gatekeeper en cada
+  versión; el instalador por usuario es `scripts/install-macos.sh`
+  (Linux: `scripts/install-linux.sh`).
 
-## File Structure
+## Probar un update sin release
 
-```
-libredeck/
-├── backup/          # Backup of previous version (created during update)
-├── temp/           # Temporary files (cleaned up after update)
-├── daemon/         # Backend application
-├── web/           # Frontend application
-├── package.json   # Version information
-└── ...
-```
-
-## Development Notes
-
-### Testing Updates
-To test the update system without affecting your development environment:
-
-1. Create a test release on GitHub
-2. Temporarily modify the version in `package.json`
-3. Test the update process
-4. Restore from backup if needed
-
-### Release Process
-When creating a new release:
-
-1. Ensure all code is committed and tested
-2. Update version in `package.json`
-3. Create a GitHub release with a ZIP asset
-4. The update system will automatically find and install it
-
-## Security Considerations
-
-- Only downloads from official GitHub releases
-- Verifies release authenticity
-- Creates backups before making changes
-- Includes rollback mechanisms
-- No automatic updates for pre-releases or drafts
-
-## Future Enhancements
-
-- [ ] Delta updates (only download changed files)
-- [ ] Update progress with more detailed feedback
-- [ ] Automatic rollback on application startup failure
-- [ ] Update channels (stable, beta, nightly)
-- [ ] Admin approval for updates in enterprise environments
+1. `cargo run` en `launcher/` (dev, con `LIBREDECK_INSTALL_DIR` temporal).
+2. Servir un manifiesto + bundle falsos en local y apuntar
+   `MANIFEST_URL`… (hoy la URL es fija; para E2E local, edita temporalmente
+   `MANIFEST_URL` en `updater.rs` o usa `libredeck-cli update` contra
+   `LIBREDECK_INSTALL_DIR` con un bundle real renombrado).
+3. `cargo test --bins` (versiones, manifiesto, layout) +
+   `bun test` en `daemon/` y `cli/`.

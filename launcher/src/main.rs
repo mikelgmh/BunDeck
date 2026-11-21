@@ -16,21 +16,27 @@
 //!
 //! - El icono de bandeja (system tray) es propiedad del launcher
 //!   (ver `tray.rs`, solo Windows): al hacer clic se abre esta ventana.
-//!   Cerrar la ventana NO cierra la app: una ventana ancla invisible
-//!   mantiene vivo el proceso para que el tray siga respondiendo.
-//!   Solo "Salir" (de la ventana o del menú del tray) termina el proceso.
+//!   Cerrar la ventana NO cierra la app (ni la manda a ningún sitio
+//!   distinto: la ventana simplemente se oculta): una ventana ancla
+//!   invisible mantiene vivo el proceso para que el tray siga
+//!   respondiendo. Solo "Salir" (de la ventana o del menú del tray)
+//!   termina el proceso. El menú del tray ofrece Abrir panel (esta
+//!   ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
+//!   (ventana nativa del host) y Salir.
 
 mod monitor;
 mod theme;
 mod tray;
+pub mod updater;
 
 use gpui::{
-    div, img, prelude::*, px, size, App, Application, Bounds, Context, FontWeight, SharedString,
-    WindowBounds, WindowOptions,
+    div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, FontWeight,
+    SharedString, WindowBounds, WindowOptions,
 };
 #[cfg(windows)]
 use gpui::{AnyWindowHandle, MouseButton, Window, WindowKind};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(windows)]
 use std::time::Instant;
@@ -43,13 +49,13 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 #[cfg(windows)]
 use tray::{TrayCtl, TrayEvent};
 #[cfg(windows)]
-use windows::Win32::Foundation::{HWND, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsZoomed, SendMessageW, ShowWindowAsync, HTCAPTION, SW_MAXIMIZE, SW_RESTORE,
-    WM_NCLBUTTONDOWN,
+    IsZoomed, SendMessageW, ShowWindowAsync, HTCAPTION, ICON_BIG, ICON_SMALL, SW_MAXIMIZE,
+    SW_RESTORE, WM_NCLBUTTONDOWN, WM_SETICON,
 };
 
 /// Canal hacia el bucle de eventos del tray (Windows): "Salir" pasa por
@@ -75,6 +81,18 @@ struct LauncherView {
     installed: Option<String>,
     /// Última release en GitHub (None hasta el primer chequeo con red).
     latest: Option<LatestRelease>,
+    /// Chequeo de update gestionado (manifiesto): versión + asset verificado.
+    update_check: Option<updater::UpdateCheck>,
+    /// Progreso de descarga/staging (lo escribe el hilo de fondo).
+    update_progress: Arc<Mutex<updater::UpdateProgress>>,
+    /// Hay descarga/staging en curso (no lanzar dos).
+    update_busy: bool,
+    /// Aplicando la versión staged en el hilo de fondo (bloquea doble clic).
+    update_applying: bool,
+    /// Versión aplicada en esta sesión (para el botón de reinicio).
+    last_applied: Option<String>,
+    /// El stage traía launcher nuevo: hay que reiniciar este proceso.
+    launcher_pending_restart: bool,
     /// El usuario pidió arrancar: el bucle reintenta hasta que la API suba.
     pending_start: bool,
     /// PNG del logo para la cabecera (None = cuadrado ámbar de reserva).
@@ -90,8 +108,11 @@ impl LauncherView {
     fn new(cx: &mut Context<Self>) -> Self {
         let mut log = vec!["Launcher iniciado.".to_string()];
         // Intento de arranque del daemon (no bloquea la UI).
-        log.extend(monitor::ensure_daemon_spawned());
-        let snapshot = monitor::snapshot();
+        let (boot, spawned) = monitor::ensure_daemon_spawned();
+        log.extend(boot);
+        // Si acabamos de spawnearlo y aún no responde, el primer sondeo
+        // muestra "arrancando", no "detenido".
+        let snapshot = monitor::snapshot(spawned);
         log.push(format!(
             "Sondeo inicial: API {} · WS {} · Front {}",
             snapshot.api.detail, snapshot.ws.detail, snapshot.frontend.detail
@@ -106,6 +127,11 @@ impl LauncherView {
             Some(r) => log.push(format!("Última release: {} ({})", r.tag, r.url)),
             None => log.push("No se pudo consultar la última release (¿sin internet?).".to_string()),
         }
+        let pending_start =
+            spawned && snapshot.api.state != State::Ok;
+        if pending_start {
+            log.push("Daemon arrancando: esperando a que la API responda…".to_string());
+        }
         let mut view = Self {
             snapshot,
             log,
@@ -113,7 +139,13 @@ impl LauncherView {
             tab: Tab::Status,
             installed,
             latest,
-            pending_start: false,
+            update_check: None,
+            update_progress: Arc::new(Mutex::new(updater::UpdateProgress::default())),
+            update_busy: false,
+            update_applying: false,
+            last_applied: None,
+            launcher_pending_restart: false,
+            pending_start,
             logo: monitor::logo_path(),
             host: monitor::host_alive(),
             #[cfg(windows)]
@@ -144,9 +176,12 @@ impl LauncherView {
                         this.update(&mut async_cx, |view, _| view.pending_start).unwrap_or(false);
                     let mut boot = Vec::new();
                     if want_start {
-                        boot = monitor::ensure_daemon_spawned();
+                        let (lines, _) = monitor::ensure_daemon_spawned();
+                        boot = lines;
                     }
-                    let snap = monitor::snapshot();
+                    // Solo con arranque pendiente lo caído se pinta
+                    // "arrancando": tras Detener (sin pendiente) es "detenido".
+                    let snap = monitor::snapshot(want_start);
                     // Si la vista se cerró, `update` falla: terminamos el
                     // bucle en vez de girar para siempre.
                     if this
@@ -158,6 +193,68 @@ impl LauncherView {
                                 view.pending_start = false;
                             }
                             view.log.extend(boot);
+                            // El hilo de descarga escribe en update_progress;
+                            // el sondeo lo vuelca al registro y libera busy.
+                            let mut finished_msg: Option<String> = None;
+                            if view.update_busy {
+                                if let Ok(p) = view.update_progress.lock() {
+                                    if p.done {
+                                        finished_msg = Some(format!(
+                                            "Descarga lista: {}",
+                                            p.staged_version
+                                                .as_ref()
+                                                .map(|v| format!("v{v}"))
+                                                .unwrap_or_default()
+                                        ));
+                                    } else if let Some(e) = p.error.clone() {
+                                        finished_msg = Some(format!("Update falló: {e}"));
+                                    }
+                                }
+                                if let Some(msg) = finished_msg {
+                                    view.update_busy = false;
+                                    view.log.push(msg);
+                                }
+                            }
+                            // El hilo de apply termina igual: recoge resultado.
+                            if view.update_applying {
+                                let (done, applied, apply_err, changed, alog) =
+                                    if let Ok(p) = view.update_progress.lock() {
+                                        (
+                                            p.apply_done,
+                                            p.applied_version.clone(),
+                                            p.apply_error.clone(),
+                                            p.launcher_changed,
+                                            p.apply_log.clone(),
+                                        )
+                                    } else {
+                                        (false, None, None, false, Vec::new())
+                                    };
+                                if done {
+                                    view.update_applying = false;
+                                    view.log.extend(alog);
+                                    if let Some(v) = applied {
+                                        view.log.push(format!("BunDeck {v} activo."));
+                                        view.installed = monitor::installed_version();
+                                        view.last_applied = Some(v);
+                                        if changed {
+                                            view.launcher_pending_restart = true;
+                                            view.log.push(
+                                                "El launcher también cambió: reinicia para completar."
+                                                    .to_string(),
+                                            );
+                                        } else {
+                                            view.update_check = None;
+                                        }
+                                        *view.update_progress.lock().unwrap() =
+                                            updater::UpdateProgress::default();
+                                    } else if let Some(e) = apply_err {
+                                        view.log
+                                            .push(format!("No se pudo aplicar: {e}"));
+                                        *view.update_progress.lock().unwrap() =
+                                            updater::UpdateProgress::default();
+                                    }
+                                }
+                            }
                             view.truncate_log();
                             cx.notify();
                         })
@@ -242,57 +339,222 @@ impl LauncherView {
         self.truncate_log();
     }
 
-    /// Botón Buscar: re-consulta instalada + última release.
+    /// Botón Buscar: re-consulta instalada + manifiesto de update.
+    /// Usa el manifiesto versionado; si no existe (release antigua),
+    /// recurre a la API de GitHub para al menos informar.
     fn check_updates(&mut self) {
         self.installed = monitor::installed_version();
-        self.latest = monitor::latest_release();
-        match (&self.installed, &self.latest) {
-            (Some(i), Some(l)) if monitor::is_newer(i, &l.tag) => {
-                self.log.push(format!("Nueva versión disponible: instalada v{i}, última {}.", l.tag))
+        let current = self.installed.clone().unwrap_or_else(|| "dev".to_string());
+        match updater::check_for_update(&current) {
+            Ok(Some(check)) => {
+                self.log.push(format!(
+                    "Nueva versión: instalada v{} → {} (bundle {}, {:.1} MB).",
+                    check.current,
+                    check.latest,
+                    check.asset.bundle,
+                    check.asset.size as f64 / 1_048_576.0
+                ));
+                if !check.manifest_signed {
+                    self.log.push(
+                        "Aviso: bundle sin firma (solo sha256).".to_string(),
+                    );
+                }
+                self.latest = Some(LatestRelease {
+                    tag: format!("v{}", check.latest),
+                    url: check.notes_url.clone(),
+                });
+                // Resetea progreso anterior al haber nueva versión.
+                if self
+                    .update_check
+                    .as_ref()
+                    .map(|c| c.latest != check.latest)
+                    .unwrap_or(true)
+                {
+                    *self.update_progress.lock().unwrap() = updater::UpdateProgress::default();
+                }
+                self.update_check = Some(check);
             }
-            (Some(i), Some(_)) => self.log.push(format!("Estás al día (v{i}).")),
-            _ => self.log.push("No se pudo completar el chequeo (¿daemon o internet caídos?).".to_string()),
+            Ok(None) => {
+                self.log.push(format!("Estás al día (v{current})."));
+                self.update_check = None;
+                self.latest = Some(LatestRelease {
+                    tag: format!("v{current}"),
+                    url: format!(
+                        "https://github.com/{}/releases/latest",
+                        updater::GITHUB_REPO
+                    ),
+                });
+            }
+            Err(e) => {
+                // Fallback informativo a latest_release clásico.
+                self.latest = monitor::latest_release();
+                match (&self.installed, &self.latest) {
+                    (Some(i), Some(l)) if monitor::is_newer(i, &l.tag) => {
+                        self.log.push(format!(
+                            "Manifiesto inaccesible ({e}); última release conocida: instalada v{i}, {}. Descarga manual desde {}",
+                            l.tag, l.url
+                        ))
+                    }
+                    (Some(i), Some(_)) => self.log.push(format!("Estás al día (v{i}).")),
+                    _ => self.log.push(format!("No se pudo completar el chequeo: {e}")),
+                }
+            }
         }
         self.truncate_log();
     }
 
     /// ¿Hay actualización pendiente de aplicar?
     fn update_available(&self) -> bool {
+        if self.launcher_pending_restart {
+            return true;
+        }
+        if let Some(c) = &self.update_check {
+            return updater::is_newer(&c.current, &c.latest);
+        }
         match (&self.installed, &self.latest) {
             (Some(i), Some(l)) => monitor::is_newer(i, &l.tag),
             _ => false,
         }
     }
 
-    /// Botón Actualizar: delega en el host Electrobun (Updater canónico);
-    /// si no hay host, abre la página de la release en el navegador.
-    /// Devuelve true si hay que cerrar la ventanita (handoff completado).
+    /// ¿Ya está descargada y lista para aplicar?
+    fn update_staged_version(&self) -> Option<String> {
+        self.update_progress
+            .lock()
+            .ok()
+            .and_then(|p| p.staged_version.clone().filter(|_| p.done && p.error.is_none()))
+    }
+
+    /// Botón Actualizar: flujo gestionado (descarga en 2º plano con
+    /// progreso) y aplicación con backup + rollback. Si el launcher
+    /// también cambió, tras aplicar se ofrece reiniciar vía helper
+    /// `libredeck-updater` (reemplaza el exe tras salir: handoff).
+    /// Devuelve true si hay que cerrar la ventanita.
     fn apply_update(&mut self) -> bool {
-        let Some(latest) = self.latest.clone() else {
-            self.log.push("Sin última release conocida: pulsa Buscar primero.".to_string());
+        // 0) Reinicio pendiente para completar el self-update del launcher.
+        if self.launcher_pending_restart {
+            return self.restart_for_self_update();
+        }
+        if self.update_applying {
+            return false;
+        }
+        // 1) Si ya hay stage listo: aplicar ahora (en fondo).
+        if let Some(ver) = self.update_staged_version() {
+            self.finish_apply(&ver);
+            return false;
+        }
+        // 2) Si hay descarga en curso: no duplicar, solo informar.
+        if self.update_busy {
+            self.log.push("Descarga en curso: espera a que termine.".to_string());
             self.truncate_log();
             return false;
-        };
-        if let Some(body) = monitor::host_post("update-apply") {
-            let ok = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|v| v.get("ok")?.as_bool())
-                .unwrap_or(false);
-            if ok {
-                self.log.push(format!("Actualización a {} en marcha (el host aplica y reinicia).", latest.tag));
-                self.truncate_log();
-                return true;
+        }
+        // 3) Sin chequeo previo: buscar primero.
+        let check = match self.update_check.clone() {
+            Some(c) => c,
+            None => {
+                self.log.push("Buscando actualización primero…".to_string());
+                self.check_updates();
+                match self.update_check.clone() {
+                    Some(c) => c,
+                    None => {
+                        self.log.push("Sin actualización disponible.".to_string());
+                        self.truncate_log();
+                        return false;
+                    }
+                }
             }
-            self.log.push("El host no pudo aplicar la actualización.".to_string());
-        } else {
-            self.log.push("Sin host Electrobun: abro la release para descarga manual.".to_string());
-        }
+        };
+        // 4) Descarga en hilo de fondo (progreso vía Arc<Mutex>).
+        self.update_busy = true;
+        *self.update_progress.lock().unwrap() = updater::UpdateProgress {
+            stage: format!("Descargando {}…", check.asset.bundle),
+            ..Default::default()
+        };
+        self.log.push(format!(
+            "Descargando BunDeck {} ({} MB)…",
+            check.latest,
+            check.asset.size as f64 / 1_048_576.0
+        ));
         self.truncate_log();
-        if open::that(&latest.url).is_err() {
-            self.log.push("No se pudo abrir el navegador.".to_string());
-            self.truncate_log();
-        }
+        let progress = self.update_progress.clone();
+        std::thread::spawn(move || {
+            match updater::download_and_stage(&check, &progress) {
+                Ok(_) => {}
+                Err(e) => {
+                    if let Ok(mut p) = progress.lock() {
+                        p.error = Some(e);
+                        p.stage = "Error en la descarga.".to_string();
+                    }
+                }
+            }
+        });
         false
+    }
+
+    /// Aplica una versión ya staged en un hilo de fondo: backup +
+    /// shutdown + activar + health-check + rollback. El sondeo recoge el
+    /// resultado y, si el launcher cambió, ofrece reiniciar vía helper.
+    fn finish_apply(&mut self, ver: &str) {
+        self.update_applying = true;
+        self.log.push(format!("Aplicando BunDeck {ver}…"));
+        self.truncate_log();
+        if let Ok(mut p) = self.update_progress.lock() {
+            p.stage = format!("Aplicando BunDeck {ver}…");
+            p.apply_done = false;
+            p.applied_version = None;
+            p.apply_error = None;
+            p.apply_log.clear();
+        }
+        let progress = self.update_progress.clone();
+        let ver = ver.to_string();
+        std::thread::spawn(move || {
+            let mut lines: Vec<String> = Vec::new();
+            let res = updater::apply_staged(&mut |s| lines.push(s), &ver);
+            let root = updater::install_root();
+            if let Ok(mut p) = progress.lock() {
+                p.apply_log = lines;
+                match res {
+                    Ok(()) => {
+                        p.apply_done = true;
+                        p.applied_version = Some(ver.clone());
+                        p.launcher_changed = updater::staged_has_launcher(&root, &ver);
+                        p.stage = format!("BunDeck {ver} activo.");
+                    }
+                    Err(e) => {
+                        p.apply_done = true;
+                        p.apply_error = Some(e);
+                        p.stage = "No se pudo aplicar.".to_string();
+                    }
+                }
+            }
+        });
+    }
+
+    /// Reinicia el launcher para completar su self-update vía helper
+    /// (reemplaza el exe tras salir). Devuelve true: hay que cerrar.
+    fn restart_for_self_update(&mut self) -> bool {
+        let Some(ver) = self.last_applied.clone() else {
+            return false;
+        };
+        match updater::handoff_self_update(&ver) {
+            Ok(()) => {
+                self.log
+                    .push("El launcher se actualizará al salir.".to_string());
+                self.truncate_log();
+                true
+            }
+            Err(e) => {
+                self.log.push(format!(
+                    "No se pudo lanzar el actualizador del launcher ({e}). \
+                     Descarga la release desde {}/releases/latest y reinstala.",
+                    format!("https://github.com/{}", updater::GITHUB_REPO)
+                ));
+                self.truncate_log();
+                self.launcher_pending_restart = false;
+                false
+            }
+        }
     }
 
     /// Botón Ventana Electrobun: pide al host que abra su dashboard.
@@ -403,6 +665,33 @@ impl Render for LauncherView {
         let update_available = self.update_available();
         let api_up = self.snapshot.api.state == State::Ok;
         let host_up = self.host;
+        // Snapshot del progreso (lo escribe el hilo de fondo).
+        let (update_stage, update_frac, update_err, staged_ver) = self
+            .update_progress
+            .lock()
+            .map(|p| {
+                (
+                    p.stage.clone(),
+                    p.fraction(),
+                    p.error.clone(),
+                    p.staged_version.clone().filter(|_| p.done && p.error.is_none()),
+                )
+            })
+            .unwrap_or_default();
+        let update_busy = self.update_busy;
+        let update_applying = self.update_applying;
+        let launcher_pending_restart = self.launcher_pending_restart;
+        let update_btn_label = if launcher_pending_restart {
+            "Reiniciar launcher"
+        } else if update_applying {
+            "Aplicando…"
+        } else if staged_ver.is_some() {
+            "Aplicar ahora"
+        } else if update_busy {
+            "Descargando…"
+        } else {
+            "Descargar"
+        };
         #[cfg(windows)]
         let maximized = is_maximized(window);
         #[cfg(not(windows))]
@@ -662,7 +951,13 @@ impl Render for LauncherView {
                         div()
                             .text_xs()
                             .text_color(theme::secondary_text())
-                            .child("Hay una versión nueva lista para instalar.".to_string())
+                            .child(if launcher_pending_restart {
+                                "Launcher actualizado: reinicia para completar.".to_string()
+                            } else if staged_ver.is_some() {
+                                "Descarga verificada: lista para aplicar.".to_string()
+                            } else {
+                                "Hay una versión nueva lista para descargar.".to_string()
+                            })
                             .into_any_element()
                     } else {
                         div()
@@ -670,6 +965,48 @@ impl Render for LauncherView {
                             .text_color(theme::muted_text())
                             .child("Pulsa Buscar para comprobar si hay novedades.".to_string())
                             .into_any_element()
+                    })
+                    // Etapa / progreso de la actualización en curso.
+                    .child(if update_busy || update_err.is_some() || staged_ver.is_some() || !update_stage.is_empty() {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme::secondary_text())
+                                    .child(if update_err.is_some() {
+                                        update_err.clone().unwrap_or_default()
+                                    } else if staged_ver.is_some() {
+                                        format!("Lista: v{} — pulsa Aplicar ahora.", staged_ver.clone().unwrap_or_default())
+                                    } else if update_stage.is_empty() {
+                                        "".to_string()
+                                    } else {
+                                        update_stage.clone()
+                                    }),
+                            )
+                            .child(if let Some(f) = update_frac {
+                                div()
+                                    .h(px(6.0))
+                                    .w_full()
+                                    .rounded_full()
+                                    .bg(theme::line())
+                                    .child(
+                                        div()
+                                            .h(px(6.0))
+                                            .rounded_full()
+                                            .bg(theme::accent())
+                                            .w(relative(f.clamp(0.0, 1.0)))
+                                            .into_any_element(),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                div().hidden().into_any_element()
+                            })
+                            .into_any_element()
+                    } else {
+                        div().hidden().into_any_element()
                     })
                     .child(
                         div()
@@ -716,7 +1053,7 @@ impl Render for LauncherView {
                                             cx.notify();
                                         }
                                     }))
-                                    .child("Actualizar ahora".to_string())
+                                    .child(update_btn_label.to_string())
                                     .into_any_element()
                             } else {
                                 div()
@@ -967,7 +1304,7 @@ fn open_launcher_window(cx: &mut App) -> gpui::Result<AnyWindowHandle> {
     Ok(cx.open_window(options, |_, cx| cx.new(LauncherView::new))?.into())
 }
 
-/// Clic en el tray (o "Abrir BunDeck"): trae la ventana al frente si
+/// Clic en el tray (o "Abrir panel"): trae la ventana al frente si
 /// existe, o la abre si se cerró.
 #[cfg(windows)]
 fn show_launcher(cx: &mut App, state: &Rc<RefCell<LauncherState>>) {
@@ -981,7 +1318,13 @@ fn show_launcher(cx: &mut App, state: &Rc<RefCell<LauncherState>>) {
         }
     }
     match open_launcher_window(cx) {
-        Ok(h) => st.window = Some(h),
+        Ok(h) => {
+            // Icono nativo (barra de tareas / Alt-Tab): el marco es propio
+            // (`appears_transparent`) y GPUI 0.2 no expone icono, así que
+            // se pone a mano sobre el HWND (además del recurso del exe).
+            let _ = h.update(cx, |_, window, _| apply_window_icon(window));
+            st.window = Some(h);
+        }
         Err(e) => eprintln!("[launcher] no se pudo abrir la ventana: {e:#}"),
     }
 }
@@ -991,7 +1334,7 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
     match ev {
         TrayEvent::ShowLauncher => show_launcher(cx, state),
         TrayEvent::OpenPanel => {
-            let url = monitor::snapshot().dashboard_url.clone();
+            let url = monitor::snapshot(false).dashboard_url.clone();
             if open::that(&url).is_err() {
                 eprintln!("[launcher] no se pudo abrir el navegador ({url})");
             } else {
@@ -999,6 +1342,20 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
                 let mut st = state.borrow_mut();
                 if let Some(h) = st.window.take() {
                     let _ = h.update(cx, |_, window, _| window.remove_window());
+                }
+            }
+        }
+        TrayEvent::OpenElectrobun => {
+            // Como el botón "Ventana Electrobun": handoff al host; sin
+            // host, se abre el panel web como alternativa.
+            let opened = monitor::host_post("open-window")
+                .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+                .and_then(|v| v.get("opened")?.as_bool())
+                .unwrap_or(false);
+            if !opened {
+                let url = monitor::snapshot(false).dashboard_url.clone();
+                if open::that(&url).is_err() {
+                    eprintln!("[launcher] sin host Electrobun y no se pudo abrir ({url})");
                 }
             }
         }
@@ -1039,6 +1396,83 @@ fn hwnd_of(window: &mut Window) -> Option<HWND> {
             _ => None,
         },
         Err(_) => None,
+    }
+}
+
+/// Icono nativo de la ventana (barra de tareas / Alt-Tab).
+/// El exe ya lleva `icon.ico` incrustado (`build.rs` + `app.rc`), pero GPUI
+/// crea su propia clase de ventana y no expone icono: se asigna además por
+/// HWND con `WM_SETICON` para que aparezca aunque el marco visible sea el
+/// propio (`appears_transparent`, sin marco nativo).
+#[cfg(windows)]
+fn load_window_icon(size: i32) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        LoadIconW, LoadImageW, IDI_APPLICATION, IMAGE_ICON, LR_LOADFROMFILE,
+    };
+    use windows::core::PCWSTR;
+    unsafe {
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("icon.ico"));
+                let mut d = dir.to_path_buf();
+                for _ in 0..3 {
+                    if !d.pop() {
+                        break;
+                    }
+                }
+                candidates.push(d.join("icon.ico"));
+            }
+        }
+        for c in candidates {
+            if c.is_file() {
+                let wide: Vec<u16> = c.to_string_lossy().encode_utf16().chain([0]).collect();
+                if let Ok(h) = LoadImageW(
+                    None,
+                    PCWSTR(wide.as_ptr()),
+                    IMAGE_ICON,
+                    size,
+                    size,
+                    LR_LOADFROMFILE,
+                ) {
+                    if !h.0.is_null() {
+                        return Some(windows::Win32::UI::WindowsAndMessaging::HICON(h.0));
+                    }
+                }
+            }
+        }
+        LoadIconW(None, IDI_APPLICATION)
+            .ok()
+            .filter(|h| !h.0.is_null())
+    }
+}
+
+/// Asigna el icono al HWND de la ventana GPUI (grande + pequeño).
+#[cfg(windows)]
+fn apply_window_icon(window: &mut Window) {
+    if let Some(hwnd) = hwnd_of(window) {
+        unsafe {
+            // Un solo HICON de 32px sirve para ambos tamaños; Windows lo
+            // escala para la vista pequeña si hace falta.
+            if let Some(icon) = load_window_icon(32) {
+                let lparam = LPARAM(icon.0 as isize);
+                let _ = SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(ICON_BIG as usize)),
+                    Some(lparam),
+                );
+                let _ = SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(ICON_SMALL as usize)),
+                    Some(lparam),
+                );
+                // El HICON es Copy y queda asociado a la ventana; no hay
+                // nada que liberar aquí (se pierde un handle por apertura,
+                // despreciable frente al ciclo de vida de la ventana).
+            }
+        }
     }
 }
 

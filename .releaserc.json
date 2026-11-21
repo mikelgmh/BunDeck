@@ -64,6 +64,22 @@
             "label": "Windows Installer"
           },
           {
+            "path": "bundeck-v*-windows-x64.zip",
+            "label": "Managed bundle Windows x64"
+          },
+          {
+            "path": "bundeck-v*-linux-x64.zip",
+            "label": "Managed bundle Linux x64"
+          },
+          {
+            "path": "bundeck-v*-darwin-x64.zip",
+            "label": "Managed bundle macOS x64"
+          },
+          {
+            "path": "bundeck-update-manifest.json",
+            "label": "Update manifest (auto-update)"
+          },
+          {
             "path": "libredeck-cli-linux-x64",
             "label": "CLI Linux x64 (latest)"
           },

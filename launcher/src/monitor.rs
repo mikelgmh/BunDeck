@@ -136,19 +136,25 @@ fn check_frontend(port: u16) -> (ServiceSnapshot, bool) {
 }
 
 /// Un sondeo completo. Barato (<3s peor caso) para llamar cada 2s desde la UI.
-pub fn snapshot() -> Snapshot {
+///
+/// `expect_running` distingue "arrancando" de "detenido": solo cuando la UI
+/// espera el daemon en marcha (tras Iniciar/Reiniciar o un arranque recién
+/// spawneado) los servicios caídos se muestran como `Starting`. Tras una
+/// parada voluntaria (`expect_running = false`) todo lo caído es `Down`.
+pub fn snapshot(expect_running: bool) -> Snapshot {
     let api = api_port();
     let ws = ws_port();
     let front = frontend_port();
 
-    let api_snap = check_api(api);
-    // Si la API no responde, WS y front probablemente tampoco: no los
-    // marcamos "down" definitivo sino "starting" si el daemon se está
-    // levantando (evita parpadeo rojo durante los ~10s de boot).
-    let starting_hint = api_snap.state == State::Down && daemon_process_alive();
+    let mut api_snap = check_api(api);
+    // Sin expectativa de arranque, lo caído es caído (no "arrancando").
+    // Con ella, el boot a medias (~10s) se muestra en ámbar, no en rojo.
+    if expect_running && api_snap.state == State::Down {
+        api_snap.state = State::Starting;
+    }
     let mut ws_snap = check_ws(ws);
     let (mut front_snap, front_is_astro) = check_frontend(front);
-    if starting_hint {
+    if expect_running {
         if ws_snap.state == State::Down {
             ws_snap.state = State::Starting;
         }
@@ -171,16 +177,10 @@ pub fn snapshot() -> Snapshot {
     }
 }
 
-/// Heurística barata: ¿hay un proceso bun sirviendo? Se usa solo para
-/// distinguir "arrancando" de "detenido" en la UI.
-fn daemon_process_alive() -> bool {
-    // Mejor esfuerzo multiplataforma sin dependencias: intentarlo por nombre
-    // de proceso es frágil; devolvemos true si API_PORT responde en el
-    // próximo sondeo de todas formas. Por ahora: si no hay API, asumimos
-    // arranque en curso durante los primeros N sondeos (la vista cuenta).
-    // Se deja como gancho para una futura supervisión real del hijo.
-    true
-}
+/// No se usa: el estado "arrancando" lo decide la UI (`expect_running` en
+/// `snapshot`), no una heurística de proceso. Se eliminó el stub
+/// `daemon_process_alive()` (siempre-true) que pintaba "arrancando" también
+/// tras una parada voluntaria.
 
 /// Sin consola en Windows salvo en dev: con `CREATE_NO_WINDOW` el hijo
 /// (bun o el daemon compilado) no abre ninguna terminal. En dev
@@ -206,12 +206,13 @@ fn hide_console(cmd: &mut std::process::Command) {
 /// en `src/bun/index.ts`); 2) instalado (`libredeck-daemon(.exe)` junto al
 /// launcher, como lo deja installer.iss en {app}).
 /// No bloquea: devuelve inmediatamente tras lanzar el hijo detached.
-/// Devuelve líneas de registro para la UI.
-pub fn ensure_daemon_spawned() -> Vec<String> {
+/// Devuelve líneas de registro para la UI y si se intentó un arranque
+/// (para que la UI marque "arrancando" en vez de "detenido" durante el boot).
+pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
     let mut log = Vec::new();
     if check_api(api_port()).state == State::Ok {
         log.push("Daemon ya en línea, no se spawnea.".to_string());
-        return log;
+        return (log, false);
     }
     if let Some(root) = find_project_root() {
         let entry = root.join("daemon").join("src").join("server.ts");
@@ -240,10 +241,15 @@ pub fn ensure_daemon_spawned() -> Vec<String> {
             hide_console(&mut cmd);
             match cmd.spawn()
             {
-                Ok(child) => log.push(format!("Daemon spawneado (pid {}).", child.id())),
-                Err(e) => log.push(format!("No se pudo spawnear el daemon con {bun}: {e}")),
+                Ok(child) => {
+                    log.push(format!("Daemon spawneado (pid {}).", child.id()));
+                    return (log, true);
+                }
+                Err(e) => {
+                    log.push(format!("No se pudo spawnear el daemon con {bun}: {e}"));
+                    return (log, false);
+                }
             }
-            return log;
         }
     }
     if let Some(exe) = find_installed_daemon() {
@@ -261,13 +267,18 @@ pub fn ensure_daemon_spawned() -> Vec<String> {
         hide_console(&mut cmd);
         match cmd.spawn()
         {
-            Ok(child) => log.push(format!("Daemon spawneado (pid {}).", child.id())),
-            Err(e) => log.push(format!("No se pudo arrancar {}: {e}", exe.display())),
+            Ok(child) => {
+                log.push(format!("Daemon spawneado (pid {}).", child.id()));
+                return (log, true);
+            }
+            Err(e) => {
+                log.push(format!("No se pudo arrancar {}: {e}", exe.display()));
+                return (log, false);
+            }
         }
-        return log;
     }
     log.push("Sin daemon a la vista: ni fuentes (daemon/src/server.ts) ni libredeck-daemon junto al launcher.".to_string());
-    log
+    (log, false)
 }
 
 /// Pide al daemon que se apague (POST /api/v1/admin/shutdown: responde al
@@ -351,11 +362,15 @@ pub fn is_newer(installed: &str, latest_tag: &str) -> bool {
 }
 
 /// Logo a todo color para la cabecera del panel (PNG de bundeck).
-/// Instalado: `<exe>/web-dist`; dev: `<root>/web/public` o `<root>/web/dist`.
+/// Gestionado: `versions/<activa>/web-dist`; instalado plano: `<exe>/web-dist`;
+/// dev: `<root>/web/public` o `<root>/web/dist`.
 /// Se prefiere el grande (`apple-touch-icon.png`) para que no se vea
 /// borroso en pantallas HiDPI. None si no se encuentra.
 pub fn logo_path() -> Option<std::path::PathBuf> {
     let mut dirs = Vec::new();
+    if let Some(managed) = super::updater::resolve_web_dist() {
+        dirs.push(managed);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             dirs.push(dir.join("web-dist"));
@@ -417,8 +432,12 @@ pub fn host_post(path: &str) -> Option<String> {
     host_agent().post(&host_url(path)).call().ok()?.into_string().ok()
 }
 
-/// Daemon compilado junto al launcher (layout de installer.iss: todo en {app}).
+/// Daemon compilado: `versions/<activa>/` (gestionado) o plano junto al
+/// launcher (legacy, layout de installer.iss: todo en {app}).
 fn find_installed_daemon() -> Option<std::path::PathBuf> {
+    if let Some(exe) = super::updater::resolve_daemon_exe() {
+        return Some(exe);
+    }
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     for name in ["libredeck-daemon.exe", "libredeck-daemon"] {
         let candidate = dir.join(name);

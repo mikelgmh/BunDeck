@@ -1,13 +1,14 @@
 /**
  * launcher-server.ts — mini API solo-localhost para la ventanita GPUI
- * (panel de control). El host Electrobun es el dueño canónico del Updater;
- * el launcher gobierna a distancia: abrir ventana, buscar/aplicar updates.
+ * (panel de control). Solo dev (`electrobun dev`): en producción el dueño
+ * del update es el launcher Rust (ver UPDATE_SYSTEM.md) y estas rutas de
+ * update son legacy — el launcher ya no las llama.
  *
  * Rutas:
  * - GET  /__launcher/ping         -> { ok: true, host: 'electrobun' } (presencia, sin efectos)
  * - POST /__launcher/open-window  -> abre la BrowserWindow del dashboard
- * - GET  /__launcher/update-check -> { updateAvailable, version? }
- * - POST /__launcher/update-apply -> { ok } (descarga y aplica, reinicia)
+ * - GET  /__launcher/update-check -> { updateAvailable, version? } (legacy dev)
+ * - POST /__launcher/update-apply -> { ok } (legacy dev)
  */
 
 export interface OpenWindowResult {

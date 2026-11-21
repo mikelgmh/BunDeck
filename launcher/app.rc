@@ -1,0 +1,3 @@
+// Icono del exe (ventana, barra de tareas, Alt-Tab). Ruta relativa a este
+// fichero: el icono canónico vive en la raíz del repo.
+1 ICON "../icon.ico"

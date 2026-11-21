@@ -1,5 +1,5 @@
 <template>
-  <div class="w-72 bg-base-200 border-r border-base-300 flex flex-col shrink-0">
+  <div class="w-80 bg-base-200 border-r border-base-300 flex flex-col shrink-0">
     <!-- Header -->
     <div class="px-4 h-12 border-b border-base-300 flex items-center gap-2.5 shrink-0">
       <div class="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0">

@@ -5,7 +5,9 @@
 //! LIBREDECK_NO_TRAY=1, que pone `monitor::ensure_daemon_spawned` al
 //! spawnearlo — y el host Electrobun no pinta tray propio): al hacer
 //! clic se abre la ventana del launcher, y el menú ofrece Abrir panel
-//! (navegador) y Salir (apaga el daemon y cierra).
+//! (ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
+//! (ventana nativa del host, si lo hay) y Salir (cierra el launcher;
+//! el daemon sigue en marcha y se detiene con Detener).
 //!
 //! Implementación Win32 directa (`Shell_NotifyIconW`) sobre un HWND oculto
 //! con su propio bucle de mensajes en un hilo dedicado. Los eventos viajan
@@ -16,11 +18,13 @@ use std::sync::mpsc::{self, Receiver};
 /// Eventos del tray hacia el hilo de GPUI.
 #[derive(Debug, Clone, Copy)]
 pub enum TrayEvent {
-    /// Clic izquierdo (o doble clic) en el icono, o "Abrir BunDeck".
+    /// Clic izquierdo (o doble clic) en el icono, o "Abrir panel".
     ShowLauncher,
-    /// "Abrir panel": abrir el dashboard en el navegador.
+    /// "Abrir en la web": abrir el dashboard en el navegador.
     OpenPanel,
-    /// "Salir": apagar daemon y cerrar la app.
+    /// "Abrir en Electrobun": pedir al host que abra su ventana nativa.
+    OpenElectrobun,
+    /// "Salir": cerrar el launcher (el daemon sigue en marcha).
     Quit,
 }
 
@@ -72,8 +76,9 @@ mod imp {
     pub(super) const WM_TRAYICON: u32 = WM_APP + 41;
     pub(super) const WM_TRAY_SHUTDOWN: u32 = WM_APP + 42;
     const MENU_OPEN: usize = 1;
-    const MENU_PANEL: usize = 2;
-    const MENU_QUIT: usize = 3;
+    const MENU_WEB: usize = 2;
+    const MENU_ELECTROBUN: usize = 3;
+    const MENU_QUIT: usize = 4;
 
     struct TrayThread {
         tx: Sender<TrayEvent>,
@@ -163,8 +168,9 @@ mod imp {
                 Ok(m) => m,
                 Err(_) => return,
             };
-            let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir BunDeck"));
-            let _ = AppendMenuW(menu, MF_STRING, MENU_PANEL, w!("Abrir panel"));
+            let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir panel"));
+            let _ = AppendMenuW(menu, MF_STRING, MENU_WEB, w!("Abrir en la web"));
+            let _ = AppendMenuW(menu, MF_STRING, MENU_ELECTROBUN, w!("Abrir en Electrobun"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Salir"));
             let mut pt = POINT { x: 0, y: 0 };
@@ -186,7 +192,8 @@ mod imp {
             let _ = DestroyMenu(menu);
             let ev = match cmd.0 as usize {
                 MENU_OPEN => Some(TrayEvent::ShowLauncher),
-                MENU_PANEL => Some(TrayEvent::OpenPanel),
+                MENU_WEB => Some(TrayEvent::OpenPanel),
+                MENU_ELECTROBUN => Some(TrayEvent::OpenElectrobun),
                 MENU_QUIT => Some(TrayEvent::Quit),
                 _ => None,
             };

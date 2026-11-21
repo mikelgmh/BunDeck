@@ -110,6 +110,18 @@ jobs:
         bun run build
         mv libredeck-cli${{ matrix.ext }} ../libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
+    - name: Setup Rust (all OS: launcher + updater ship everywhere)
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build launcher + updater (all OS)
+      shell: bash
+      env:
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
+        LIBREDECK_UPDATE_PUBKEY: ${{ secrets.LIBREDECK_UPDATE_PUBKEY }}
+      run: |
+        cd launcher
+        cargo build --release
+
     - name: Build Web
       run: |
         cd web
@@ -131,7 +143,22 @@ jobs:
         fi
         mv libredeck-daemon${{ matrix.ext }} ../libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
-    - name: Package Web dist (non-Windows)
+    - name: Assemble managed bundle (daemon+cli+launcher+updater+web)
+      shell: bash
+      run: |
+        rm -rf dist
+        mkdir -p dist
+        cp libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/libredeck-daemon${{ matrix.ext }}"
+        cp libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/libredeck-cli${{ matrix.ext }}"
+        LAUNCHER_EXT="${{ matrix.ext }}"
+        cp launcher/target/release/libredeck-launcher${LAUNCHER_EXT} "dist/libredeck-launcher${LAUNCHER_EXT}"
+        cp launcher/target/release/libredeck-updater${LAUNCHER_EXT} "dist/libredeck-updater${LAUNCHER_EXT}"
+        mkdir -p dist/web-dist
+        cp -r web/dist/* dist/web-dist/
+        echo "{\"version\":\"${{ steps.version.outputs.version }}\"}" > dist/active.json
+        bash scripts/make-bundle.sh "${{ steps.version.outputs.version }}" "${{ matrix.target }}"
+
+    - name: Package Web dist (non-Windows, legacy standalone layout)
       if: matrix.installer == false
       run: tar -czf libredeck-web-dist-v${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz -C web dist
       shell: bash
@@ -142,26 +169,6 @@ jobs:
       run: |
         choco install innosetup -y
         echo "C:\Program Files (x86)\Inno Setup 6" >> $GITHUB_PATH
-
-    - name: Setup Rust (Windows only)
-      if: matrix.installer == true
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Build launcher GPUI (Windows only)
-      if: matrix.installer == true
-      run: |
-        cd launcher
-        cargo build --release
-
-    - name: Copy Web dist to Dist (Windows only)
-      if: matrix.installer == true
-      shell: bash
-      run: |
-        mkdir -p dist/web-dist
-        cp -r web/dist/* dist/web-dist/
-        cp libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} dist/libredeck-daemon${{ matrix.ext }}
-        cp libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} dist/libredeck-cli${{ matrix.ext }}
-        cp launcher/target/release/libredeck-launcher.exe dist/libredeck-launcher.exe
 
     - name: Build Windows Installer
       if: matrix.installer == true
@@ -180,6 +187,8 @@ jobs:
           libredeck-cli-v*-${{ matrix.target }}${{ matrix.ext }}
           libredeck-daemon-v*-${{ matrix.target }}${{ matrix.ext }}
           libredeck-web-dist-v*-${{ matrix.target }}.tar.gz
+          bundeck-v*-${{ matrix.target }}.zip
+          bundeck-v*-${{ matrix.target }}.zip.sha256
           installer/BunDeck-Setup-v*.exe
 
   release:
@@ -218,7 +227,18 @@ jobs:
         find artifacts -name "libredeck-cli-v*-*" -exec mv {} . \;
         find artifacts -name "libredeck-daemon-v*-*" -exec mv {} . \;
         find artifacts -name "libredeck-web-dist-v*.tar.gz" -exec mv {} . \; || true
+        find artifacts -name "bundeck-v*.zip" -exec mv {} . \; || true
+        find artifacts -name "bundeck-v*.zip.sha256" -exec mv {} . \; || true
         find artifacts -name "BunDeck-Setup-v*.exe" -exec mv {} . \; || true
+
+    - name: Build update manifest (signed if secret present)
+      env:
+        LIBREDECK_UPDATE_PRIVKEY: ${{ secrets.LIBREDECK_UPDATE_PRIVKEY }}
+      run: |
+        VER="$(ls bundeck-v*-windows-x64.zip | head -1 | sed -E 's/.*bundeck-v([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/')"
+        echo "Manifest version: $VER"
+        node scripts/build-update-manifest.mjs --version "$VER" --assets . --out bundeck-update-manifest.json
+        cat bundeck-update-manifest.json
 
     - name: Create stable latest aliases (unversioned, for direct /latest/download links)
       run: |

@@ -446,17 +446,32 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
     if (method === 'GET') {
       return jsonResponse({
         version: getVersion(),
+        channel: 'stable',
         buildDate: new Date().toISOString(),
       });
     }
   }
 
-  // Deprecated: update flow moved to the Electrobun Updater (canonical).
+  // Preparación para update gestionado (launcher): best-effort, siempre ok.
+  // Hoy: WAL checkpoint para que el backup sea consistente; el apagado
+  // ordenado lo hace POST /api/v1/admin/shutdown.
+  if (path === '/api/v1/admin/prepare-update') {
+    if (method === 'POST') {
+      try {
+        (db as unknown as { checkpoint?: () => void })?.checkpoint?.();
+      } catch {
+        // best-effort: no bloquear el update por esto
+      }
+      return jsonResponse({ ok: true });
+    }
+  }
+
+  // Deprecated: update flow moved to the launcher (ver UPDATE_SYSTEM.md).
   // Kept as 501 so old clients fail loudly instead of hanging.
   if (path === '/api/v1/version/check') {
     if (method === 'GET') {
       return jsonResponse(
-        { error: 'Gone', message: 'Version check is managed by the Electrobun Updater, not the daemon API.' },
+        { error: 'Gone', message: 'Version check is managed by the launcher updater, not the daemon API.' },
         501
       );
     }

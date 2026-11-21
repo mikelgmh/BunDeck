@@ -7,6 +7,11 @@ set -e
 
 echo "🚀 Building BunDeck for production..."
 
+# Versión única desde package.json (temprano: la usan daemon/CLI/launcher/bundle).
+APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+echo "📌 App version: $APP_VERSION"
+export LIBREDECK_VERSION="$APP_VERSION"
+
 # Clean dist directory
 echo "🧹 Cleaning dist directory..."
 rm -rf dist/*
@@ -54,19 +59,32 @@ echo "📦 Building Launcher (Rust)..."
 if command -v cargo &> /dev/null; then
     (cd launcher && cargo build --release)
     cp launcher/target/release/libredeck-launcher dist/ 2>/dev/null || cp launcher/target/release/libredeck-launcher.exe dist/ 2>/dev/null || echo "⚠️ Launcher compilado pero no copiado a dist/"
+    cp launcher/target/release/libredeck-updater dist/ 2>/dev/null || cp launcher/target/release/libredeck-updater.exe dist/ 2>/dev/null || echo "⚠️ Updater compilado pero no copiado a dist/"
 else
     echo "⚠️ cargo no encontrado: se omite el launcher (instala Rust o usa bun run dev:launcher)"
 fi
 
+# active.json gestionado (el updater migra instalaciones planas a versions/).
+if [ -f dist/libredeck-daemon ] || [ -f dist/libredeck-daemon.exe ]; then
+    echo "{\"version\":\"$APP_VERSION\"}" > dist/active.json
+fi
+
+# Bundle gestionado (daemon+cli+launcher+updater+web) para auto-update.
+if [ -f dist/libredeck-daemon ] || [ -f dist/libredeck-daemon.exe ]; then
+    if [ "$(uname -s)" = "MINGW"* ] || [ "$(uname -s)" = "MSYS"* ] || [ -n "${WINDIR:-}" ]; then
+        bash scripts/make-bundle.sh "$APP_VERSION" "windows-x64" || echo "⚠️ no se pudo crear el bundle"
+    elif [ "$(uname)" = "Darwin" ]; then
+        bash scripts/make-bundle.sh "$APP_VERSION" "darwin-x64" || echo "⚠️ no se pudo crear el bundle"
+    else
+        bash scripts/make-bundle.sh "$APP_VERSION" "linux-x64" || echo "⚠️ no se pudo crear el bundle"
+    fi
+fi
+
 echo "📦 Building Installer..."
 ISCC_PATH="/c/Users/Mikel/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
-# Versión única desde package.json, vía version.iss (evita /DAppVersion en CLI,
-# que ISCC bajo Git Bash interpreta como segundo fichero de script).
-APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
-echo "📌 App version: $APP_VERSION"
-# Override en tiempo de ejecución y respaldo para getVersion() en daemon/CLI
-# (el JSON de root package.json ya va incrustado en el binario vía import).
-export LIBREDECK_VERSION="$APP_VERSION"
+# version.iss desde APP_VERSION (evita /DAppVersion en CLI, que ISCC bajo
+# Git Bash interpreta como segundo fichero de script). LIBREDECK_VERSION ya
+# se exportó arriba para daemon/CLI/launcher.
 echo "#define AppVersion \"$APP_VERSION\"" > version.iss
 if [ -f "$ISCC_PATH" ]; then
     "$ISCC_PATH" installer.iss

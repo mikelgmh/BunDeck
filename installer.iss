@@ -37,6 +37,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\libredeck-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\libredeck-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\libredeck-launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\libredeck-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\active.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\web-dist\*"; DestDir: "{app}\web-dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 

@@ -1377,7 +1377,9 @@ const doUndo = async () => {
   if (undo) await undo()
 }
 
-// Updater (canónico Electrobun, como antes)
+// Updater: en producción el dueño es el launcher (UPDATE_SYSTEM.md);
+// aquí solo se consulta la versión instalada y, bajo Electrobun dev,
+// el modal legacy (el daemon devuelve 501 en version/check y update).
 const hasElectrobunUpdater = typeof window !== 'undefined' && !!(window as any).electrobun
 const currentVersion = ref('')
 const latestVersion = ref('')

@@ -119,16 +119,24 @@ BunDeck is cross-platform: **Windows, macOS and Linux** are first-class citizens
 |---|---|---|
 | Windows | `BunDeck-Setup.exe` (installer: daemon + CLI + launcher + panel) | [BunDeck-Setup.exe](https://github.com/mikelgmh/libredeck/releases/latest/download/BunDeck-Setup.exe) |
 | Windows (portable) | Daemon + CLI standalone | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-windows-x64.exe) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-windows-x64.exe) |
-| macOS | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-darwin-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-darwin-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-darwin-x64.tar.gz) |
-| Linux | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-linux-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-linux-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-linux-x64.tar.gz) |
+| macOS | Managed bundle (daemon + CLI + launcher + panel) | [bundeck-v*-darwin-x64.zip](https://github.com/mikelgmh/libredeck/releases/latest) — install with `scripts/install-macos.sh` |
+| Linux | Managed bundle (daemon + CLI + launcher + panel) | [bundeck-v*-linux-x64.zip](https://github.com/mikelgmh/libredeck/releases/latest) — install with `scripts/install-linux.sh` |
+| macOS/Linux (manual) | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-darwin-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-darwin-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-darwin-x64.tar.gz) |
 
 All files for a version (including versioned filenames for pinning): [latest release page](https://github.com/mikelgmh/libredeck/releases/latest).
 
 ### Per-OS notes
 
 - **Windows:** run the installer, open **BunDeck** → **Open panel**. The installer sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
-- **macOS:** download the three files, make daemon/CLI executable (`chmod +x`), run the daemon (`./libredeck-daemon-darwin-x64`), unpack the web panel next to it as `web-dist/`, then open `http://localhost:3002`.
-- **Linux:** same layout as macOS. Unpack with `tar -xzf libredeck-web-dist-linux-x64.tar.gz`.
+- **macOS:** download the managed bundle and run `bash scripts/install-macos.sh` (from the repo), or install manually: download the three files, make daemon/CLI executable (`chmod +x`), run the daemon (`./libredeck-daemon-darwin-x64`), unpack the web panel next to it as `web-dist/`, then open `http://localhost:3002`.
+- **Linux:** download the managed bundle and run `bash scripts/install-linux.sh`, or same manual layout as macOS (`tar -xzf libredeck-web-dist-linux-x64.tar.gz`).
+
+### Updates
+
+Managed installs (installer or install script) update from the launcher:
+**ACTUALIZACIÓN → Buscar → Descargar → Aplicar ahora**, with progress,
+integrity + signature verification, database backup and automatic rollback.
+Standalone binaries: `libredeck-cli update` (see `UPDATE_SYSTEM.md`).
 
 ### From source
 
@@ -263,13 +271,13 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 ```bash
 ./build.sh
 # web → daemon/web-dist + dist/ → compiled daemon+cli (version embedded)
-# → Rust launcher (if cargo exists) → platform packages
-# (Windows: Inno Setup installer; macOS/Linux: portable binaries + web-dist)
+# → Rust launcher + updater (if cargo exists) → managed bundle per OS
+# (Windows: Inno Setup installer; macOS/Linux: bundle + install scripts)
 ```
 
-- Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`LIBREDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` use `getVersion()`, no hardcoded `0.1.0`.
-- CI (`.github/workflows/release.yml`): test → per-OS build (daemon + CLI + `web-dist.tar.gz`; Windows also `BunDeck-Setup`) → `semantic-release` on `master`.
-- Electrobun stays out of the canonical release (its updater artifacts go to `.../releases/latest/download`).
+- Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`LIBREDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` (now `{ version, channel: 'stable', buildDate }`) use `getVersion()`, no hardcoded `0.1.0`. Launcher version comes from `build.rs` (`LIBREDECK_VERSION` or root JSON).
+- CI (`.github/workflows/release.yml`): test → per-OS build (daemon + CLI + launcher + updater + `web-dist` → `bundeck-v<ver>-<target>.zip`; Windows also `BunDeck-Setup`) → manifest (`scripts/build-update-manifest.mjs`, signed with `LIBREDECK_UPDATE_PRIVKEY` secret) → `semantic-release` on `master`.
+- Auto-update owner is the launcher (`launcher/src/updater.rs`, details in `UPDATE_SYSTEM.md`). Electrobun stays out of the canonical release.
 
 ---
 
@@ -280,8 +288,10 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 | `PORT` / `WS_PORT` / `FRONTEND_PORT` / `HOST_PORT` | Ports (see table) |
 | `DEV_MODE=true` | No embedded frontend; UI on Astro `:4321` |
 | `LIBREDECK_DATA_DIR` | Explicit data dir (also tests) |
+| `LIBREDECK_INSTALL_DIR` | Managed install root (updater layout); defaults to launcher dir |
 | `LIBREDECK_BIND` / `LIBREDECK_BIND_LAN=1` | `0.0.0.0` for LAN; loopback by default |
 | `LIBREDECK_VERSION` | Version override (build/CI inject it) |
+| `LIBREDECK_UPDATE_PUBKEY` | Update signing pubkey override (else compiled `UPDATE_PUBKEY`) |
 | `LIBREDECK_NO_TRAY=1` / `LIBREDECK_MANAGED=1` | Daemon skips tray / self-management (set by launcher) |
 | `LIBREDECK_HOST_MANAGE_DAEMON=0/1` | Forbid/force Electrobun daemon management |
 | `BUN_PATH` | Alternate bun for the dev host |
