@@ -1,0 +1,17 @@
+[package]
+name = "xattr"
+# Vendored from crates.io xattr 0.2.3 + fix: on Linux/Android, libc has no
+# ENOATTR (getxattr reports a missing attribute as ENODATA). Upstream fixed
+# this split in xattr 1.x; zed-async-tar (via gpui) still requires 0.2, so
+# we vendor with the one-line platform split. See src/sys/mod.rs.
+version = "0.2.3"
+authors = ["Steven Allen <steven@stebalien.com>"]
+description = "unix extended filesystem attributes (vendored + linux ENOATTR fix)"
+license = "MIT/Apache-2.0"
+
+[features]
+default = ["unsupported"]
+unsupported = []
+
+[dependencies]
+libc = "0.2"

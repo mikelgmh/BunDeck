@@ -45,3 +45,10 @@ embed-resource = "3"
 opt-level = "z"
 lto = true
 strip = true
+
+# xattr 0.2.3 (vía gpui -> gpui_http_client -> zed-async-tar) no compila en
+# Linux con libc moderna: emite `::libc::ENOATTR` también para Linux/Android,
+# donde no existe (allí es ENODATA). Vendoreado con el split por OS.
+# Upstream lo corrigió en xattr 1.x, pero zed-async-tar exige 0.2.
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
