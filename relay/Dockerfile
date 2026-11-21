@@ -3,16 +3,17 @@ FROM oven/bun:1 AS base
 WORKDIR /app
 
 # ---- deps (capa cacheable) ----
+# Contexto: openship usa el repo como contexto con rootDirectory=relay,
+# así que se copia con prefijo relay/ para que funcione igual en local y en remote.
 FROM base AS install
-COPY package.json ./
-# Sin bun.lock commiteado aún: instala producción.
+COPY relay/package.json relay/bun.lock ./
 RUN bun install --production
 
 # ---- runtime ----
 FROM base AS release
 COPY --from=install /app/node_modules ./node_modules
-COPY package.json tsconfig.json ./
-COPY src ./src
+COPY relay/package.json ./
+COPY relay/src ./src
 
 ENV NODE_ENV=production
 # Openship/openpanel inyectan $PORT; RELAY_PORT es el fallback.
