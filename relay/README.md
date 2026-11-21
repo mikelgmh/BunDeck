@@ -69,10 +69,15 @@ por mensaje). Límite: **64 KB** por mensaje; **60 msg/min por IP**.
 
 | Método | Ruta | Auth | Respuesta |
 |---|---|---|---|
+| GET | `/` | no | Landing HTML (cómo conectar, estado, botón copiar `wss://…`). Con `Accept: application/json` → `{ service, version, online }` |
 | GET | `/health` | no | `{ ok, service, version, uptime }` |
 | GET | `/stats` | no | `{ online, devices, pairingPending, uptime }` — solo conteos, sin datos sensibles |
 | POST | `/pair` | **sí** (`RELAY_TOKEN`) | `{ code: "123456", expiresIn: 300 }` — código de un solo uso |
 | * | resto | **sí** | upgrade a WebSocket (`401` sin token, `426` si no es WS) |
+
+> Nota: `GET /` es público a propósito (antes devolvía `401 unauthorized`
+> y por eso el dominio mostraba un error). Los upgrades WebSocket a `/`
+> (`Upgrade: websocket`) siguen exigiendo el token igual que antes.
 
 ## Variables de entorno
 
@@ -81,7 +86,24 @@ por mensaje). Límite: **64 KB** por mensaje; **60 msg/min por IP**.
 | `PORT` | — | Prioritario (lo inyectan openship/openpanel). Si no, `RELAY_PORT`. |
 | `RELAY_PORT` | `8787` | Puerto de escucha. |
 | `RELAY_TOKEN` | vacío (abierto, solo dev) | Secreto para WS y `POST /pair`. Generar: `openssl rand -hex 32`. |
-| `RELAY_DOMAIN` | vacío | Solo logs (p.ej. `bundeck.mikelgranero.com`). |
+| `RELAY_DOMAIN` | vacío | URL que muestra la landing como `wss://…` y etiqueta de logs (p.ej. `bundeck.mikelgranero.com`). Si vacío, la landing autodetecta el `Host` del request. Acepta `dominio` o `wss://dominio`. |
+
+### Personalizar la landing (RELAY_DOMAIN)
+
+`GET /` es una página pública sin auth: título, badge (online/versión/
+conectados), qué es el relay, pasos de conexión, botón de copiar URL y
+enlace a docs. Sin dependencias (CSS/JS inline), ES+EN según
+`Accept-Language` (default ES).
+
+```bash
+# La URL visible será wss://bundeck.mikelgranero.com
+RELAY_DOMAIN=bundeck.mikelgranero.com
+```
+
+- Con `RELAY_DOMAIN` vacío se usa el `Host` del request
+  (detrás de un reverse proxy funciona vía `Host` / `X-Forwarded-Host`).
+- Clientes máquina-a-máquina: `curl -H 'Accept: application/json' https://tu-dominio/`
+  → `{ service, version, online }`.
 | `DATA_DIR` / `RELAY_DATA_DIR` | `relay/data` | Directorio de `relay.db` (en docker: `/data`). |
 
 ## Cómo correr

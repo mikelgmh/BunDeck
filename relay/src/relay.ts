@@ -2,6 +2,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import { timingSafeEqual } from 'node:crypto';
 import type { DeviceStore } from './store';
 import type { PairingStore } from './pairing';
+import { pickLang, publicHostname, relayWsUrl, renderLanding } from './landing';
 import { RateLimiter } from './ratelimit';
 
 export const PROTOCOL_VERSION = 1;
@@ -30,6 +31,8 @@ export interface RelayServerOptions {
   store: DeviceStore;
   pairing: PairingStore;
   version?: string;
+  /** Dominio público para la landing (RELAY_DOMAIN). Si vacío, se autodetecta del Host. */
+  publicHost?: string;
   startedAt?: number;
   now?: () => number;
 }
@@ -154,6 +157,32 @@ export class RelayServer {
 
   private handleFetch(req: Request, server: Server<WsData>): Response | undefined {
     const url = new URL(req.url);
+
+    // Landing pública: GET / sin auth. OJO: si es un upgrade a WebSocket
+    // (los clientes conectan a ws(s)://host/?token=…) se deja pasar al
+    // flujo WS de abajo, que sí exige token.
+    if (url.pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const upgrade = req.headers.get('upgrade') ?? '';
+      if (!upgrade.toLowerCase().includes('websocket')) {
+        const version = this.opts.version ?? '0.1.0';
+        const accept = req.headers.get('accept') ?? '';
+        if (accept.includes('application/json')) {
+          return Response.json({ service: 'libredeck-relay', version, online: this.byDevice.size });
+        }
+        // Evita que el Host quede vacío detrás de proxies raros.
+        const html = renderLanding({
+          version,
+          online: this.byDevice.size,
+          devices: this.opts.store.count(),
+          wsUrl: relayWsUrl(req, this.opts.publicHost ?? ''),
+          lang: pickLang(req),
+        });
+        return new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+    }
 
     if (url.pathname === '/health' && req.method === 'GET') {
       return Response.json({

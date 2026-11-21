@@ -16,6 +16,7 @@ const relay = new RelayServer({
   store,
   pairing,
   version: config.version,
+  publicHost: config.domain,
 });
 
 const server = relay.listen(config.port, '0.0.0.0');
