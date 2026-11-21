@@ -4,19 +4,17 @@ import { PluginLoader } from './plugin-loader';
 import { ActionRunner } from './action-runner';
 import { windowWatcher } from './window-watcher';
 import { DatabaseService } from './db';
-import { setupAPIRoutes } from './api/routes';
 import { streamDeckDriver } from './hw-driver/streamdeck-driver';
 import { API_PORT as PORT, WS_PORT, FRONTEND_PORT, DEV_MODE, BIND_HOST } from './config';
-import { buildCorsHeaders, isPreflight, preflightResponse, withCors } from './http/cors';
+import { buildCorsHeaders, isPreflight, preflightResponse } from './http/cors';
+import { createDaemonFetch } from './http/handler';
 import {
   getContentType,
-  serveDataAsset,
   findWebDistFile,
   findWebDistIndex,
   resolveWebDistIndexCandidates,
 } from './http/static';
 import { stopServers, requestShutdown, abortStartup, installSignalHandlers, isTrayDisabled } from './lifecycle';
-import { getVersion } from './version';
 
 // Import opcional del tray (solo funciona en Windows)
 // systray v1 exporta una clase por defecto: `new SysTray({menu, ...})`
@@ -88,6 +86,20 @@ class LibreDeckDaemon {
           wsManager: this.wsManager,
           actionRunner: this.actionRunner,
         });
+        // El túnel sirve la MISMA respuesta que el Bun.serve local
+        // (http/handler.ts): se inyecta aquí porque necesita los servicios
+        // ya inicializados (ws/plugin/actionRunner/windowWatcher).
+        try {
+          (globalThis as any).__libredeckRemote?.tunnel?.setHttpHandler?.(
+            createDaemonFetch({
+              wsManager: this.wsManager!,
+              pluginLoader: this.pluginLoader!,
+              actionRunner: this.actionRunner!,
+              windowWatcher: windowWatcher,
+              onShutdown: () => this.requestShutdown(),
+            }),
+          );
+        } catch { /* best-effort: el túnel responde 503 sin handler */ }
         console.log('✓ Remote E2E module initialized');
       } catch (e) {
         console.error('⚠️ Remote E2E module failed to init (sigue sin relay):', e);
@@ -280,86 +292,20 @@ class LibreDeckDaemon {
   public async start() {
     await this.initializeServices();
 
-    // Crear servidor API
+    // Crear servidor API (fetch compartido con el túnel: ver http/handler.ts)
     this.httpServer = Bun.serve({
       // Bind explícito (config.ts): 0.0.0.0 = compat LAN (dev.sh/QR),
       // LIBREDECK_BIND=127.0.0.1 para solo-loopback.
       hostname: BIND_HOST,
       port: PORT,
-      fetch: async (req: Request) => {
-        const url = new URL(req.url);
-        const origin = req.headers.get('origin');
-        const corsHeaders = buildCorsHeaders(origin);
+      fetch: createDaemonFetch({
+        wsManager: this.wsManager!,
+        pluginLoader: this.pluginLoader!,
+        actionRunner: this.actionRunner!,
+        windowWatcher: windowWatcher,
+        onShutdown: () => this.requestShutdown(),
+      }),
 
-        // Manejar preflight OPTIONS
-        if (isPreflight(req)) {
-          return preflightResponse(req);
-        }
-
-        // Servir assets estáticos (subidos por el usuario en <data>/assets)
-        if (url.pathname.startsWith('/assets/')) {
-          const served = await serveDataAsset(url.pathname.replace('/assets/', ''), corsHeaders);
-          if (served) return served;
-
-          return new Response('Asset not found', {
-            status: 404,
-            headers: corsHeaders,
-          });
-        }
-
-        // Manejar rutas API
-        if (url.pathname.startsWith('/api/')) {
-          const response = await setupAPIRoutes(req, {
-            wsManager: this.wsManager!,
-            pluginLoader: this.pluginLoader!,
-            actionRunner: this.actionRunner!,
-            windowWatcher: windowWatcher,
-            onShutdown: () => this.requestShutdown(),
-          });
-
-          return withCors(response, origin);
-        }
-
-        // Config para el frontend (puertos centralizados).
-        // También servido por el frontend embebido en prod; aquí para DEV_MODE.
-        if (url.pathname === '/config') {
-          return new Response(
-            JSON.stringify({
-              wsPort: WS_PORT,
-              apiPort: PORT,
-              frontendPort: FRONTEND_PORT,
-            }),
-            {
-              headers: {
-                ...corsHeaders,
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-        }
-
-        // Health check
-        if (url.pathname === '/health') {
-          return new Response(
-            JSON.stringify({
-              status: 'ok',
-              timestamp: Date.now(),
-              version: getVersion(),
-              websocket: WS_PORT,
-            }),
-            {
-              headers: {
-                ...corsHeaders,
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-        }
-
-        return new Response('BunDeck API Server', {
-          headers: corsHeaders,
-        });
-      },
       error: (error) => {
         console.error('API Server error:', error);
         return new Response('Internal Server Error', { status: 500 });

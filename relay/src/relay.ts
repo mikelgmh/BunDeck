@@ -4,14 +4,25 @@ import type { DeviceStore } from './store';
 import type { PairingStore } from './pairing';
 import { pickLang, publicHostname, relayWsUrl, renderLanding } from './landing';
 import { RateLimiter } from './ratelimit';
+import {
+  TunnelState,
+  getUiPageHandler,
+  injectBase,
+  HTTP_TIMEOUT_MS,
+  MAX_TUNNEL_BODY_BYTES,
+  type HttpResult,
+} from './tunnel';
+
+export { getUiPageHandler, setUiPageHandler } from './tunnel';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024; // 64 KB
 export const EXP_SKEW_MS = 5 * 60 * 1000; // acepta exp hasta 5 min en el pasado
 export const RATE_LIMIT_PER_MIN = 60;
 
-type WsData = { ip: string };
+type WsData = { ip: string; tunnelBridge?: { id: string; token: string; deviceId: string } };
 type AnyWs = ServerWebSocket<WsData>;
+type TunnelBridgeData = NonNullable<WsData['tunnelBridge']>;
 
 export interface WireMessage {
   v?: unknown;
@@ -35,6 +46,10 @@ export interface RelayServerOptions {
   publicHost?: string;
   startedAt?: number;
   now?: () => number;
+  /** Sin decisión del daemon en este tiempo, el poll pasa a `denied` (defecto 120 s). */
+  uiRequestTimeoutMs?: number;
+  /** Respuesta del daemon a `http-req` en este tiempo o 504 (defecto 30 s). */
+  httpTimeoutMs?: number;
 }
 
 function serverEnvelope(to: unknown, reason: string, detail?: string, now = Date.now()): string {
@@ -79,11 +94,16 @@ export class RelayServer {
   private limiter: RateLimiter;
   private now: () => number;
   readonly startedAt: number;
+  /** Núcleo del túnel inverso (estado + decisiones; el E2E sigue aparte). */
+  readonly tunnel: TunnelState;
+  private readonly httpTimeoutMs: number;
 
   constructor(private opts: RelayServerOptions) {
     this.limiter = new RateLimiter(opts.rateLimitPerMin ?? RATE_LIMIT_PER_MIN);
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.startedAt ?? this.now();
+    this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs });
+    this.httpTimeoutMs = opts.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
   }
 
   get authorized(): boolean {
@@ -107,6 +127,12 @@ export class RelayServer {
       },
       websocket: {
         open(ws) {
+          // Los navegadores tuneleados NO reciben el sobre `connected`:
+          // su WS es un puente crudo hacia el daemon.
+          if (ws.data.tunnelBridge) {
+            self.onTunnelBridgeOpen(ws, ws.data.tunnelBridge);
+            return;
+          }
           ws.send(
             JSON.stringify({
               v: PROTOCOL_VERSION,
@@ -117,9 +143,13 @@ export class RelayServer {
           );
         },
         message(ws, raw) {
-          self.handleSocketMessage(ws, String(raw));
+          self.handleTunnelOrRelayMessage(ws, raw);
         },
         close(ws) {
+          if (ws.data.tunnelBridge) {
+            self.onTunnelBridgeClose(ws.data.tunnelBridge);
+            return;
+          }
           self.handleSocketClose(ws);
         },
       },
@@ -147,15 +177,21 @@ export class RelayServer {
         /* noop */
       }
     }
+    this.tunnel.shutdown();
     this.byDevice.clear();
     this.deviceByWs.clear();
     this.server?.stop(true);
     this.server = null;
   }
 
+  /** Limpieza periódica del túnel (la llama el intervalo de index.ts). */
+  pruneTunnel(): void {
+    this.tunnel.prune();
+  }
+
   // ---- HTTP ----
 
-  private handleFetch(req: Request, server: Server<WsData>): Response | undefined {
+  private handleFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
 
     // Landing pública: GET / sin auth. OJO: si es un upgrade a WebSocket
@@ -216,12 +252,401 @@ export class RelayServer {
       });
     }
 
+    // Túnel inverso (público, sin RELAY_TOKEN: el navegador no lo tiene).
+    // Rate-limit propio con la misma ventana que el resto (`ui:<ip>`, `t:<ip>`).
+    if (url.pathname === '/ui' || url.pathname.startsWith('/ui/')) {
+      const ipUi = server.requestIP(req)?.address ?? 'unknown';
+      if (!this.limiter.allow(`ui:${ipUi}`)) {
+        return Response.json({ error: 'rate-limited' }, { status: 429 });
+      }
+      return this.handleUiFetch(req, server);
+    }
+    if (url.pathname === '/t' || url.pathname.startsWith('/t/')) {
+      const ipT = server.requestIP(req)?.address ?? 'unknown';
+      if (!this.limiter.allow(`t:${ipT}`)) {
+        return Response.json({ error: 'rate-limited' }, { status: 429 });
+      }
+      return this.handleTunnelFetch(req, server);
+    }
+
     // Todo lo demás: WebSocket (wss en prod tras reverse proxy; local ws).
     if (!this.isAuthorized(req)) return new Response('unauthorized', { status: 401 });
     const ip = server.requestIP(req)?.address ?? 'unknown';
     const ok = server.upgrade(req, { data: { ip } });
     if (!ok) return new Response('websocket only', { status: 426 });
     return undefined;
+  }
+
+  // ---- Túnel inverso ----
+
+  /**
+   * `GET /ui/<urlCode>` → página de espera (dispara `ui-request` en la
+   * primera visita). `GET /ui/<urlCode>/status` → estado del flujo.
+   */
+  private handleUiFetch(req: Request, server: Server<WsData>): Response | Promise<Response> {
+    const url = new URL(req.url);
+    if (req.method !== 'GET') {
+      return Response.json({ error: 'method-not-allowed' }, { status: 405 });
+    }
+    const parts = url.pathname.slice('/ui'.length).split('/').filter((p) => p !== '');
+    if (parts.length === 2 && parts[1] === 'status') {
+      return Response.json(this.tunnel.status(parts[0]));
+    }
+    if (parts.length !== 1) {
+      return Response.json({ error: 'not-found' }, { status: 404 });
+    }
+    const urlCode = parts[0];
+    const ensured = this.tunnel.ensureRequest(urlCode, {
+      ua: req.headers.get('user-agent') ?? '',
+      ip: server.requestIP(req)?.address ?? 'unknown',
+    });
+    if ('error' in ensured) {
+      return Response.json({ error: ensured.error }, { status: 404 });
+    }
+    if (ensured.created) {
+      const sock = this.tunnel.devices.get(ensured.deviceId);
+      if (sock) {
+        try {
+          sock.send(
+            JSON.stringify({
+              v: PROTOCOL_VERSION,
+              kind: 'ui-request',
+              reqId: ensured.reqId,
+              urlCode,
+              ua: ensured.ua,
+              ip: ensured.ip,
+            }),
+          );
+          this.tunnel.markSent(ensured.reqId);
+        } catch {
+          /* daemon caído: se reenvía al registrarse (takeUnsent) */
+        }
+      }
+      // Sin socket del daemon: la petición queda pendiente sin enviar y se
+      // entrega en cuanto el daemon se registre (takeUnsent).
+    }
+    const page = getUiPageHandler();
+    if (!page) {
+      return Response.json({ error: 'ui-page-missing' }, { status: 404 });
+    }
+    return page(urlCode, req);
+  }
+
+  /**
+   * Todo bajo `/t/<sessionToken>/…`. El upgrade a WS del puente debe ser
+   * síncrono (Bun no permite `server.upgrade()` tras un `await`), así que
+   * esta parte es síncrona y solo el proxy HTTP es asíncrono.
+   */
+  private handleTunnelFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
+    const url = new URL(req.url);
+    const m = /^\/t\/([^/]+)([\s\S]*)$/.exec(url.pathname);
+    if (!m) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    const token = m[1];
+    const rest = m[2]; // '' o '/…'
+    const upgrade = (req.headers.get('upgrade') ?? '').toLowerCase();
+
+    if (upgrade.includes('websocket')) {
+      if (rest !== '/ws') return Response.json({ error: 'not-found' }, { status: 404 });
+      const sess = this.tunnel.sessions.get(token);
+      if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+      if (sess.exp <= this.now()) {
+        this.tunnel.expireSession(token);
+        return Response.json({ error: 'expired' }, { status: 401 });
+      }
+      const id = this.tunnel.nextId('ws');
+      const ok = server.upgrade(req, {
+        data: { ip: server.requestIP(req)?.address ?? 'unknown', tunnelBridge: { id, token, deviceId: sess.deviceId } },
+      });
+      if (!ok) return Response.json({ error: 'upgrade-failed' }, { status: 500 });
+      return undefined;
+    }
+    return this.handleTunnelProxy(req, token, rest === '' ? '/' : rest, url.search);
+  }
+
+  /** Proxy HTTP tuneleado: inyecta `http-req` al daemon y espera `http-res`. */
+  private async handleTunnelProxy(req: Request, token: string, rest: string, search: string): Promise<Response> {
+    const sess = this.tunnel.sessions.get(token);
+    if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (sess.exp <= this.now()) {
+      this.tunnel.expireSession(token);
+      return Response.json({ error: 'expired' }, { status: 401 });
+    }
+    const daemon = this.tunnel.devices.get(sess.deviceId);
+    if (!daemon) return Response.json({ error: 'daemon-offline' }, { status: 502 });
+
+    const headers: Record<string, string> = {};
+    req.headers.forEach((v, k) => {
+      headers[k] = v;
+    });
+    let bodyB64: string | null = null;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength > MAX_TUNNEL_BODY_BYTES) {
+        return Response.json({ error: 'body-too-large' }, { status: 413 });
+      }
+      if (buf.byteLength > 0) bodyB64 = Buffer.from(buf).toString('base64');
+    }
+
+    const id = this.tunnel.nextId('http');
+    const path = (rest === '/' ? '/' : rest) + search;
+    const res: HttpResult = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.tunnel.httpPending.delete(id);
+        resolve({
+          status: 504,
+          headers: { 'content-type': 'application/json' },
+          bodyB64: Buffer.from(JSON.stringify({ error: 'daemon-timeout' }), 'utf8').toString('base64'),
+        });
+      }, this.httpTimeoutMs);
+      timer.unref?.();
+      this.tunnel.httpPending.set(id, {
+        deviceId: sess.deviceId,
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        timer,
+      });
+      try {
+        daemon.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'http-req', id, method: req.method, path, headers, bodyB64 }));
+      } catch {
+        const e = this.tunnel.takeHttp(id);
+        if (e) {
+          resolve({
+            status: 502,
+            headers: { 'content-type': 'application/json' },
+            bodyB64: Buffer.from(JSON.stringify({ error: 'daemon-offline' }), 'utf8').toString('base64'),
+          });
+        }
+      }
+    });
+
+    const status = Number.isInteger(res.status) && res.status >= 100 && res.status <= 599 ? res.status : 502;
+    const outHeaders: Record<string, string> = { ...(res.headers ?? {}) };
+    let body: Uint8Array | null = res.bodyB64 ? Buffer.from(res.bodyB64, 'base64') : null;
+    const ct = String(outHeaders['content-type'] ?? outHeaders['Content-Type'] ?? '');
+    if (body && body.length > 0 && ct.toLowerCase().includes('text/html')) {
+      const injected = injectBase(Buffer.from(body).toString('utf8'), token);
+      body = Buffer.from(injected, 'utf8');
+      delete outHeaders['content-length'];
+      delete outHeaders['Content-Length'];
+    }
+    return new Response(body ? new Blob([body as unknown as BlobPart]) : null, { status, headers: outHeaders });
+  }
+
+  // ---- WS del túnel ----
+
+  /** Entrada única WS: puentes tuneleados, `kind:*` del daemon o E2E. */
+  private handleTunnelOrRelayMessage(ws: AnyWs, raw: string | Buffer): void {
+    const br = ws.data.tunnelBridge;
+    if (br) {
+      this.onTunnelBridgeMessage(ws, br, raw);
+      return;
+    }
+    const text = typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf8');
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Record<string, unknown>).kind === 'string' &&
+      (parsed as Record<string, unknown>).type === undefined
+    ) {
+      if (!this.limiter.allow(`ws:${ws.data.ip}`)) {
+        ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error: 'rate-limited' }));
+        return;
+      }
+      this.onTunnelMessage(ws, parsed as Record<string, unknown>);
+      return;
+    }
+    this.handleSocketMessage(ws, text);
+  }
+
+  private onTunnelMessage(ws: AnyWs, msg: Record<string, unknown>): void {
+    const err = (error: string, detail?: string): void => {
+      ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error, ...(detail ? { detail } : {}) }));
+    };
+    switch (msg.kind as string) {
+      case 'tunnel-register': {
+        const deviceId = msg.deviceId;
+        if (typeof deviceId !== 'string' || deviceId === '') {
+          err('bad-register', 'deviceId required');
+          return;
+        }
+        this.tunnel.registerDevice(ws, deviceId);
+        ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'tunnel-registered', deviceId }));
+        // Entrega peticiones creadas mientras el daemon estaba offline.
+        for (const p of this.tunnel.takeUnsent(deviceId)) {
+          try {
+            ws.send(
+              JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-request', reqId: p.reqId, urlCode: p.urlCode, ua: p.ua, ip: p.ip }),
+            );
+          } catch {
+            /* noop */
+          }
+        }
+        return;
+      }
+      case 'ui-publish': {
+        const r = this.tunnel.publish(ws, msg.urlCode, msg.exp);
+        if ('error' in r) err(r.error);
+        else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-published', urlCode: msg.urlCode }));
+        return;
+      }
+      case 'ui-decision': {
+        const r = this.tunnel.decide(msg.reqId, msg.allow);
+        if (r !== 'ok') err(r, typeof msg.reqId === 'string' ? msg.reqId : undefined);
+        else {
+          ws.send(
+            JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-decision-ack', reqId: msg.reqId, allow: msg.allow }),
+          );
+        }
+        return;
+      }
+      case 'ui-bind': {
+        const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp);
+        if (r !== 'ok') err(r);
+        else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode }));
+        return;
+      }
+      case 'ui-unbind': {
+        const ok = this.tunnel.unbind(msg.sessionToken);
+        if (!ok) err('unknown-token');
+        else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-unbound', sessionToken: msg.sessionToken }));
+        return;
+      }
+      case 'ui-unpublish': {
+        const ok = this.tunnel.unpublish(msg.urlCode);
+        if (!ok) err('unknown-code');
+        else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-unpublished', urlCode: msg.urlCode }));
+        return;
+      }
+      case 'http-res': {
+        const id = msg.id;
+        if (typeof id !== 'string') return;
+        const e = this.tunnel.takeHttp(id);
+        if (!e) return;
+        const headers: Record<string, string> = {};
+        if (msg.headers && typeof msg.headers === 'object') {
+          for (const [k, v] of Object.entries(msg.headers as Record<string, unknown>)) {
+            if (typeof v === 'string') headers[k] = v;
+          }
+        }
+        e.resolve({
+          status: typeof msg.status === 'number' ? msg.status : 502,
+          headers,
+          bodyB64: typeof msg.bodyB64 === 'string' ? msg.bodyB64 : null,
+        });
+        return;
+      }
+      case 'ws-msg': {
+        // Daemon → navegador (puente).
+        if (typeof msg.id !== 'string' || typeof msg.dataB64 !== 'string') return;
+        const bridge = this.tunnel.getBridge(msg.id);
+        if (!bridge) return;
+        const bytes = Buffer.from(msg.dataB64, 'base64');
+        try {
+          bridge.browser.send(msg.isBinary === true ? bytes : bytes.toString('utf8'));
+        } catch {
+          /* el puente se limpia al cerrar el socket */
+        }
+        return;
+      }
+      case 'ws-close': {
+        // Extensión simétrica: el daemon también puede cerrar un puente.
+        if (typeof msg.id !== 'string') return;
+        const bridge = this.tunnel.removeBridge(msg.id);
+        if (bridge) {
+          try {
+            bridge.browser.close(1000, 'closed by daemon');
+          } catch {
+            /* noop */
+          }
+        }
+        return;
+      }
+      default:
+        err('unknown-kind', String(msg.kind));
+    }
+  }
+
+  private onTunnelBridgeOpen(ws: AnyWs, br: TunnelBridgeData): void {
+    const sess = this.tunnel.sessions.get(br.token);
+    if (!sess || sess.exp <= this.now()) {
+      if (sess) this.tunnel.expireSession(br.token);
+      try {
+        ws.close(4401, 'expired');
+      } catch {
+        /* noop */
+      }
+      return;
+    }
+    const daemon = this.tunnel.devices.get(sess.deviceId);
+    if (!daemon) {
+      try {
+        ws.close(1013, 'daemon offline');
+      } catch {
+        /* noop */
+      }
+      return;
+    }
+    this.tunnel.addBridge(br.id, ws, sess.deviceId, br.token);
+    try {
+      daemon.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ws-open', id: br.id }));
+    } catch {
+      this.tunnel.removeBridge(br.id);
+      try {
+        ws.close(1011, 'daemon unreachable');
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
+  private onTunnelBridgeMessage(ws: AnyWs, br: TunnelBridgeData, raw: string | Buffer): void {
+    const bridge = this.tunnel.getBridge(br.id);
+    if (!bridge) return; // puente desconocido: ignora el frame
+    const bytes = typeof raw === 'string' ? Buffer.from(raw, 'utf8') : Buffer.from(raw);
+    const daemon = this.tunnel.devices.get(bridge.deviceId);
+    if (!daemon) {
+      this.tunnel.removeBridge(br.id);
+      try {
+        ws.close(1013, 'daemon offline');
+      } catch {
+        /* noop */
+      }
+      return;
+    }
+    try {
+      daemon.send(
+        JSON.stringify({
+          v: PROTOCOL_VERSION,
+          kind: 'ws-msg',
+          id: br.id,
+          dataB64: bytes.toString('base64'),
+          isBinary: typeof raw !== 'string',
+        }),
+      );
+    } catch {
+      /* daemon caído: se limpia al cerrar el socket */
+    }
+  }
+
+  private onTunnelBridgeClose(br: TunnelBridgeData): void {
+    const entry = this.tunnel.removeBridge(br.id);
+    if (!entry) return;
+    const daemon = this.tunnel.devices.get(entry.deviceId);
+    if (daemon) {
+      try {
+        daemon.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ws-close', id: br.id }));
+      } catch {
+        /* noop */
+      }
+    }
   }
 
   // ---- WS ----
@@ -397,12 +822,15 @@ export class RelayServer {
 
   private handleSocketClose(ws: AnyWs): void {
     const deviceId = this.deviceByWs.get(ws);
-    if (!deviceId) return;
-    this.deviceByWs.delete(ws);
-    if (this.byDevice.get(deviceId) === ws) {
-      this.byDevice.delete(deviceId);
-      this.broadcastPresence(deviceId, false);
+    if (deviceId) {
+      this.deviceByWs.delete(ws);
+      if (this.byDevice.get(deviceId) === ws) {
+        this.byDevice.delete(deviceId);
+        this.broadcastPresence(deviceId, false);
+      }
     }
+    // Túnel: al caer el socket se borran sus publicaciones y sesiones.
+    this.tunnel.removeSocket(ws);
   }
 
   private broadcastPresence(deviceId: string, online: boolean): void {

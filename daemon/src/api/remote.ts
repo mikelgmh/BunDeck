@@ -15,6 +15,11 @@ import type { ApiHandler } from './types';
 import { DatabaseService } from '../db';
 import { publicIdentity, rotateKeys, getIdentity } from '../remote/identity';
 import { generatePairCode, acceptInvite, listDevices, listPending, revokeDevice, updatePolicy } from '../remote/pairing';
+import {
+  isUiEnabled, setUiEnabled, relayHttpsUrl, createUiCode, revokeUiCode, listUiPendingCombined,
+  approveUiPending, denyUiPending, listUiSessions, revokeUiSessionByPrefix,
+  notifyTunnelUiUnbind,
+} from '../remote/ui-policy';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
 
@@ -38,7 +43,21 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
       pending: listPending(db).length,
       trusted: listDevices(db).filter((d) => !d.revoked).length,
       policy: [...DEFAULT_POLICY],
+      uiEnabled: isUiEnabled(db),
     });
+  }
+
+  // Toggle maestro de la UI remota (NO gated: es el propio interruptor).
+  // POST y PUT como alias; body {enabled: boolean} → {ok, uiEnabled}.
+  if (path === '/api/v1/remote/ui-enabled' && (method === 'POST' || method === 'PUT')) {
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    if (typeof body?.enabled !== 'boolean') {
+      return jsonResponse({ error: 'enabled (boolean) requerido' }, 400);
+    }
+    const uiEnabled = setUiEnabled(db, body.enabled);
+    try { services.wsManager?.broadcast('remote.ui-enabled', { uiEnabled, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true, uiEnabled });
   }
 
   if (path === '/api/v1/remote/pair-code' && method === 'POST') {
@@ -195,6 +214,81 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     } catch (e) {
       return jsonResponse({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400);
     }
+  }
+
+  // ---------- Política de UI remota (aprobación en host) ----------
+  // Interruptor maestro: remote.ui.enabled ("0"/"1", default "0").
+  // Todo lo de abajo devuelve 403 si está a "0".
+  // NOTA seguridad (también en los mensajes): el tráfico UI lo ve el
+  // operador del relay (TLS+token, opt-in explícito, default OFF). Se
+  // guardan ua+ip tal cual para que el dueño decida.
+  const uiDisabled = () =>
+    jsonResponse(
+      { error: 'UI remota deshabilitada (remote.ui.enabled=0). Actívala solo si aceptas que el operador del relay ve el tráfico UI (TLS+token, opt-in explícito).' },
+      403,
+    );
+
+  if (path === '/api/v1/remote/ui-code' && method === 'POST') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const c = createUiCode(db);
+    const https = relayHttpsUrl(db);
+    const url = https ? `${https}/ui/${c.urlCode}` : '';
+    try { services.wsManager?.broadcast('remote.ui-code', { expiresAt: c.expiresAt, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ code: c.code, urlCode: c.urlCode, url, expiresAt: c.expiresAt });
+  }
+
+  if (path === '/api/v1/remote/ui-code' && method === 'DELETE') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const revoked = revokeUiCode(db);
+    if (revoked) {
+      try { services.wsManager?.broadcast('remote.ui-revoked', { scope: 'code', ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    }
+    return jsonResponse({ ok: true, revoked });
+  }
+
+  if (path === '/api/v1/remote/ui-pending' && method === 'GET') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    return jsonResponse({ pending: listUiPendingCombined(db) });
+  }
+
+  const allowMatch = path.match(/^\/api\/v1\/remote\/ui-pending\/([^/]+)\/allow$/);
+  if (allowMatch && method === 'POST') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const reqId = decodeURIComponent(allowMatch[1]);
+    // Delega en el TunnelClient si tiene el reqId (emite ui-decision +
+    // ui-bind al relay); si no, store local. En ambos casos el token
+    // completo SOLO se muestra aquí, una vez.
+    const r = approveUiPending(db, reqId);
+    if (!r.ok) return jsonResponse({ error: r.error ?? 'Solicitud desconocida o caducada' }, 404);
+    try { services.wsManager?.broadcast('remote.ui-allowed', { reqId, tokenPrefix: r.sessionToken!.slice(0, 8), ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true, sessionToken: r.sessionToken });
+  }
+
+  const denyMatch = path.match(/^\/api\/v1\/remote\/ui-pending\/([^/]+)\/deny$/);
+  if (denyMatch && method === 'POST') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const reqId = decodeURIComponent(denyMatch[1]);
+    const r = denyUiPending(db, reqId);
+    if (!r.ok) return jsonResponse({ error: r.error ?? 'Solicitud desconocida o caducada' }, 404);
+    try { services.wsManager?.broadcast('remote.ui-denied', { reqId, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true });
+  }
+
+  if (path === '/api/v1/remote/ui-sessions' && method === 'GET') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    // Solo prefijos: el token completo jamás sale del servidor salvo al aprobar.
+    return jsonResponse({ sessions: listUiSessions(db) });
+  }
+
+  const sessDel = path.match(/^\/api\/v1\/remote\/ui-sessions\/([^/]+)$/);
+  if (sessDel && method === 'DELETE') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const prefix = decodeURIComponent(sessDel[1]);
+    const r = revokeUiSessionByPrefix(db, prefix);
+    if (!r) return jsonResponse({ error: 'Sesión desconocida' }, 404);
+    try { services.wsManager?.broadcast('remote.ui-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    notifyTunnelUiUnbind(r.token);
+    return jsonResponse({ ok: true, revoked: prefix });
   }
 
   return null;

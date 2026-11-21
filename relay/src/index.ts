@@ -2,6 +2,8 @@ import { loadConfig } from './config';
 import { DeviceStore } from './store';
 import { PairingStore, PAIRING_TTL_MS } from './pairing';
 import { RelayServer } from './relay';
+import { setUiPageHandler } from './tunnel';
+import { renderWaitingPage, waitingLang, wantsJson } from './waiting';
 
 const config = loadConfig();
 
@@ -20,6 +22,15 @@ const relay = new RelayServer({
 });
 
 const server = relay.listen(config.port, '0.0.0.0');
+
+// Sala de espera del navegador (/ui/<code>): la sirve waiting.ts a través
+// del hook que expone tunnel.ts. Sin esto, /ui/<code> devuelve 404.
+setUiPageHandler((urlCode: string, req: Request) => {
+  if (wantsJson(req)) return Response.json({ page: 'ui-waiting', urlCode });
+  return new Response(renderWaitingPage(urlCode, waitingLang(req)), {
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+});
 console.log(
   `[relay] listening on 0.0.0.0:${server.port}` +
     (config.domain ? ` (domain: ${config.domain})` : '') +
@@ -27,7 +38,10 @@ console.log(
 );
 
 // Limpieza periódica de códigos expirados (best-effort, no bloquea).
-const pruneTimer = setInterval(() => pairing.prune(), 60_000);
+const pruneTimer = setInterval(() => {
+  pairing.prune();
+  relay.pruneTunnel();
+}, 60_000);
 pruneTimer.unref?.();
 
 function shutdown(): void {

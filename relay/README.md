@@ -142,6 +142,41 @@ Openship-ready: respeta `$PORT`, expone `HEALTHCHECK /health`.
 Dominio previsto: `bundeck.mikelgranero.com` → reverse proxy TLS → `wss://` a este servicio
 (el relay no termina TLS por sí mismo; `wss` lo pone el proxy).
 
+## Túnel inverso (exponer la web del daemon en internet)
+
+El relay también actúa como salida a internet del daemon (estilo ngrok):
+el daemon mantiene su WS de siempre y el relay inyecta peticiones HTTP/WS
+del navegador en ese socket. Núcleo en `src/tunnel.ts` (`TunnelState` +
+`setUiPageHandler()`), cableado en `src/relay.ts`, tests en
+`tests/tunnel.test.ts`. La página de espera la pone otro módulo con
+`setUiPageHandler(fn)`; sin handler, `GET /ui/<code>` responde
+404 `{error:'ui-page-missing'}`.
+
+| Dirección | Mensaje (`v:1` + `kind`, por el WS autenticado) |
+|---|---|
+| d→r | `tunnel-register {deviceId}` → `tunnel-registered` |
+| d→r | `ui-publish {urlCode (12+ chars), exp}` → `ui-published` |
+| r→d | `ui-request {reqId, urlCode, ua, ip}` (primera visita a `/ui/<code>`) |
+| d→r | `ui-decision {reqId, allow}` → `ui-decision-ack` (sin decisión en 120 s → `denied`) |
+| d→r | `ui-bind {urlCode, sessionToken (hex 32+), exp}` → `ui-bound` |
+| d→r | `ui-unbind {sessionToken}` → `ui-unbound` (borra token Y publicación) |
+| r→d / d→r | `http-req {id, method, path, headers, bodyB64}` / `http-res {id, status, headers, bodyB64}` (timeout 30 s → 504) |
+| r→d / d→r | `ws-open {id}`, `ws-msg {id, dataB64, isBinary}` (ambos sentidos), `ws-close {id}` (idem) |
+| r→d | `error {error, detail?}` si el mensaje es inválido |
+
+| Método | Ruta navegador→relay (pública, con rate-limit) | Respuesta |
+|---|---|---|
+| GET | `/ui/<urlCode>` | página de espera (handler externo) o 404 JSON |
+| GET | `/ui/<urlCode>/status` | `{status: pending\|approved\|denied\|expired, sessionToken?}` (el token, solo en el primer poll tras aprobar) |
+| * | `/t/<sessionToken>/<path>` | proxy al daemon (401 token malo/caducado, 502 daemon offline, 504 timeout; `<base href>` inyectado en `text/html`) |
+| WS | `/t/<sessionToken>/ws` | puente bidireccional crudo hacia el daemon |
+
+Notas: al caer el socket del daemon se borran sus publicaciones, sesiones
+y puentes; `prune()` (cada 60 s en `index.ts`) expira códigos/sesiones y
+marca `denied` los `ui-request` sin respuesta; rate-limit con la misma
+ventana global bajo claves `ui:<ip>` / `t:<ip>`; cuerpos > 5 MB → 413;
+timeouts configurables (`uiRequestTimeoutMs`, `httpTimeoutMs`).
+
 ## Límites del MVP (decisiones conscientes)
 
 - Sin cola persistente: destino offline ⇒ `error offline`, el mensaje se pierde.

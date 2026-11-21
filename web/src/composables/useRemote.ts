@@ -17,6 +17,32 @@ export interface RemoteStatusView {
   pending: number
   trusted: number
   policy: string[]
+  /** UI remota vía relay (nuevo backend). Ausente en daemons antiguos. */
+  uiEnabled?: boolean
+}
+
+export interface UiPendingItem {
+  reqId: string
+  urlCode: string
+  ua: string
+  ip: string
+  createdAt: number
+}
+
+export interface UiSessionItem {
+  tokenPrefix: string
+  createdAt: number
+  exp: number
+  ua: string
+  ip: string
+  revoked: boolean
+}
+
+export interface UiCodeData {
+  code: string
+  urlCode: string
+  url: string
+  expiresAt: number
 }
 
 export interface RemoteEvent {
@@ -136,6 +162,37 @@ export function useRemote() {
   const qrUnsupported = ref(false)
   const qrError = ref('')
 
+  // --- UI remota vía relay (contrato nuevo; degradación si 404) ---
+  const uiEnabled = ref(false)
+  const uiUnsupported = ref(false)
+  const uiLoading = ref(false)
+  const uiError = ref('')
+  const uiCode = ref<UiCodeData | null>(null)
+  const uiCodeDataUrl = ref('')
+  const uiPending = ref<UiPendingItem[]>([])
+  const uiSessions = ref<UiSessionItem[]>([])
+  /** Token de sesión recién creado: se muestra UNA vez y se limpia al descartar. */
+  const uiJustToken = ref('')
+  const remoteListeners = new Set<(msg: { type: string; payload: unknown }) => void>()
+
+  const notifyRemote = (msg: { type: string; payload: unknown }) => {
+    remoteListeners.forEach((cb) => {
+      try {
+        cb(msg)
+      } catch {
+        /* noop */
+      }
+    })
+  }
+
+  /** Suscripción a eventos `remote.*` del WS (además del log interno). */
+  const onRemoteEvent = (cb: (msg: { type: string; payload: unknown }) => void) => {
+    remoteListeners.add(cb)
+    return () => {
+      remoteListeners.delete(cb)
+    }
+  }
+
   let ws: WebSocket | null = null
   let wsPort = 3003
 
@@ -186,7 +243,14 @@ export function useRemote() {
 
   const loadStatus = async () => {
     await syncConfig()
-    status.value = await api('/remote/status')
+    const data = await api('/remote/status')
+    status.value = data
+    if (typeof (data as { uiEnabled?: unknown })?.uiEnabled === 'boolean') {
+      uiEnabled.value = !!(data as { uiEnabled?: boolean }).uiEnabled
+    } else {
+      // Daemon antiguo sin uiEnabled: por defecto OFF (no asumir habilitado).
+      uiEnabled.value = false
+    }
   }
 
   const loadDevices = async () => {
@@ -200,6 +264,13 @@ export function useRemote() {
     try {
       await loadStatus()
       await loadDevices()
+      // UI remota: precargar pendientes/sesiones si está habilitada; 404 → aviso.
+      if (uiEnabled.value && !uiUnsupported.value) {
+        await loadUiPending().catch((e) => {
+          if (!/ui-unsupported/.test(e instanceof Error ? e.message : String(e))) throw e
+        })
+        await loadUiSessions().catch(() => {})
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -310,6 +381,7 @@ export function useRemote() {
           const msg = JSON.parse(String((ev as MessageEvent).data))
           if (typeof msg?.type === 'string' && msg.type.startsWith('remote.')) {
             pushEvent(msg.type, msg.payload ?? {})
+            notifyRemote({ type: msg.type, payload: msg.payload ?? {} })
           } else if (msg?.type === 'log.created' && (msg.payload as any)?.meta?.remote) {
             pushEvent('remote.log', {
               from: (msg.payload as any)?.meta?.from,
@@ -337,6 +409,148 @@ export function useRemote() {
     ws = null
   }
 
+  // ---------- UI remota vía relay ----------
+  const isUi404 = (e: unknown) =>
+    /HTTP 404|^404\b|ui-unsupported|not found/i.test(e instanceof Error ? e.message : String(e ?? ''))
+
+  const uiFetch = async (path: string, init?: RequestInit) => {
+    await syncConfig()
+    const res = await fetch(`${apiBase()}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init
+    })
+    if (res.status === 404) {
+      uiUnsupported.value = true
+      throw new Error('ui-unsupported')
+    }
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const j = await res.json()
+        detail = String((j as any)?.error ?? detail)
+      } catch {
+        /* noop */
+      }
+      throw new Error(detail)
+    }
+    return res.json()
+  }
+
+  /**
+   * Toggle maestro de UI remota. Contrato: el backend expone
+   * `POST /api/v1/remote/ui-enabled { enabled }` (también se acepta PUT
+   * por compatibilidad). Si el daemon es antiguo (404) se marca
+   * `uiUnsupported` para mostrar el aviso de actualización.
+   */
+  const setUiEnabled = async (enabled: boolean) => {
+    uiError.value = ''
+    uiLoading.value = true
+    try {
+      let data: { uiEnabled?: boolean }
+      try {
+        data = await uiFetch('/remote/ui-enabled', { method: 'POST', body: JSON.stringify({ enabled }) })
+      } catch (e) {
+        if (!isUi404(e)) throw e
+        // Fallback: algunos daemons podrían exponer PUT en vez de POST.
+        data = await uiFetch('/remote/ui-enabled', { method: 'PUT', body: JSON.stringify({ enabled }) })
+      }
+      uiEnabled.value = typeof data?.uiEnabled === 'boolean' ? data.uiEnabled : enabled
+      if (uiEnabled.value) {
+        await Promise.all([loadUiPending().catch(() => {}), loadUiSessions().catch(() => {})])
+      } else {
+        uiPending.value = []
+        uiSessions.value = []
+        uiCode.value = null
+        uiCodeDataUrl.value = ''
+        uiJustToken.value = ''
+      }
+      return uiEnabled.value
+    } catch (e) {
+      if (isUi404(e)) uiUnsupported.value = true
+      uiError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      uiLoading.value = false
+    }
+  }
+
+  /** Pide un código de UI (`POST /ui-code`) y renderiza la `url` a QR (reutiliza `qrcode`). */
+  const requestUiCode = async () => {
+    uiError.value = ''
+    uiLoading.value = true
+    try {
+      const data = await uiFetch('/remote/ui-code', { method: 'POST', body: JSON.stringify({}) })
+      uiCode.value = {
+        code: String(data.code ?? ''),
+        urlCode: String(data.urlCode ?? ''),
+        url: String(data.url ?? ''),
+        expiresAt: Number(data.expiresAt ?? 0)
+      }
+      if (uiCode.value.url) {
+        const { default: QRCode } = await import('qrcode')
+        uiCodeDataUrl.value = await QRCode.toDataURL(uiCode.value.url, { width: 280, margin: 2 })
+      } else {
+        uiCodeDataUrl.value = ''
+      }
+      return uiCode.value
+    } catch (e) {
+      if (isUi404(e)) uiUnsupported.value = true
+      uiError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      uiLoading.value = false
+    }
+  }
+
+  const revokeUiCode = async () => {
+    uiError.value = ''
+    await uiFetch('/remote/ui-code', { method: 'DELETE' })
+    uiCode.value = null
+    uiCodeDataUrl.value = ''
+  }
+
+  const loadUiPending = async () => {
+    const data = await uiFetch('/remote/ui-pending')
+    uiPending.value = Array.isArray(data.pending) ? data.pending : []
+    return uiPending.value
+  }
+
+  const loadUiSessions = async () => {
+    const data = await uiFetch('/remote/ui-sessions')
+    uiSessions.value = Array.isArray(data.sessions) ? data.sessions : []
+    return uiSessions.value
+  }
+
+  const loadUiAll = async () => {
+    await Promise.all([loadUiPending(), loadUiSessions()])
+  }
+
+  /** Aprueba un pendiente: devuelve el `sessionToken` (mostrar UNA vez). */
+  const allowPending = async (reqId: string) => {
+    uiError.value = ''
+    const data = await uiFetch(`/remote/ui-pending/${encodeURIComponent(reqId)}/allow`, { method: 'POST' })
+    const token = String(data.sessionToken ?? '')
+    uiJustToken.value = token
+    await Promise.all([loadUiPending().catch(() => {}), loadUiSessions().catch(() => {})])
+    return token
+  }
+
+  const denyPending = async (reqId: string) => {
+    uiError.value = ''
+    await uiFetch(`/remote/ui-pending/${encodeURIComponent(reqId)}/deny`, { method: 'POST' })
+    await loadUiPending().catch(() => {})
+  }
+
+  const revokeSession = async (prefix: string) => {
+    uiError.value = ''
+    await uiFetch(`/remote/ui-sessions/${encodeURIComponent(prefix)}`, { method: 'DELETE' })
+    await loadUiSessions().catch(() => {})
+  }
+
+  const clearJustToken = () => {
+    uiJustToken.value = ''
+  }
+
   return {
     status,
     devices,
@@ -360,6 +574,27 @@ export function useRemote() {
     rotate,
     connectWs,
     disconnectWs,
-    pushEvent
+    pushEvent,
+    // UI remota
+    uiEnabled,
+    uiUnsupported,
+    uiLoading,
+    uiError,
+    uiCode,
+    uiCodeDataUrl,
+    uiPending,
+    uiSessions,
+    uiJustToken,
+    setUiEnabled,
+    requestUiCode,
+    revokeUiCode,
+    loadUiPending,
+    loadUiSessions,
+    loadUiAll,
+    allowPending,
+    denyPending,
+    revokeSession,
+    clearJustToken,
+    onRemoteEvent
   }
 }

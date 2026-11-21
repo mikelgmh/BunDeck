@@ -1,23 +1,30 @@
 /**
- * Cableado del módulo remoto: identidad + relay + E2E entrante.
+ * Cableado del módulo remoto: identidad + relay + E2E entrante + túnel UI.
  *
  * - Crea/asegura la identidad (`getIdentity`).
  * - Inyecta persistencia de replay en `remote.seq.<peer>`.
  * - Arranca el `RelayClient`; cada `envelope` para nosotros se descifra
  *   con la privada local + la pública del peer trusted, y se ejecuta vía
  *   `executeRemoteAction` (allowlist + policy + log + broadcast `remote`).
+ * - Arranca el `TunnelClient` (`tunnel.ts`): expone la web/API local a
+ *   través del relay (http-req + ws bridge + ui-request con aprobación).
+ *   El manejador HTTP se inyecta desde `server.ts` vía
+ *   `tunnel.setHttpHandler(createDaemonFetch(...))`; sin él, los http-req
+ *   responden 503.
  */
 import { DatabaseService } from '../db';
 import type { WebSocketManager } from '../ws';
 import type { ActionRunner } from '../action-runner';
 import { getIdentity } from './identity';
 import { RelayClient, type RelayEnvelopeMsg } from './relay-client';
+import { TunnelClient, type HttpHandler } from './tunnel';
 import { decryptFrom, configureReplayStore } from './crypto';
 import { getTrusted } from './pairing';
 import { executeRemoteAction } from './remote-actions';
 
 export interface RemoteModule {
   relay: RelayClient;
+  tunnel: TunnelClient;
   deviceId: string;
   fingerprint: string;
   stop: () => void;
@@ -71,12 +78,19 @@ export function initRemote(deps: { db?: DatabaseService; wsManager?: WebSocketMa
   });
 
   relay.start();
+
+  // Túnel UI: misma URL de relay, protocolo `kind:` multiplexado en su
+  // propia conexión WS (ver `tunnel.ts`). Sin RELAY_URL queda en 'disabled'.
+  const tunnel = new TunnelClient(db, (deps.wsManager as any) ?? null, { deviceId: identity.deviceId });
+  tunnel.start();
   return {
     relay,
+    tunnel,
     deviceId: identity.deviceId,
     fingerprint: identity.fingerprint,
-    stop: () => relay.stop(),
+    stop: () => { try { relay.stop(); } catch { /* noop */ } try { tunnel.stop(); } catch { /* noop */ } },
   };
 }
 
 export { getIdentity };
+export { TunnelClient, type HttpHandler } from './tunnel';

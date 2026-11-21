@@ -309,6 +309,49 @@ export class WebSocketManager {
     this.broadcast(event, payload, 'remote');
   }
 
+  // ---- Puente del túnel remoto (remote/tunnel.ts) ----
+  //
+  // El relay expone la web/API local a través de `TunnelClient`: cada
+  // `ws-open` del relay se registra aquí como un cliente local más (con un
+  // `ws` falso cuyo `send` reenvía al relay como `ws-msg`). Así recibe los
+  // mismos broadcasts y suscripciones que un navegador local, sin duplicar
+  // la lógica de `handleClientMessage`/`broadcast`.
+
+  /** Registra un cliente virtual del túnel. Devuelve el clientId local. */
+  public createTunnelClient(tunnelId: string, send: (text: string) => void): string {
+    const clientId = `tunnel:${tunnelId}`;
+    const fakeWs: any = {
+      readyState: 1, // WebSocket.OPEN
+      send: (text: string) => { try { send(String(text)); } catch { /* noop */ } },
+      close: () => { this.clients.delete(clientId); },
+    };
+    this.clients.set(clientId, { id: clientId, ws: fakeWs, subscriptions: new Set() });
+    return clientId;
+  }
+
+  /** Elimina el cliente virtual del túnel. */
+  public removeTunnelClient(tunnelId: string): void {
+    this.clients.delete(`tunnel:${tunnelId}`);
+  }
+
+  /** Trata un mensaje del túnel como si lo hubiera enviado un cliente local. */
+  public handleTunnelMessage(tunnelId: string, text: string): void {
+    const clientId = `tunnel:${tunnelId}`;
+    const client = this.clients.get(clientId);
+    if (!client) return;
+    try {
+      const parsed: WebSocketMessage = JSON.parse(text);
+      this.handleClientMessage(clientId, parsed);
+    } catch {
+      try {
+        client.ws.send(JSON.stringify({
+          type: 'error',
+          payload: { message: 'Invalid message format' },
+        }));
+      } catch { /* noop */ }
+    }
+  }
+
   public getConnectedClients(): number {
     return this.clients.size;
   }
