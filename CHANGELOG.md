@@ -1,3 +1,25 @@
+# [1.7.0](https://github.com/mikelgmh/libredeck/compare/v1.6.0...v1.7.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci:** restaurar fetch real en afterEach de system-e2e en vez de undefined ([3e7ad69](https://github.com/mikelgmh/libredeck/commit/3e7ad69faeff6425ba6bffc1439c8e4f7fac0d9e))
+* **relay:** Dockerfile con contexto repo-root para openship ([45cb137](https://github.com/mikelgmh/libredeck/commit/45cb13768eb7d3b6057393fae074809b09dfbf26))
+* **relay:** fallback a almacenamiento efimero si /data no es escribible ([b9e313a](https://github.com/mikelgmh/libredeck/commit/b9e313a22122008a50a5f5fe0fb0e9a387183cc2))
+* **remote:** relay publico por defecto + protocolo E2E unificado ([bb2db46](https://github.com/mikelgmh/libredeck/commit/bb2db465d6bf39ed758f16920cef48ed73fd9da5))
+* **remote:** relay publico por defecto, protocolo E2E unificado y diagnostico de tunel ([57b6c56](https://github.com/mikelgmh/libredeck/commit/57b6c56505a8c2634ea2fe55553742c4d0df8159))
+* **web:** grid centrado en el escenario (min-height en asides, bd-stack con margin auto) ([8ad0946](https://github.com/mikelgmh/libredeck/commit/8ad0946211556cd5a2e8aab728865489341b572d))
+
+
+### Features
+
+* catalogo plugins + 25 plugins nuevos + relay E2E + remote pane ([bb3138d](https://github.com/mikelgmh/libredeck/commit/bb3138d482b6bc8b5c45d5c5156612a8c8a6f97a))
+* **relay:** landing publica GET / con guia de conexion (ES/EN) ([b7c95b6](https://github.com/mikelgmh/libredeck/commit/b7c95b64ce2052e4e2ebaf91620c5836db6de4d8))
+* **remote:** emparejamiento por QR - GET /remote/qr, mostrar/escanear con camara, deteccion movil ([c352693](https://github.com/mikelgmh/libredeck/commit/c352693bb42fd0735f20702f200b4843782c6afc))
+* **remote:** UI remota por internet via relay (tunel inverso + aprobacion en host) ([a279d4a](https://github.com/mikelgmh/libredeck/commit/a279d4ac95ea9fb82d87f5a495c089c9cdda7f16))
+* **web:** Entrar desde internet primero, fuera churro de estado, switch DaisyUI ([914711a](https://github.com/mikelgmh/libredeck/commit/914711acefe7e983cb48a0dce690a6113c2da5e7))
+* **web:** separa Acceso remoto en Enlazar otro BunDeck vs Entrar desde internet ([4612bf9](https://github.com/mikelgmh/libredeck/commit/4612bf9859204d4a16bb7950c0d0ca8253dfa674))
+
 # [1.6.0](https://github.com/mikelgmh/libredeck/compare/v1.5.0...v1.6.0) (2026-11-21)
 
 
