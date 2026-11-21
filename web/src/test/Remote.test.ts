@@ -70,20 +70,29 @@ describe('RemotePane', () => {
     )
   })
 
-  it('muestra estado, generar código, aceptar y lista vacía con data-cy', async () => {
+  it('muestra generar código, aceptar y lista vacía con data-cy', async () => {
     vi.stubGlobal('fetch', mockFetch())
     const wrapper = mount(RemotePane)
     await flushPromises()
     expect(wrapper.find('[data-cy="remote-pane"]').exists()).toBe(true)
-    expect(wrapper.find('[data-cy="remote-status"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-gen-code"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-accept-code"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-accept-device"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-accept-pubkey"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-accept-btn"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="remote-rotate"]').exists()).toBe(true)
-    // Huella visible en el estado
-    expect(wrapper.text()).toContain('ab12:34cd')
+  })
+
+  it('Entrar desde internet es la primera tarjeta (vía principal)', async () => {
+    vi.stubGlobal('fetch', mockFetch())
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    const html = wrapper.html()
+    expect(html.indexOf('data-cy="remote-ui-section"')).toBeGreaterThan(-1)
+    expect(html.indexOf('data-cy="remote-pair-section"')).toBeGreaterThan(-1)
+    expect(html.indexOf('data-cy="remote-ui-section"')).toBeLessThan(html.indexOf('data-cy="remote-pair-section"'))
+    // Sin churro de estado: ni fingerprint local ni badge de relay.
+    expect(wrapper.find('[data-cy="remote-status"]').exists()).toBe(false)
   })
 
   it('generar código muestra el código con data-cy', async () => {
