@@ -102,6 +102,7 @@ jobs:
         npm ci
 
     - name: Build CLI
+      shell: bash
       env:
         LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
@@ -118,6 +119,7 @@ jobs:
       run: node scripts/copy-web-dist.js
 
     - name: Build Unified Daemon
+      shell: bash
       env:
         LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
@@ -136,6 +138,7 @@ jobs:
 
     - name: Setup Inno Setup (Windows only)
       if: matrix.installer == true
+      shell: bash
       run: |
         choco install innosetup -y
         echo "C:\Program Files (x86)\Inno Setup 6" >> $GITHUB_PATH
@@ -152,6 +155,7 @@ jobs:
 
     - name: Copy Web dist to Dist (Windows only)
       if: matrix.installer == true
+      shell: bash
       run: |
         mkdir -p dist/web-dist
         cp -r web/dist/* dist/web-dist/
