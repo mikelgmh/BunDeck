@@ -110,8 +110,14 @@ jobs:
         bun run build
         mv libredeck-cli${{ matrix.ext }} ../libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
-    - name: Setup Rust (all OS: launcher + updater ship everywhere)
+    - name: "Setup Rust (all OS: launcher + updater ship everywhere)"
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Linux system deps (GPUI needs xkbcommon/wayland/GL/fonts)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
     - name: Build launcher + updater (all OS)
       shell: bash
