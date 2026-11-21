@@ -1,6 +1,8 @@
-#ifndef AppVersion
-  // Fallback manual — build.sh inyecta la versión real desde package.json
-  // vía `iscc /DAppVersion=<ver> installer.iss`. Mantener sincronizado.
+#if FileExists("version.iss")
+  ; Generado por build.sh / CI desde package.json (no commitear).
+  #include "version.iss"
+#else
+  ; Fallback manual para `iscc installer.iss` directo. Mantener sincronizado.
   #define AppVersion "1.5.0"
 #endif
 [Setup]

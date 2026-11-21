@@ -1,4 +1,4 @@
-import { BrowserWindow, ApplicationMenu, Tray, Updater, Utils } from "electrobun/bun";
+import { BrowserWindow, ApplicationMenu, Updater, Utils } from "electrobun/bun";
 import Electrobun from "electrobun/bun";
 import { startSpotifyLoginPolling } from "./spotify-login";
 import { startLauncherServer } from "./launcher-server";
@@ -328,6 +328,9 @@ export function openDashboardWindow(targetUrl: string): { opened: boolean; url?:
     const win = new BrowserWindow({
       title: "LibreDeck",
       url: targetUrl,
+      // Frameless: la barra nativa se sustituye por <TitleBar/> (web).
+      // El drag funciona con la clase .electrobun-webkit-app-region-drag.
+      titleBarStyle: "hidden",
       frame: { width: 1280, height: 800, x: 100, y: 100 },
     });
     trackClose(win);
@@ -339,6 +342,7 @@ export function openDashboardWindow(targetUrl: string): { opened: boolean; url?:
       const fallback = new BrowserWindow({
         title: "LibreDeck",
         url: "views://mainview/index.html",
+        titleBarStyle: "hidden",
         frame: { width: 1280, height: 800, x: 100, y: 100 },
       });
       trackClose(fallback);
@@ -358,7 +362,8 @@ async function main() {
   await spawnFrontend();
 
   // Ventanita GPUI como puerta de entrada: si se lanza, Electrobun no abre
-  // su BrowserWindow (evita duplicar ventanas; tray/menú/updater siguen).
+  // su BrowserWindow (evita duplicar ventanas; menú/updater siguen, y el
+  // tray es del launcher: ver launcher/src/tray.rs).
   const launcherActive = spawnLauncher();
 
   // Pequeña espera
@@ -430,43 +435,10 @@ async function main() {
 
   console.log(`[electrobun] Creando ventana → ${targetUrl}`);
 
-  // System tray SIEMPRE: la app queda en la bandeja al cerrar la ventana
-  // (exitOnLastWindowClosed=false en electrobun.config.ts).
-  // El icono sale de web/public/tray.png (generado desde assets/bundeck.svg
-  // con scripts/gen-icons.cjs); en prod empaquetada va en views://mainview/.
-  const resolveTrayImage = (): string => {
-    const root = findProjectRoot();
-    const candidates = [
-      path.join(root, "web", "public", "tray.png"),
-      path.join(root, "web", "dist", "tray.png"),
-      path.join(process.cwd(), "web", "public", "tray.png"),
-      path.join(process.cwd(), "web", "dist", "tray.png"),
-    ];
-    for (const c of candidates) {
-      try { if (existsSync(c)) return c; } catch {}
-    }
-    return "views://mainview/tray.png";
-  };
-  try {
-    const tray = new Tray({ title: "LibreDeck", image: resolveTrayImage() });
-    tray.setMenu([
-      { type: "normal", label: "Abrir LibreDeck", tooltip: "Abrir panel", action: "open-dashboard" },
-      { type: "divider" },
-      { type: "normal", label: "Salir", tooltip: "Cerrar LibreDeck", action: "quit" },
-    ]);
-    tray.on("tray-clicked", (e: any) => {
-      const action = e?.action ?? (e as any)?.data?.action;
-      if (action === "open-dashboard") {
-        Utils.openExternal(dashboardUrl);
-      } else if (action === "quit") {
-        // Pasa por Utils.quit() -> before-quit -> shutdownAll (daemon+front).
-        process.exit(0);
-      }
-    });
-    log("[electrobun] Tray creado (LibreDeck en bandeja del sistema)");
-  } catch (e) {
-    console.error("[electrobun] No se pudo crear el tray:", e);
-  }
+  // Sin tray propio: la bandeja es propiedad del launcher GPUI (ver
+  // launcher/src/tray.rs). Clic en el icono -> abre la ventanita del
+  // launcher; su menú ("Abrir panel"/"Salir") gobierna a distancia vía
+  // la Launcher API (__launcher/*) de este host.
 
   if (launcherActive) {
     log("[electrobun] Ventana Electrobun omitida: el launcher GPUI es la UI de entrada");
@@ -476,12 +448,35 @@ async function main() {
 
   // API de control para el launcher GPUI (panel de control).
   // Solo 127.0.0.1; si el puerto está ocupado (otro host), se sigue sin ella.
+  // También la usa <TitleBar/> (web) para min/max/close de la ventana frameless.
   try {
     startLauncherServer(
       {
         openWindow: () => openDashboardWindow(dashboardUrl),
         checkUpdate: checkAppUpdate,
         applyUpdate: applyAppUpdate,
+        windowMinimize: () => {
+          try { dashboardWin?.minimize?.(); } catch { /* noop */ }
+        },
+        windowToggleMaximize: () => {
+          try {
+            if (!dashboardWin) return { maximized: false };
+            if (dashboardWin.isMaximized?.()) {
+              dashboardWin.unmaximize?.();
+              return { maximized: false };
+            }
+            dashboardWin.maximize?.();
+            return { maximized: true };
+          } catch {
+            return { maximized: false };
+          }
+        },
+        windowClose: () => {
+          try { dashboardWin?.close?.(); } catch { /* noop */ }
+        },
+        windowIsMaximized: () => {
+          try { return !!dashboardWin?.isMaximized?.(); } catch { return false; }
+        },
       },
       HOST_PORT,
     );

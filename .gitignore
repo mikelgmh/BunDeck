@@ -129,5 +129,6 @@ daemon/data/
 web/bun.lock
 web/.astro/dev.json
 web/.astro/content.d.ts
+version.iss
 .agents/
 NUL

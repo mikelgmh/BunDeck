@@ -202,6 +202,7 @@ async function main() {
     const win = new BrowserWindow({
       title: "LibreDeck",
       url: targetUrl,
+      titleBarStyle: "hidden",
       frame: { width: 1280, height: 800, x: 100, y: 100 },
     });
     console.log(`[electrobun] Ventana creada OK url=${targetUrl}`);
@@ -213,6 +214,7 @@ async function main() {
       const fallback = new BrowserWindow({
         title: "LibreDeck",
         url: "views://mainview/index.html",
+        titleBarStyle: "hidden",
         frame: { width: 1280, height: 800, x: 100, y: 100 },
       });
       console.log("[electrobun] Ventana fallback views:// creada");

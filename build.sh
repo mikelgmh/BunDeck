@@ -56,11 +56,13 @@ fi
 
 echo "📦 Building Installer..."
 ISCC_PATH="/c/Users/Mikel/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
-# Versión única desde package.json (no hardcodear en installer.iss)
-APP_VERSION=$(node -p "require('./package.json').version")
+# Versión única desde package.json, vía version.iss (evita /DAppVersion en CLI,
+# que ISCC bajo Git Bash interpreta como segundo fichero de script).
+APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
 echo "📌 App version: $APP_VERSION"
+echo "#define AppVersion \"$APP_VERSION\"" > version.iss
 if [ -f "$ISCC_PATH" ]; then
-    "$ISCC_PATH" installer.iss /DAppVersion="$APP_VERSION"
+    "$ISCC_PATH" installer.iss
     echo "✅ Installer created: installer/LibreDeck-Setup.exe"
 else
     echo "⚠️ Inno Setup not found at $ISCC_PATH"

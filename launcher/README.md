@@ -11,6 +11,14 @@ Es la puerta de entrada en todos los flujos: al pulsar **Abrir panel** abre el
 navegador y **se auto-cierra** (solo si API y frontend están en línea; si no,
 se queda abierta con el motivo en el registro).
 
+El icono de bandeja (system tray, solo Windows, ver `src/tray.rs`) es
+propiedad del launcher, no del host Electrobun: al hacer clic se abre esta
+ventana (o se trae al frente si ya existe). Cerrar la ventana NO cierra la
+app — una ventana ancla invisible mantiene vivo el proceso para que el tray
+siga respondiendo. El menú del tray ofrece Abrir LibreDeck, Abrir panel y
+Salir (cierra el launcher; el daemon sigue en marcha y se detiene con
+Detener). "Abrir panel" auto-cierra la ventana igual que el botón.
+
 ## Panel de control (estilo XAMPP)
 
 Dos pestañas:

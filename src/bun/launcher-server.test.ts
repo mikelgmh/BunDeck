@@ -73,4 +73,58 @@ describe('launcher-server', () => {
     );
     expect(wrongMethod.status).toBe(404);
   });
+
+  it('controles de ventana frameless: min/max/close/state', async () => {
+    const calls: string[] = [];
+    let max = false;
+    const wdeps = {
+      ...deps,
+      windowMinimize: () => {
+        calls.push('min');
+      },
+      windowToggleMaximize: () => {
+        calls.push('toggle');
+        max = !max;
+        return { maximized: max };
+      },
+      windowClose: () => {
+        calls.push('close');
+      },
+      windowIsMaximized: () => max,
+    } as any;
+    const min = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-minimize', { method: 'POST' }),
+      wdeps,
+    );
+    expect(min.status).toBe(200);
+    const tog = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-toggle-maximize', { method: 'POST' }),
+      wdeps,
+    );
+    expect((await tog.json()).maximized).toBe(true);
+    const st = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-state', { method: 'GET' }),
+      wdeps,
+    );
+    expect((await st.json()).maximized).toBe(true);
+    const cls = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-close', { method: 'POST' }),
+      wdeps,
+    );
+    expect(cls.status).toBe(200);
+    expect(calls).toEqual(['min', 'toggle', 'close']);
+  });
+
+  it('controles de ventana sin deps -> 200 con valores por defecto', async () => {
+    const tog = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-toggle-maximize', { method: 'POST' }),
+      deps as any,
+    );
+    expect((await tog.json()).maximized).toBe(false);
+    const st = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/window-state', { method: 'GET' }),
+      deps as any,
+    );
+    expect((await st.json()).maximized).toBe(false);
+  });
 });

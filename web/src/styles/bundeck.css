@@ -71,6 +71,17 @@
 .bundeck .bd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .bundeck .bd-sp { flex: 1; }
 
+/* — Titlebar custom (ventana frameless Electrobun) — */
+.bundeck .bd-titlebar { height: 40px; flex: none; display: flex; align-items: stretch; background: var(--bd-bg); border-bottom: 1px solid var(--bd-ln); user-select: none; }
+.bundeck .bd-titlebar-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; cursor: default; }
+.bundeck .bd-titlebar-mark { width: 18px; height: 18px; flex: none; }
+.bundeck .bd-titlebar-name { font-size: 12px; font-weight: 600; letter-spacing: 0.01em; color: var(--bd-mu); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bundeck .bd-titlebar-btns { display: flex; align-items: stretch; flex: none; }
+.bundeck .bd-winbtn { width: 46px; min-height: 40px; display: grid; place-items: center; color: var(--bd-mu); }
+.bundeck .bd-winbtn:hover { background: var(--bd-sf); color: var(--bd-ink); }
+.bundeck .bd-winbtn.bd-close:hover { background: #e81123; color: #fff; }
+.bundeck .bd-winbtn:focus-visible { outline: 2px solid var(--bd-ac); outline-offset: -2px; }
+
 /* — Header — */
 .bundeck header.bd-top { height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--bd-ln); flex: none; }
 .bundeck .bd-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }

@@ -6,18 +6,37 @@
 //! - Botones: Abrir panel (navegador), Reintentar sondeo, Salir.
 //! - Estilo: tokens de `theme.rs`, espejo manual de
 //!   `web/src/styles/global.css` (dark, un acento #4f8cff).
+//!
+//! - El icono de bandeja (system tray) es propiedad del launcher
+//!   (ver `tray.rs`, solo Windows): al hacer clic se abre esta ventana.
+//!   Cerrar la ventana NO cierra la app: una ventana ancla invisible
+//!   mantiene vivo el proceso para que el tray siga respondiendo.
+//!   Solo "Salir" (de la ventana o del menú del tray) termina el proceso.
 
 mod monitor;
 mod theme;
+mod tray;
 
 use gpui::{
     div, img, prelude::*, px, size, App, Application, Bounds, Context, FontWeight, SharedString,
     WindowBounds, WindowOptions,
 };
+#[cfg(windows)]
+use gpui::{AnyWindowHandle, WindowKind};
 use std::path::PathBuf;
 use std::time::Duration;
+#[cfg(windows)]
+use std::{cell::RefCell, rc::Rc};
 
 use monitor::{LatestRelease, Snapshot, State};
+#[cfg(windows)]
+use tray::{TrayCtl, TrayEvent};
+
+/// Canal hacia el bucle de eventos del tray (Windows): "Salir" pasa por
+/// aquí para limpiar el icono antes de terminar el proceso.
+#[cfg(windows)]
+static TRAY_TX: std::sync::OnceLock<std::sync::mpsc::Sender<TrayEvent>> =
+    std::sync::OnceLock::new();
 
 /// Pestañas del panel: estado/acciones y registro a pantalla completa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -681,10 +700,11 @@ impl Render for LauncherView {
                             .text_color(theme::primary_btn_text())
                             .cursor_pointer()
                             .hover(|s| s.bg(theme::primary_btn_hover()))
-                            .on_click(cx.listener(|view, _, _, cx| {
+                            .on_click(cx.listener(|view, _, window, cx| {
                                 if view.open_dashboard() {
                                     if view.ready_to_close() {
-                                        cx.quit();
+                                        // Se cierra la ventana, el tray sigue vivo.
+                                        window.remove_window();
                                     } else {
                                         view.log.push(
                                             "Servicios aún arrancando: dejo la ventana abierta."
@@ -772,7 +792,7 @@ impl Render for LauncherView {
                     .cursor_pointer()
                     .hover(|s| s.border_color(theme::secondary_text()))
                     .on_click(|_, _, cx: &mut App| {
-                        cx.quit();
+                        quit_app(cx);
                     })
                     .child("Salir".to_string())
                     .into_any_element()
@@ -819,7 +839,7 @@ impl Render for LauncherView {
                             .cursor_pointer()
                             .hover(|s| s.border_color(theme::secondary_text()))
                             .on_click(|_, _, cx: &mut App| {
-                                cx.quit();
+                                quit_app(cx);
                             })
                             .child("Salir".to_string()),
                     )
@@ -837,22 +857,182 @@ impl Render for LauncherView {
     }
 }
 
+/// Estado vivo del launcher en Windows: ventana visible (si la hay) y
+/// control del hilo del tray. Vive en un `Rc<RefCell>` compartido entre
+/// el arranque y el bucle de eventos (todo en el hilo principal).
+#[cfg(windows)]
+struct LauncherState {
+    window: Option<AnyWindowHandle>,
+    tray: Option<TrayCtl>,
+}
+
+/// Ventana ancla invisible: con al menos una ventana abierta, cerrar la
+/// visible no provoca `PostQuitMessage` y el tray sigue respondiendo.
+#[cfg(windows)]
+struct AnchorView;
+
+#[cfg(windows)]
+impl Render for AnchorView {
+    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+#[cfg(windows)]
+fn main_window_options(cx: &mut App) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(420.0), px(720.0)),
+            cx,
+        ))),
+        titlebar: Some(gpui::TitlebarOptions {
+            title: Some("LibreDeck — Panel de control".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[cfg(windows)]
+fn open_launcher_window(cx: &mut App) -> gpui::Result<AnyWindowHandle> {
+    let options = main_window_options(cx);
+    Ok(cx.open_window(options, |_, cx| cx.new(LauncherView::new))?.into())
+}
+
+/// Clic en el tray (o "Abrir LibreDeck"): trae la ventana al frente si
+/// existe, o la abre si se cerró.
+#[cfg(windows)]
+fn show_launcher(cx: &mut App, state: &Rc<RefCell<LauncherState>>) {
+    let mut st = state.borrow_mut();
+    if let Some(h) = st.window {
+        if h
+            .update(cx, |_, window, _| window.activate_window())
+            .is_ok()
+        {
+            return;
+        }
+    }
+    match open_launcher_window(cx) {
+        Ok(h) => st.window = Some(h),
+        Err(e) => eprintln!("[launcher] no se pudo abrir la ventana: {e:#}"),
+    }
+}
+
+#[cfg(windows)]
+fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) {
+    match ev {
+        TrayEvent::ShowLauncher => show_launcher(cx, state),
+        TrayEvent::OpenPanel => {
+            let url = monitor::snapshot().dashboard_url.clone();
+            if open::that(&url).is_err() {
+                eprintln!("[launcher] no se pudo abrir el navegador ({url})");
+            } else {
+                // Igual que "Panel web": se cierra la ventana, el tray sigue.
+                let mut st = state.borrow_mut();
+                if let Some(h) = st.window.take() {
+                    let _ = h.update(cx, |_, window, _| window.remove_window());
+                }
+            }
+        }
+        TrayEvent::Quit => {
+            if let Some(tray) = state.borrow_mut().tray.take() {
+                tray.shutdown();
+            }
+            cx.quit();
+        }
+    }
+}
+
+/// Salir unificado: pasa por el tray (limpia el icono) si existe.
+#[cfg(windows)]
+fn quit_app(cx: &mut App) {
+    if let Some(tx) = TRAY_TX.get() {
+        if tx.send(TrayEvent::Quit).is_ok() {
+            return;
+        }
+    }
+    cx.quit();
+}
+
 /// PNG a todo color de la mascota (`apple-touch-icon.png` o
 /// `favicon-32.png`). `img()` lo carga de disco tal cual, sin AssetSource.
 fn main() {
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(420.0), px(720.0)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("LibreDeck — Panel de control".into()),
+        #[cfg(windows)]
+        {
+            let (rx, ctl) = tray::start_tray();
+            let state = Rc::new(RefCell::new(LauncherState {
+                window: None,
+                tray: Some(ctl),
+            }));
+            // Ancla invisible: evita que cerrar la ventana salga de la app.
+            let _anchor = cx
+                .open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                            None,
+                            size(px(1.0), px(1.0)),
+                            cx,
+                        ))),
+                        titlebar: None,
+                        focus: false,
+                        show: false,
+                        kind: WindowKind::PopUp,
+                        is_movable: false,
+                        is_resizable: false,
+                        ..Default::default()
+                    },
+                    |_, cx| cx.new(|_| AnchorView),
+                )
+                .expect("no se pudo abrir la ventana ancla del launcher");
+            // Primera ventana visible.
+            show_launcher(cx, &state);
+            // Bucle de eventos del tray (~10 Hz) en el hilo principal.
+            let pump = state.clone();
+            cx.spawn(async move |async_cx| {
+                loop {
+                    async_cx
+                        .background_executor()
+                        .timer(Duration::from_millis(100))
+                        .await;
+                    let mut evs = Vec::new();
+                    while let Ok(ev) = rx.try_recv() {
+                        evs.push(ev);
+                    }
+                    if evs.is_empty() {
+                        continue;
+                    }
+                    let pump = pump.clone();
+                    if async_cx
+                        .update(|cx| {
+                            for ev in evs {
+                                handle_tray(cx, &pump, ev);
+                            }
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+        #[cfg(not(windows))]
+        {
+            let bounds = Bounds::centered(None, size(px(420.0), px(720.0)), cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(gpui::TitlebarOptions {
+                        title: Some("LibreDeck — Panel de control".into()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-            |_, cx| cx.new(LauncherView::new),
-        )
-        .expect("no se pudo abrir la ventana del launcher");
+                },
+                |_, cx| cx.new(LauncherView::new),
+            )
+            .expect("no se pudo abrir la ventana del launcher");
+        }
     });
 }

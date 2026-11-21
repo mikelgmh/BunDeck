@@ -150,7 +150,8 @@ jobs:
       if: matrix.installer == true
       run: |
         mkdir -p installer
-        iscc installer.iss /DAppVersion=${{ steps.version.outputs.version }}
+        echo "#define AppVersion \"${{ steps.version.outputs.version }}\"" > version.iss
+        iscc installer.iss
         mv installer/LibreDeck-Setup.exe installer/LibreDeck-Setup-v${{ steps.version.outputs.version }}.exe
       shell: bash
 

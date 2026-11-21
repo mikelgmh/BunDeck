@@ -102,6 +102,11 @@
     },
     "bd": {
         "brand": "BunDeck",
+        "windowChrome": "Window bar",
+        "windowMinimize": "Minimize",
+        "windowMaximize": "Maximize",
+        "windowRestore": "Restore",
+        "windowClose": "Close",
         "connected": "Connected",
         "disconnected": "Disconnected",
         "newProfile": "New profile",

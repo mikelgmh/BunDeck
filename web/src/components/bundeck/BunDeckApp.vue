@@ -12,6 +12,7 @@
       '--bd-rw': bdShowRight ? '400px' : '52px'
     }"
   >
+    <TitleBar />
     <header class="bd-top">
       <div class="bd-brand">
         <svg class="bd-mark" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="bdg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d9a8"/><stop offset=".6" stop-color="#e3b77a"/><stop offset="1" stop-color="#c98f52"/></linearGradient></defs><ellipse cx="32" cy="55" rx="21" ry="4" opacity=".2"/><path d="M7 40c0-18 10-29 25-29s25 11 25 29c0 9-7 14-25 14S7 49 7 40" fill="url(#bdg)"/><path d="M14 27c3-8 9-12 16-13" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/><ellipse cx="19" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><ellipse cx="45" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><circle cx="24" cy="37" r="2.6" fill="#33200f"/><circle cx="40" cy="37" r="2.6" fill="#33200f"/><path d="M28 42c2 3 6 3 8 0" fill="none" stroke="#33200f" stroke-width="2" stroke-linecap="round"/></svg>
@@ -354,6 +355,7 @@ import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type Share
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
 import StageBoard from './StageBoard.vue'
+import TitleBar from './TitleBar.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import ActionCommandPalette from './ActionCommandPalette.vue'
