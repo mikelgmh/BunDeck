@@ -24,7 +24,7 @@ export class TypeTextPlugin {
             name: 'Type Text',
             version: '1.0.0',
             description: 'Simulate typing text on the keyboard',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['keyboard', 'input'],
             actions: [
                 {

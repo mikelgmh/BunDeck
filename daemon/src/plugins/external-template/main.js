@@ -1,5 +1,5 @@
 /**
- * Plantilla de plugin externo LibreDeck (Plugin API 2.1).
+ * Plantilla de plugin externo BunDeck (Plugin API 2.1).
  *
  * - Este archivo corre en SU PROPIO Worker. No hay acceso directo a
  *   SQLite, al FS del daemon ni a la red salvo vía `api`.

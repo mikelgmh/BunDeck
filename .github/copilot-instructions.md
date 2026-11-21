@@ -1,8 +1,8 @@
-# LibreDeck Copilot Instructions
+# BunDeck Copilot Instructions
 
 ## Project Overview
 
-LibreDeck is an open-source StreamDeck alternative built with a **multi-process architecture**:
+BunDeck is an open-source StreamDeck alternative built with a **multi-process architecture**:
 
 - **Daemon (Bun)**: Local server providing REST API + WebSocket communication
 - **Web Frontend (Astro + Vue)**: Administration panel for managing profiles and buttons
@@ -156,7 +156,7 @@ return new Response(JSON.stringify({ error: 'Message' }), {
 - **No authentication**: Currently designed for local-only use
 - **File upload validation**: Asset uploads must be validated for type/size
 
-Remember: LibreDeck is a **local automation platform**, not a web service. All components run on the user's machine for privacy and performance.
+Remember: BunDeck is a **local automation platform**, not a web service. All components run on the user's machine for privacy and performance.
 
 ## Development Guidelines
 

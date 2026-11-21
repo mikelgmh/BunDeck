@@ -18,6 +18,15 @@ async function body(res: Response): Promise<any> {
 }
 
 describe('launcher-server', () => {
+  it('GET ping responde presencia sin efectos', async () => {
+    const res = await handleLauncherRequest(
+      new Request('http://127.0.0.1:3031/__launcher/ping'),
+      deps as any,
+    );
+    expect(res.status).toBe(200);
+    expect(await body(res)).toEqual({ ok: true, host: 'electrobun' });
+  });
+
   it('POST open-window abre la ventana del dashboard', async () => {
     const res = await handleLauncherRequest(
       new Request('http://127.0.0.1:3031/__launcher/open-window', { method: 'POST' }),

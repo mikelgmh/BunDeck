@@ -1,4 +1,4 @@
-# LibreDeck Auto-Update System (DEPRECATED — Electrobun Updater is canonical)
+# BunDeck Auto-Update System (DEPRECATED — Electrobun Updater is canonical)
 
 > **Estado actual**: el flujo GitHub-ZIP descrito abajo fue eliminado en la
 > limpieza de obsoletos. El updater canónico es el **Electrobun `Updater`**
@@ -10,7 +10,7 @@
 
 ## Overview (histórico)
 
-LibreDeck includes a built-in automatic update system that can download, install, and restart the application when new versions are available on GitHub.
+BunDeck includes a built-in automatic update system that can download, install, and restart the application when new versions are available on GitHub.
 
 ## How It Works
 

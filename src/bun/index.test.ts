@@ -10,7 +10,7 @@ import { describe, it, expect } from 'bun:test';
 // módulo): para testear sin efectos, fijar el flag ANTES del import
 // dinámico — con import estático main() ya habría arrancado.
 process.env.LIBREDECK_HOST_TEST = '1';
-const { shutdownAll, findLauncherBinary, spawnLauncher } = await import('./index');
+const { shutdownAll, findLauncherBinary, spawnLauncher, shouldHostManageDaemon } = await import('./index');
 
 function fakeChild() {
   const calls: string[] = [];
@@ -130,5 +130,21 @@ describe('electrobun host launcher GPUI', () => {
     });
     expect(ok).toBe(false);
     expect(logs.some((m) => m.includes('No se pudo lanzar'))).toBe(true);
+  });
+});
+
+describe('shouldHostManageDaemon (host dev-only, launcher dueño en prod)', () => {
+  it('en dev gestiona el daemon por defecto', () => {
+    expect(shouldHostManageDaemon({} as any, true)).toBe(true);
+  });
+  it('en prod no spawnea (el launcher Rust es el dueño)', () => {
+    expect(shouldHostManageDaemon({} as any, false)).toBe(false);
+  });
+  it('LIBREDECK_MANAGED=1 nunca duplica (ni en dev)', () => {
+    expect(shouldHostManageDaemon({ LIBREDECK_MANAGED: '1' } as any, true)).toBe(false);
+  });
+  it('override explícito manda sobre el modo', () => {
+    expect(shouldHostManageDaemon({ LIBREDECK_HOST_MANAGE_DAEMON: '1' } as any, false)).toBe(true);
+    expect(shouldHostManageDaemon({ LIBREDECK_HOST_MANAGE_DAEMON: '0' } as any, true)).toBe(false);
   });
 });

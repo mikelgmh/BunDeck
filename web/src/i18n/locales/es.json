@@ -97,7 +97,7 @@
     "iosFullscreenWarning": {
         "title": "Pantalla completa solo en Safari",
         "message": "Estás usando iOS en un navegador distinto de Safari. En iOS, la pantalla completa solo funciona en Safari.",
-        "safariHint": "Abre LibreDeck en Safari para usar la pantalla completa. Consejo: en Safari usa Compartir → «Añadir a pantalla de inicio» para la mejor experiencia.",
+        "safariHint": "Abre BunDeck en Safari para usar la pantalla completa. Consejo: en Safari usa Compartir → «Añadir a pantalla de inicio» para la mejor experiencia.",
         "gotIt": "Entendido"
     },
     "bd": {
@@ -213,7 +213,7 @@
         "chooseFile": "Elegir archivo…",
         "keyCodeLabel": "Código de la tecla",
         "keyCodePlaceholder": "{\"libredeck\": 1, \"type\": \"key\", …}",
-        "invalidKeyCode": "Este código no parece una tecla de LibreDeck.",
+        "invalidKeyCode": "Este código no parece una tecla de BunDeck.",
         "codeTooBig": "El código es demasiado grande.",
         "fileTooBig": "El archivo es demasiado grande.",
         "notValidJson": "No es un JSON válido. Comprueba que lo has copiado entero.",
@@ -491,10 +491,10 @@
         "installedRemove": "Instalado · Quitar",
         "downloads": "descargas",
         "mcpTitle": "Servidor MCP (legacy)",
-        "mcpTitleSelf": "Servidor MCP de LibreDeck",
-        "mcpUrlLabel": "Este LibreDeck ES el servidor MCP",
+        "mcpTitleSelf": "Servidor MCP de BunDeck",
+        "mcpUrlLabel": "Este BunDeck ES el servidor MCP",
         "mcpHintSelf": "Apunta tu cliente MCP (Claude Code, etc.) a esta URL con un token para controlarlo TODO: perfiles, páginas, botones (icono, textos, acciones y orden), plugins, ajustes y registros.",
-        "mcpSub": "Tu LibreDeck como servidor MCP: control total con permisos por token.",
+        "mcpSub": "Tu BunDeck como servidor MCP: control total con permisos por token.",
         "mcpAdminWarning": "Un token con todos los permisos puede cambiarlo TODO: perfiles, páginas, botones, acciones, plugins y ajustes. Concede solo lo necesario y revoca los tokens que no uses.",
         "mcpScopesTitle": "Permisos del token",
         "mcpSelectAll": "Seleccionar todo",

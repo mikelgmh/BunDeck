@@ -6,7 +6,10 @@
   #define AppVersion "1.5.0"
 #endif
 [Setup]
-AppName=LibreDeck
+AppName=BunDeck
+; AppId anclado al nombre anterior para que las instalaciones existentes
+; actualicen en su sitio en vez de duplicarse en "Agregar o quitar programas".
+AppId=LibreDeck
 AppVersion={#AppVersion}
 AppPublisher=Mikel
 AppPublisherURL=https://github.com/mikelgmh/libredeck
@@ -14,11 +17,11 @@ AppSupportURL=https://github.com/mikelgmh/libredeck
 AppUpdatesURL=https://github.com/mikelgmh/libredeck
 SetupIconFile=icon.ico
 UninstallDisplayIcon={app}\libredeck-launcher.exe
-DefaultDirName={commonpf}\LibreDeck
-DefaultGroupName=LibreDeck
+DefaultDirName={commonpf}\BunDeck
+DefaultGroupName=BunDeck
 AllowNoIcons=yes
 OutputDir=installer
-OutputBaseFilename=LibreDeck-Setup
+OutputBaseFilename=BunDeck-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -45,9 +48,9 @@ Name: "{%APPDATA}\LibreDeck\data\logs"; Flags: uninsneveruninstall
 Name: "{%APPDATA}\LibreDeck\data\plugins"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{group}\LibreDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"
-Name: "{group}\{cm:UninstallProgram,LibreDeck}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\LibreDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{group}\BunDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"
+Name: "{group}\{cm:UninstallProgram,BunDeck}"; Filename: "{uninstallexe}"
+Name: "{commondesktop}\BunDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\libredeck-launcher.exe"; Description: "{cm:LaunchProgram,LibreDeck}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\libredeck-launcher.exe"; Description: "{cm:LaunchProgram,BunDeck}"; Flags: nowait postinstall skipifsilent

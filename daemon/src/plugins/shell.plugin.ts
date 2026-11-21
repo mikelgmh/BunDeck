@@ -24,7 +24,7 @@ export class ShellPlugin {
             name: 'Shell Commands',
             version: '1.0.0',
             description: 'Execute shell commands and scripts',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['shell', 'filesystem'],
             actions: [
                 {

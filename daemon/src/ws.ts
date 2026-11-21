@@ -300,6 +300,10 @@ export class WebSocketManager {
     this.broadcast('plugin.settings', { pluginId }, 'plugins');
   }
 
+  public broadcastLog(entry: { level: string; message: string; meta?: any; ts: number }): void {
+    this.broadcast('log.created', entry, 'logs');
+  }
+
   public getConnectedClients(): number {
     return this.clients.size;
   }

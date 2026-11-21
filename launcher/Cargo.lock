@@ -2939,6 +2939,7 @@ version = "1.5.0"
 dependencies = [
  "gpui",
  "open",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "ureq",

@@ -143,7 +143,7 @@ const scanWindows = async () => {
   // First check if daemon is running
   const isConnected = await checkConnection()
   if (!isConnected) {
-    alert('El daemon de LibreDeck no está ejecutándose. Por favor, inicia el daemon primero.')
+    alert('El daemon de BunDeck no está ejecutándose. Por favor, inicia el daemon primero.')
     isScanning.value = false
     return
   }

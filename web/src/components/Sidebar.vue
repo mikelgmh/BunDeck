@@ -6,7 +6,7 @@
         <Grid3x3 :size="15" stroke-width="2" class="text-primary-content" />
       </div>
       <div class="min-w-0">
-        <h1 class="text-sm font-semibold leading-tight tracking-tight">LibreDeck</h1>
+        <h1 class="text-sm font-semibold leading-tight tracking-tight">BunDeck</h1>
         <div class="flex items-center gap-1.5 text-xs leading-tight">
           <div :class="['w-1.5 h-1.5 rounded-full shrink-0', connectionStatus]"></div>
           <span class="text-base-content/60 truncate">{{ connectionText }}</span>

@@ -72,3 +72,7 @@ pub fn warn() -> Rgba {
 pub fn danger() -> Rgba {
     rgb(0xE5806F)
 }
+/// Hover del botón cerrar de la titlebar (rojo Windows, texto blanco).
+pub fn close_hover() -> Rgba {
+    rgb(0xE81123)
+}

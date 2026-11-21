@@ -29,7 +29,7 @@ export class UtilityPlugin {
             name: 'Utility Actions',
             version: '1.0.0',
             description: 'Utility actions for delays and more',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['system', 'utility'],
             actions: [
                 {

@@ -44,7 +44,7 @@ Different names for compatibility across platforms:
 ### macOS
 - Uses AppleScript `System Events` with key codes
 - **Requirements**: 
-  - Accessibility permissions for the terminal/app running LibreDeck
+  - Accessibility permissions for the terminal/app running BunDeck
   - System Preferences → Security & Privacy → Privacy → Accessibility
 - **Notes**: Use `cmd` or `command` modifier for Command key
 
@@ -132,11 +132,11 @@ For cross-platform compatibility, consider creating platform-specific profiles o
 ## Troubleshooting
 
 ### Windows
-- If hotkeys don't work, try running LibreDeck as administrator
+- If hotkeys don't work, try running BunDeck as administrator
 - Some applications may block simulated keyboard input
 
 ### macOS
-- Grant Accessibility permissions to the terminal/app running LibreDeck
+- Grant Accessibility permissions to the terminal/app running BunDeck
 - System Preferences → Security & Privacy → Privacy → Accessibility → Add your terminal app
 
 ### Linux (X11)

@@ -1,3 +1,8 @@
+// DEPRECATED — entrypoint muerto. Nada lo referencia: el build de
+// Electrobun usa src/bun/index.ts (ver electrobun.config.ts) y el dueño del
+// ciclo de vida en prod es el launcher Rust (launcher/). Se conserva como
+// .deprecated solo como referencia histórica del antiguo host duplicado.
+// No importar: será eliminado.
 import { BrowserWindow, ApplicationMenu, Updater, Utils } from "electrobun/bun";
 import { spawn, type ChildProcess } from "child_process";
 import { existsSync, appendFileSync } from "fs";

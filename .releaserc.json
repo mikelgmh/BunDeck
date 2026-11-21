@@ -52,7 +52,7 @@
             "label": "Daemon macOS x64"
           },
           {
-            "path": "LibreDeck-Setup-v*.exe",
+            "path": "BunDeck-Setup-v*.exe",
             "label": "Windows Installer"
           }
         ]

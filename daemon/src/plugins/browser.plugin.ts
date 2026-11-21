@@ -24,7 +24,7 @@ export class BrowserPlugin {
             name: 'Browser Navigation',
             version: '1.0.0',
             description: 'Open URLs in the default system browser',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['system', 'browser'],
             actions: [
                 {

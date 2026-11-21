@@ -1,4 +1,4 @@
-# Plugins LibreDeck (nativos + externos)
+# Plugins BunDeck (nativos + externos)
 
 ## Dos tipos
 

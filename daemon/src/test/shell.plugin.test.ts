@@ -43,7 +43,7 @@ describe('ShellPlugin', () => {
         expect(manifest.id).toBe('shell')
         expect(manifest.name).toBe('Shell Commands')
         expect(manifest.version).toBe('1.0.0')
-        expect(manifest.author).toBe('LibreDeck')
+        expect(manifest.author).toBe('BunDeck')
         expect(manifest.actions).toHaveLength(1)
         expect(manifest.actions[0].id).toBe('shell')
         expect(manifest.actions[0].schema.type).toBe('object')

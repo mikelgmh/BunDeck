@@ -1,23 +1,47 @@
 #!/usr/bin/env bun
+// cli.ts — Solo definición de comandos. La lógica vive en:
+//   client.ts  (DaemonClient: apiRequest, health, waitForHealthy/Stopped, plugin install/upload)
+//   process.ts (getLatestDaemonExe, pidfile, killByPid, spawn detached/foreground)
+//   cli-utils.ts (puertos por defecto, resolveDataDir, parseHealth, pid/log paths)
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import inquirer from 'inquirer';
-import { spawn as bunSpawn, SpawnOptions } from 'bun';
-import { spawn as nodeSpawn } from 'node:child_process';
 import {
-  buildApiBase,
-  buildWsUrl,
+  apiRequest,
+  discoverWsPort,
+  followLogsLive,
+  installPluginFromDirectory,
+  installPluginFromUrl,
+  selectPluginInstall,
+  uploadPluginZip,
+  isDaemonRunning,
+  resolveApiBase,
+  resolveWsUrl,
+  waitForHealthy,
+  waitForStopped,
+  ENDPOINTS,
+} from './client';
+import {
+  getLatestDaemonExe,
+  isPidAlive,
+  killByPid,
+  readPidFile,
+  removePidFile,
+  runCommand,
+  runForeground,
+  spawnDetached,
+} from './process';
+import {
   daemonLogPath,
   normalizePort,
   parseHealth,
-  pickLatestDaemonExe,
   pidFilePath,
   resolveDataDir,
   DEFAULT_API_PORT,
   DEFAULT_WS_PORT,
 } from './cli-utils';
+import { getVersion } from './version';
 
 const program = new Command();
 
@@ -28,11 +52,9 @@ program
   .option('--data-dir <dir>', 'Directorio de datos (por defecto: resolución automática)')
   .option('-v, --verbose', 'Salida detallada de diagnóstico');
 
-const DAEMON_PATH = '../daemon';
 const DATA_PATH = '../data';
-const SHUTDOWN_ENDPOINT = '/api/v1/admin/shutdown';
 
-// Utilidades
+// Utilidades de pegamento CLI (resuelven flags globales -> módulos)
 const verboseLog = (...args: any[]) => {
   try {
     if (program.opts().verbose) console.log(chalk.gray('[verbose]'), ...args);
@@ -40,6 +62,7 @@ const verboseLog = (...args: any[]) => {
     // program.opts() puede fallar antes del parse; ignorar
   }
 };
+const logFn = (message: string) => verboseLog(message);
 
 const getDataDir = (cmdOptions?: { dataDir?: string }): string => {
   const globalDataDir = (() => {
@@ -64,191 +87,32 @@ const getApiBase = (cmdOptions?: { port?: string | number }): string => {
   })();
   // El --port del comando tiene prioridad; si no, el global; si no, 3001.
   const port = cmdOptions?.port ?? globalPort ?? DEFAULT_API_PORT;
-  return buildApiBase(port);
+  return resolveApiBase(port);
 };
 
-const getWsUrl = (cmdOptions?: { wsPort?: string | number }): string => {
-  const globalWs = (() => {
+const getApiPort = (cmdOptions?: { port?: string | number }): number => {
+  const globalPort = (() => {
     try {
-      return program.opts().wsPort as string | undefined;
+      return program.opts().port as string | undefined;
     } catch {
       return undefined;
     }
   })();
-  const port = cmdOptions?.wsPort ?? globalWs ?? DEFAULT_WS_PORT;
-  return buildWsUrl(port);
+  return normalizePort(cmdOptions?.port ?? globalPort, DEFAULT_API_PORT);
 };
 
-const apiRequest = async (endpoint: string, options: RequestInit = {}, cmdOptions?: { port?: string | number }) => {
-  const base = getApiBase(cmdOptions);
+const getWsPortFlag = (cmdOptions?: { wsPort?: string | number }): string | number | undefined => {
   try {
-    const response = await fetch(`${base}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      },
-      ...options
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    throw new Error(`Failed to connect to LibreDeck daemon. Is it running?`);
-  }
-};
-
-const runCommand = async (command: string, args: string[] = [], options: SpawnOptions = {}): Promise<number> => {
-  const proc = bunSpawn({
-    cmd: [command, ...args],
-    stdio: ['inherit', 'inherit', 'inherit'],
-    ...options
-  });
-
-  await proc.exited;
-  return proc.exitCode || 0;
-};
-
-const isProcessRunning = async (port: number, cmdOptions?: { port?: string | number }): Promise<boolean> => {
-  try {
-    verboseLog(`Checking if daemon is running on port ${port}...`);
-    const base = getApiBase(cmdOptions ?? { port });
-    const response = await fetch(`${base}/health`);
-    verboseLog(`Health check response status: ${response.status}`);
-    return response.ok;
-  } catch (error) {
-    verboseLog(`Health check failed: ${(error as Error).message}`);
-    return false;
-  }
-};
-
-/** Health-check con reintentos (sustituye los `sleep` fijos). */
-const waitForHealthy = async (
-  port: number,
-  cmdOptions?: { port?: string | number },
-  timeoutMs = 30000,
-  intervalMs = 1000,
-): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (await isProcessRunning(port, cmdOptions)) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-};
-
-/** Espera a que el daemon DEJE de responder (útil tras shutdown). */
-const waitForStopped = async (
-  port: number,
-  cmdOptions?: { port?: string | number },
-  timeoutMs = 15000,
-  intervalMs = 500,
-): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (!(await isProcessRunning(port, cmdOptions))) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-};
-
-// Función para obtener el exe del daemon con la versión más alta
-const getLatestDaemonExe = async (): Promise<string | null> => {
-  const fs = await import('fs');
-  const path = await import('path');
-  const currentDir = path.dirname(process.execPath);
-
-  verboseLog('Searching for daemon exe in dir:', currentDir);
-
-  try {
-    const files = fs.readdirSync(currentDir);
-    verboseLog('All files in dir:', files);
-
-    const selected = pickLatestDaemonExe(files);
-    verboseLog('Selected exe:', selected);
-
-    if (!selected) return null;
-    return path.join(currentDir, selected);
-  } catch (error) {
-    verboseLog('Error finding latest daemon exe:', error);
-    return null;
-  }
-};
-
-const readPidFile = async (pidFile: string): Promise<number | null> => {
-  try {
-    const raw = (await Bun.file(pidFile).text()).trim();
-    const pid = Number(raw);
-    if (!Number.isInteger(pid) || pid <= 0) return null;
-    return pid;
+    return (cmdOptions?.wsPort ?? program.opts().wsPort) as string | undefined;
   } catch {
-    return null;
+    return cmdOptions?.wsPort;
   }
 };
-
-const removePidFile = async (pidFile: string): Promise<void> => {
-  try {
-    const fs = await import('fs');
-    if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
-  } catch {
-    // best effort
-  }
-};
-
-const isPidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** Mata por PID de forma dirigida (sin /IM a ciegas en Windows). */
-const killByPid = async (pid: number): Promise<boolean> => {
-  try {
-    if (process.platform === 'win32') {
-      // Primero intento graceful, luego forzado solo sobre ese PID.
-      let code = await runCommand('taskkill', ['/PID', String(pid)]);
-      if (code !== 0 || isPidAlive(pid)) {
-        await new Promise((r) => setTimeout(r, 1000));
-        if (isPidAlive(pid)) {
-          code = await runCommand('taskkill', ['/F', '/PID', String(pid)]);
-        }
-      }
-      await new Promise((r) => setTimeout(r, 500));
-      return !isPidAlive(pid);
-    }
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      return false;
-    }
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      if (!isPidAlive(pid)) return true;
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      return false;
-    }
-    await new Promise((r) => setTimeout(r, 500));
-    return !isPidAlive(pid);
-  } catch {
-    return false;
-  }
-};
-
-// Comandos principales
 
 // Start daemon
 program
   .command('start')
-  .description('Iniciar el daemon de LibreDeck')
+  .description('Iniciar el daemon de BunDeck')
   .option('-p, --port <port>', 'Puerto para la API HTTP', String(DEFAULT_API_PORT))
   .option('-w, --ws-port <port>', 'Puerto para WebSocket', String(DEFAULT_WS_PORT))
   .option('-d, --detach', 'Ejecutar en segundo plano')
@@ -256,12 +120,12 @@ program
   .option('--health-timeout <ms>', 'Timeout del health-check en ms', '30000')
   .action(async (options) => {
     const apiPort = normalizePort(options.port ?? program.opts().port, DEFAULT_API_PORT);
-    const wsPort = normalizePort(options.wsPort ?? program.opts().wsPort, DEFAULT_WS_PORT);
+    const wsPort = normalizePort(options.wsPort ?? getWsPortFlag(), DEFAULT_WS_PORT);
     const dataDir = getDataDir(options);
     const healthTimeout = normalizePort(options.healthTimeout, 30000);
 
     // Verificar si ya está ejecutándose
-    const isRunning = await isProcessRunning(apiPort, { port: apiPort });
+    const isRunning = await isDaemonRunning(apiPort, { log: logFn });
     if (isRunning) {
       console.log(chalk.yellow('El daemon ya está ejecutándose'));
       return;
@@ -285,39 +149,16 @@ program
 
     if (options.detach) {
       // Detached: spawn desacoplado + pidfile + logs a data/logs/daemon.log.
-      // Se usa spawn detached multiplataforma (sin `cmd /c start /B` huérfano).
-      const spinner = ora('Iniciando LibreDeck daemon (detached)...').start();
+      const spinner = ora('Iniciando BunDeck daemon (detached)...').start();
       try {
-        const fs = await import('fs');
-        const path = await import('path');
-        fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
-        const logPath = daemonLogPath(dataDir);
-        const logFd = fs.openSync(logPath, 'a');
+        const { pidFile } = await spawnDetached(daemonExe, env, dataDir, { log: logFn });
 
-        const child = nodeSpawn(daemonExe, [], {
-          detached: true,
-          stdio: ['ignore', logFd, logFd],
-          env,
-          cwd: process.cwd(),
-          windowsHide: true,
-        });
-        child.unref();
-        // El hijo hereda su propio fd; cerramos el nuestro.
-        try {
-          fs.closeSync(logFd);
-        } catch { /* noop */ }
-
-        if (child.pid) {
-          await Bun.write(pidFilePath(dataDir), String(child.pid));
-          verboseLog(`PID ${child.pid} escrito en ${pidFilePath(dataDir)}, logs en ${logPath}`);
-        }
-
-        const isNowRunning = await waitForHealthy(apiPort, { port: apiPort }, healthTimeout);
+        const isNowRunning = await waitForHealthy(apiPort, healthTimeout, 1000, { log: logFn });
         if (isNowRunning) {
-          spinner.succeed(`LibreDeck daemon iniciado en http://localhost:${apiPort} (pidfile: ${pidFilePath(dataDir)})`);
+          spinner.succeed(`BunDeck daemon iniciado en http://localhost:${apiPort} (pidfile: ${pidFile})`);
         } else {
           spinner.fail('Error al iniciar el daemon - no responde al health check');
-          console.log(`El daemon puede estar ejecutándose pero no responde. Revisa los logs en ${logPath}.`);
+          console.log(`El daemon puede estar ejecutándose pero no responde. Revisa los logs en ${daemonLogPath(dataDir)}.`);
           process.exit(1);
         }
       } catch (error) {
@@ -326,24 +167,8 @@ program
       }
     } else {
       // Foreground REAL: proceso atado a la terminal, stdio heredado, Ctrl+C limpio.
-      console.log(chalk.green(`LibreDeck daemon en primer plano en http://localhost:${apiPort} (Ctrl+C para detener)`));
-      const proc = bunSpawn({
-        cmd: [daemonExe],
-        env,
-        stdio: ['inherit', 'inherit', 'inherit'],
-        cwd: process.cwd(),
-      });
-      const onSigint = () => {
-        try {
-          proc.kill();
-        } catch { /* noop */ }
-      };
-      process.on('SIGINT', onSigint);
-      process.on('SIGTERM', onSigint);
-      await proc.exited;
-      process.off('SIGINT', onSigint);
-      process.off('SIGTERM', onSigint);
-      const code = proc.exitCode ?? 0;
+      console.log(chalk.green(`BunDeck daemon en primer plano en http://localhost:${apiPort} (Ctrl+C para detener)`));
+      const code = await runForeground(daemonExe, env);
       console.log(chalk.gray(`Daemon terminado (exit code ${code})`));
       process.exit(code);
     }
@@ -352,19 +177,18 @@ program
 // Stop daemon
 program
   .command('stop')
-  .description('Detener el daemon de LibreDeck')
+  .description('Detener el daemon de BunDeck')
   .option('--data-dir <dir>', 'Directorio de datos (donde está el pidfile)')
   .action(async (options) => {
     const spinner = ora('Deteniendo daemon...').start();
-    const apiPort = normalizePort(program.opts().port, DEFAULT_API_PORT);
-    const cmdOpts = { port: apiPort };
+    const apiPort = getApiPort();
     const dataDir = getDataDir(options);
     const pidFile = pidFilePath(dataDir);
 
     try {
       // 1) Vía API (endpoint real)
-      await apiRequest(SHUTDOWN_ENDPOINT, { method: 'POST' }, cmdOpts);
-      const stopped = await waitForStopped(apiPort, cmdOpts, 15000);
+      await apiRequest(ENDPOINTS.shutdown, { method: 'POST' }, apiPort);
+      const stopped = await waitForStopped(apiPort, 15000, 500, { log: logFn });
       await removePidFile(pidFile);
       if (stopped) {
         spinner.succeed('Daemon detenido correctamente');
@@ -418,22 +242,17 @@ program
     const spinner = ora('Verificando estado...').start();
 
     try {
-      const apiPort = normalizePort(program.opts().port, DEFAULT_API_PORT);
-      const wsPortOpt = (() => {
-        try {
-          return program.opts().wsPort as string | undefined;
-        } catch {
-          return undefined;
-        }
-      })();
-      const health = await apiRequest('/health', {}, { port: apiPort });
+      const apiPort = getApiPort();
+      const apiBase = getApiBase();
+      const health = await apiRequest(ENDPOINTS.health, {}, apiPort);
       const parsed = parseHealth(health);
       spinner.succeed('Daemon ejecutándose correctamente');
 
-      const wsPort = parsed.wsPort ?? normalizePort(wsPortOpt, DEFAULT_WS_PORT);
+      // Puerto WS: del /health, si no de /config, si no del flag --ws-port.
+      const wsPort = parsed.wsPort ?? (await discoverWsPort(apiBase, getWsPortFlag()));
       console.log(chalk.green('✓ Estado: Online'));
       console.log(chalk.blue(`📡 API: http://localhost:${apiPort}`));
-      console.log(chalk.blue(`🔌 WebSocket: ${buildWsUrl(wsPort)}`));
+      console.log(chalk.blue(`🔌 WebSocket: ${resolveWsUrl(wsPort)}`));
       if (parsed.version) {
         console.log(chalk.gray(`🏷️ Versión: ${parsed.version}`));
       }
@@ -458,7 +277,7 @@ pluginCommand
   .description('Listar plugins instalados')
   .action(async () => {
     try {
-      const data = await apiRequest('/plugins');
+      const data = await apiRequest(ENDPOINTS.plugins, {}, getApiPort());
 
       console.log(chalk.bold('\n📦 Plugins Instalados:'));
 
@@ -487,13 +306,32 @@ pluginCommand
 
 pluginCommand
   .command('install <path>')
-  .description('Instalar un plugin desde archivo ZIP o carpeta')
-  .action(async (pluginPath: string) => {
+  .description('Instalar un plugin desde URL (git o ZIP), archivo .zip local o carpeta local')
+  .option('-f, --force', 'Sobrescribir si ya existe')
+  .option('--ref <ref>', 'Rama/tag/commit (solo URL git)')
+  .action(async (pluginPath: string, options) => {
     const spinner = ora(`Instalando plugin desde ${pluginPath}...`).start();
 
     try {
-      // TODO: Implementar instalación de plugins
-      spinner.fail('Instalación de plugins no implementada aún');
+      const apiBase = getApiBase();
+      const plan = selectPluginInstall(pluginPath);
+
+      if (plan.kind === 'git-url' || plan.kind === 'zip-url') {
+        const result = await installPluginFromUrl(apiBase, plan.url, {
+          sourceType: plan.sourceType,
+          ref: options.ref,
+          force: !!options.force,
+        });
+        spinner.succeed(`Plugin instalado: ${result.pluginId ?? plan.url}`);
+      } else if (plan.kind === 'zip-file') {
+        const result = await uploadPluginZip(apiBase, plan.path, !!options.force);
+        spinner.succeed(`Plugin instalado: ${result.pluginId ?? plan.path}`);
+      } else {
+        const { resolve } = await import('path');
+        const absDir = resolve(process.cwd(), plan.path);
+        const result = await installPluginFromDirectory(apiBase, absDir, !!options.force);
+        spinner.succeed(`Plugin instalado: ${result.pluginId ?? absDir}`);
+      }
     } catch (error) {
       spinner.fail(`Error instalando plugin: ${error}`);
     }
@@ -507,7 +345,7 @@ profileCommand
   .description('Listar perfiles')
   .action(async () => {
     try {
-      const profiles = await apiRequest('/profiles');
+      const profiles = await apiRequest(ENDPOINTS.profiles, {}, getApiPort());
 
       console.log(chalk.bold('\n👤 Perfiles:'));
 
@@ -531,10 +369,10 @@ profileCommand
     const spinner = ora(`Creando perfil "${name}"...`).start();
 
     try {
-      const profile = await apiRequest('/profiles', {
+      const profile = await apiRequest(ENDPOINTS.profiles, {
         method: 'POST',
         body: JSON.stringify({ name })
-      });
+      }, getApiPort());
 
       spinner.succeed(`Perfil "${name}" creado con ID: ${profile.id}`);
     } catch (error) {
@@ -550,14 +388,15 @@ profileCommand
     const spinner = ora('Exportando perfil...').start();
 
     try {
-      const profile = await apiRequest(`/profiles/${profileId}`);
+      const apiPort = getApiPort();
+      const profile = await apiRequest(`${ENDPOINTS.profiles}/${profileId}`, {}, apiPort);
 
       // También obtener páginas y botones
-      const pages = await apiRequest(`/pages?profileId=${profileId}`);
+      const pages = await apiRequest(`${ENDPOINTS.pages}?profileId=${profileId}`, {}, apiPort);
       const exportData = { profile, pages };
 
       for (const page of pages) {
-        const buttons = await apiRequest(`/buttons?pageId=${page.id}`);
+        const buttons = await apiRequest(`${ENDPOINTS.buttons}?pageId=${page.id}`, {}, apiPort);
         page.buttons = buttons;
       }
 
@@ -568,6 +407,19 @@ profileCommand
     }
   });
 
+const printLogLine = (log: any) => {
+  const time = new Date(log.ts).toLocaleTimeString();
+  let levelColor = chalk.white;
+
+  switch (log.level) {
+    case 'error': levelColor = chalk.red; break;
+    case 'warn': levelColor = chalk.yellow; break;
+    case 'info': levelColor = chalk.blue; break;
+  }
+
+  console.log(`${chalk.gray(time)} ${levelColor(String(log.level).toUpperCase())} ${log.message}`);
+};
+
 // Logs
 program
   .command('logs')
@@ -577,30 +429,60 @@ program
   .option('-n, --lines <number>', 'Número de líneas', '50')
   .action(async (options) => {
     try {
+      const apiPort = getApiPort();
       const params = new URLSearchParams();
       if (options.level) params.set('level', options.level);
       if (options.lines) params.set('limit', options.lines);
 
-      const logs = await apiRequest(`/logs?${params.toString()}`);
+      const logs = await apiRequest(`${ENDPOINTS.logs}?${params.toString()}`, {}, apiPort);
 
-      console.log(chalk.bold('📋 Logs de LibreDeck:\n'));
+      console.log(chalk.bold('📋 Logs de BunDeck:\n'));
 
-      logs.forEach((log: any) => {
-        const time = new Date(log.ts).toLocaleTimeString();
-        let levelColor = chalk.white;
-
-        switch (log.level) {
-          case 'error': levelColor = chalk.red; break;
-          case 'warn': levelColor = chalk.yellow; break;
-          case 'info': levelColor = chalk.blue; break;
-        }
-
-        console.log(`${chalk.gray(time)} ${levelColor(log.level.toUpperCase())} ${log.message}`);
-      });
+      logs.forEach(printLogLine);
 
       if (options.follow) {
-        console.log(chalk.gray('\nSiguiendo logs... (Ctrl+C para salir)'));
-        // TODO: Implementar seguimiento en tiempo real vía WebSocket
+        // Tiempo real por WS (topic 'logs'); si falla, polling cada 2s.
+        const wsPort = await discoverWsPort(`http://localhost:${apiPort}`, undefined).catch(() => undefined);
+        let stopLive: (() => void) | null = null;
+        if (wsPort) {
+          try {
+            stopLive = await followLogsLive(wsPort, (log: any) => {
+              if (!options.level || log.level === options.level) printLogLine(log);
+            });
+            console.log(chalk.gray('\nSiguiendo logs en tiempo real (WS, Ctrl+C para salir)...'));
+          } catch {
+            stopLive = null;
+          }
+        }
+        if (!stopLive) {
+          console.log(chalk.gray('\nSiguiendo logs (polling cada 2s, Ctrl+C para salir)...'));
+        } else {
+          const cleanup = () => { try { stopLive?.(); } catch {} process.exit(0); };
+          process.on('SIGINT', cleanup);
+          process.on('SIGTERM', cleanup);
+          await new Promise(() => {});
+          return;
+        }
+        const seen = new Set(logs.map((log: any) => log.id ?? `${log.ts}-${log.message}`));
+        const timer = setInterval(async () => {
+          try {
+            const fresh = await apiRequest(`${ENDPOINTS.logs}?${params.toString()}`, {}, apiPort);
+            for (const log of fresh) {
+              const key = log.id ?? `${log.ts}-${log.message}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                printLogLine(log);
+              }
+            }
+          } catch {
+            // Reintentar en el siguiente tick sin cortar el follow
+          }
+        }, 2000);
+        process.on('SIGINT', () => {
+          clearInterval(timer);
+          process.exit(0);
+        });
+        await new Promise(() => {});
       }
     } catch (error) {
       console.error(chalk.red(`Error: ${error}`));
@@ -610,12 +492,12 @@ program
 // Update
 program
   .command('update')
-  .description('Check for updates and update LibreDeck daemon')
+  .description('Check for updates and update BunDeck daemon')
   .action(async () => {
     const spinner = ora('Checking for updates...').start();
 
     try {
-      const currentVersion = require('../../package.json').version;
+      const currentVersion = getVersion();
       const response = await fetch('https://api.github.com/repos/mikelgmh/libredeck/releases/latest');
 
       if (!response.ok) {
@@ -673,7 +555,7 @@ program
         // The update will be applied on next restart
         spinner.succeed(`Daemon updated to v${latestVersion}! The update will be applied when you restart the application.`);
       } else {
-        spinner.succeed('LibreDeck is up to date');
+        spinner.succeed('BunDeck is up to date');
       }
     } catch (error) {
       spinner.fail(`Update failed: ${error}`);
@@ -766,8 +648,8 @@ Este plugin añade las siguientes acciones:
 // Main CLI setup
 program
   .name('libredeck-cli')
-  .description('LibreDeck CLI - Herramientas de línea de comandos para LibreDeck')
-  .version('0.1.0');
+  .description('BunDeck CLI - Herramientas de línea de comandos para BunDeck')
+  .version(getVersion());
 
 // Parse command line arguments
 program.parse(process.argv);

@@ -10,7 +10,7 @@
       @dblclick="toggleMaximize"
     >
       <svg class="bd-titlebar-mark" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="bdtg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d9a8"/><stop offset=".6" stop-color="#e3b77a"/><stop offset="1" stop-color="#c98f52"/></linearGradient></defs><ellipse cx="32" cy="55" rx="21" ry="4" opacity=".2"/><path d="M7 40c0-18 10-29 25-29s25 11 25 29c0 9-7 14-25 14S7 49 7 40" fill="url(#bdtg)"/><circle cx="24" cy="37" r="2.6" fill="#33200f"/><circle cx="40" cy="37" r="2.6" fill="#33200f"/><path d="M28 42c2 3 6 3 8 0" fill="none" stroke="#33200f" stroke-width="2" stroke-linecap="round"/></svg>
-      <span class="bd-titlebar-name">LibreDeck</span>
+      <span class="bd-titlebar-name">BunDeck</span>
     </div>
     <div class="bd-titlebar-btns electrobun-webkit-app-region-no-drag">
       <button

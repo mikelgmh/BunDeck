@@ -1,7 +1,7 @@
 {
   "name": "libredeck-cli",
   "version": "0.1.0",
-  "description": "LibreDeck CLI - Command line tools for LibreDeck management",
+  "description": "BunDeck CLI - Command line tools for BunDeck management",
   "type": "module",
   "bin": {
     "libredeck-cli": "src/cli.ts"

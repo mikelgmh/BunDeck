@@ -1,11 +1,18 @@
-//! LibreDeck launcher — ventanita de estado (Rust + GPUI).
+//! BunDeck launcher — ventanita de estado (Rust + GPUI).
 //!
+//! Sin rastro de terminal en release (`windows_subsystem = "windows"`;
+//! en dev se conserva la consola para los logs).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! - Al abrir: intenta que el daemon esté corriendo (espejo de
 //!   `spawnDaemon()` en `src/bun/index.ts`), luego sondea cada 2s:
 //!   API :3001 (/health), WS :3003 (TCP), Frontend :3002 o :4321 (HEAD /).
 //! - Botones: Abrir panel (navegador), Reintentar sondeo, Salir.
-//! - Estilo: tokens de `theme.rs`, espejo manual de
-//!   `web/src/styles/global.css` (dark, un acento #4f8cff).
+//! - Estilo: tokens de `theme.rs`, espejo manual del tema bundeck
+//!   (`web/src/styles/bundeck.css`, dark + acento amarillo).
+//! - Ventana sin marco nativo (`appears_transparent`): la barra de
+//!   título es propia (arrastre, minimizar, maximizar/restaurar, cerrar),
+//!   al estilo de `web/src/components/bundeck/TitleBar.vue`.
 //!
 //! - El icono de bandeja (system tray) es propiedad del launcher
 //!   (ver `tray.rs`, solo Windows): al hacer clic se abre esta ventana.
@@ -22,15 +29,28 @@ use gpui::{
     WindowBounds, WindowOptions,
 };
 #[cfg(windows)]
-use gpui::{AnyWindowHandle, WindowKind};
+use gpui::{AnyWindowHandle, MouseButton, Window, WindowKind};
 use std::path::PathBuf;
 use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 #[cfg(windows)]
 use std::{cell::RefCell, rc::Rc};
 
 use monitor::{LatestRelease, Snapshot, State};
 #[cfg(windows)]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+#[cfg(windows)]
 use tray::{TrayCtl, TrayEvent};
+#[cfg(windows)]
+use windows::Win32::Foundation::{HWND, WPARAM};
+#[cfg(windows)]
+use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    IsZoomed, SendMessageW, ShowWindowAsync, HTCAPTION, SW_MAXIMIZE, SW_RESTORE,
+    WM_NCLBUTTONDOWN,
+};
 
 /// Canal hacia el bucle de eventos del tray (Windows): "Salir" pasa por
 /// aquí para limpiar el icono antes de terminar el proceso.
@@ -59,6 +79,11 @@ struct LauncherView {
     pending_start: bool,
     /// PNG del logo para la cabecera (None = cuadrado ámbar de reserva).
     logo: Option<PathBuf>,
+    /// Hay host Electrobun (ventana nativa disponible).
+    host: bool,
+    /// Último clic en la barra de título (doble clic = maximizar/restaurar).
+    #[cfg(windows)]
+    last_chrome_click: Option<Instant>,
 }
 
 impl LauncherView {
@@ -90,6 +115,9 @@ impl LauncherView {
             latest,
             pending_start: false,
             logo: monitor::logo_path(),
+            host: monitor::host_alive(),
+            #[cfg(windows)]
+            last_chrome_click: None,
         };
         view.start_polling(cx);
         view
@@ -125,6 +153,7 @@ impl LauncherView {
                         .update(&mut async_cx, |view, cx| {
                             view.polls += 1;
                             view.snapshot = snap;
+                            view.host = monitor::host_alive();
                             if view.snapshot.api.state == State::Ok {
                                 view.pending_start = false;
                             }
@@ -267,8 +296,17 @@ impl LauncherView {
     }
 
     /// Botón Ventana Electrobun: pide al host que abra su dashboard.
+    /// Sin host no hay ventana nativa: lo explica y sugiere Abrir panel.
     /// Devuelve true si hay que cerrar la ventanita (handoff completado).
     fn open_electrobun(&mut self) -> bool {
+        if !self.host {
+            self.log.push(
+                "Sin host Electrobun: la ventana nativa solo existe con `electrobun dev`. Usa Abrir panel."
+                    .to_string(),
+            );
+            self.truncate_log();
+            return false;
+        }
         if let Some(body) = monitor::host_post("open-window") {
             let opened = serde_json::from_str::<serde_json::Value>(&body)
                 .ok()
@@ -282,7 +320,7 @@ impl LauncherView {
             self.truncate_log();
             return true;
         }
-        self.log.push("Sin host Electrobun (¿electrobun dev en marcha?). Usa Abrir panel.".to_string());
+        self.log.push("El host no respondió. Usa Abrir panel.".to_string());
         self.truncate_log();
         false
     }
@@ -350,7 +388,7 @@ fn service_row(name: &str, snap: &monitor::ServiceSnapshot) -> impl IntoElement 
 }
 
 impl Render for LauncherView {
-    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tab = self.tab;
         let dashboard_url: SharedString = self.snapshot.dashboard_url.clone().into();
         let log_text: SharedString = self.recent_log(30).into();
@@ -364,17 +402,38 @@ impl Render for LauncherView {
         };
         let update_available = self.update_available();
         let api_up = self.snapshot.api.state == State::Ok;
+        let host_up = self.host;
+        #[cfg(windows)]
+        let maximized = is_maximized(window);
+        #[cfg(not(windows))]
+        let maximized = false;
 
         div()
             .flex()
             .flex_col()
-            .gap_3()
-            .p_4()
             .size_full()
             .bg(theme::ground())
             .text_color(theme::primary_text())
-            // Cabecera
+            // Borde de ventana sin marco (invisible a pantalla completa).
+            .border_1()
+            .border_color(if maximized {
+                theme::ground()
+            } else {
+                theme::line()
+            })
+            // Barra de título propia (Windows; en otros SO va oculta).
+            .child(title_chrome(self, window, cx))
             .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_4()
+                    .size_full()
+                    .bg(theme::ground())
+                    .text_color(theme::primary_text())
+                    // Cabecera
+                    .child(
                 div()
                     .flex()
                     .flex_col()
@@ -404,7 +463,7 @@ impl Render for LauncherView {
                                             .text_lg()
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(theme::primary_text())
-                                            .child("LibreDeck".to_string()),
+                                            .child("BunDeck".to_string()),
                                     )
                                     .child(
                                         div()
@@ -731,7 +790,11 @@ impl Render for LauncherView {
                             .bg(theme::surface())
                             .border_1()
                             .border_color(theme::line())
-                            .text_color(theme::primary_text())
+                            .text_color(if host_up {
+                                theme::primary_text()
+                            } else {
+                                theme::muted_text()
+                            })
                             .cursor_pointer()
                             .hover(|s| s.border_color(theme::secondary_text()))
                             .on_click(cx.listener(|view, _, _, cx| {
@@ -854,6 +917,7 @@ impl Render for LauncherView {
                     .text_color(theme::muted_text())
                     .child(format!("Panel: {dashboard_url}")),
             )
+            )
     }
 }
 
@@ -887,7 +951,10 @@ fn main_window_options(cx: &mut App) -> WindowOptions {
             cx,
         ))),
         titlebar: Some(gpui::TitlebarOptions {
-            title: Some("LibreDeck — Panel de control".into()),
+            title: Some("BunDeck — Panel de control".into()),
+            // Sin marco nativo: la barra de título la dibuja la app
+            // (ver `title_chrome`). El título sigue en la barra de tareas.
+            appears_transparent: true,
             ..Default::default()
         }),
         ..Default::default()
@@ -900,7 +967,7 @@ fn open_launcher_window(cx: &mut App) -> gpui::Result<AnyWindowHandle> {
     Ok(cx.open_window(options, |_, cx| cx.new(LauncherView::new))?.into())
 }
 
-/// Clic en el tray (o "Abrir LibreDeck"): trae la ventana al frente si
+/// Clic en el tray (o "Abrir BunDeck"): trae la ventana al frente si
 /// existe, o la abre si se cerró.
 #[cfg(windows)]
 fn show_launcher(cx: &mut App, state: &Rc<RefCell<LauncherState>>) {
@@ -955,8 +1022,248 @@ fn quit_app(cx: &mut App) {
     cx.quit();
 }
 
+/// Sin tray: salir directamente.
+#[cfg(not(windows))]
+fn quit_app(cx: &mut App) {
+    cx.quit();
+}
+
+/// HWND nativo de una ventana GPUI (arrastre y maximizar propios).
+/// GPUI 0.2 no implementa `start_window_move` en Windows: se hace a mano
+/// con `ReleaseCapture + WM_NCLBUTTONDOWN/HTCAPTION`.
+#[cfg(windows)]
+fn hwnd_of(window: &mut Window) -> Option<HWND> {
+    match window.window_handle() {
+        Ok(h) => match h.as_raw() {
+            RawWindowHandle::Win32(w) => Some(HWND(w.hwnd.get() as *mut _)),
+            _ => None,
+        },
+        Err(_) => None,
+    }
+}
+
+/// Alterna maximizado/restaurado con la API nativa.
+#[cfg(windows)]
+fn toggle_maximize(window: &mut Window) {
+    if let Some(hwnd) = hwnd_of(window) {
+        unsafe {
+            if IsZoomed(hwnd).0 != 0 {
+                let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+            } else {
+                let _ = ShowWindowAsync(hwnd, SW_MAXIMIZE);
+            }
+        }
+    }
+}
+
+/// Inicia un arrastre de ventana desde la barra propia.
+#[cfg(windows)]
+fn begin_native_drag(window: &mut Window) {
+    if let Some(hwnd) = hwnd_of(window) {
+        unsafe {
+            let _ = ReleaseCapture();
+            let _ = SendMessageW(
+                hwnd,
+                WM_NCLBUTTONDOWN,
+                Some(WPARAM(HTCAPTION as usize)),
+                None,
+            );
+        }
+    }
+}
+
+/// ¿Ventana maximizada? (para el icono de maximizar/restaurar).
+#[cfg(windows)]
+fn is_maximized(window: &mut Window) -> bool {
+    hwnd_of(window)
+        .map(|hwnd| unsafe { IsZoomed(hwnd).0 != 0 })
+        .unwrap_or(false)
+}
+
+/// Glifos de la barra (12px, trazo 1.5), estilo TitleBar de bundeck.
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+enum ChromeGlyph {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+#[cfg(windows)]
+fn chrome_glyph(kind: ChromeGlyph, color: gpui::Rgba) -> impl IntoElement {
+    use gpui::{canvas, point, PathBuilder};
+    canvas(
+        move |bounds, _, _| bounds,
+        move |bounds, _, window, _| {
+            let ox = bounds.origin.x;
+            let oy = bounds.origin.y;
+            let p = |x: f32, y: f32| point(ox + px(x), oy + px(y));
+            let mut b = PathBuilder::stroke(px(1.5));
+            match kind {
+                ChromeGlyph::Minimize => {
+                    b.move_to(p(2.0, 6.0));
+                    b.line_to(p(10.0, 6.0));
+                }
+                ChromeGlyph::Maximize => {
+                    b.move_to(p(2.5, 2.5));
+                    b.line_to(p(9.5, 2.5));
+                    b.line_to(p(9.5, 9.5));
+                    b.line_to(p(2.5, 9.5));
+                    b.close();
+                }
+                ChromeGlyph::Restore => {
+                    b.move_to(p(4.5, 1.5));
+                    b.line_to(p(10.5, 1.5));
+                    b.line_to(p(10.5, 7.5));
+                    b.line_to(p(8.0, 7.5));
+                    b.move_to(p(1.5, 4.5));
+                    b.line_to(p(7.5, 4.5));
+                    b.line_to(p(7.5, 10.5));
+                    b.line_to(p(1.5, 10.5));
+                    b.close();
+                }
+                ChromeGlyph::Close => {
+                    b.move_to(p(2.5, 2.5));
+                    b.line_to(p(9.5, 9.5));
+                    b.move_to(p(9.5, 2.5));
+                    b.line_to(p(2.5, 9.5));
+                }
+            }
+            if let Ok(path) = b.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .size(px(12.0))
+}
+
+/// Botón de la barra (46x40 como `.bd-winbtn`). El `.id()` convierte el
+/// `div` en stateful, que es lo que expone `on_click` encadenable.
+#[cfg(windows)]
+fn chrome_button(
+    id: &'static str,
+    glyph: ChromeGlyph,
+    danger: bool,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .w(px(46.0))
+        .h(px(40.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(theme::secondary_text())
+        .cursor_pointer()
+        .hover(|s| {
+            s.bg(if danger {
+                theme::close_hover()
+            } else {
+                theme::raised()
+            })
+        })
+        .on_click(move |_, window, cx| {
+            on_click(window, cx);
+            window.refresh();
+        })
+        .child(chrome_glyph(glyph, theme::secondary_text()))
+}
+
+/// Barra de título propia (40px, como `.bd-titlebar`): logo + nombre a la
+/// izquierda (arrastrar mueve, doble clic maximiza), botones a la derecha.
+#[cfg(windows)]
+fn title_chrome(
+    view: &mut LauncherView,
+    window: &mut Window,
+    cx: &mut Context<LauncherView>,
+) -> impl IntoElement {
+    let maximized = is_maximized(window);
+    let logo = view.logo.clone();
+    div()
+        .h(px(40.0))
+        .flex_shrink_0()
+        .w_full()
+        .flex()
+        .flex_row()
+        .bg(theme::ground())
+        .border_b_1()
+        .border_color(theme::line())
+        .child(
+            div()
+                .flex_1()
+                .h(px(40.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .pl(px(12.0))
+                .child(if let Some(path) = logo {
+                    img(path).size(px(18.0)).into_any_element()
+                } else {
+                    div()
+                        .size(px(18.0))
+                        .rounded_md()
+                        .bg(theme::accent())
+                        .into_any_element()
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::muted_text())
+                        .child("BunDeck".to_string()),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|view, _, window, cx| {
+                        // Doble clic = maximizar/restaurar; si no, arrastre.
+                        let now = Instant::now();
+                        let dbl = matches!(view.last_chrome_click, Some(t) if now.duration_since(t) < Duration::from_millis(400));
+                        view.last_chrome_click = Some(now);
+                        if dbl {
+                            toggle_maximize(window);
+                        } else {
+                            begin_native_drag(window);
+                        }
+                        cx.notify();
+                    }),
+                ),
+        )
+        .child(
+            div().flex().flex_row().flex_none()
+                .child(chrome_button("chrome-min", ChromeGlyph::Minimize, false, |window, _| {
+                    window.minimize_window();
+                }))
+                .child(chrome_button(
+                    "chrome-max",
+                    if maximized {
+                        ChromeGlyph::Restore
+                    } else {
+                        ChromeGlyph::Maximize
+                    },
+                    false,
+                    |window, _| {
+                        toggle_maximize(window);
+                    },
+                ))
+                .child(chrome_button("chrome-close", ChromeGlyph::Close, true, |window, _| {
+                    window.remove_window();
+                })),
+        )
+}
+
 /// PNG a todo color de la mascota (`apple-touch-icon.png` o
 /// `favicon-32.png`). `img()` lo carga de disco tal cual, sin AssetSource.
+#[cfg(not(windows))]
+fn title_chrome(
+    _view: &mut LauncherView,
+    _window: &mut Window,
+    _cx: &mut Context<LauncherView>,
+) -> impl IntoElement {
+    div().hidden()
+}
+
 fn main() {
     Application::new().run(|cx: &mut App| {
         #[cfg(windows)]
@@ -1025,7 +1332,7 @@ fn main() {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("LibreDeck — Panel de control".into()),
+                        title: Some("BunDeck — Panel de control".into()),
                         ..Default::default()
                     }),
                     ..Default::default()

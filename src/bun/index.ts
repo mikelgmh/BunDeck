@@ -6,6 +6,15 @@ import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { existsSync, appendFileSync } from "fs";
 import path from "path";
 
+/**
+ * ROL DEL HOST: Electrobun es dev-only para el ciclo de vida del daemon.
+ * En producción/instalado el dueño canónico es el launcher Rust
+ * (launcher/src/main.rs + monitor.rs: ensure_daemon_spawned /
+ * shutdown_daemon, tray en launcher/src/tray.rs). Este host NO spawnea el
+ * daemon en prod (ver shouldHostManageDaemon) para evitar doble daemon y
+ * duplicar iconos; solo lo supervisa en dev (`electrobun dev`).
+ */
+
 const DEV_MODE = process.env.DEV_MODE === "true" || process.env.NODE_ENV !== "production";
 
 function log(msg: string) {
@@ -69,9 +78,33 @@ function findProjectRoot(): string {
   return path.join(import.meta.dir, "..", "..");
 }
 
+/**
+ * ¿Debe el host spawnear/supervisar el daemon? En prod el dueño es el
+ * launcher Rust: el host no spawnea para evitar doble daemon. Solo dev
+ * (o override explícito) lo gestiona.
+ * - LIBREDECK_HOST_MANAGE_DAEMON=1 fuerza, =0 lo prohíbe.
+ * - LIBREDECK_MANAGED=1 lo pone el launcher al spawnear (nunca duplicar).
+ */
+export function shouldHostManageDaemon(
+  env: NodeJS.ProcessEnv = process.env,
+  devMode: boolean = DEV_MODE,
+): boolean {
+  if (env.LIBREDECK_HOST_MANAGE_DAEMON === "1") return true;
+  if (env.LIBREDECK_HOST_MANAGE_DAEMON === "0") return false;
+  if (env.LIBREDECK_MANAGED === "1") return false;
+  return devMode;
+}
+
 async function spawnDaemon(): Promise<void> {
   if (await isDaemonRunning()) {
     log(`[electrobun] Daemon ya corre en :${API_PORT}, no spawneo`);
+    return;
+  }
+  if (!shouldHostManageDaemon()) {
+    // Prod/instalado: el launcher Rust es el dueño del ciclo de vida
+    // (ensure_daemon_spawned en launcher/src/monitor.rs). No spawnear para
+    // evitar doble daemon; el launcher lo levanta si hace falta.
+    log(`[electrobun] Prod: no spawneo daemon (dueño: launcher Rust). Usa el launcher o bun run dev:daemon`);
     return;
   }
   log(`[electrobun] Spawneando daemon... API:${API_PORT} WS:${WS_PORT} Frontend:${FRONTEND_PORT}`);
@@ -92,11 +125,12 @@ async function spawnDaemon(): Promise<void> {
   try {
     if (DEV_MODE) {
       // Dev (electrobun dev): igual que `bun run dev:daemon` (watch + sin
-      // frontend embebido; la UI la sirve Astro en :4321).
+      // frontend embebido; la UI la sirve Astro en :4321). LAN explícita para
+      // QR/móvil (daemon por defecto solo loopback).
       const daemonDir = path.join(projectRoot, "daemon");
       daemonProcess = spawn(hostBun, ["run", "--watch", "src/server.ts"], {
         cwd: daemonDir,
-        env: { ...process.env, DEV_MODE: "true" },
+        env: { ...process.env, DEV_MODE: "true", LIBREDECK_BIND_LAN: process.env.LIBREDECK_BIND_LAN ?? "1" },
         stdio: "inherit",
         shell: false,
         detached: false,
@@ -326,7 +360,7 @@ export function openDashboardWindow(targetUrl: string): { opened: boolean; url?:
   };
   try {
     const win = new BrowserWindow({
-      title: "LibreDeck",
+      title: "BunDeck",
       url: targetUrl,
       // Frameless: la barra nativa se sustituye por <TitleBar/> (web).
       // El drag funciona con la clase .electrobun-webkit-app-region-drag.
@@ -340,7 +374,7 @@ export function openDashboardWindow(targetUrl: string): { opened: boolean; url?:
     console.error("[electrobun] Error creando ventana con", targetUrl, e);
     try {
       const fallback = new BrowserWindow({
-        title: "LibreDeck",
+        title: "BunDeck",
         url: "views://mainview/index.html",
         titleBarStyle: "hidden",
         frame: { width: 1280, height: 800, x: 100, y: 100 },
@@ -372,7 +406,7 @@ async function main() {
   try {
     ApplicationMenu.setApplicationMenu([
       {
-        label: "LibreDeck",
+        label: "BunDeck",
         submenu: [
           { label: "Abrir en navegador", click: () => Utils.openExternal(dashboardUrl) },
           { type: "separator" },

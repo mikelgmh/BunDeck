@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { getVersion } from './version';
 
 let db: Database;
 
@@ -177,6 +178,12 @@ export async function initDatabase() {
   for (const setting of defaultSettings) {
     insertSetting.run(setting.key, setting.value);
   }
+  // La versión efectiva de la app la define root package.json (getVersion()).
+  // El seed '0.1.0' es solo default para DBs nuevas; aquí se actualiza al
+  // arrancar para no dejar versiones rancias en DBs existentes.
+  try {
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(getVersion(), 'app.version');
+  } catch { /* mejor esfuerzo: la app sigue sin versión en DB */ }
 
   // Instalar plugins integrados
   await installBuiltInPlugins(db);
@@ -795,6 +802,17 @@ export class DatabaseService {
       VALUES (?, ?, ?, ?)
     `);
     stmt.run(entry.level, entry.message, JSON.stringify(entry.meta), entry.ts);
+    // Tiempo real: avisa a los suscritos a 'logs' (CLI --follow, panel).
+    // Sin importar ws (evita ciclo db↔ws): el server registra el manager
+    // en globalThis al arrancar; si no hay WS, se omite en silencio.
+    try {
+      (globalThis as any).__libredeckWs?.broadcastLog?.({
+        level: entry.level,
+        message: entry.message,
+        meta: entry.meta,
+        ts: entry.ts,
+      });
+    } catch { /* mejor esfuerzo */ }
   }
 
   getLogs(limit: number = 100, level?: string): LogEntry[] {

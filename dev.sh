@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script de desarrollo para LibreDeck
+# Script de desarrollo para BunDeck
 # Facilita el desarrollo y testing del proyecto
 
 set -e
@@ -12,7 +12,7 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🎛️  LibreDeck Development Script${NC}"
+echo -e "${BLUE}🎛️  BunDeck Development Script${NC}"
 echo -e "${BLUE}=================================${NC}"
 
 # Puertos por defecto (alineados con daemon/src/config.ts)
@@ -150,12 +150,15 @@ create_initial_profile() {
 # Iniciar desarrollo
 start_dev() {
     echo -e "${YELLOW}Iniciando modo desarrollo...${NC}"
-    
+
     # Trap para limpiar procesos al salir
     trap 'kill $(jobs -p) 2>/dev/null' EXIT
-    
+
     echo -e "${BLUE}🔧 Iniciando daemon (modo dev - sin frontend embebido)...${NC}"
     export DEV_MODE=true
+    # Dev necesita LAN para QR/panel en móvil: opt-in explícito (el daemon
+    # por defecto solo escucha en loopback; ver daemon/src/config.ts).
+    export LIBREDECK_BIND_LAN=1
     cd daemon && bun run start &
     DAEMON_PID=$!
     
@@ -174,8 +177,8 @@ start_dev() {
     for port in {3000..4000}; do
         if curl -s http://localhost:$port > /dev/null 2>&1; then
             response=$(curl -s http://localhost:$port)
-            # Evitar detectar el puerto del daemon (que responde con "LibreDeck API Server")
-            if echo "$response" | grep -q "astro\|vite\|<title>" && ! echo "$response" | grep -q "LibreDeck API Server"; then
+            # Evitar detectar el puerto del daemon (que responde con "BunDeck API Server")
+            if echo "$response" | grep -q "astro\|vite\|<title>" && ! echo "$response" | grep -q "BunDeck API Server"; then
                 FRONTEND_PORT=$port
                 break
             fi
@@ -197,7 +200,7 @@ start_dev() {
         LOCAL_IP=$(ip addr show 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d/ -f1 | head -n1)
     fi
 
-    echo -e "${GREEN}🚀 LibreDeck está ejecutándose:${NC}"
+    echo -e "${GREEN}🚀 BunDeck está ejecutándose:${NC}"
     echo -e "   📡 API: ${BLUE}http://localhost:${API_PORT}${NC}"
     echo -e "   🌐 Panel Local: ${BLUE}http://localhost:$FRONTEND_PORT${NC}"
     if [ -n "$LOCAL_IP" ]; then
@@ -317,8 +320,8 @@ create_example_plugin() {
   "id": "com.libredeck.ejemplo",
   "name": "Plugin de Ejemplo",
   "version": "1.0.0",
-  "description": "Plugin de demostración para LibreDeck",
-  "author": "LibreDeck Team",
+  "description": "Plugin de demostración para BunDeck",
+  "author": "BunDeck Team",
   "permissions": ["emitEvent"],
   "actions": [
     {
@@ -349,7 +352,7 @@ EOF
 
     # Main.js
     cat > "$PLUGIN_DIR/main.js" << 'EOF'
-// Plugin de Ejemplo para LibreDeck
+// Plugin de Ejemplo para BunDeck
 export function register(api) {
   console.log('🎉 Plugin de Ejemplo cargado');
   
@@ -387,7 +390,7 @@ EOF
     cat > "$PLUGIN_DIR/README.md" << 'EOF'
 # Plugin de Ejemplo
 
-Este es un plugin de demostración que muestra cómo crear plugins para LibreDeck.
+Este es un plugin de demostración que muestra cómo crear plugins para BunDeck.
 
 ## Funciones
 
@@ -403,7 +406,7 @@ sdctl plugin install data/plugins/ejemplo-plugin
 
 ## Uso
 
-1. Crear un botón en LibreDeck
+1. Crear un botón en BunDeck
 2. Asignar la acción "Decir Hola"
 3. Configurar el nombre y nivel de entusiasmo
 4. ¡Presionar el botón y ver el saludo!

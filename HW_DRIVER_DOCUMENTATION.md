@@ -133,7 +133,7 @@ function encodeJPEG(
 
 - **@julusian/jpeg-turbo**: ^1.1.2 || ^2.0.0 - Codificador JPEG optimizado (opcional)
 
-### Uso en LibreDeck
+### Uso en BunDeck
 
 Aunque esta librería es interna, podría ser útil para comprimir imágenes antes de enviarlas al StreamDeck. Sin embargo, para una integración completa con hardware StreamDeck, se recomienda instalar y usar `@elgato-stream-deck/node` en su lugar, que proporciona la API completa para:
 
@@ -187,9 +187,9 @@ console.log('Imagen JPEG creada:', jpegBuffer.length, 'bytes');
 - [Documentación de Paquetes Públicos](https://www.npmjs.com/org/elgato-stream-deck)
 - [Demo WebHID](https://julusian.github.io/node-elgato-stream-deck/) (requiere Chromium v89+)
 
-### Integración en LibreDeck
+### Integración en BunDeck
 
-Para integrar esta funcionalidad en el hw-driver de LibreDeck:
+Para integrar esta funcionalidad en el hw-driver de BunDeck:
 
 1. Crear archivos en `daemon/src/hw-driver/`:
    - `streamdeck-driver.ts`: Implementación del driver usando @elgato-stream-deck/node

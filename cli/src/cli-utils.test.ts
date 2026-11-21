@@ -124,6 +124,23 @@ describe('data dir / pidfile', () => {
     });
     expect(dir).toBe('/custom/data');
   });
+  test('respeta ELECTROBUN_DATA_DIR como fallback (igual que el daemon)', () => {
+    const dir = resolveDataDir({
+      execPath: '/usr/bin/bun',
+      cwd: '/repo/cli',
+      env: { ELECTROBUN_DATA_DIR: '/electro/data' },
+    });
+    expect(dir).toContain('libredeck');
+    expect(dir.replace(/\\/g, '/').startsWith('/electro/data')).toBe(true);
+  });
+  test('LIBREDECK_DATA_DIR tiene prioridad sobre ELECTROBUN_DATA_DIR', () => {
+    const dir = resolveDataDir({
+      execPath: '/usr/bin/bun',
+      cwd: '/repo/cli',
+      env: { LIBREDECK_DATA_DIR: '/custom/data', ELECTROBUN_DATA_DIR: '/electro/data' },
+    });
+    expect(dir).toBe('/custom/data');
+  });
   test('en dev desde cli/ resuelve ../data', () => {
     const dir = resolveDataDir({
       execPath: '/usr/bin/bun',

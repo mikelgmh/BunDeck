@@ -2,7 +2,7 @@ import type { ElectrobunConfig } from "electrobun";
 
 export default {
   app: {
-    name: "LibreDeck",
+    name: "BunDeck",
     identifier: "dev.libredeck.app",
     version: "1.5.0",
   },

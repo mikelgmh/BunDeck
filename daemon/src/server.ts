@@ -6,7 +6,17 @@ import { windowWatcher } from './window-watcher';
 import { DatabaseService } from './db';
 import { setupAPIRoutes } from './api/routes';
 import { streamDeckDriver } from './hw-driver/streamdeck-driver';
-import { API_PORT as PORT, WS_PORT, FRONTEND_PORT, DEV_MODE } from './config';
+import { API_PORT as PORT, WS_PORT, FRONTEND_PORT, DEV_MODE, BIND_HOST } from './config';
+import { buildCorsHeaders, isPreflight, preflightResponse, withCors } from './http/cors';
+import {
+  getContentType,
+  serveDataAsset,
+  findWebDistFile,
+  findWebDistIndex,
+  resolveWebDistIndexCandidates,
+} from './http/static';
+import { stopServers, requestShutdown, abortStartup, installSignalHandlers, isTrayDisabled } from './lifecycle';
+import { getVersion } from './version';
 
 // Import opcional del tray (solo funciona en Windows)
 // systray v1 exporta una clase por defecto: `new SysTray({menu, ...})`
@@ -19,9 +29,7 @@ try {
   console.log('ℹ️ Tray module not available (this is normal on Linux/macOS)');
 }
 
-import path from 'path';
 import fs from 'fs';
-import { TRAY_ICON_BASE64 } from './tray-icon';
 
 class LibreDeckDaemon {
   private httpServer?: any;
@@ -31,7 +39,16 @@ class LibreDeckDaemon {
   private actionRunner?: ActionRunner;
   private tray?: any;
 
-  constructor() { }
+  constructor() {}
+
+  private serversSnapshot() {
+    return {
+      httpServer: this.httpServer,
+      frontendServer: this.frontendServer,
+      wsManager: this.wsManager,
+      tray: this.tray,
+    };
+  }
 
   private async initializeServices() {
     try {
@@ -55,6 +72,8 @@ class LibreDeckDaemon {
 
       // Configurar WebSocket
       this.wsManager = new WebSocketManager(WS_PORT);
+      // Exponer el manager para broadcast best-effort (p.ej. db.addLog → 'log.created').
+      (globalThis as any).__libredeckWs = this.wsManager;
       // Propagar eventos de plugins externos (api.emitEvent) por WS
       this.pluginLoader.setWebSocketManager(this.wsManager);
 
@@ -66,8 +85,7 @@ class LibreDeckDaemon {
 
       console.log('✓ Services initialized');
     } catch (error) {
-      console.error('Failed to initialize services:', error);
-      process.exit(1);
+      abortStartup(error);
     }
   }
 
@@ -129,8 +147,8 @@ class LibreDeckDaemon {
           data: {
             isDefault: true,
             gridCols: 5,
-            gridRows: 3
-          }
+            gridRows: 3,
+          },
         };
 
         db.createProfile(defaultProfile);
@@ -145,8 +163,8 @@ class LibreDeckDaemon {
           is_folder: 0,
           data: {
             gridCols: 5,
-            gridRows: 3
-          }
+            gridRows: 3,
+          },
         };
 
         db.createPage(defaultPage);
@@ -161,6 +179,13 @@ class LibreDeckDaemon {
 
   private initializeTray() {
     try {
+      // El launcher Rust es el dueño del tray en instalado/prod: al spawnear
+      // pone LIBREDECK_NO_TRAY=1 (ver launcher/src/monitor.rs). El tray del
+      // daemon queda como fallback solo-dev para no duplicar iconos.
+      if (isTrayDisabled()) {
+        console.log('ℹ️ Tray del daemon desactivado: corre bajo el launcher/host (dueño del icono)');
+        return;
+      }
       // Solo intentar inicializar tray en Windows y si el módulo está disponible
       if (process.platform !== 'win32' || !SysTrayClass) {
         console.log('ℹ️ Tray icon not supported on this platform or module not available');
@@ -195,6 +220,7 @@ class LibreDeckDaemon {
       // API systray v1: menú declarativo + onClick por índice.
       // icon es el .ico de BunDeck en base64 (daemon/src/tray-icon.ts,
       // generado desde assets/bundeck.svg): en Windows pide .ico.
+      const { TRAY_ICON_BASE64 } = require('./tray-icon');
       const tray = new SysTrayClass({
         menu: {
           icon: TRAY_ICON_BASE64,
@@ -213,8 +239,8 @@ class LibreDeckDaemon {
         const idx = action?.seq_id;
         if (idx === 0) openDashboard();
         else if (idx === 1) {
-          try { tray.kill(false); } catch { /* noop */ }
-          process.exit(0);
+          // Apagado ordenado vía lifecycle (cierra servidores antes de salir).
+          this.requestShutdown(0);
         }
       });
       tray.onError?.((err: unknown) => {
@@ -228,64 +254,40 @@ class LibreDeckDaemon {
     }
   }
 
+  /** Apagado diferido (el host/la ruta admin responden antes de morir). */
+  public requestShutdown(delayMs: number = 2000) {
+    // El tray ya se cierra dentro de stopServers; matar la copia local evita
+    // que el icono quede colgado si el proceso tarda en salir.
+    requestShutdown(() => this.serversSnapshot(), delayMs);
+  }
+
   public async start() {
     await this.initializeServices();
 
     // Crear servidor API
     this.httpServer = Bun.serve({
+      // Bind explícito (config.ts): 0.0.0.0 = compat LAN (dev.sh/QR),
+      // LIBREDECK_BIND=127.0.0.1 para solo-loopback.
+      hostname: BIND_HOST,
       port: PORT,
       fetch: async (req: Request) => {
         const url = new URL(req.url);
-
-        // Obtener origin del request
-        const origin = req.headers.get('origin') || '*';
-
-        // Configurar CORS - permitir localhost y cualquier IP local
-        const isLocalOrigin = origin === 'null' ||
-          origin.includes('localhost') ||
-          origin.includes('127.0.0.1') ||
-          origin.match(/https?:\/\/192\.168\.\d+\.\d+(:\d+)?/) ||
-          origin.match(/https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?/) ||
-          origin.match(/https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+(:\d+)?/);
-
-        const corsHeaders = {
-          'Access-Control-Allow-Origin': '*', // Allow all origins for development
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-          'Access-Control-Allow-Credentials': 'true'
-        };
+        const origin = req.headers.get('origin');
+        const corsHeaders = buildCorsHeaders(origin);
 
         // Manejar preflight OPTIONS
-        if (req.method === 'OPTIONS') {
-          return new Response(null, {
-            status: 204,
-            headers: corsHeaders
-          });
+        if (isPreflight(req)) {
+          return preflightResponse(req);
         }
 
-        // Servir assets estáticos
+        // Servir assets estáticos (subidos por el usuario en <data>/assets)
         if (url.pathname.startsWith('/assets/')) {
-          try {
-            const assetPath = url.pathname.replace('/assets/', '');
-            const { getDataDir } = await import('./paths');
-            const fullPath = path.join(getDataDir(), 'assets', assetPath);
-            const file = Bun.file(fullPath);
-
-            if (await file.exists()) {
-              return new Response(file, {
-                headers: {
-                  ...corsHeaders,
-                  'Cache-Control': 'public, max-age=3600'
-                }
-              });
-            }
-          } catch (error) {
-            console.error('Error serving asset:', error);
-          }
+          const served = await serveDataAsset(url.pathname.replace('/assets/', ''), corsHeaders);
+          if (served) return served;
 
           return new Response('Asset not found', {
             status: 404,
-            headers: corsHeaders
+            headers: corsHeaders,
           });
         }
 
@@ -295,173 +297,134 @@ class LibreDeckDaemon {
             wsManager: this.wsManager!,
             pluginLoader: this.pluginLoader!,
             actionRunner: this.actionRunner!,
-            windowWatcher: windowWatcher
+            windowWatcher: windowWatcher,
+            onShutdown: () => this.requestShutdown(),
           });
 
-          // Agregar headers CORS a las respuestas API
-          const headers = new Headers(response.headers);
-          Object.entries(corsHeaders).forEach(([key, value]) => {
-            headers.set(key, value);
-          });
-
-          return new Response(response.body, {
-            status: response.status,
-            headers
-          });
+          return withCors(response, origin);
         }
 
         // Config para el frontend (puertos centralizados).
         // También servido por el frontend embebido en prod; aquí para DEV_MODE.
         if (url.pathname === '/config') {
-          return new Response(JSON.stringify({
-            wsPort: WS_PORT,
-            apiPort: PORT,
-            frontendPort: FRONTEND_PORT
-          }), {
-            headers: {
-              ...corsHeaders,
-              'Content-Type': 'application/json'
+          return new Response(
+            JSON.stringify({
+              wsPort: WS_PORT,
+              apiPort: PORT,
+              frontendPort: FRONTEND_PORT,
+            }),
+            {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json',
+              },
             }
-          });
+          );
         }
 
         // Health check
         if (url.pathname === '/health') {
-          return new Response(JSON.stringify({
-            status: 'ok',
-            timestamp: Date.now(),
-            version: '0.1.0',
-            websocket: WS_PORT
-          }), {
-            headers: {
-              ...corsHeaders,
-              'Content-Type': 'application/json'
+          return new Response(
+            JSON.stringify({
+              status: 'ok',
+              timestamp: Date.now(),
+              version: getVersion(),
+              websocket: WS_PORT,
+            }),
+            {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json',
+              },
             }
-          });
+          );
         }
 
-        return new Response('LibreDeck API Server', {
-          headers: corsHeaders
+        return new Response('BunDeck API Server', {
+          headers: corsHeaders,
         });
       },
       error: (error) => {
         console.error('API Server error:', error);
         return new Response('Internal Server Error', { status: 500 });
-      }
+      },
     });
 
     // Crear servidor frontend (solo en producción)
     if (!DEV_MODE) {
       this.frontendServer = Bun.serve({
+        hostname: BIND_HOST,
         port: FRONTEND_PORT,
         fetch: async (req: Request) => {
           const url = new URL(req.url);
-
-          // Obtener origin del request
-          const origin = req.headers.get('origin') || '*';
-
-          // Configurar CORS - permitir localhost y cualquier IP local
-          const corsHeaders = {
-            'Access-Control-Allow-Origin': '*', // Allow all origins for development
-            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-            'Access-Control-Allow-Credentials': 'true'
-          };
+          const origin = req.headers.get('origin');
+          const corsHeaders = buildCorsHeaders(origin);
 
           // Manejar preflight OPTIONS
-          if (req.method === 'OPTIONS') {
-            return new Response(null, {
-              status: 204,
-              headers: corsHeaders
-            });
+          if (isPreflight(req)) {
+            return preflightResponse(req);
           }
 
           // Servir config
           if (url.pathname === '/config') {
             const config: any = {
               wsPort: WS_PORT,
-              apiPort: PORT
+              apiPort: PORT,
             };
 
             return new Response(JSON.stringify(config), {
               headers: {
                 ...corsHeaders,
-                'Content-Type': 'application/json'
-              }
+                'Content-Type': 'application/json',
+              },
             });
           }
 
-          // Servir web-dist (UI embebida) — híbrido: soporta web/dist (dev) y web-dist (prod) y electrobun
+          // Servir web-dist (UI embebida) — candidatos centralizados en http/static.
           try {
-            let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-
-            // Buscar archivos web-dist en múltiples ubicaciones posibles
-            const possiblePaths = [
-              path.join(process.cwd(), 'web-dist'),           // Desde CWD (prod)
-              path.join(path.dirname(process.execPath), 'web-dist'), // Desde el directorio del ejecutable
-              path.join(process.cwd(), 'web', 'dist'),        // Astro dev/prod (web/dist)
-              path.join(import.meta.dir, '..', '..', 'web', 'dist'), // Relativo a daemon/src
-              path.join(import.meta.dir, '..', 'web-dist'),   // daemon/web-dist (build.sh)
-            ];
-
-            for (const basePath of possiblePaths) {
-              const fullPath = path.join(basePath, filePath.slice(1));
-              try {
-                const file = Bun.file(fullPath);
-                if (await file.exists()) {
-                  return new Response(file, {
-                    headers: {
-                      ...corsHeaders,
-                      'Content-Type': this.getContentType(filePath)
-                    }
-                  });
-                }
-              } catch (error) {
-                // Continuar buscando en la siguiente ubicación
-              }
+            const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+            const found = await findWebDistFile(filePath);
+            if (found) {
+              return new Response(Bun.file(found), {
+                headers: {
+                  ...corsHeaders,
+                  'Content-Type': getContentType(filePath),
+                },
+              });
             }
           } catch (error) {
             console.error('Error serving web file:', error);
           }
 
-          // Fallback a index.html para SPA - buscar en las mismas ubicaciones
-          const possibleIndexPaths = [
-            path.join(process.cwd(), 'web-dist', 'index.html'),
-            path.join(path.dirname(process.execPath), 'web-dist', 'index.html'),
-            path.join(process.cwd(), 'web', 'dist', 'index.html'),
-            path.join(import.meta.dir, '..', '..', 'web', 'dist', 'index.html'),
-            path.join(import.meta.dir, '..', 'web-dist', 'index.html'),
-          ];
-
-          for (const indexPath of possibleIndexPaths) {
-            try {
-              const indexFile = Bun.file(indexPath);
-              if (await indexFile.exists()) {
-                return new Response(indexFile, {
-                  headers: {
-                    ...corsHeaders,
-                    'Content-Type': 'text/html'
-                  }
-                });
-              }
-            } catch (error) {
-              // Continuar buscando
-            }
+          // Fallback a index.html para SPA
+          const indexPath = await findWebDistIndex();
+          if (indexPath) {
+            return new Response(Bun.file(indexPath), {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'text/html',
+              },
+            });
           }
 
           // Debug info si no se encuentra nada
-          const debugInfo = possibleIndexPaths.map(p => `${p}: ${fs.existsSync(p)}`).join('<br>');
-          return new Response(`LibreDeck Frontend Server<br>CWD: ${process.cwd()}<br>execPath: ${process.execPath}<br>execDir: ${path.dirname(process.execPath)}<br><br>Checked paths:<br>${debugInfo}`, {
-            headers: {
-              ...corsHeaders,
-              'Content-Type': 'text/html'
+          const debugInfo = resolveWebDistIndexCandidates()
+            .map((p) => `${p}: ${fs.existsSync(p)}`)
+            .join('<br>');
+          return new Response(
+            `LibreDeck Frontend Server<br>CWD: ${process.cwd()}<br>execPath: ${process.execPath}<br>execDir: ${require('path').dirname(process.execPath)}<br><br>Checked paths:<br>${debugInfo}`,
+            {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'text/html',
+              },
             }
-          });
+          );
         },
         error: (error) => {
           console.error('Frontend Server error:', error);
           return new Response('Internal Server Error', { status: 500 });
-        }
+        },
       });
     }
 
@@ -499,52 +462,20 @@ class LibreDeckDaemon {
     }
   }
 
-  private getContentType(filePath: string): string {
-    const ext = filePath.split('.').pop()?.toLowerCase();
-    const types: { [key: string]: string } = {
-      'html': 'text/html',
-      'css': 'text/css',
-      'js': 'application/javascript',
-      'json': 'application/json',
-      'png': 'image/png',
-      'jpg': 'image/jpeg',
-      'svg': 'image/svg+xml',
-      'ico': 'image/x-icon'
-    };
-    return types[ext || ''] || 'text/plain';
-  }
-
   public async stop() {
-    if (this.httpServer) {
-      this.httpServer.stop();
-    }
-    if (this.frontendServer) {
-      this.frontendServer.stop();
-    }
-    if (this.wsManager) {
-      this.wsManager.close();
-    }
-    if (this.tray) {
-      try { this.tray.kill(false); } catch { /* noop */ }
-    }
-    console.log('🛑 LibreDeck daemon stopped');
+    await stopServers(this.serversSnapshot());
   }
 }
 
 // Manejo de señales del sistema — solo auto-arranca si es entrypoint directo (no cuando es importado por Electrobun)
 export const daemon = new LibreDeckDaemon();
 
-process.on('SIGINT', async () => {
-  console.log('\nReceived SIGINT, shutting down gracefully...');
-  await daemon.stop();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('\nReceived SIGTERM, shutting down gracefully...');
-  await daemon.stop();
-  process.exit(0);
-});
+installSignalHandlers(() => ({
+  httpServer: (daemon as any).httpServer,
+  frontendServer: (daemon as any).frontendServer,
+  wsManager: (daemon as any).wsManager,
+  tray: (daemon as any).tray,
+}));
 
 // Iniciar daemon solo si este archivo es el entrypoint (Bun --watch / bun run)
 if (import.meta.main) {

@@ -117,7 +117,7 @@
             <section v-else :aria-labelledby="'settings-about-title'">
               <h3 id="settings-about-title" class="mb-3 text-sm font-semibold">{{ t('settings.about') }}</h3>
               <div class="rounded-xl border border-base-300 bg-base-100/50 p-3">
-                <p class="text-[13px] font-medium">LibreDeck</p>
+                <p class="text-[13px] font-medium">BunDeck</p>
                 <p class="ld-count mt-0.5" translate="no">{{ versionLine }}</p>
               </div>
             </section>

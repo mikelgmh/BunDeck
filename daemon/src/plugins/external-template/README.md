@@ -18,7 +18,7 @@ Ver `manifest.json`. Campos clave:
 - `id`: `nombre` o `@scope/nombre`. Debe coincidir con la carpeta
   (`@` y `/` se normalizan a `__` en disco).
 - `version`: semver (`1.0.0`).
-- `engine`: rango de LibreDeck requerido (ej. `^1.0.0`).
+- `engine`: rango de BunDeck requerido (ej. `^1.0.0`).
 - `apiVersion`: `2.1` (la que ofrece este daemon).
 - `main`: punto de entrada (por defecto `main.js`).
 - `permissions`: solo lo que necesites (`http`, `filesystem`, ...).

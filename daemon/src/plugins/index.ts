@@ -1,6 +1,6 @@
 /**
  * Native Plugins Index
- * Exports all native plugins that come bundled with LibreDeck
+ * Exports all native plugins that come bundled with BunDeck
  */
 
 import { MultimediaPlugin } from './multimedia.plugin'

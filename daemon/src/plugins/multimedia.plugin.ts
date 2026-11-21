@@ -27,7 +27,7 @@ export class MultimediaPlugin {
             name: 'Multimedia Controls',
             version: '1.0.0',
             description: 'Control media playback and system volume',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['multimedia', 'system'],
             actions: [
                 {

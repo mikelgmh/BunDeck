@@ -1,4 +1,4 @@
-# PRODUCT.md — LibreDeck
+# PRODUCT.md — BunDeck
 
 ## Audiencia
 Makers, streamers y técnicos que configuran un Stream Deck open-source. Sesiones largas, necesitan densidad sin fatiga.

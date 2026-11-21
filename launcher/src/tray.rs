@@ -1,6 +1,9 @@
 //! Icono de bandeja (system tray) del launcher — SOLO Windows.
 //!
-//! El tray es propiedad del launcher (no del host Electrobun): al hacer
+//! El tray es propiedad del launcher (no del host Electrobun ni del
+//! daemon: el daemon desactiva el suyo cuando corre gestionado —
+//! LIBREDECK_NO_TRAY=1, que pone `monitor::ensure_daemon_spawned` al
+//! spawnearlo — y el host Electrobun no pinta tray propio): al hacer
 //! clic se abre la ventana del launcher, y el menú ofrece Abrir panel
 //! (navegador) y Salir (apaga el daemon y cierra).
 //!
@@ -13,7 +16,7 @@ use std::sync::mpsc::{self, Receiver};
 /// Eventos del tray hacia el hilo de GPUI.
 #[derive(Debug, Clone, Copy)]
 pub enum TrayEvent {
-    /// Clic izquierdo (o doble clic) en el icono, o "Abrir LibreDeck".
+    /// Clic izquierdo (o doble clic) en el icono, o "Abrir BunDeck".
     ShowLauncher,
     /// "Abrir panel": abrir el dashboard en el navegador.
     OpenPanel,
@@ -135,7 +138,7 @@ mod imp {
                 uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
                 uCallbackMessage: WM_TRAYICON,
                 hIcon: hicon,
-                szTip: wide_tip("LibreDeck"),
+                szTip: wide_tip("BunDeck"),
                 ..Default::default()
             };
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
@@ -160,7 +163,7 @@ mod imp {
                 Ok(m) => m,
                 Err(_) => return,
             };
-            let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir LibreDeck"));
+            let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir BunDeck"));
             let _ = AppendMenuW(menu, MF_STRING, MENU_PANEL, w!("Abrir panel"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Salir"));
@@ -236,7 +239,7 @@ mod imp {
             let hinstance = HINSTANCE(
                 GetModuleHandleW(None).map(|h| h.0).unwrap_or(null_mut()),
             );
-            let class = w!("LibreDeckTray");
+            let class = w!("BunDeckTray");
             let wc = WNDCLASSW {
                 lpfnWndProc: Some(wndproc),
                 hInstance: hinstance,

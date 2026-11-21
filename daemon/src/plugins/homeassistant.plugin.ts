@@ -78,7 +78,7 @@ export class HomeAssistantPlugin {
             name: 'Home Assistant',
             version: '1.0.0',
             description: 'Controla luces, escenas e interruptores de Home Assistant',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['http', 'network'],
             settingsSchema: {
                 type: 'object',

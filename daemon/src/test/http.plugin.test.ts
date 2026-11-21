@@ -36,7 +36,7 @@ describe('HttpPlugin', () => {
         expect(manifest.id).toBe('http')
         expect(manifest.name).toBe('HTTP Requests')
         expect(manifest.version).toBe('1.0.0')
-        expect(manifest.author).toBe('LibreDeck')
+        expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.actions).toHaveLength(1)
         const action = manifest.actions[0]

@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# LibreDeck Build Script
+# BunDeck Build Script
 # Builds all components for production
 
 set -e
 
-echo "🚀 Building LibreDeck for production..."
+echo "🚀 Building BunDeck for production..."
 
 # Clean dist directory
 echo "🧹 Cleaning dist directory..."
@@ -60,10 +60,13 @@ ISCC_PATH="/c/Users/Mikel/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
 # que ISCC bajo Git Bash interpreta como segundo fichero de script).
 APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
 echo "📌 App version: $APP_VERSION"
+# Override en tiempo de ejecución y respaldo para getVersion() en daemon/CLI
+# (el JSON de root package.json ya va incrustado en el binario vía import).
+export LIBREDECK_VERSION="$APP_VERSION"
 echo "#define AppVersion \"$APP_VERSION\"" > version.iss
 if [ -f "$ISCC_PATH" ]; then
     "$ISCC_PATH" installer.iss
-    echo "✅ Installer created: installer/LibreDeck-Setup.exe"
+    echo "✅ Installer created: installer/BunDeck-Setup.exe"
 else
     echo "⚠️ Inno Setup not found at $ISCC_PATH"
     echo "   Install it from https://jrsoftware.org/isinfo.php"

@@ -53,7 +53,7 @@ describe('HomeAssistantPlugin manifest', () => {
         expect(manifest.id).toBe('homeassistant')
         expect(manifest.name).toBe('Home Assistant')
         expect(manifest.version).toBe('1.0.0')
-        expect(manifest.author).toBe('LibreDeck')
+        expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')
         expect(manifest.actions).toHaveLength(3)

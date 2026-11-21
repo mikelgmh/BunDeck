@@ -102,6 +102,8 @@ jobs:
         npm ci
 
     - name: Build CLI
+      env:
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
         cd cli
         bun run build
@@ -116,10 +118,17 @@ jobs:
       run: node scripts/copy-web-dist.js
 
     - name: Build Unified Daemon
+      env:
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
         cd daemon
         bun run build
         mv libredeck-daemon${{ matrix.ext }} ../libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
+
+    - name: Package Web dist (non-Windows)
+      if: matrix.installer == false
+      run: tar -czf libredeck-web-dist-v${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz -C web dist
+      shell: bash
 
     - name: Setup Inno Setup (Windows only)
       if: matrix.installer == true
@@ -152,7 +161,7 @@ jobs:
         mkdir -p installer
         echo "#define AppVersion \"${{ steps.version.outputs.version }}\"" > version.iss
         iscc installer.iss
-        mv installer/LibreDeck-Setup.exe installer/LibreDeck-Setup-v${{ steps.version.outputs.version }}.exe
+        mv installer/BunDeck-Setup.exe installer/BunDeck-Setup-v${{ steps.version.outputs.version }}.exe
       shell: bash
 
     - name: Upload artifacts
@@ -162,7 +171,8 @@ jobs:
         path: |
           libredeck-cli-v*-${{ matrix.target }}${{ matrix.ext }}
           libredeck-daemon-v*-${{ matrix.target }}${{ matrix.ext }}
-          installer/LibreDeck-Setup-v*.exe
+          libredeck-web-dist-v*-${{ matrix.target }}.tar.gz
+          installer/BunDeck-Setup-v*.exe
 
   release:
     needs: build
@@ -199,7 +209,8 @@ jobs:
       run: |
         find artifacts -name "libredeck-cli-v*-*" -exec mv {} . \;
         find artifacts -name "libredeck-daemon-v*-*" -exec mv {} . \;
-        find artifacts -name "LibreDeck-Setup-v*.exe" -exec mv {} . \; || true
+        find artifacts -name "libredeck-web-dist-v*.tar.gz" -exec mv {} . \; || true
+        find artifacts -name "BunDeck-Setup-v*.exe" -exec mv {} . \; || true
 
     - name: Release
       run: bunx semantic-release

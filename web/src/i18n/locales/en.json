@@ -97,7 +97,7 @@
     "iosFullscreenWarning": {
         "title": "Fullscreen only works in Safari",
         "message": "You are using iOS with a browser other than Safari. On iOS, fullscreen only works in Safari.",
-        "safariHint": "Open LibreDeck in Safari to use fullscreen. Tip: in Safari use Share → “Add to Home Screen” for the best experience.",
+        "safariHint": "Open BunDeck in Safari to use fullscreen. Tip: in Safari use Share → “Add to Home Screen” for the best experience.",
         "gotIt": "Got it"
     },
     "bd": {
@@ -213,7 +213,7 @@
         "chooseFile": "Choose file…",
         "keyCodeLabel": "Key code",
         "keyCodePlaceholder": "{\"libredeck\": 1, \"type\": \"key\", …}",
-        "invalidKeyCode": "This code does not look like a LibreDeck key.",
+        "invalidKeyCode": "This code does not look like a BunDeck key.",
         "codeTooBig": "The code is too big.",
         "fileTooBig": "The file is too big.",
         "notValidJson": "Not valid JSON. Check you copied it whole.",
@@ -491,10 +491,10 @@
         "installedRemove": "Installed · Remove",
         "downloads": "downloads",
         "mcpTitle": "MCP server (legacy)",
-        "mcpTitleSelf": "LibreDeck MCP server",
-        "mcpUrlLabel": "This LibreDeck is the MCP server",
+        "mcpTitleSelf": "BunDeck MCP server",
+        "mcpUrlLabel": "This BunDeck is the MCP server",
         "mcpHintSelf": "Point your MCP client (Claude Code, etc.) at this URL with a token to control EVERYTHING: profiles, pages, buttons (icon, texts, actions and order), plugins, settings and logs.",
-        "mcpSub": "Your LibreDeck as an MCP server: full control with per-token permissions.",
+        "mcpSub": "Your BunDeck as an MCP server: full control with per-token permissions.",
         "mcpAdminWarning": "A token with all permissions can change EVERYTHING: profiles, pages, buttons, actions, plugins and settings. Grant only what is needed and revoke tokens you don't use.",
         "mcpScopesTitle": "Token permissions",
         "mcpSelectAll": "Select all",

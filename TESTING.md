@@ -1,6 +1,6 @@
-# LibreDeck Testing
+# BunDeck Testing
 
-Esta guía explica cómo ejecutar los tests en LibreDeck.
+Esta guía explica cómo ejecutar los tests en BunDeck.
 
 ## 🧪 Tipos de Tests
 
@@ -122,7 +122,7 @@ describe('MiComponente', () => {
 describe('LibreDeck App', () => {
   it('debería cargar la página principal', () => {
     cy.visit('/')
-    cy.contains('LibreDeck').should('be.visible')
+    cy.contains('BunDeck').should('be.visible')
   })
 })
 ```

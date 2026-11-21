@@ -182,7 +182,26 @@ fn daemon_process_alive() -> bool {
     true
 }
 
+/// Sin consola en Windows salvo en dev: con `CREATE_NO_WINDOW` el hijo
+/// (bun o el daemon compilado) no abre ninguna terminal. En dev
+/// (`DEV_MODE=true`) se conserva para ver los logs.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(windows)]
+fn hide_console(cmd: &mut std::process::Command) {
+    if std::env::var("DEV_MODE").as_deref() != Ok("true") {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 /// Intenta arrancar el daemon.
+/// DUEÑO DEL CICLO DE VIDA: en instalado/producción este launcher es el
+/// único que spawnea el daemon (el host Electrobun no spawnea en prod: ver
+/// shouldHostManageDaemon en `src/bun/index.ts`). Marca al hijo con
+/// LIBREDECK_NO_TRAY=1 / LIBREDECK_MANAGED=1 para que desactive su propio
+/// tray (el icono lo pone este launcher: `tray.rs`) y nadie lo duplique.
 /// Orden: 1) dev (`bun run daemon/src/server.ts`, espejo de `spawnDaemon()`
 /// en `src/bun/index.ts`); 2) instalado (`libredeck-daemon(.exe)` junto al
 /// launcher, como lo deja installer.iss en {app}).
@@ -204,15 +223,22 @@ pub fn ensure_daemon_spawned() -> Vec<String> {
                 entry.display(),
                 root.display()
             ));
-            match std::process::Command::new(&bun)
-                .arg("run")
+            let mut cmd = std::process::Command::new(&bun);
+            cmd.arg("run")
                 .arg(&entry)
                 .current_dir(&root)
                 .env("DEV_MODE", std::env::var("DEV_MODE").unwrap_or("false".into()))
+                // Gestionado por el launcher: sin tray propio ni supervisión ajena.
+                .env("LIBREDECK_NO_TRAY", "1")
+                .env("LIBREDECK_MANAGED", "1")
+                // Panel LAN/QR en dev: opt-in explícito (daemon por defecto loopback).
+                .env("LIBREDECK_BIND_LAN", "1")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            hide_console(&mut cmd);
+            match cmd.spawn()
             {
                 Ok(child) => log.push(format!("Daemon spawneado (pid {}).", child.id())),
                 Err(e) => log.push(format!("No se pudo spawnear el daemon con {bun}: {e}")),
@@ -222,11 +248,18 @@ pub fn ensure_daemon_spawned() -> Vec<String> {
     }
     if let Some(exe) = find_installed_daemon() {
         log.push(format!("Arrancando daemon instalado: {}", exe.display()));
-        match std::process::Command::new(&exe)
-            .stdin(std::process::Stdio::null())
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn()
+            // Gestionado por el launcher: sin tray propio ni supervisión ajena.
+            .env("LIBREDECK_NO_TRAY", "1")
+            .env("LIBREDECK_MANAGED", "1")
+            // Instalado con panel LAN: opt-in explícito (daemon por defecto loopback).
+            .env("LIBREDECK_BIND_LAN", "1");
+        #[cfg(windows)]
+        hide_console(&mut cmd);
+        match cmd.spawn()
         {
             Ok(child) => log.push(format!("Daemon spawneado (pid {}).", child.id())),
             Err(e) => log.push(format!("No se pudo arrancar {}: {e}", exe.display())),
@@ -358,6 +391,25 @@ fn host_agent() -> ureq::Agent {
         .timeout_read(Duration::from_secs(25))
         .timeout_write(Duration::from_millis(1500))
         .build()
+}
+
+/// ¿Hay host Electrobun escuchando? (GET /__launcher/ping, sin efectos).
+/// La ventana nativa solo existe si el host está en marcha
+/// (`electrobun dev`); sin host el botón se atenúa y lo explica.
+pub fn host_alive() -> bool {
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(1000))
+        .timeout_read(Duration::from_millis(1000))
+        .timeout_write(Duration::from_millis(1000))
+        .build();
+    agent
+        .get(&host_url("ping"))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("ok")?.as_bool())
+        .unwrap_or(false)
 }
 
 /// POST contra el host. Devuelve el cuerpo si responde (sea cual sea).

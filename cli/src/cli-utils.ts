@@ -1,5 +1,13 @@
 import { join, dirname, resolve, basename } from 'path';
 
+/**
+ * Puertos por defecto del daemon.
+ *
+ * Fuente única de verdad: daemon/src/config.ts (API_PORT=3001, WS_PORT=3003).
+ * El binario del CLI viaja sin el daemon (bun --compile), así que NO puede
+ * importar daemon/src/config.ts: estos valores son una réplica y deben
+ * mantenerse sincronizados manualmente con el daemon.
+ */
 export const DEFAULT_API_PORT = 3001;
 export const DEFAULT_WS_PORT = 3003;
 
@@ -113,13 +121,15 @@ export function pickLatestDaemonExe(files: string[]): string | null {
 
 export interface DataDirEnv {
   LIBREDECK_DATA_DIR?: string;
+  ELECTROBUN_DATA_DIR?: string;
   APPDATA?: string;
   LOCALAPPDATA?: string;
 }
 
 /**
  * Replica la resolución del daemon (daemon/src/config.ts) desde el CLI:
- * LIBREDECK_DATA_DIR > %APPDATA%/LibreDeck/data (instalado) > <repo>/data (dev).
+ * LIBREDECK_DATA_DIR > ELECTROBUN_DATA_DIR/libredeck > %APPDATA%/LibreDeck/data
+ * (instalado) > <repo>/data (dev).
  */
 export function resolveDataDir(opts?: {
   execPath?: string;
@@ -128,6 +138,7 @@ export function resolveDataDir(opts?: {
 }): string {
   const env = opts?.env ?? (process.env as DataDirEnv);
   if (env.LIBREDECK_DATA_DIR) return env.LIBREDECK_DATA_DIR;
+  if (env.ELECTROBUN_DATA_DIR) return join(env.ELECTROBUN_DATA_DIR, 'libredeck');
   const execPath = opts?.execPath ?? process.execPath ?? '';
   const cwd = opts?.cwd ?? process.cwd();
   const isInstalled =

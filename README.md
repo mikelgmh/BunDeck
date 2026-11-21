@@ -1,4 +1,4 @@
-# LibreDeck
+# BunDeck
 
 [![Build Status](https://github.com/mikelgmh/libredeck/workflows/Release/badge.svg)](https://github.com/mikelgmh/libredeck/actions)
 [![Test Status](https://github.com/mikelgmh/libredeck/workflows/Release/badge.svg?branch=master&event=push)](https://github.com/mikelgmh/libredeck/actions)
@@ -43,7 +43,7 @@ bun run dev
 ## Usage
 
 ```bash
-# Start LibreDeck
+# Start BunDeck
 ./dist/sdctl start
 
 # Open web UI at http://localhost:4321
@@ -81,7 +81,7 @@ Automated via GitHub Actions on push to master and release creation.
 
 ## Updates
 
-LibreDeck includes automatic update checking:
+BunDeck includes automatic update checking:
 
 ```bash
 sdctl update

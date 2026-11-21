@@ -4,6 +4,7 @@
  * el launcher gobierna a distancia: abrir ventana, buscar/aplicar updates.
  *
  * Rutas:
+ * - GET  /__launcher/ping         -> { ok: true, host: 'electrobun' } (presencia, sin efectos)
  * - POST /__launcher/open-window  -> abre la BrowserWindow del dashboard
  * - GET  /__launcher/update-check -> { updateAvailable, version? }
  * - POST /__launcher/update-apply -> { ok } (descarga y aplica, reinicia)
@@ -49,6 +50,9 @@ export async function handleLauncherRequest(req: Request, deps: LauncherServerDe
     return new Response(null, { status: 204, headers: JSON_HEADERS });
   }
   try {
+    if (url.pathname === '/__launcher/ping' && req.method === 'GET') {
+      return json({ ok: true, host: 'electrobun' });
+    }
     if (url.pathname === '/__launcher/open-window' && req.method === 'POST') {
       const res = await deps.openWindow();
       return json({ ok: true, ...res });

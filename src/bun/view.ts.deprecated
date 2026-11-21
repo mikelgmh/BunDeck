@@ -1,3 +1,7 @@
+// DEPRECATED — view muerta. Nada la referencia: la view canónica del
+// fallback offline es src/electrobun/view.ts (ver electrobun.config.ts).
+// Se conserva como .deprecated solo como referencia histórica.
+// No importar: será eliminada.
 // View de Electrobun — cuando se usa views://mainview/index.html (fallback offline)
 // El HTML real viene de web/dist copiado via electrobun.config.ts copy.
 // Este entrypoint solo añade helper para modo híbrido y no interfiere con Astro.

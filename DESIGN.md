@@ -1,4 +1,4 @@
-# DESIGN.md — LibreDeck
+# DESIGN.md — BunDeck
 
 Fuente: `unslop` + `awwwards` + `impeccable.style` + `vercel web-design-guidelines`.
 Crédito unslop: Damir Sokolovsky (@heydamir), CC BY 4.0.

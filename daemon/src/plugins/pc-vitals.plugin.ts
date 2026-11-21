@@ -24,7 +24,7 @@ export class PCVitalsPlugin {
             name: 'PC Vitals',
             version: '1.0.0',
             description: 'Monitor system metrics like CPU, GPU, RAM usage and temperatures',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['system', 'monitoring'],
             actions: [
                 {

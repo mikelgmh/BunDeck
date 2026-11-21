@@ -111,7 +111,7 @@ export class ObsPlugin {
             name: 'OBS Studio',
             version: '1.0.0',
             description: 'Controla OBS Studio (escenas, fuentes, directo, grabación y audio) vía obs-websocket v5',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['network'],
             settingsSchema: {
                 type: 'object',

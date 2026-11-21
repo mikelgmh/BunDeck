@@ -86,7 +86,7 @@ export class SpotifyPlugin {
             name: 'Spotify',
             version: '1.1.0',
             description: 'Controla la reproducción de Spotify: reproducir/pausar, Me gusta, aleatorio y playlists',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['http', 'network'],
             // OAuth sin Client ID propio: la app de escritorio abre el Web Player
             // oficial en una ventana Electrobun y extrae el token de sesión.
@@ -134,7 +134,7 @@ export class SpotifyPlugin {
                 },
                 required: ['token']
             },
-            instructions: 'Para conectar con Spotify (sin Client ID):\n\n1. Abre los ajustes del plugin (menú ⋯) y pulsa "Conectar con Spotify".\n2. Se abre el Web Player oficial: inicia sesión si hace falta.\n3. LibreDeck extrae el token de tu sesión en local y lo guarda aquí (no sale de tu equipo).\n4. Mientras la app siga abierta, el token se renueva solo en segundo plano (la sesión del Web Player reacuña cada ~1h). Solo tendrás que repetir el paso 1 si cierras sesión en Spotify.\n\nNota: un <iframe> incrustado no funciona (Spotify lo bloquea con X-Frame-Options: deny); por eso se usa una ventana propia.',
+            instructions: 'Para conectar con Spotify (sin Client ID):\n\n1. Abre los ajustes del plugin (menú ⋯) y pulsa "Conectar con Spotify".\n2. Se abre el Web Player oficial: inicia sesión si hace falta.\n3. BunDeck extrae el token de tu sesión en local y lo guarda aquí (no sale de tu equipo).\n4. Mientras la app siga abierta, el token se renueva solo en segundo plano (la sesión del Web Player reacuña cada ~1h). Solo tendrás que repetir el paso 1 si cierras sesión en Spotify.\n\nNota: un <iframe> incrustado no funciona (Spotify lo bloquea con X-Frame-Options: deny); por eso se usa una ventana propia.',
             actions: [
                 {
                     id: 'playback',

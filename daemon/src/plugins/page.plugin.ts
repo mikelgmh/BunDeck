@@ -23,8 +23,8 @@ export class PagePlugin {
             id: 'page',
             name: 'Page Navigation',
             version: '1.0.0',
-            description: 'Navigate to different pages within LibreDeck',
-            author: 'LibreDeck',
+            description: 'Navigate to different pages within BunDeck',
+            author: 'BunDeck',
             permissions: ['navigation', 'ui'],
             actions: [
                 {

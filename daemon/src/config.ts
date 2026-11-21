@@ -20,6 +20,20 @@ export const FRONTEND_PORT = parsePort(
 export const DEV_MODE = process.env.DEV_MODE === 'true';
 export const ELECTROBUN_MODE = process.env.ELECTROBUN === 'true' || !!process.env.ELECTROBUN_DATA_DIR;
 
+// Bind de los Bun.serve del daemon (API, WS y frontend embebido).
+// Seguro por defecto: solo loopback. Para LAN (QR del panel, móvil):
+//   LIBREDECK_BIND=0.0.0.0 (o LIBREDECK_BIND_LAN=1)
+// dev.sh y el launcher Rust ya ponen LIBREDECK_BIND_LAN=1 al spawnear.
+// Para forzar loopback aunque haya LAN: LIBREDECK_BIND=127.0.0.1 (o LIBREDECK_BIND_LAN=0).
+function resolveBindHost(): string {
+  const explicit = process.env.LIBREDECK_BIND?.trim();
+  if (explicit) return explicit;
+  const lan = process.env.LIBREDECK_BIND_LAN;
+  if (lan === '1' || lan === 'true') return '0.0.0.0';
+  return '127.0.0.1';
+}
+export const BIND_HOST = resolveBindHost();
+
 // Data dir absoluto — compatible con Bun --compile y Electrobun
 export function resolveDataDir(): string {
   if (process.env.LIBREDECK_DATA_DIR) return process.env.LIBREDECK_DATA_DIR;

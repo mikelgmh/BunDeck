@@ -24,7 +24,7 @@ export class HttpPlugin {
             name: 'HTTP Requests',
             version: '1.0.0',
             description: 'Make HTTP/HTTPS requests to APIs and webhooks',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['http', 'network'],
             actions: [
                 {

@@ -56,7 +56,7 @@
           <div v-else class="up-to-date">
             <div class="alert alert-info">
               <component :is="getLucideIcon('check-circle')" />
-              LibreDeck está actualizado a la última versión
+              BunDeck está actualizado a la última versión
             </div>
           </div>
 

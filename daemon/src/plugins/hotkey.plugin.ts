@@ -24,7 +24,7 @@ export class HotkeyPlugin {
             name: 'Keyboard Shortcuts',
             version: '1.0.0',
             description: 'Simulate keyboard shortcuts and key presses',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['keyboard', 'input'],
             actions: [
                 {

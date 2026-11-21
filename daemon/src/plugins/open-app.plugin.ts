@@ -24,7 +24,7 @@ export class OpenAppPlugin {
             name: 'Abrir Aplicación',
             version: '1.0.0',
             description: 'Abre aplicaciones o archivos en el sistema',
-            author: 'LibreDeck',
+            author: 'BunDeck',
             permissions: ['filesystem', 'process'],
             actions: [
                 {

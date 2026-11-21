@@ -4,7 +4,7 @@
       <h2 class="modal-title">Escanea para acceder</h2>
       
       <p class="modal-text">
-        Escanea este código QR con tu dispositivo móvil para acceder a LibreDeck desde la red local.
+        Escanea este código QR con tu dispositivo móvil para acceder a BunDeck desde la red local.
       </p>
       
       <div class="qr-container">
