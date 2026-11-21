@@ -1,3 +1,20 @@
+# [1.5.0](https://github.com/mikelgmh/libredeck/compare/v1.4.0...v1.5.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci:** instalar dependencias raiz en el job test ([9656834](https://github.com/mikelgmh/libredeck/commit/9656834bb145a8d64a1359675e22fd14efb722d1))
+* **ci:** version.iss en vez de /DAppVersion para ISCC ([5c391f8](https://github.com/mikelgmh/libredeck/commit/5c391f82cce51a01d41da6a63888fb67ef65312d))
+* **ci:** web/.npmrc con legacy-peer-deps para que npm ci pase ([140548c](https://github.com/mikelgmh/libredeck/commit/140548c74654d8b506852bf7a7d34e0c47c00928))
+* **test:** esperar setGlobalSettings en elgato-host antes de afirmar ([c1a7e37](https://github.com/mikelgmh/libredeck/commit/c1a7e37f9d60548b1681cc7bc0aa43009f08ab39))
+
+
+### Features
+
+* Add streamdeck connection ([bac06bf](https://github.com/mikelgmh/libredeck/commit/bac06bfaeb8b73ecbc81007bd33a7e1c6288f504))
+* Default profile in prod ([cea9d12](https://github.com/mikelgmh/libredeck/commit/cea9d12e45736fff6b532e17f969e6db6edc3ee2))
+* plugins OBS/Spotify/Elgato, launcher GPUI, host Electrobun y fixes de CI e instalador ([3d73931](https://github.com/mikelgmh/libredeck/commit/3d7393138b2e3933e990fc41dbcaa0634b132c9d))
+
 # [1.5.0](https://github.com/mikelgmh/libredeck/compare/v1.4.0...v1.5.0) (2025-12-01)
 
 
