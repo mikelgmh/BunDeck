@@ -350,10 +350,14 @@ export class StreamDeckDriver {
     const canvas = canvasLib.createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     
-    // Fondo: usar backgroundColor del botón o negro
+    // Fondo: imagen de fondo si hay, si no backgroundColor o negro
     const bg = buttonData.backgroundColor || '#000000';
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
+
+    // Imagen de fondo / personalizada (PNG normalizado o GIF: primer frame).
+    // Best-effort: si no se puede cargar, se sigue con color + texto/icono.
+    await this.tryDrawKeyImage(ctx, canvasLib, buttonData.iconImage ?? buttonData.backgroundImage, width, height, true);
     
     // Color de texto
     ctx.fillStyle = buttonData.textColor || '#FFFFFF';
@@ -536,6 +540,51 @@ export class StreamDeckDriver {
       return true;
     } catch (e) {
       // console.error('Failed to draw lucide icon', iconName, e);
+      return false;
+    }
+  }
+
+  /**
+   * Dibuja la imagen personalizada de la tecla (`iconImage`/`backgroundImage`,
+   * URLs `/assets/<fichero>`) con recorte «cover» a 72x72.
+   * Best-effort: GIF → primer frame; si no se puede cargar, no dibuja nada
+   * y el llamador sigue con color + texto/icono.
+   */
+  private async tryDrawKeyImage(
+    ctx: any,
+    canvasLib: any,
+    rel: unknown,
+    width: number,
+    height: number,
+    cover: boolean
+  ): Promise<boolean> {
+    try {
+      if (typeof rel !== 'string' || !rel) return false;
+      const name = rel.split('?')[0].replace(/^\/assets\//, '');
+      if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) return false;
+      const { getDataDir } = await import('../paths');
+      const { default: path } = await import('path');
+      const file = Bun.file(path.join(getDataDir(), 'assets', name));
+      if (!(await file.exists())) return false;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!bytes.byteLength) return false;
+      const loader = (canvasLib as any)?.loadImage;
+      if (typeof loader !== 'function') return false;
+      const img: any = await loader(bytes);
+      const iw = Number(img?.width) || 0;
+      const ih = Number(img?.height) || 0;
+      if (!iw || !ih) return false;
+      if (cover) {
+        const s = Math.max(width / iw, height / ih);
+        const dw = iw * s;
+        const dh = ih * s;
+        ctx.drawImage(img, (width - dw) / 2, (height - dh) / 2, dw, dh);
+      } else {
+        ctx.drawImage(img, 0, 0, width, height);
+      }
+      return true;
+    } catch {
       return false;
     }
   }
@@ -744,6 +793,8 @@ export class StreamDeckDriver {
             button.data.textBottom?.trim() ||
             button.data.emoji?.trim() ||
             button.data.icon ||
+            button.data.iconImage ||
+            button.data.backgroundImage ||
             (button.data.actions && button.data.actions.length > 0)
           );
 
@@ -816,6 +867,8 @@ export class StreamDeckDriver {
             button.data.textBottom?.trim() ||
             button.data.emoji?.trim() ||
             button.data.icon ||
+            button.data.iconImage ||
+            button.data.backgroundImage ||
             (button.data.actions && button.data.actions.length > 0)
           );
 

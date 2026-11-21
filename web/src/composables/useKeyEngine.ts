@@ -200,7 +200,8 @@ export function createKeyEngine(deps: EngineDeps) {
     // Leer tick para reevaluar cada segundo (hora, temporizadores).
     void displayTick.value
     const E = env()
-    const L = (raw.looks ?? []).find((l: any) => l?.cond && evb(l.cond, E))
+    const looks = Array.isArray(raw.looks) ? raw.looks : []
+    const L = looks.find((l: any) => l?.cond && evb(l.cond, E))
     if (!L) return { ...raw, label: intp(raw.label ?? '', E) }
     return {
       ...raw,

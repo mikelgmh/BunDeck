@@ -14,18 +14,7 @@ import {
   findWebDistIndex,
   resolveWebDistIndexCandidates,
 } from './http/static';
-import { stopServers, requestShutdown, abortStartup, installSignalHandlers, isTrayDisabled } from './lifecycle';
-
-// Import opcional del tray (solo funciona en Windows)
-// systray v1 exporta una clase por defecto: `new SysTray({menu, ...})`
-let SysTrayClass: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('systray');
-  SysTrayClass = mod?.default ?? mod?.SysTray ?? mod;
-} catch (error) {
-  console.log('ℹ️ Tray module not available (this is normal on Linux/macOS)');
-}
+import { stopServers, requestShutdown, abortStartup, installSignalHandlers } from './lifecycle';
 
 import fs from 'fs';
 
@@ -35,7 +24,6 @@ class LibreDeckDaemon {
   private wsManager?: WebSocketManager;
   private pluginLoader?: PluginLoader;
   private actionRunner?: ActionRunner;
-  private tray?: any;
 
   constructor() {}
 
@@ -44,7 +32,6 @@ class LibreDeckDaemon {
       httpServer: this.httpServer,
       frontendServer: this.frontendServer,
       wsManager: this.wsManager,
-      tray: this.tray,
     };
   }
 
@@ -107,9 +94,6 @@ class LibreDeckDaemon {
 
       // Inicializar auto-profile switching si hay configuración guardada
       await this.initializeAutoProfileSwitching();
-
-      // Inicializar tray icon
-      this.initializeTray();
 
       console.log('✓ Services initialized');
     } catch (error) {
@@ -205,87 +189,8 @@ class LibreDeckDaemon {
     }
   }
 
-  private initializeTray() {
-    try {
-      // El launcher Rust es el dueño del tray en instalado/prod: al spawnear
-      // pone LIBREDECK_NO_TRAY=1 (ver launcher/src/monitor.rs). El tray del
-      // daemon queda como fallback solo-dev para no duplicar iconos.
-      if (isTrayDisabled()) {
-        console.log('ℹ️ Tray del daemon desactivado: corre bajo el launcher/host (dueño del icono)');
-        return;
-      }
-      // Solo intentar inicializar tray en Windows y si el módulo está disponible
-      if (process.platform !== 'win32' || !SysTrayClass) {
-        console.log('ℹ️ Tray icon not supported on this platform or module not available');
-        return;
-      }
-
-      const { exec } = require('child_process');
-      const openDashboard = () => {
-        try {
-          const os = require('os');
-          const interfaces = os.networkInterfaces() as any;
-          let localIP = 'localhost';
-          for (const iface of Object.values(interfaces)) {
-            for (const addr of iface as any[]) {
-              if (addr.family === 'IPv4' && !addr.internal) {
-                localIP = addr.address;
-                break;
-              }
-              if (localIP !== 'localhost') break;
-            }
-          }
-          // En dev el panel es Astro (4321); en prod es el frontend embebido
-          const url = DEV_MODE
-            ? `http://${localIP}:4321`
-            : `http://${localIP}:${process.env.PORT_FRONTEND || FRONTEND_PORT}`;
-          exec(`start "" "${url}"`);
-        } catch (e) {
-          console.error('Failed to open dashboard from tray:', e);
-        }
-      };
-
-      // API systray v1: menú declarativo + onClick por índice.
-      // icon es el .ico de BunDeck en base64 (daemon/src/tray-icon.ts,
-      // generado desde assets/bundeck.svg): en Windows pide .ico.
-      const { TRAY_ICON_BASE64 } = require('./tray-icon');
-      const tray = new SysTrayClass({
-        menu: {
-          icon: TRAY_ICON_BASE64,
-          title: 'LibreDeck',
-          tooltip: 'LibreDeck Daemon',
-          items: [
-            { title: 'Abrir LibreDeck', tooltip: 'Abrir panel', checked: false, enabled: true },
-            { title: 'Salir', tooltip: 'Detener daemon y salir', checked: false, enabled: true },
-          ],
-        },
-        debug: false,
-        copyDir: true,
-      });
-
-      tray.onClick((action: any) => {
-        const idx = action?.seq_id;
-        if (idx === 0) openDashboard();
-        else if (idx === 1) {
-          // Apagado ordenado vía lifecycle (cierra servidores antes de salir).
-          this.requestShutdown(0);
-        }
-      });
-      tray.onError?.((err: unknown) => {
-        console.log('ℹ️ Tray error (daemon sigue corriendo):', err);
-      });
-
-      this.tray = tray;
-      console.log('✓ Tray icon initialized (LibreDeck en bandeja del sistema)');
-    } catch (error) {
-      console.log('ℹ️ Tray icon not available on this system (daemon sigue corriendo). Reason:', error);
-    }
-  }
-
   /** Apagado diferido (el host/la ruta admin responden antes de morir). */
   public requestShutdown(delayMs: number = 2000) {
-    // El tray ya se cierra dentro de stopServers; matar la copia local evita
-    // que el icono quede colgado si el proceso tarda en salir.
     requestShutdown(() => this.serversSnapshot(), delayMs);
   }
 
@@ -436,7 +341,6 @@ installSignalHandlers(() => ({
   httpServer: (daemon as any).httpServer,
   frontendServer: (daemon as any).frontendServer,
   wsManager: (daemon as any).wsManager,
-  tray: (daemon as any).tray,
 }));
 
 // Iniciar daemon solo si este archivo es el entrypoint (Bun --watch / bun run)

@@ -23,14 +23,18 @@
   </template>
   <template v-else>
     <div class="bd-ih">
-      <div
-        class="bd-pv"
+      <button
+        class="bd-pv bd-pvbtn"
         :style="{ '--bd-g': preview.color, background: preview.bg || undefined }"
-        :aria-label="t('bd.keyPreview')"
-        role="img"
+        :aria-label="t('bd.changeImage')"
+        :title="t('bd.changeImage')"
+        data-cy="bd-key-preview"
+        @click="emit('open-icon-picker')"
       >
-        <component v-if="previewIcon" :is="previewIcon" :size="26" stroke-width="1.75" aria-hidden="true" />
-      </div>
+        <img v-if="previewImage" :src="previewImage" class="bd-pvimg" alt="" aria-hidden="true" />
+        <component v-else-if="previewIcon" :is="previewIcon" :size="26" stroke-width="1.75" aria-hidden="true" />
+        <span class="bd-pvov" aria-hidden="true"><ImagePlus :size="20" stroke-width="1.75" /></span>
+      </button>
       <div class="bd-it">
         <p class="bd-mono bd-cap">F{{ row + 1 }} · C{{ col + 1 }}</p>
         <label class="bd-sr" for="bd-ft">{{ t('bd.keyTitle') }}</label>
@@ -92,10 +96,20 @@
       >
         {{ t('bd.tabRules') }} <span class="bd-cnt">{{ ruleList.length }}</span>
       </button>
-      <button role="tab" :aria-selected="tab === 'appearance'" @click="tab = 'appearance'">
+      <button
+        role="tab"
+        data-cy="bd-tab-appearance"
+        :aria-selected="tab === 'appearance'"
+        @click="tab = 'appearance'"
+      >
         {{ t('bd.tabAppearance') }}
       </button>
-      <button role="tab" :aria-selected="tab === 'behavior'" @click="tab = 'behavior'">
+      <button
+        role="tab"
+        data-cy="bd-tab-behavior"
+        :aria-selected="tab === 'behavior'"
+        @click="tab = 'behavior'"
+      >
         {{ t('bd.tabBehavior') }}
       </button>
     </div>
@@ -167,7 +181,7 @@
                       <ChevronUp :size="16" stroke-width="1.75" aria-hidden="true" />
                     </button>
                     <button
-                      :disabled="i === buttonConfig.actions.length - 1"
+                      :disabled="i === (buttonConfig.actions?.length ?? 0) - 1"
                       aria-label="Bajar"
                       title="Bajar"
                       @click="emit('move-action', i, 1)"
@@ -255,7 +269,7 @@
           </div>
           <p class="bd-sh2">{{ t('bd.ruleThen') }}</p>
           <div class="bd-al">
-            <div v-for="(o, i) in (r.then ?? [])" :key="o.id ?? i" class="bd-ac">
+            <div v-for="(o, i) in asList(r.then)" :key="o.id ?? i" class="bd-ac">
               <ActionCard
                 :action="o"
                 :index="i"
@@ -273,7 +287,7 @@
           </button>
           <p class="bd-sh2">{{ t('bd.ruleElse') }}</p>
           <div class="bd-al">
-            <div v-for="(o, i) in (r.else ?? [])" :key="o.id ?? i" class="bd-ac">
+            <div v-for="(o, i) in asList(r.else)" :key="o.id ?? i" class="bd-ac">
               <ActionCard
                 :action="o"
                 :index="i"
@@ -319,10 +333,14 @@
         <div class="bd-fld" style="margin-top: 12px">
           <span class="bd-lb">{{ t('bd.icon') }}</span>
           <button class="bd-icb" @click="emit('open-icon-picker')">
-            <component v-if="iconComponent" :is="iconComponent" :size="24" stroke-width="1.75" aria-hidden="true" />
+            <img v-if="previewImage" :src="previewImage" class="bd-ics" alt="" aria-hidden="true" />
+            <component v-else-if="iconComponent" :is="iconComponent" :size="24" stroke-width="1.75" aria-hidden="true" />
             <span>{{ iconKebab }}</span>
             <i class="bd-sp"></i>
             {{ t('bd.change') }}
+          </button>
+          <button v-if="hasKeyImage" class="bd-btn bd-wide" style="margin-top: 8px" @click="emit('clear-image')">
+            <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.removeImage') }}
           </button>
         </div>
 
@@ -497,13 +515,14 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { ChevronUp, ChevronDown, Plus, Settings, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2 } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Plus, Settings, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2, ImagePlus } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { createSwapy, type Swapy } from 'swapy'
 import ActionCard from './ActionCard.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { ev, fmt, intp } from '../../composables/useExpressions'
 import { vars, getEnv, displayTick } from '../../composables/useVars'
+import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
 
@@ -522,6 +541,8 @@ interface Props {
   availablePages: Array<{ id: string; name: string }>
   profileName?: string
   pageName?: string
+  /** Base de la API (puerto 3001): los assets `/assets/…` cuelgan de ahí. */
+  apiBase?: string
 }
 
 interface Emits {
@@ -539,13 +560,24 @@ interface Emits {
   (e: 'import-key'): void
   (e: 'open-icon-picker'): void
   (e: 'open-look-icon', index: number): void
+  (e: 'clear-image'): void
   (e: 'action-drop-selected', actionType: string): void
 }
 
-const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '' })
+const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '' })
 const emit = defineEmits<Emits>()
 
 const tab = ref<'actions' | 'rules' | 'appearance' | 'behavior'>('actions')
+// Sin tecla no hay reglas/aspecto que mostrar: volver a acciones evita
+// que las pestañas parezcan "no clicables" (mismo empty-state en todas).
+watch(
+  () => props.hasButton,
+  (v) => {
+    if (!v) tab.value = 'actions'
+  }
+)
+/** Lista segura para ramas entonces/si-no corruptas (no-array). */
+const asList = (v: unknown): any[] => (Array.isArray(v) ? v : [])
 const menuOpen = ref(false)
 const menuBtn = ref<HTMLElement | null>(null)
 const dragOver = ref(false)
@@ -556,18 +588,25 @@ let swapping = false
 let orderBeforeSwap: string[] = []
 
 const actionKey = (action: any, i: number) => String(action?.id ?? i)
-const ruleList = computed<any[]>(() => props.buttonConfig?.rules ?? [])
-const lookList = computed<any[]>(() => props.buttonConfig?.looks ?? [])
+const ruleList = computed<any[]>(() => {
+  const r = props.buttonConfig?.rules
+  return Array.isArray(r) ? r.filter((x) => x && typeof x === 'object') : []
+})
+const lookList = computed<any[]>(() => {
+  const l = props.buttonConfig?.looks
+  return Array.isArray(l) ? l.filter((x) => x && typeof x === 'object') : []
+})
 const varList = computed(() => vars.value)
 const envNow = () => {
   void displayTick.value
   return getEnv(props.profileName, props.pageName)
 }
 
-const condBadge = (src: string): string => {
-  if (!(src || '').trim()) return esc(t('bd.condAlways'))
+const condBadge = (src: unknown): string => {
+  const s = String(src ?? '')
+  if (!s.trim()) return esc(t('bd.condAlways'))
   try {
-    return `${esc(t('bd.condNow'))}: <b>${esc(fmt(ev(src, envNow())))}<\/b>`
+    return `${esc(t('bd.condNow'))}: <b>${esc(fmt(ev(s, envNow())))}<\/b>`
   } catch (e: any) {
     return `<span class="bd-err">${esc(e?.message ?? String(e))}<\/span>`
   }
@@ -667,12 +706,12 @@ const onDocClick = (e: MouseEvent) => {
 const execMode = computed(() => props.buttonConfig?.mode ?? 'seq')
 
 const activeSwatch = computed(() => {
-  const cur = (props.buttonConfig?.textColor ?? '').toLowerCase()
+  const cur = String(props.buttonConfig?.textColor ?? '').toLowerCase()
   const idx = SWATCHES.indexOf(cur)
   return idx === -1 ? 0 : idx
 })
 const activeBg = computed(() => {
-  const cur = (props.buttonConfig?.backgroundColor ?? '').toLowerCase()
+  const cur = String(props.buttonConfig?.backgroundColor ?? '').toLowerCase()
   return BG_SWATCHES.findIndex((h) => h.toLowerCase() === cur)
 })
 const toColorInput = (v: any) => {
@@ -683,28 +722,48 @@ const toColorInput = (v: any) => {
 const icons = LucideIcons as Record<string, any>
 const iconComponent = computed(() => {
   const name = props.buttonConfig?.icon
-  return name ? icons[name] ?? null : null
+  return typeof name === 'string' && name ? icons[name] ?? null : null
 })
 const iconKebab = computed(() => {
-  const name: string = props.buttonConfig?.icon ?? ''
+  const name: string = String(props.buttonConfig?.icon ?? '')
   return name.replace(/([a-z])([A-Z0-9])/g, '$1-$2').toLowerCase()
 })
 
 /** Vista previa con apariencia condicional aplicada. */
 const preview = computed(() => {
-  void displayTick.value
-  const E = envNow()
-  const raw = props.buttonConfig ?? {}
-  const L = (raw.looks ?? []).find((l: any) => {
-    try { return !!(l?.cond && String(l.cond).trim() && ev(l.cond, E)) } catch { return false }
-  })
-  return {
-    label: intp(String(L?.t || raw.label || ''), E),
-    color: L && L.c != null ? SWATCHES[L.c] ?? raw.textColor : raw.textColor || '#e8e9eb',
-    bg: (L && L.bg ? (LOOK_BGS[L.bg] ?? null) : (raw.backgroundColor || null)) as string | null,
-    iconName: String(L?.i || raw.icon || '')
+  try {
+    void displayTick.value
+    const E = envNow()
+    const raw = props.buttonConfig ?? {}
+    const looks = Array.isArray(raw.looks) ? raw.looks : []
+    const L = looks.find((l: any) => {
+      try { return !!(l?.cond && String(l.cond).trim() && ev(String(l.cond), E)) } catch { return false }
+    })
+    const textColor = typeof raw.textColor === 'string' ? raw.textColor : '#e8e9eb'
+    const backgroundColor = typeof raw.backgroundColor === 'string' ? raw.backgroundColor : null
+    return {
+      label: intp(String(L?.t ?? raw.label ?? ''), E),
+      color: L && L.c != null && typeof SWATCHES[L.c] === 'string' ? SWATCHES[L.c] : textColor,
+      bg: (L && L.bg ? (typeof LOOK_BGS[L.bg] === 'string' ? LOOK_BGS[L.bg] : null) : backgroundColor) as string | null,
+      iconName: String(L?.i || raw.icon || ''),
+      image: typeof raw.iconImage === 'string' ? raw.iconImage : ''
+    }
+  } catch {
+    const raw = props.buttonConfig ?? {}
+    return {
+      label: String(raw?.label ?? ''),
+      color: typeof raw?.textColor === 'string' ? raw.textColor : '#e8e9eb',
+      bg: (typeof raw?.backgroundColor === 'string' ? raw.backgroundColor : null) as string | null,
+      iconName: String(raw?.icon ?? ''),
+      image: typeof raw?.iconImage === 'string' ? raw.iconImage : ''
+    }
   }
 })
+const previewImage = computed(() => {
+  const rel = String((preview.value as any).image ?? '')
+  return isAssetRef(rel) ? assetUrl(props.apiBase, rel) : ''
+})
+const hasKeyImage = computed(() => previewImage.value !== '')
 const previewIcon = computed(() => {
   const n = (preview.value as any).iconName
   return n ? icons[n] ?? null : null
@@ -722,21 +781,24 @@ const addRule = () => {
 const delRule = (ri: number) => setRules(ruleList.value.filter((_, i) => i !== ri))
 const updRuleAction = (ri: number, side: 'then' | 'else', i: number, patch: Record<string, any>) => {
   const next = [...ruleList.value]
-  const list = [...(next[ri]?.[side] ?? [])]
+  const cur = Array.isArray(next[ri]?.[side]) ? next[ri][side] : []
+  const list = [...cur]
   list[i] = { ...list[i], ...patch }
   next[ri] = { ...next[ri], [side]: list }
   setRules(next)
 }
 const updRuleParam = (ri: number, side: 'then' | 'else', i: number, k: string, v: any) => {
   const next = [...ruleList.value]
-  const list = [...(next[ri]?.[side] ?? [])]
+  const cur = Array.isArray(next[ri]?.[side]) ? next[ri][side] : []
+  const list = [...cur]
   list[i] = { ...list[i], parameters: { ...(list[i]?.parameters ?? {}), [k]: v } }
   next[ri] = { ...next[ri], [side]: list }
   setRules(next)
 }
 const delRuleAction = (ri: number, side: 'then' | 'else', i: number) => {
   const next = [...ruleList.value]
-  next[ri] = { ...next[ri], [side]: (next[ri]?.[side] ?? []).filter((_: any, j: number) => j !== i) }
+  const cur = Array.isArray(next[ri]?.[side]) ? next[ri][side] : []
+  next[ri] = { ...next[ri], [side]: cur.filter((_: any, j: number) => j !== i) }
   setRules(next)
 }
 
@@ -749,8 +811,10 @@ const setLook = (li: number, patch: Record<string, any>) => {
 const addLook = () => setLooks([...lookList.value, { cond: '', t: '', i: '', c: null, bg: 0 }])
 const delLook = (li: number) => setLooks(lookList.value.filter((_, i) => i !== li))
 const lookIcon = (li: number) => {
-  const n = lookList.value[li]?.i || props.buttonConfig?.icon
-  return (n && icons[n]) ?? icons['Zap'] ?? Settings
+  const n = typeof lookList.value[li]?.i === 'string' && lookList.value[li].i
+    ? lookList.value[li].i
+    : (typeof props.buttonConfig?.icon === 'string' ? props.buttonConfig.icon : '')
+  return (n && (icons as Record<string, any>)[n]) ?? icons['Zap'] ?? Settings
 }
 
 const onDrop = (event: DragEvent) => {

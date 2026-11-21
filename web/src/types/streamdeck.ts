@@ -29,6 +29,8 @@ export interface ButtonData {
     fontSize?: number
     emoji: string
     icon?: string
+    /** Imagen personalizada de la tecla (URL `/assets/…`, normalizada por el daemon). */
+    iconImage?: string
     backgroundColor: string
     textColor: string
     actions: ActionConfig[]

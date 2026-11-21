@@ -8,7 +8,7 @@
       '--bd-ks': bdKeySize + 'px',
       '--bd-rk': bdRadius + 'px',
       '--bd-br': (0.5 + 0.5 * bdBrightness / 100).toFixed(2),
-      '--bd-lw': bdShowLeft ? '264px' : '52px',
+      '--bd-lw': bdShowLeft ? '320px' : '52px',
       '--bd-rw': bdShowRight ? '400px' : '52px'
     }"
   >
@@ -108,40 +108,28 @@
 
     <main class="bd-main">
       <aside id="bd-drw" class="bd-side" :class="{ 'bd-collapsed': !bdShowLeft }" :aria-label="t('bd.libraryLabel')">
-        <div>
-          <template v-if="bdShowLeft">
-            <div class="bd-panelbar">
-              <button
-                class="bd-ibtn"
-                @click="bdSetPanels(false, bdShowRight)"
-                :title="t('bd.collapseRight')"
-                :aria-label="t('bd.collapseRight')"
-                data-cy="bd-collapse-left"
-              >
-                <PanelLeftClose :size="20" stroke-width="1.75" aria-hidden="true" />
-              </button>
-            </div>
-            <ActionsPanel
-              ref="actionsPanel"
-              :plugins="plugins"
-              :detailed="pluginsDetailed"
-              @action-pick="onActionPick"
-              @open-plugin-settings="(id) => openPluginSettings(id, 'settings')"
-              @open-plugin-instructions="(id) => openPluginSettings(id, 'instructions')"
-            />
-          </template>
-          <div v-else class="bd-rail">
-            <button
-              class="bd-ibtn"
-              @click="bdSetPanels(true, bdShowRight)"
-              :title="t('bd.expandRight')"
-              :aria-label="t('bd.expandRight')"
-              data-cy="bd-expand-left"
-            >
-              <PanelLeftOpen :size="20" stroke-width="1.75" aria-hidden="true" />
-            </button>
-          </div>
+        <div v-if="bdShowLeft">
+          <ActionsPanel
+            ref="actionsPanel"
+            :plugins="plugins"
+            :detailed="pluginsDetailed"
+            @action-pick="onActionPick"
+            @open-plugin-settings="(id) => openPluginSettings(id, 'settings')"
+            @open-plugin-instructions="(id) => openPluginSettings(id, 'instructions')"
+          />
         </div>
+        <div v-else class="bd-collapsed-hit" aria-hidden="true"></div>
+        <button
+          class="bd-edge bd-edge-r"
+          @click="bdSetPanels(!bdShowLeft, bdShowRight)"
+          :title="bdShowLeft ? t('bd.collapseRight') : t('bd.expandRight')"
+          :aria-label="bdShowLeft ? t('bd.collapseRight') : t('bd.expandRight')"
+          :aria-expanded="bdShowLeft"
+          :data-cy="bdShowLeft ? 'bd-collapse-left' : 'bd-expand-left'"
+        >
+          <PanelLeftClose v-if="bdShowLeft" :size="20" stroke-width="1.75" aria-hidden="true" />
+          <PanelLeftOpen v-else :size="20" stroke-width="1.75" aria-hidden="true" />
+        </button>
       </aside>
 
       <StageBoard
@@ -154,6 +142,7 @@
         :get-button-data="getButtonData"
         :display-data="(pos: number) => engine.resolveDisplay(pos)"
         :mode="mode"
+        :api-base="API_BASE"
         :label-mode="bdLabelMode"
         :current-pages="currentPages"
         :current-page="currentPage"
@@ -178,59 +167,49 @@
       />
 
       <aside id="bd-ins" class="bd-side" :class="{ 'bd-collapsed': !bdShowRight }" :aria-label="t('bd.inspectorLabel')">
-        <div>
-          <template v-if="bdShowRight">
-            <div class="bd-panelbar">
-              <button
-                class="bd-ibtn"
-                @click="bdSetPanels(bdShowLeft, false)"
-                :title="t('bd.collapseLeft')"
-                :aria-label="t('bd.collapseLeft')"
-                data-cy="bd-collapse-right"
-              >
-                <PanelRightClose :size="20" stroke-width="1.75" aria-hidden="true" />
-              </button>
-            </div>
-            <KeyInspector
-              :mode="mode"
-              :selected-position="selectedButton"
-              :has-button="!!(selectedButton !== null && getButton(selectedButton))"
-              :row="selectedButton !== null ? Math.floor(selectedButton / gridCols) : 0"
-              :col="selectedButton !== null ? selectedButton % gridCols : 0"
-              :button-config="buttonConfig"
-              :plugins="plugins"
-              :available-pages="availablePages"
-              :profile-name="currentProfile?.name ?? ''"
-              :page-name="currentPage?.name ?? ''"
-              @update-field="onUpdateField"
-              @update-action="onUpdateAction"
-              @update-action-param="(i, k, v) => updateActionParameter(i, k, v)"
-              @move-action="onMoveAction"
-              @remove-action="removeAction"
-              @reorder-actions="(actions) => reorderActions(actions)"
-              @focus-library="focusLibrary"
-              @open-palette="(path) => openPalette(path)"
-              @test="onTest"
-              @clear="onClearKey"
-              @export-key="openExport(selectedButton ?? undefined)"
-              @import-key="openImport(selectedButton ?? undefined)"
-              @open-icon-picker="openIconPicker"
-              @open-look-icon="(i) => openLookIconPicker(i)"
-              @action-drop-selected="onActionDropSelected"
-            />
-          </template>
-          <div v-else class="bd-rail">
-            <button
-              class="bd-ibtn"
-              @click="bdSetPanels(bdShowLeft, true)"
-              :title="t('bd.expandLeft')"
-              :aria-label="t('bd.expandLeft')"
-              data-cy="bd-expand-right"
-            >
-              <PanelRightOpen :size="20" stroke-width="1.75" aria-hidden="true" />
-            </button>
-          </div>
+        <div v-if="bdShowRight">
+          <KeyInspector
+            :mode="mode"
+            :selected-position="selectedButton"
+            :has-button="!!(selectedButton !== null && getButton(selectedButton))"
+            :row="selectedButton !== null ? Math.floor(selectedButton / gridCols) : 0"
+            :col="selectedButton !== null ? selectedButton % gridCols : 0"
+            :button-config="buttonConfig"
+            :plugins="plugins"
+            :available-pages="availablePages"
+            :profile-name="currentProfile?.name ?? ''"
+            :page-name="currentPage?.name ?? ''"
+             :api-base="API_BASE"
+            @update-field="onUpdateField"
+            @update-action="onUpdateAction"
+            @update-action-param="(i, k, v) => updateActionParameter(i, k, v)"
+            @move-action="onMoveAction"
+            @remove-action="removeAction"
+            @reorder-actions="(actions) => reorderActions(actions)"
+            @focus-library="focusLibrary"
+            @open-palette="(path) => openPalette(path)"
+            @test="onTest"
+            @clear="onClearKey"
+            @export-key="openExport(selectedButton ?? undefined)"
+            @import-key="openImport(selectedButton ?? undefined)"
+            @open-icon-picker="openIconPicker"
+            @open-look-icon="(i) => openLookIconPicker(i)"
+             @clear-image="onClearImage"
+            @action-drop-selected="onActionDropSelected"
+          />
         </div>
+        <div v-else class="bd-collapsed-hit" aria-hidden="true"></div>
+        <button
+          class="bd-edge bd-edge-l"
+          @click="bdSetPanels(bdShowLeft, !bdShowRight)"
+          :title="bdShowRight ? t('bd.collapseLeft') : t('bd.expandLeft')"
+          :aria-label="bdShowRight ? t('bd.collapseLeft') : t('bd.expandLeft')"
+          :aria-expanded="bdShowRight"
+          :data-cy="bdShowRight ? 'bd-collapse-right' : 'bd-expand-right'"
+        >
+          <PanelRightClose v-if="bdShowRight" :size="20" stroke-width="1.75" aria-hidden="true" />
+          <PanelRightOpen v-else :size="20" stroke-width="1.75" aria-hidden="true" />
+        </button>
       </aside>
     </main>
 
@@ -281,7 +260,11 @@
     <IconPickerDialog
       ref="iconPickerDialog"
       :current="buttonConfig.icon ?? ''"
+      :current-image="buttonConfig.iconImage ?? ''"
+      :api-base="API_BASE"
       @pick="(name) => onIconPick(name)"
+      @pick-image="(url) => onPickImage(url)"
+      @clear-image="onClearImage"
     />
 
     <QrDialog ref="qrDialog" @notify="(msg) => bdShowToast(msg)" />
@@ -484,7 +467,37 @@ const onIconPick = async (name: string) => {
         return
       }
     }
+    // El icono Lucide sustituye a la imagen personalizada (la imagen manda
+    // en el pintado, así que convivir confundiría).
+    if (buttonConfig.value.iconImage) onUpdateField('iconImage', '')
     onUpdateField('icon', name)
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+}
+/** Imagen subida desde el diálogo: guardado inmediato (como las acciones). */
+const onPickImage = async (url: string) => {
+  try {
+    if (!url) return
+    onUpdateField('iconImage', url)
+    await saveButtonConfig()
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+}
+/** Quitar la imagen personalizada (borra el fichero en el daemon, best-effort). */
+const onClearImage = async () => {
+  try {
+    const cur = typeof buttonConfig.value.iconImage === 'string' ? buttonConfig.value.iconImage : ''
+    onUpdateField('iconImage', '')
+    await saveButtonConfig()
+    if (cur.startsWith('/assets/')) {
+      fetch(`${API_BASE.value}/api/v1/assets`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cur })
+      }).catch(() => {})
+    }
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -812,6 +825,7 @@ const onClearKey = async () => {
     textTop: '',
     textBottom: '',
     icon: '',
+    iconImage: '',
     emoji: '',
     actions: [],
     rules: [],

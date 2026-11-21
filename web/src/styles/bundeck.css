@@ -20,7 +20,7 @@
   --bd-as: color-mix(in srgb, var(--bd-ac) 14%, transparent);
   --bd-sans: 'Geist', system-ui, sans-serif;
   --bd-mono: 'Geist Mono', ui-monospace, monospace;
-  --bd-lw: 264px;
+  --bd-lw: 320px;
   --bd-rw: 400px;
   color-scheme: dark;
   height: 100vh;
@@ -111,18 +111,38 @@
 /* — Layout principal — */
 .bundeck main.bd-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--bd-lw) 1fr var(--bd-rw); }
 .bundeck[data-anim='1'] main.bd-main { transition: grid-template-columns 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.bundeck aside.bd-side { overflow: hidden; min-width: 0; position: relative; }
-.bundeck aside.bd-side > div { height: 100%; overflow: auto; padding: 24px 20px; overscroll-behavior: contain; }
-.bundeck .bd-panelbar { display: flex; margin: -12px -8px 4px; }
-.bundeck #bd-drw .bd-panelbar { justify-content: flex-end; }
-.bundeck #bd-ins .bd-panelbar { justify-content: flex-start; }
-.bundeck .bd-rail { display: flex; justify-content: center; padding-top: 4px; }
+.bundeck aside.bd-side { overflow: visible; min-width: 0; min-height: 0; position: relative; }
+.bundeck aside.bd-side > div { height: 100%; overflow: auto; padding: 24px 20px; overscroll-behavior: contain; position: relative; z-index: 2; background: var(--bd-bg); }
+.bundeck aside.bd-side > div.bd-collapsed-hit { overflow: hidden; }
+/* — Pestañas exteriores: viven POR DETRÁS del panel y se asoman por arriba por fuera — */
+.bundeck .bd-edge { position: absolute; top: 12px; z-index: 1; width: 28px; height: 64px; display: grid; place-items: center; background: var(--bd-sf); border: 1px solid var(--bd-ln); color: var(--bd-mu); cursor: pointer; opacity: 0; pointer-events: none; }
+.bundeck .bd-edge:hover { color: var(--bd-ink); border-color: var(--bd-mu); }
+.bundeck .bd-edge-r { left: 100%; border-left: 0; border-radius: 0 12px 12px 0; transform: translateX(-100%); box-shadow: 8px 12px 24px -12px rgba(0, 0, 0, 0.6); }
+.bundeck .bd-edge-l { right: 100%; border-right: 0; border-radius: 12px 0 0 12px; transform: translateX(100%); box-shadow: -8px 12px 24px -12px rgba(0, 0, 0, 0.6); }
+.bundeck[data-anim='1'] .bd-edge { transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+.bundeck aside.bd-side:hover > .bd-edge,
+.bundeck aside.bd-side:focus-within > .bd-edge,
+.bundeck .bd-edge:hover,
+.bundeck .bd-edge:focus-visible { opacity: 1; pointer-events: auto; }
+.bundeck aside.bd-side:hover > .bd-edge-r,
+.bundeck aside.bd-side:focus-within > .bd-edge-r,
+.bundeck .bd-edge-r:hover,
+.bundeck .bd-edge-r:focus-visible { transform: translateX(0); }
+.bundeck aside.bd-side:hover > .bd-edge-l,
+.bundeck aside.bd-side:focus-within > .bd-edge-l,
+.bundeck .bd-edge-l:hover,
+.bundeck .bd-edge-l:focus-visible { transform: translateX(0); }
+/* Colapsado: la pestaña queda siempre asomando para invitar a abrir */
+.bundeck aside.bd-side.bd-collapsed > .bd-edge { opacity: 1; pointer-events: auto; transform: translateX(0); }
+@media (pointer: coarse) {
+  .bundeck aside.bd-side > .bd-edge { opacity: 1; pointer-events: auto; transform: translateX(0); }
+}
 .bundeck aside.bd-side.bd-collapsed > div,
 .bundeck #bd-ins.bd-collapsed > div,
 .bundeck #bd-drw.bd-collapsed > div { width: 52px; padding: 12px 0; overflow: hidden; }
 .bundeck #bd-drw.bd-collapsed > div { border-right: 1px solid var(--bd-ln); margin: 0; }
 .bundeck #bd-ins.bd-collapsed > div { border-left: 1px solid var(--bd-ln); margin: 0 0 0 auto; }
-.bundeck #bd-drw > div { width: 264px; border-right: 1px solid var(--bd-ln); }
+.bundeck #bd-drw > div { width: 320px; border-right: 1px solid var(--bd-ln); }
 .bundeck #bd-ins > div { width: 400px; border-left: 1px solid var(--bd-ln); margin-left: auto; display: flex; flex-direction: column; overflow: hidden; }
 .bundeck .bd-sh { font-size: 12px; font-weight: 600; color: var(--bd-mu); margin: 24px 0 8px; display: flex; align-items: center; gap: 8px; }
 .bundeck .bd-cnt { font-family: var(--bd-mono); background: var(--bd-sf); border-radius: 8px; padding: 0 8px; font-weight: 500; }
@@ -154,7 +174,12 @@
 .bundeck .bd-seg button { padding: 4px 12px; min-height: 32px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; white-space: nowrap; flex: none; }
 .bundeck .bd-seg button { padding: 4px 12px; min-height: 32px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; white-space: nowrap; flex: none; }
 .bundeck .bd-seg button[aria-pressed='true'] { background: var(--bd-sf); color: var(--bd-ink); box-shadow: 0 0 0 1px var(--bd-ln); }
-.bundeck .bd-floor { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; overscroll-behavior: contain; }
+.bundeck .bd-floor { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 24px; overscroll-behavior: contain; }
+/* El contenido vive en .bd-stack con margin:auto: centra cuando cabe y
+   arranca desde arriba con scroll normal cuando desborda. (justify-content:
+   center + overflow:auto en columna empuja la parte superior fuera del
+   alcance del scroll y deja un hueco enorme sobre el grid.) */
+.bundeck .bd-stack { margin: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; max-width: 100%; }
 .bundeck .bd-crumb { display: flex; gap: 8px; align-items: center; color: var(--bd-mu); min-height: 32px; }
 .bundeck .bd-crumb b { color: var(--bd-ink); font-weight: 500; }
 .bundeck .bd-plate { display: grid; grid-template-columns: repeat(var(--bd-c), var(--bd-ks)); gap: 12px; padding: 24px; border-radius: calc(var(--bd-rk) + 12px); background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 32px 48px -28px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.35); }
@@ -268,6 +293,19 @@
 /* — Inspector nuevo: cabecera con vista previa, tabs y pie fijo — */
 .bundeck .bd-ih { display: flex; gap: 12px; align-items: center; padding: 16px 12px 12px 20px; flex: none; }
 .bundeck .bd-pv { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; color: var(--bd-g, var(--bd-ink)); flex: none; background: linear-gradient(180deg, var(--bd-k1), var(--bd-k2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 0 0 1px rgba(0, 0, 0, 0.45); overflow: hidden; }
+/* Vista previa clicable: hover oscurece y muestra el icono de foto. */
+.bundeck button.bd-pvbtn { padding: 0; cursor: pointer; position: relative; }
+.bundeck button.bd-pvbtn:hover { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 0 0 1px var(--bd-ac); }
+.bundeck .bd-pvimg { width: 100%; height: 100%; object-fit: cover; }
+.bundeck .bd-pvov { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff; opacity: 0; transition: opacity 0.15s; }
+.bundeck button.bd-pvbtn:hover .bd-pvov, .bundeck button.bd-pvbtn:focus-visible .bd-pvov { opacity: 1; }
+.bundeck .bd-ics { width: 24px; height: 24px; object-fit: cover; border-radius: 6px; flex: none; }
+.bundeck .bd-kimg { width: 40px; height: 40px; object-fit: cover; border-radius: 10px; opacity: var(--bd-br); }
+/* Pestaña Imagen del selector de iconos. */
+.bundeck .bd-imgdrop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 16px; border: 1px dashed var(--bd-ln); border-radius: 12px; color: var(--bd-mu); cursor: pointer; text-align: center; }
+.bundeck .bd-imgdrop:hover, .bundeck .bd-imgdrop.bd-on { border-color: var(--bd-ac); color: var(--bd-ink); background: var(--bd-as); }
+.bundeck .bd-imgcur { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bundeck .bd-imgprev { width: 56px; height: 56px; object-fit: cover; border-radius: 12px; box-shadow: 0 0 0 1px var(--bd-ln); flex: none; }
 .bundeck .bd-it { flex: 1; min-width: 0; }
 .bundeck .bd-tin { border: 1px solid transparent; background: transparent; padding: 0 8px; margin: 0 -8px; min-height: 32px; font-weight: 600; font-size: 16px; border-radius: 8px; width: calc(100% + 16px); color: var(--bd-ink); }
 .bundeck .bd-tin:hover, .bundeck .bd-tin:focus { background: var(--bd-sf); border-color: var(--bd-ln); outline: none; }
@@ -468,12 +506,18 @@
   .bundeck aside.bd-side > div { height: auto; }
   .bundeck #bd-ins > div, .bundeck #bd-drw > div { width: auto; border: 0; border-top: 1px solid var(--bd-ln); margin: 0; overflow: visible; }
   /* En móvil los paneles se apilan en vertical: el colapsado debe seguir
-     mostrando el rail con el botón de expandir, nunca ocultarse del todo. */
+     mostrando la pestaña con el botón de expandir, nunca ocultarse del todo. */
   .bundeck aside.bd-side.bd-collapsed { display: block; }
   .bundeck aside.bd-side.bd-collapsed > div,
   .bundeck #bd-ins.bd-collapsed > div,
   .bundeck #bd-drw.bd-collapsed > div { width: auto; padding: 8px 12px; overflow: hidden; border: 0; border-top: 1px solid var(--bd-ln); margin: 0; }
-  .bundeck .bd-rail { justify-content: flex-start; padding-top: 0; }
+  /* En vertical no hay "fuera" lateral: la pestaña flota arriba a la derecha del drawer */
+  .bundeck aside.bd-side > .bd-edge { top: 8px; left: auto; right: 8px; transform: none; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--bd-ln); box-shadow: none; z-index: 3; }
+  .bundeck aside.bd-side:hover > .bd-edge,
+  .bundeck aside.bd-side:focus-within > .bd-edge,
+  .bundeck aside.bd-side > .bd-edge:hover,
+  .bundeck aside.bd-side > .bd-edge:focus-visible,
+  .bundeck aside.bd-side.bd-collapsed > .bd-edge { transform: none; }
   .bundeck .bd-brand span { display: none; }
   .bundeck header.bd-top { gap: 8px; padding: 0 8px; }
 }

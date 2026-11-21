@@ -1,9 +1,7 @@
 //! Icono de bandeja (system tray) del launcher — SOLO Windows.
 //!
-//! El tray es propiedad del launcher (no del host Electrobun ni del
-//! daemon: el daemon desactiva el suyo cuando corre gestionado —
-//! LIBREDECK_NO_TRAY=1, que pone `monitor::ensure_daemon_spawned` al
-//! spawnearlo — y el host Electrobun no pinta tray propio): al hacer
+//! El tray es propiedad única del launcher (el daemon no tiene tray propio
+//! y el host Electrobun no pinta ninguno): al hacer
 //! clic se abre la ventana del launcher, y el menú ofrece Abrir panel
 //! (ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
 //! (ventana nativa del host, si lo hay) y Salir (cierra el launcher;

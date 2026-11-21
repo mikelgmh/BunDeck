@@ -74,5 +74,5 @@ cd web && npm run test:e2e:open       # Cypress GUI
 
 - Do not start long-running dev servers (`./dev.sh dev`, `bun run dev`, `electrobun dev`) unless asked — the user runs them; assume they auto-reload.
 - `dev.sh`/`build.sh` are bash scripts with Windows-isms (`start`, hardcoded `C:\...` paths) — run from Git Bash on Windows.
-- Tray icon is Windows-only (`systray`, guarded `require`); StreamDeck driver init failure is non-fatal by design.
+- Tray icon is Windows-only and owned solely by the Rust launcher (`launcher/src/tray.rs`); the daemon has no tray code. StreamDeck driver init failure is non-fatal by design.
 - Electrobun es dev-only/experimental: `electrobun build --env=stable` publica artefactos de updater en `.../releases/latest/download` (`electrobun.config.ts`), fuera del release canónico; window prefers `http://localhost:3002`, falls back to `views://mainview/index.html` (offline copy from `copy: {"web/dist": "views/mainview"}`).

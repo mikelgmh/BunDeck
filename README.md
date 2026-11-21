@@ -71,7 +71,7 @@ The panel is a local website (`http://localhost:3002` in prod, `:4321` in dev). 
 Deliberate choices:
 
 - **No double supervisor:** either the launcher starts the daemon, or you do. Never both (`LIBREDECK_MANAGED`, pre-flight health check).
-- **No double tray:** the daemon disables its own tray when launched by the launcher (`LIBREDECK_NO_TRAY=1`).
+- **Single tray:** the GPUI launcher owns the only tray icon (`launcher/src/tray.rs`). The daemon has no tray code at all — no double icons, not even in dev.
 - **One shutdown path:** `POST /api/v1/admin/shutdown` → `lifecycle.ts` → stops API, frontend, WS and tray in order. CLI, launcher and host all request the same thing.
 - **One contract:** the API lives under `/api/v1`. CLI and panel use the same endpoints.
 
@@ -292,7 +292,7 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 | `LIBREDECK_BIND` / `LIBREDECK_BIND_LAN=1` | `0.0.0.0` for LAN; loopback by default |
 | `LIBREDECK_VERSION` | Version override (build/CI inject it) |
 | `LIBREDECK_UPDATE_PUBKEY` | Update signing pubkey override (else compiled `UPDATE_PUBKEY`) |
-| `LIBREDECK_NO_TRAY=1` / `LIBREDECK_MANAGED=1` | Daemon skips tray / self-management (set by launcher) |
+| `LIBREDECK_MANAGED=1` | Daemon skips self-management (set by launcher) |
 | `LIBREDECK_HOST_MANAGE_DAEMON=0/1` | Forbid/force Electrobun daemon management |
 | `BUN_PATH` | Alternate bun for the dev host |
 | `NO_LAUNCHER=1` / `NO_BROWSER=1` | Don’t open launcher / browser in dev |
@@ -305,7 +305,6 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 |---|---|---|
 | Panel won’t open on `:3002` | Daemon in `DEV_MODE` or busy port | In dev use `:4321`; check `http://localhost:3001/health` and `HOST_PORT` |
 | Phone can’t reach panel | Loopback bind without LAN | Start with `LIBREDECK_BIND_LAN=1` (dev.sh/launcher already do) |
-| Two tray icons (Windows) | Daemon tray + launcher | Only expected in manual dev; an installed/launcher-managed daemon disables its own |
 | Folder `plugin install` fails | Relative path or missing `manifest.json` | Pass an absolute path with `manifest.json` + `main.js`; the CLI already absolutizes it |
 | Old DB with odd version | Stale `app.version` | Self-heals on boot (`getVersion()`); otherwise `./dev.sh clean` |
 | Busy port | Another daemon running | `libredeck-cli status` / `stop`, or change `PORT`/`WS_PORT` |

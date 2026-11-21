@@ -26,18 +26,17 @@
     </div>
 
     <div class="bd-floor">
-      <div class="bd-crumb">
-        <template v-if="navTrail.length > 1">
-          <button class="bd-btn" @click="$emit('nav-back')">
-            <ArrowLeft :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.back') }}
-          </button>
-          <span>
-            <template v-for="(name, i) in navTrail" :key="i">
-              <b v-if="i === navTrail.length - 1">{{ name }}</b>
-              <template v-else>{{ name }} › </template>
-            </template>
-          </span>
-        </template>
+     <div class="bd-stack">
+      <div v-if="navTrail.length > 1" class="bd-crumb">
+        <button class="bd-btn" @click="$emit('nav-back')">
+          <ArrowLeft :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.back') }}
+        </button>
+        <span>
+          <template v-for="(name, i) in navTrail" :key="i">
+            <b v-if="i === navTrail.length - 1">{{ name }}</b>
+            <template v-else>{{ name }} › </template>
+          </template>
+        </span>
       </div>
 
       <div
@@ -85,6 +84,14 @@
                   :is="'span'"
                   class="bd-dyn"
                 >{{ keyDyn(index - 1) }}</component>
+                <img
+                  v-else-if="keyImage(index - 1)"
+                  :src="keyImage(index - 1)"
+                  class="bd-kimg"
+                  alt=""
+                  aria-hidden="true"
+                  draggable="false"
+                />
                 <component
                   v-else-if="keyIcon(index - 1)"
                   :is="keyIcon(index - 1)"
@@ -165,6 +172,7 @@
       </div>
 
       <p class="bd-cap">{{ caption }}</p>
+     </div>
     </div>
 
     <ContextMenu
@@ -187,6 +195,7 @@ import {
 import * as LucideIcons from 'lucide-vue-next'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 import type { ButtonEntity, PageData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
@@ -208,6 +217,8 @@ interface Props {
   navTrail: string[]
   profileName: string
   busy: boolean
+  /** Base de la API (puerto 3001): las imágenes `/assets/…` cuelgan de ahí. */
+  apiBase?: string
 }
 
 interface Emits {
@@ -280,7 +291,12 @@ const disp = (position: number) => props.displayData ? props.displayData(positio
 
 const keyIcon = (position: number) => {
   const icon = disp(position)?.icon
-  return icon ? getLucideIcon(icon) : null
+  return typeof icon === 'string' && icon ? getLucideIcon(icon) : null
+}
+/** Imagen personalizada (`/assets/…` → absoluta contra la API). Los GIF animan solos en <img>. */
+const keyImage = (position: number) => {
+  const rel = disp(position)?.iconImage
+  return isAssetRef(rel) ? assetUrl(props.apiBase ?? '', rel) : ''
 }
 const keyEmoji = (position: number) => disp(position)?.emoji ?? ''
 const keyTop = (position: number) => disp(position)?.textTop ?? ''

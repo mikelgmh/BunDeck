@@ -45,6 +45,7 @@ export interface SharedButtonData {
   fontSize?: number
   emoji?: string
   icon?: string
+  iconImage?: string
   backgroundColor?: string
   textColor?: string
   showTitle?: boolean
@@ -91,6 +92,20 @@ export interface SharedDoc {
 }
 
 const str = (v: any, n: number) => String(v ?? '').slice(0, n)
+/** URL absoluta de un asset `/assets/…` contra la base de la API (puerto 3001). */
+export function assetUrl(apiBase: unknown, rel: unknown): string {
+  if (typeof rel !== 'string' || !rel) return ''
+  if (/^https?:\/\//i.test(rel) || rel.startsWith('data:')) return rel
+  if (!rel.startsWith('/')) return rel
+  const base = typeof apiBase === 'string' ? apiBase.replace(/\/+$/, '') : ''
+  return `${base}${rel}`
+}
+/** file → `/assets/…` validado (un segmento, extensión de imagen). */
+export function isAssetRef(v: unknown): v is string {
+  if (typeof v !== 'string' || !v.startsWith('/assets/')) return false
+  const base = v.split('?')[0].slice('/assets/'.length)
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|gif|svg)$/i.test(base)
+}
 const num = (v: any, lo: number, hi: number, fb: number) => {
   const x = Number(v)
   if (!Number.isFinite(x)) return fb
@@ -162,6 +177,7 @@ export function cleanKey(k: any): SharedButtonData {
     fontSize: num(k?.fontSize, 8, 48, 14),
     emoji: str(k?.emoji, 8),
     icon: str(k?.icon, 48),
+    iconImage: isAssetRef(k?.iconImage) ? k.iconImage.slice(0, 200) : '',
     backgroundColor: str(k?.backgroundColor || '#374151', 24),
     textColor: str(k?.textColor || '#f1f5f9', 24),
     showTitle: k?.showTitle !== false,

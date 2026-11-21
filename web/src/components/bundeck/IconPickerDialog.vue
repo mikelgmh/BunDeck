@@ -7,7 +7,11 @@
         <X :size="20" stroke-width="1.75" aria-hidden="true" />
       </button>
     </div>
-    <div style="padding: 0 24px">
+    <div class="bd-itabs" role="tablist" :aria-label="t('bd.iconTitle')" style="padding: 0 24px">
+      <button role="tab" :aria-selected="!imgTab" @click="imgTab = false">{{ t('bd.iconTabIcons') }}</button>
+      <button role="tab" :aria-selected="imgTab" data-cy="bd-icon-tab-image" @click="imgTab = true">{{ t('bd.iconTabImage') }}</button>
+    </div>
+    <div v-if="!imgTab" style="padding: 12px 24px 0">
       <div class="bd-srch" style="margin: 0">
         <Search :size="16" stroke-width="1.75" aria-hidden="true" />
         <label class="bd-sr" for="bd-iq">{{ t('bd.searchIcons') }}</label>
@@ -22,6 +26,7 @@
       </div>
     </div>
     <div class="bd-pb">
+      <template v-if="!imgTab">
       <p class="bd-cap">{{ t('bd.iconsCount', { n: total.toLocaleString('es-ES') }) }}</p>
       <div class="bd-ig">
         <button
@@ -39,32 +44,80 @@
       <button v-if="visible.length < filtered.length" class="bd-btn" @click="shown += 192">
         {{ t('bd.showMore') }}
       </button>
+      </template>
+      <template v-else>
+        <p class="bd-hint" style="margin: 0 0 12px">{{ t('bd.imageHint') }}</p>
+        <div v-if="currentImageUrl" class="bd-imgcur">
+          <img :src="currentImageUrl" class="bd-imgprev" alt="" aria-hidden="true" />
+          <button class="bd-btn" @click="emit('clear-image'); close()">
+            <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.removeImage') }}
+          </button>
+        </div>
+        <div
+          class="bd-imgdrop"
+          :class="{ 'bd-on': dragImg }"
+          role="button"
+          tabindex="0"
+          :aria-label="t('bd.chooseImage')"
+          data-cy="bd-image-drop"
+          @click="imgInput?.click()"
+          @keydown.enter="imgInput?.click()"
+          @keydown.space.prevent="imgInput?.click()"
+          @dragover.prevent="dragImg = true"
+          @dragleave="dragImg = false"
+          @drop.prevent="onImgDrop"
+        >
+          <ImagePlus :size="24" stroke-width="1.75" aria-hidden="true" />
+          <span v-if="uploading">{{ t('bd.uploadingImage') }}</span>
+          <span v-else>{{ t('bd.dropImage') }}</span>
+          <span class="bd-btn" aria-hidden="true">{{ t('bd.chooseImage') }}</span>
+        </div>
+        <input ref="imgInput" type="file" class="bd-sr" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" @change="onImgFile" />
+        <p v-if="uploadError" class="bd-err" role="alert">{{ uploadError }}</p>
+      </template>
     </div>
   </dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { X, Search } from 'lucide-vue-next'
+import { X, Search, ImagePlus, Trash2 } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
+import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
 
 interface Props {
   current: string
+  /** Imagen actual de la tecla (`/assets/…` o ''). */
+  currentImage?: string
+  /** Base de la API (puerto 3001): la subida y los assets cuelgan de ahí. */
+  apiBase?: string
 }
 
 interface Emits {
   (e: 'pick', iconName: string): void
+  (e: 'pick-image', url: string): void
+  (e: 'clear-image'): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { currentImage: '', apiBase: '' })
 const emit = defineEmits<Emits>()
 
 const dialog = ref<HTMLDialogElement | null>(null)
 const query = ref('')
 const shown = ref(96)
+const imgTab = ref(false)
+const dragImg = ref(false)
+const uploading = ref(false)
+const uploadError = ref('')
+const imgInput = ref<HTMLInputElement | null>(null)
+
+const currentImageUrl = computed(() => {
+  const rel = props.currentImage ?? ''
+  return isAssetRef(rel) ? assetUrl(props.apiBase, rel) : ''
+})
 
 const all = computed(() => {
   const out: Record<string, any> = {}
@@ -94,9 +147,56 @@ const pick = (name: string) => {
   close()
 }
 
-const show = () => {
+const MAX_IMG_BYTES = 8 * 1024 * 1024
+
+const uploadFile = async (file: File | undefined | null) => {
+  uploadError.value = ''
+  if (!file) return
+  if (file.size > MAX_IMG_BYTES) {
+    uploadError.value = t('bd.imageTooBig')
+    return
+  }
+  if (!props.apiBase) {
+    uploadError.value = t('bd.imageUploadFail')
+    return
+  }
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    const res = await fetch(`${props.apiBase.replace(/\/+$/, '')}/api/v1/assets`, { method: 'POST', body: fd })
+    const body: any = await res.json().catch(() => ({}))
+    if (!res.ok || !body?.url) {
+      uploadError.value = typeof body?.error === 'string' && body.error ? body.error : t('bd.imageUploadFail')
+      return
+    }
+    emit('pick-image', String(body.url))
+    close()
+  } catch {
+    uploadError.value = t('bd.imageUploadFail')
+  } finally {
+    uploading.value = false
+    if (imgInput.value) imgInput.value.value = ''
+  }
+}
+
+const onImgFile = (e: Event) => {
+  const input = e.target as HTMLInputElement | null
+  void uploadFile(input?.files?.[0])
+  dragImg.value = false
+}
+const onImgDrop = (e: DragEvent) => {
+  dragImg.value = false
+  const f = e.dataTransfer?.files?.[0]
+  void uploadFile(f)
+}
+
+const show = (tab: 'icons' | 'image' = 'icons') => {
   query.value = ''
   shown.value = 96
+  imgTab.value = tab === 'image'
+  uploadError.value = ''
+  dragImg.value = false
   dialog.value?.showModal()
 }
 const close = () => dialog.value?.close()

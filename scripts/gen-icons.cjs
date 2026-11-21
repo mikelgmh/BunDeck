@@ -29,21 +29,12 @@ const path = require('path');
   fs.writeFileSync(path.join(pub, 'apple-touch-icon.png'), pngs[180]);
   fs.writeFileSync(path.join(pub, 'favicon-32.png'), pngs[32]);
 
-  // ICO multi-tamano para Windows (taskbar electrobun + daemon + instalador).
+  // ICO multi-tamano para Windows (taskbar electrobun + instalador).
   // Solo 16/32/48: el entry de 256 se guarda como BMP sin comprimir (~260KB)
   // y no aporta nada en taskbar/tray/instalador.
   const ico = await pngToIco([pngs[16], pngs[32], pngs[48]]);
   fs.writeFileSync(path.join(root, 'icon.ico'), ico);
   fs.writeFileSync(path.join(root, 'assets/icon.ico'), ico);
 
-  // Daemon systray: la API pide el icono como string base64 (.ico en Windows).
-  // Se embebe en un modulo TS para que funcione tambien en el exe compilado.
-  const b64 = ico.toString('base64');
-  fs.writeFileSync(
-    path.join(root, 'daemon', 'src', 'tray-icon.ts'),
-    `// Generado por scripts/gen-icons.cjs — no editar a mano.\n` +
-    `// Icono BunDeck en formato .ico (base64) para el systray de Windows.\n` +
-    `export const TRAY_ICON_BASE64 = "${b64}";\n`
-  );
   console.log('icons ok');
 })().catch((e) => { console.error(e); process.exit(1); });

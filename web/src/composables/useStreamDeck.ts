@@ -905,7 +905,8 @@ export function useStreamDeck() {
         }
       } else {
         // For new buttons, only save if there's actual content
-        const hasContent = buttonConfig.value.label.trim() || buttonConfig.value.emoji.trim() || buttonConfig.value.actions.length > 0
+        const hasContent = buttonConfig.value.label?.trim() || buttonConfig.value.emoji?.trim() ||
+          buttonConfig.value.iconImage?.trim() || (buttonConfig.value.actions?.length ?? 0) > 0
         if (hasContent) {
           await saveButtonConfig()
         }
@@ -1091,7 +1092,8 @@ export function useStreamDeck() {
       buttonConfig.value.textBottom?.trim() ||
       buttonConfig.value.emoji?.trim() ||
       buttonConfig.value.icon?.trim() ||
-      buttonConfig.value.actions.length > 0 ||
+      buttonConfig.value.iconImage?.trim() ||
+      (buttonConfig.value.actions?.length ?? 0) > 0 ||
       (buttonConfig.value.rules?.length ?? 0) > 0 ||
       (buttonConfig.value.looks?.length ?? 0) > 0
 

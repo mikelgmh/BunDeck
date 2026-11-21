@@ -201,8 +201,8 @@ fn hide_console(cmd: &mut std::process::Command) {
 /// DUEÑO DEL CICLO DE VIDA: en instalado/producción este launcher es el
 /// único que spawnea el daemon (el host Electrobun no spawnea en prod: ver
 /// shouldHostManageDaemon en `src/bun/index.ts`). Marca al hijo con
-/// LIBREDECK_NO_TRAY=1 / LIBREDECK_MANAGED=1 para que desactive su propio
-/// tray (el icono lo pone este launcher: `tray.rs`) y nadie lo duplique.
+/// LIBREDECK_MANAGED=1 para que nadie lo duplique (el icono de bandeja
+/// lo pone este launcher: `tray.rs`; el daemon no tiene tray propio).
 /// Orden: 1) dev (`bun run daemon/src/server.ts`, espejo de `spawnDaemon()`
 /// en `src/bun/index.ts`); 2) instalado (`libredeck-daemon(.exe)` junto al
 /// launcher, como lo deja installer.iss en {app}).
@@ -230,8 +230,7 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
                 .arg(&entry)
                 .current_dir(&root)
                 .env("DEV_MODE", std::env::var("DEV_MODE").unwrap_or("false".into()))
-                // Gestionado por el launcher: sin tray propio ni supervisión ajena.
-                .env("LIBREDECK_NO_TRAY", "1")
+                // Gestionado por el launcher: sin supervisión ajena.
                 .env("LIBREDECK_MANAGED", "1")
                 // Panel LAN/QR en dev: opt-in explícito (daemon por defecto loopback).
                 .env("LIBREDECK_BIND_LAN", "1")
@@ -259,8 +258,7 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            // Gestionado por el launcher: sin tray propio ni supervisión ajena.
-            .env("LIBREDECK_NO_TRAY", "1")
+            // Gestionado por el launcher: sin supervisión ajena.
             .env("LIBREDECK_MANAGED", "1")
             // Instalado con panel LAN: opt-in explícito (daemon por defecto loopback).
             .env("LIBREDECK_BIND_LAN", "1");

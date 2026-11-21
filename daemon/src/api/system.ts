@@ -33,11 +33,15 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
     }
   }
 
-  // Assets endpoints
+  // Assets endpoints (imágenes de tecla: POST multipart + DELETE por url)
   if (path === '/api/v1/assets') {
     if (method === 'POST') {
-      // TODO: Implement file upload
-      return jsonResponse({ error: 'Asset upload not implemented yet' }, 501);
+      const { handleKeyImageUpload } = await import('../http/key-images');
+      return handleKeyImageUpload(_req, db);
+    }
+    if (method === 'DELETE') {
+      const { handleKeyImageDelete } = await import('../http/key-images');
+      return handleKeyImageDelete(_req);
     }
   }
 
