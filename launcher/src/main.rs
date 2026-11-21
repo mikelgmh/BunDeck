@@ -1692,7 +1692,7 @@ fn title_chrome(
 #[cfg(not(windows))]
 fn title_chrome(
     _view: &mut LauncherView,
-    _window: &mut Window,
+    _window: &mut gpui::Window,
     _cx: &mut Context<LauncherView>,
 ) -> impl IntoElement {
     div().hidden()
