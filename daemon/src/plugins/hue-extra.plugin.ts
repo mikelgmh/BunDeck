@@ -37,10 +37,12 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs: 
 }
 
 function toConnectionError(error: any, base: string): Error {
+    // La base incluye la API key (`http://ip/api/<key>`): nunca exponerla.
+    const safeBase = base.replace(/\/api\/.+$/, '/api/****')
     if (error instanceof Error && error.name === 'AbortError') {
-        return new Error(`Tiempo de espera agotado al conectar con el puente Hue en ${base}`)
+        return new Error(`Tiempo de espera agotado al conectar con el puente Hue en ${safeBase}`)
     }
-    return new Error(`No se pudo conectar con el puente Hue en ${base}: ${error instanceof Error ? error.message : String(error)}`)
+    return new Error(`No se pudo conectar con el puente Hue en ${safeBase}: ${error instanceof Error ? error.message : String(error)}`)
 }
 
 export class HueExtraPlugin {
