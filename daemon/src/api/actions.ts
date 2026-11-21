@@ -33,6 +33,18 @@ export const handleActions: ApiHandler = async (_req, { method, path, services }
               'pages'
             );
           }
+
+          // Check if this is a profile navigation action (profile-auto.switch-profile/restore)
+          if (result.result && result.result.action === 'navigate_to_profile') {
+            services.wsManager.broadcast(
+              'profile.navigate',
+              {
+                profileId: result.result.profileId,
+                context,
+              },
+              'profiles'
+            );
+          }
         } else {
           services.wsManager.broadcastActionError(actionId, result.error);
         }

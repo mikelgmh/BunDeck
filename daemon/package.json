@@ -25,6 +25,7 @@
     "chokidar": "^5.0.0",
     "lucide": "^1.44.0",
     "mime-types": "^3.0.2",
+    "tweetnacl": "^1.0.3",
     "uuid": "^14.0.2"
   },
   "optionalDependencies": {

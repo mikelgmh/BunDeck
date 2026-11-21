@@ -224,7 +224,7 @@ start_dev() {
             fi
         done
         if [ "$LAUNCHER_OPENED" = "0" ]; then
-            echo -e "${YELLOW}Launcher GPUI sin compilar: 'cd launcher && cargo run' (luego ./dev.sh dev ya lo abre solo)${NC}"
+            echo -e "${YELLOW}Launcher GPUI sin compilar: 'cd launcher && cargo run --bin libredeck-launcher' (luego ./dev.sh dev ya lo abre solo)${NC}"
         fi
     fi
 

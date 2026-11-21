@@ -145,7 +145,7 @@ describe('ElgatoHost con plugin falso', () => {
     });
     await host.startPlugin(PLUGIN_ID, manifest);
     expect(host.isRunning(PLUGIN_ID)).toBe(true);
-    await waitFor(() => seen.some((s) => s.context === 'ctx-1' && s.state.title === 'Hola DeckCal'));
+    await waitFor(() => seen.some((s) => s.context === 'ctx-1' && s.state.title === 'Hola DeckCal' && s.state.state === 1));
     const st = host.getActionState(PLUGIN_ID, 'ctx-1');
     expect(st?.title).toBe('Hola DeckCal');
     expect(st?.state).toBe(1);

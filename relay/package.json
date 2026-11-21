@@ -1,0 +1,20 @@
+{
+  "name": "libredeck-relay",
+  "version": "0.1.0",
+  "description": "BunDeck E2E relay server — opaque message router, never sees plaintext",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "build": "bun build --compile src/index.ts --outfile libredeck-relay"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2"
+  }
+}

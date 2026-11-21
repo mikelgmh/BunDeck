@@ -279,7 +279,7 @@ async function installBuiltInPlugins(db: Database) {
   console.log('🔌 Installing built-in plugins...');
 
   // Import built-in plugins statically to avoid dynamic import issues
-  const { ShellPlugin, HttpPlugin, HotkeyPlugin, TypeTextPlugin, MultimediaPlugin, OpenAppPlugin, PagePlugin, UtilityPlugin, BrowserPlugin, PCVitalsPlugin, ObsPlugin, HomeAssistantPlugin, SpotifyPlugin } = await import('./plugins/index');
+  const { ShellPlugin, HttpPlugin, HotkeyPlugin, TypeTextPlugin, MultimediaPlugin, OpenAppPlugin, PagePlugin, UtilityPlugin, BrowserPlugin, PCVitalsPlugin, ObsPlugin, HomeAssistantPlugin, SpotifyPlugin, DiscordPlugin, TwitchPlugin, YoutubePlugin, SoundboardPlugin, VoicemodPlugin, VoicemeeterPlugin, ShadowplayPlugin, WebcamPlugin, PhotoshopPlugin, PremierePlugin, DavinciPlugin, BlenderPlugin, MidiOscPlugin, SteamPlugin, MinecraftPlugin, HueExtraPlugin, GoveePlugin, AudioMixerPlugin, WindowManagerPlugin, MeetingsPlugin, SlackPlugin, CalendarPlugin, TimerPlugin, ClipboardPlugin, MultiactionPlugin, ProfileAutoPlugin } = await import('./plugins/index');
 
   const builtInPlugins = [
     { id: 'shell', class: ShellPlugin },
@@ -294,7 +294,33 @@ async function installBuiltInPlugins(db: Database) {
     { id: 'pc-vitals', class: PCVitalsPlugin },
     { id: 'obs', class: ObsPlugin },
     { id: 'homeassistant', class: HomeAssistantPlugin },
-    { id: 'spotify', class: SpotifyPlugin }
+    { id: 'spotify', class: SpotifyPlugin },
+    { id: 'discord', class: DiscordPlugin },
+    { id: 'twitch', class: TwitchPlugin },
+    { id: 'youtube', class: YoutubePlugin },
+    { id: 'soundboard', class: SoundboardPlugin },
+    { id: 'voicemod', class: VoicemodPlugin },
+    { id: 'voicemeeter', class: VoicemeeterPlugin },
+    { id: 'shadowplay', class: ShadowplayPlugin },
+    { id: 'webcam', class: WebcamPlugin },
+    { id: 'photoshop', class: PhotoshopPlugin },
+    { id: 'premiere', class: PremierePlugin },
+    { id: 'davinci', class: DavinciPlugin },
+    { id: 'blender', class: BlenderPlugin },
+    { id: 'midi-osc', class: MidiOscPlugin },
+    { id: 'steam', class: SteamPlugin },
+    { id: 'minecraft', class: MinecraftPlugin },
+    { id: 'hue-extra', class: HueExtraPlugin },
+    { id: 'govee', class: GoveePlugin },
+    { id: 'audio-mixer', class: AudioMixerPlugin },
+    { id: 'window-manager', class: WindowManagerPlugin },
+    { id: 'meetings', class: MeetingsPlugin },
+    { id: 'slack', class: SlackPlugin },
+    { id: 'calendar', class: CalendarPlugin },
+    { id: 'timer', class: TimerPlugin },
+    { id: 'clipboard', class: ClipboardPlugin },
+    { id: 'multiaction', class: MultiactionPlugin },
+    { id: 'profile-auto', class: ProfileAutoPlugin }
   ];
 
   const insertIgnore = db.prepare(`

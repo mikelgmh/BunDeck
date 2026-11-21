@@ -80,6 +80,16 @@
         <p v-else class="bd-hint">{{ t('bd.noPlugins') }}</p>
       </template>
 
+      <!-- Catálogo local (offline): índice del daemon -->
+      <template v-else-if="ptab === 'cat'">
+        <PluginCatalog
+          :api-base="props.apiBase ?? '/api/v1'"
+          :detailed="props.detailed"
+          :busy-id="props.busyId"
+          @toggle-plugin="(id, on) => emit('toggle-plugin', id, on)"
+        />
+      </template>
+
       <!-- Github (importar desde URL) -->
       <template v-else-if="ptab === 'gh'">
         <div class="bd-mk-tools">
@@ -146,10 +156,11 @@ import { ref, computed, watch } from 'vue'
 import { Upload, RefreshCw, Package } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
+import PluginCatalog from './PluginCatalog.vue'
 
 const { t } = useI18nStore()
 
-export type PluginsTab = 'inst' | 'gh' | 'ai'
+export type PluginsTab = 'inst' | 'gh' | 'ai' | 'cat'
 
 interface Props {
   plugins?: any[]
@@ -157,6 +168,8 @@ interface Props {
   busyId?: string | null
   uploading?: boolean
   installProgress?: { key: string; stage: string; message: string } | null
+  /** Base de la API para el catálogo local (mismo patrón que PluginSettingsDialog). */
+  apiBase?: string
 }
 
 interface Emits {
@@ -179,6 +192,7 @@ const ptab = ref<PluginsTab>('inst')
 
 const tabs = computed(() => [
   { id: 'inst' as const, label: t('bd.tabInstalled') },
+  { id: 'cat' as const, label: t('bd.tabCatalog') },
   { id: 'gh' as const, label: t('bd.tabGithub') },
   { id: 'ai' as const, label: t('bd.tabAi') }
 ])

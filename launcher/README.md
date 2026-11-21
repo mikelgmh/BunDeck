@@ -96,7 +96,7 @@ Si el binario no existe, cada flujo cae a su comportamiento anterior
 
 ```bash
 cd launcher
-cargo run
+cargo run --bin libredeck-launcher
 cargo test   # updater: versiones, manifiesto, layout
 ```
 

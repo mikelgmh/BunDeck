@@ -47,29 +47,31 @@ function startFakeHA(handler: (req: Request) => Response | Promise<Response>) {
 }
 
 describe('HomeAssistantPlugin manifest', () => {
-    test('manifest válido con 3 acciones y schemas', () => {
+    test('manifest válido con 8 acciones y schemas', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('homeassistant')
         expect(manifest.name).toBe('Home Assistant')
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toBe('1.1.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')
-        expect(manifest.actions).toHaveLength(3)
+        expect(manifest.actions).toHaveLength(8)
 
         const ids = manifest.actions.map((a: any) => a.id).sort()
-        expect(ids).toEqual(['light', 'scene', 'switch'])
+        expect(ids).toEqual(['automation-trigger', 'climate-set', 'cover-control', 'light', 'scene', 'scene-activate', 'sensor-value', 'switch'])
 
         for (const action of manifest.actions) {
             expect(action.schema).toBeDefined()
             expect(action.schema.type).toBe('object')
             expect(Array.isArray(action.schema.required)).toBe(true)
             // baseUrl/token viven en los ajustes del plugin (⋯) con fallback:
-            // cada acción solo exige la entidad.
-            expect(action.schema.required).toContain('entityId')
+            // cada acción exige como máximo la entidad (lectura) u opcionales.
             expect(action.schema.required).not.toContain('baseUrl')
             expect(action.schema.required).not.toContain('token')
+            if (['light', 'scene', 'switch', 'scene-activate', 'automation-trigger', 'cover-control', 'climate-set', 'sensor-value'].includes(action.id)) {
+                expect(action.schema.required).toContain('entityId')
+            }
         }
 
         // Ajustes generales del plugin: baseUrl + token requeridos + instrucciones
@@ -87,12 +89,12 @@ describe('HomeAssistantPlugin manifest', () => {
         expect(light.schema.properties.colorTemp).toBeDefined()
     })
 
-    test('handlers registrados para light, scene y switch', () => {
+    test('handlers registrados para las 8 acciones', () => {
         const { plugin } = makePlugin()
         const handlers = plugin.getActionHandlers()
-        expect(handlers.has('light')).toBe(true)
-        expect(handlers.has('scene')).toBe(true)
-        expect(handlers.has('switch')).toBe(true)
+        for (const id of ['light', 'scene', 'switch', 'scene-activate', 'automation-trigger', 'cover-control', 'climate-set', 'sensor-value']) {
+            expect(handlers.has(id)).toBe(true)
+        }
     })
 })
 

@@ -294,6 +294,7 @@
           :busy-id="props.busyId"
           :uploading="props.uploading"
           :install-progress="props.installProgress"
+          :api-base="apiBase()"
           @toggle-plugin="(id, on) => emit('toggle-plugin', id, on)"
           @remove-plugin="(id, name) => emit('remove-plugin', id, name)"
           @install-file="(f) => emit('install-file', f)"
@@ -321,6 +322,11 @@
           @revoke-mcp-token="(id) => emit('revoke-mcp-token', id)"
           @notify="(msg) => emit('notify', msg)"
         />
+      </template>
+
+      <!-- Acceso remoto E2E -->
+      <template v-else-if="section === 'remote'">
+        <RemotePane />
       </template>
 
       <!-- Atajos (visual) -->
@@ -409,10 +415,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import {
-  SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2
+  SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 import McpPane from './McpPane.vue'
+import RemotePane from './RemotePane.vue'
 import AutoProfileDialog from './AutoProfileDialog.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import {
@@ -426,7 +433,7 @@ import type { ProfileData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
 
-type Section = 'general' | 'device' | 'profiles' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'shortcuts' | 'advanced' | 'about'
+type Section = 'general' | 'device' | 'profiles' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'about'
 
 interface Props {
   currentLocale: string
@@ -483,6 +490,7 @@ const navItems = computed(() => [
   { id: 'vars' as const, label: t('bd.secVars'), icon: Variable },
   { id: 'plugins' as const, label: t('bd.secPlugins'), icon: Puzzle },
   { id: 'mcp' as const, label: t('bd.secMcp'), icon: Network },
+  { id: 'remote' as const, label: t('bd.secRemote'), icon: Smartphone },
   { id: 'shortcuts' as const, label: t('bd.secShortcuts'), icon: Command },
   { id: 'advanced' as const, label: t('bd.secAdvanced'), icon: Wrench },
   { id: 'about' as const, label: t('bd.secAbout'), icon: Info }

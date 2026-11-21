@@ -15,6 +15,32 @@ import {
   ObsPlugin,
   HomeAssistantPlugin,
   SpotifyPlugin,
+  DiscordPlugin,
+  TwitchPlugin,
+  YoutubePlugin,
+  SoundboardPlugin,
+  VoicemodPlugin,
+  VoicemeeterPlugin,
+  ShadowplayPlugin,
+  WebcamPlugin,
+  PhotoshopPlugin,
+  PremierePlugin,
+  DavinciPlugin,
+  BlenderPlugin,
+  MidiOscPlugin,
+  SteamPlugin,
+  MinecraftPlugin,
+  HueExtraPlugin,
+  GoveePlugin,
+  AudioMixerPlugin,
+  WindowManagerPlugin,
+  MeetingsPlugin,
+  SlackPlugin,
+  CalendarPlugin,
+  TimerPlugin,
+  ClipboardPlugin,
+  MultiactionPlugin,
+  ProfileAutoPlugin,
   type NativePlugin
 } from './plugins';
 import { PluginSandbox } from './plugin-system/sandbox';
@@ -102,9 +128,37 @@ export class ActionRunner {
     const obsPlugin = new ObsPlugin(this.makePluginContext('obs'));
     const homeAssistantPlugin = new HomeAssistantPlugin(this.makePluginContext('homeassistant'));
     const spotifyPlugin = new SpotifyPlugin(this.makePluginContext('spotify'));
+    const discordPlugin = new DiscordPlugin(this.makePluginContext('discord'));
+    const twitchPlugin = new TwitchPlugin(this.makePluginContext('twitch'));
+    const youtubePlugin = new YoutubePlugin(this.makePluginContext('youtube'));
+    const soundboardPlugin = new SoundboardPlugin(this.makePluginContext('soundboard'));
+    const voicemodPlugin = new VoicemodPlugin(this.makePluginContext('voicemod'));
+    const voicemeeterPlugin = new VoicemeeterPlugin(this.makePluginContext('voicemeeter'));
+    const shadowplayPlugin = new ShadowplayPlugin(this.makePluginContext('shadowplay'));
+    const webcamPlugin = new WebcamPlugin(this.makePluginContext('webcam'));
+    const photoshopPlugin = new PhotoshopPlugin(this.makePluginContext('photoshop'));
+    const premierePlugin = new PremierePlugin(this.makePluginContext('premiere'));
+    const davinciPlugin = new DavinciPlugin(this.makePluginContext('davinci'));
+    const blenderPlugin = new BlenderPlugin(this.makePluginContext('blender'));
+    const midiOscPlugin = new MidiOscPlugin(this.makePluginContext('midi-osc'));
+    const steamPlugin = new SteamPlugin(this.makePluginContext('steam'));
+    const minecraftPlugin = new MinecraftPlugin(this.makePluginContext('minecraft'));
+    const hueExtraPlugin = new HueExtraPlugin(this.makePluginContext('hue-extra'));
+    const goveePlugin = new GoveePlugin(this.makePluginContext('govee'));
+    const audioMixerPlugin = new AudioMixerPlugin(this.makePluginContext('audio-mixer'));
+    const windowManagerPlugin = new WindowManagerPlugin(this.makePluginContext('window-manager'));
+    const meetingsPlugin = new MeetingsPlugin(this.makePluginContext('meetings'));
+    const slackPlugin = new SlackPlugin(this.makePluginContext('slack'));
+    const calendarPlugin = new CalendarPlugin(this.makePluginContext('calendar'));
+    const timerPlugin = new TimerPlugin(this.makePluginContext('timer'));
+    const clipboardPlugin = new ClipboardPlugin(this.makePluginContext('clipboard'));
+    const multiactionPlugin = new MultiactionPlugin(this.makePluginContext('multiaction'));
+    const profileAutoPlugin = new ProfileAutoPlugin(this.makePluginContext('profile-auto'));
 
     // Set action executor for utility plugin
     utilityPlugin.setActionExecutor(this.executeAction.bind(this));
+    // Set action executor for multiaction plugin (usa el ActionRunner existente)
+    multiactionPlugin.setActionExecutor(this.executeAction.bind(this));
 
     this.nativePlugins.push(
       multimediaPlugin,
@@ -119,7 +173,33 @@ export class ActionRunner {
       pcVitalsPlugin,
       obsPlugin,
       homeAssistantPlugin,
-      spotifyPlugin
+      spotifyPlugin,
+      discordPlugin,
+      twitchPlugin,
+      youtubePlugin,
+      soundboardPlugin,
+      voicemodPlugin,
+      voicemeeterPlugin,
+      shadowplayPlugin,
+      webcamPlugin,
+      photoshopPlugin,
+      premierePlugin,
+      davinciPlugin,
+      blenderPlugin,
+      midiOscPlugin,
+      steamPlugin,
+      minecraftPlugin,
+      hueExtraPlugin,
+      goveePlugin,
+      audioMixerPlugin,
+      windowManagerPlugin,
+      meetingsPlugin,
+      slackPlugin,
+      calendarPlugin,
+      timerPlugin,
+      clipboardPlugin,
+      multiactionPlugin,
+      profileAutoPlugin
     );
 
     // Register all action handlers from native plugins

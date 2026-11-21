@@ -17,13 +17,6 @@
       <p>{{ t('bd.mcpAdminWarning') }}</p>
     </div>
 
-    <!-- Secreto recién creado: solo se muestra una vez -->
-    <div v-if="newSecret" class="bd-r2">
-      <input type="text" class="bd-inp" readonly :value="newSecret" @focus="($event.target as HTMLInputElement).select()" />
-      <button class="bd-btn bd-pri" @click="copySecret">{{ t('bd.copy') }}</button>
-    </div>
-    <p v-if="newSecret" class="bd-err" role="alert">{{ t('bd.mcpTokenOnce') }}</p>
-
     <!-- Tokens -->
     <div v-if="(props.mcpTokens ?? []).length" class="bd-toks">
       <div v-for="tok in (props.mcpTokens ?? [])" :key="tok.id" class="bd-tok">
@@ -111,9 +104,28 @@
         </div>
       </div>
       <p v-if="tokenError" class="bd-err" role="alert">{{ tokenError }}</p>
-      <button class="bd-btn bd-pri" :disabled="creatingToken || !tokenName.trim()" @click="createToken">
-        {{ creatingToken ? t('bd.installing') : t('bd.mcpCreate') }}
-      </button>
+      <!-- Token generado + botón único generar/copiar -->
+      <div class="bd-r2">
+        <label class="bd-sr" for="bd-mcp-secret">{{ t('bd.mcpTokenOnce') }}</label>
+        <input
+          type="text"
+          id="bd-mcp-secret"
+          data-cy="bd-mcp-secret"
+          class="bd-inp"
+          readonly
+          :value="newSecret"
+          @focus="($event.target as HTMLInputElement).select()"
+        />
+        <button
+          class="bd-btn bd-pri"
+          data-cy="bd-mcp-generate-copy"
+          :disabled="creatingToken || (!showCopySecret && !tokenName.trim())"
+          @click="showCopySecret ? copySecret() : createToken()"
+        >
+          {{ creatingToken ? t('bd.installing') : (showCopySecret ? t('bd.copy') : t('bd.mcpCreate')) }}
+        </button>
+      </div>
+      <p v-if="newSecret" class="bd-err" role="alert">{{ t('bd.mcpTokenOnce') }}</p>
     </div>
 
     <!-- Catálogo de herramientas -->
@@ -211,6 +223,11 @@ const tokenName = ref('')
 const creatingToken = ref(false)
 const tokenError = ref('')
 const newSecret = ref('')
+// Botón único: generar hasta que haya secreto; luego pasa a copiar.
+// Si el usuario empieza a escribir otro nombre, vuelve a generar
+// (el secreto anterior sigue visible hasta que se genere el nuevo,
+// y se recupera borrando el nombre).
+const showCopySecret = computed(() => !creatingToken.value && !!newSecret.value && !tokenName.value.trim())
 const newSel = reactive<Record<string, boolean>>({})
 watch(allScopeIds, (ids) => {
   for (const id of ids) if (!(id in newSel)) newSel[id] = true

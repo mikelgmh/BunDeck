@@ -15,11 +15,13 @@ import { handleProfiles } from './profiles';
 import { handlePages } from './pages';
 import { handleButtons } from './buttons';
 import { handleActions } from './actions';
+import { handleCatalog } from './catalog';
 import { handlePlugins } from './plugins';
 import { handleSystem } from './system';
 import { handleMcp } from './mcp';
 import { handleJobs } from './jobs';
 import { handleAdmin } from './admin';
+import { handleRemote } from './remote';
 
 export type { APIServices } from './types';
 
@@ -29,10 +31,12 @@ const HANDLERS: ApiHandler[] = [
   handlePages,
   handleButtons, // incluye /buttons/reorder (antes que /buttons/:id)
   handleActions,
+  handleCatalog, // /api/v1/catalog (solo lectura, offline)
   handlePlugins, // incluye /marketplace y /plugins/* (excluye /plugins/actions del prefijo)
   handleMcp,
   handleJobs,
   handleAdmin, // /admin/shutdown + /update (501)
+  handleRemote, // /api/v1/remote/* (E2E relay client)
 ];
 
 export async function setupAPIRoutes(req: Request, services: APIServices): Promise<Response> {

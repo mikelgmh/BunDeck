@@ -109,7 +109,7 @@ export class ObsPlugin {
         return {
             id: 'obs',
             name: 'OBS Studio',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Controla OBS Studio (escenas, fuentes, directo, grabación y audio) vía obs-websocket v5',
             author: 'BunDeck',
             permissions: ['network'],
@@ -305,6 +305,164 @@ export class ObsPlugin {
                         },
                         required: ['source']
                     }
+                },
+                {
+                    id: 'studio-mode',
+                    name: 'Modo estudio',
+                    description: 'Activa, desactiva o alterna el modo estudio (preview + programa)',
+                    icon: 'Columns2',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection,
+                            enabled: {
+                                type: 'boolean',
+                                title: 'Activado',
+                                description: 'Estado deseado. Si se omite, se alterna el estado actual.',
+                                ui: {
+                                    component: 'switch'
+                                }
+                            },
+                            previewScene: {
+                                type: 'string',
+                                title: 'Escena de vista previa',
+                                description: 'Al activar, pone esta escena en la vista previa (opcional)',
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: '(mantener)'
+                                }
+                            }
+                        },
+                        required: []
+                    }
+                },
+                {
+                    id: 'filter-toggle',
+                    name: 'Alternar filtro de fuente',
+                    description: 'Activa, desactiva o alterna un filtro de una fuente',
+                    icon: 'SlidersHorizontal',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection,
+                            source: {
+                                type: 'string',
+                                title: 'Fuente',
+                                description: 'Nombre exacto de la fuente que tiene el filtro',
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'Micrófono'
+                                }
+                            },
+                            filter: {
+                                type: 'string',
+                                title: 'Filtro',
+                                description: 'Nombre exacto del filtro (ej. Supresión de ruido)',
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'Supresión de ruido'
+                                }
+                            },
+                            enabled: {
+                                type: 'boolean',
+                                title: 'Activado',
+                                description: 'Estado deseado. Si se omite, se alterna el estado actual.',
+                                ui: {
+                                    component: 'switch'
+                                }
+                            }
+                        },
+                        required: ['source', 'filter']
+                    }
+                },
+                {
+                    id: 'transition',
+                    name: 'Transición',
+                    description: 'Cambia la transición activa y/o su duración',
+                    icon: 'ArrowRightLeft',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection,
+                            transitionName: {
+                                type: 'string',
+                                title: 'Transición',
+                                description: 'Nombre exacto de la transición (ej. Fundido, Corte). Si se omite solo se ajusta la duración.',
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'Fundido'
+                                }
+                            },
+                            durationMs: {
+                                type: 'number',
+                                title: 'Duración (ms)',
+                                description: 'Duración de la transición en milisegundos (opcional)',
+                                minimum: 0,
+                                maximum: 10000,
+                                ui: {
+                                    component: 'input',
+                                    type: 'number',
+                                    placeholder: '300'
+                                }
+                            }
+                        },
+                        required: []
+                    }
+                },
+                {
+                    id: 'screenshot',
+                    name: 'Foto de fuente/escena',
+                    description: 'Captura una imagen de una fuente o escena (GetSourceScreenshot)',
+                    icon: 'Camera',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection,
+                            source: {
+                                type: 'string',
+                                title: 'Fuente o escena',
+                                description: 'Nombre exacto. Si se omite se usa la escena actual del programa.',
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: '(escena actual)'
+                                }
+                            },
+                            imageFormat: {
+                                type: 'string',
+                                title: 'Formato',
+                                description: 'Formato de la imagen',
+                                enum: ['png', 'jpg', 'jpeg'],
+                                default: 'png',
+                                ui: {
+                                    component: 'select',
+                                    options: [
+                                        { value: 'png', label: 'PNG' },
+                                        { value: 'jpg', label: 'JPG' },
+                                        { value: 'jpeg', label: 'JPEG' }
+                                    ]
+                                }
+                            }
+                        },
+                        required: []
+                    }
+                },
+                {
+                    id: 'scene-list',
+                    name: 'Listar escenas',
+                    description: 'Devuelve las escenas disponibles y cuál está en programa',
+                    icon: 'List',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection
+                        },
+                        required: []
+                    }
                 }
             ]
         }
@@ -318,6 +476,11 @@ export class ObsPlugin {
         handlers.set('record', this.executeRecordAction.bind(this))
         handlers.set('replay', this.executeReplayAction.bind(this))
         handlers.set('mute', this.executeMuteAction.bind(this))
+        handlers.set('studio-mode', this.executeStudioModeAction.bind(this))
+        handlers.set('filter-toggle', this.executeFilterToggleAction.bind(this))
+        handlers.set('transition', this.executeTransitionAction.bind(this))
+        handlers.set('screenshot', this.executeScreenshotAction.bind(this))
+        handlers.set('scene-list', this.executeSceneListAction.bind(this))
         return handlers
     }
 
@@ -499,6 +662,192 @@ export class ObsPlugin {
             return { action: 'mute', ...result, host, port }
         } catch (error) {
             this.context.log('error', `OBS: no se pudo cambiar el silencio de "${source}": ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Modo estudio. Sin "enabled" alterna con Get/SetStudioModeEnabled.
+     * Con "previewScene" pone esa escena en la vista previa al activar.
+     */
+    private async executeStudioModeAction(params: any, _context: any): Promise<any> {
+        const { enabled, previewScene } = params ?? {}
+        if (enabled !== undefined && typeof enabled !== 'boolean') {
+            throw new Error('La acción "Modo estudio" espera "enabled" de tipo boolean (o omitirlo para alternar).')
+        }
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', 'OBS: cambiando modo estudio', { enabled, previewScene, host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                let target = enabled
+                if (typeof target !== 'boolean') {
+                    const state = await send('GetStudioModeEnabled')
+                    target = !state?.studioModeEnabled
+                }
+                await send('SetStudioModeEnabled', { studioModeEnabled: target })
+                let preview: string | null = null
+                if (target && typeof previewScene === 'string' && previewScene.length > 0) {
+                    try {
+                        await send('SetCurrentPreviewScene', { sceneName: previewScene })
+                        preview = previewScene
+                    } catch (error) {
+                        throw new Error(`No se encontró la escena "${previewScene}" para la vista previa. Comprueba el nombre exacto en OBS. Detalle: ${this.messageOf(error)}`)
+                    }
+                }
+                return { enabled: target, previewScene: preview }
+            })
+            this.context.log('info', `OBS: modo estudio ahora ${result.enabled ? 'activado' : 'desactivado'}`)
+            return { action: 'studio-mode', ...result, host, port }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudo cambiar el modo estudio: ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Alternar filtro de fuente. Sin "enabled" lee con GetSourceFilter
+     * y lo invierte con SetSourceFilterEnabled.
+     */
+    private async executeFilterToggleAction(params: any, _context: any): Promise<any> {
+        const { source, filter, enabled } = params ?? {}
+        if (typeof source !== 'string' || source.length === 0) {
+            throw new Error('La acción "Alternar filtro" requiere el parámetro "source" (nombre de la fuente).')
+        }
+        if (typeof filter !== 'string' || filter.length === 0) {
+            throw new Error('La acción "Alternar filtro" requiere el parámetro "filter" (nombre del filtro).')
+        }
+        if (enabled !== undefined && typeof enabled !== 'boolean') {
+            throw new Error('La acción "Alternar filtro" espera "enabled" de tipo boolean (o omitirlo para alternar).')
+        }
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', `OBS: cambiando filtro "${filter}" de "${source}"`, { enabled, host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                let target: boolean
+                if (typeof enabled === 'boolean') {
+                    target = enabled
+                } else {
+                    let current: unknown
+                    try {
+                        const info = await send('GetSourceFilter', { sourceName: source, filterName: filter })
+                        current = info?.filterEnabled
+                    } catch (error) {
+                        throw new Error(`No se encontró el filtro "${filter}" en la fuente "${source}". Comprueba los nombres exactos en OBS. Detalle: ${this.messageOf(error)}`)
+                    }
+                    target = !current
+                }
+                try {
+                    await send('SetSourceFilterEnabled', { sourceName: source, filterName: filter, filterEnabled: target })
+                } catch (error) {
+                    throw new Error(`No se pudo cambiar el filtro "${filter}" en la fuente "${source}". Comprueba los nombres exactos en OBS. Detalle: ${this.messageOf(error)}`)
+                }
+                return { source, filter, enabled: target }
+            })
+            this.context.log('info', `OBS: filtro "${filter}" ahora activado=${result.enabled}`)
+            return { action: 'filter-toggle', ...result, host, port }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudo cambiar el filtro "${filter}": ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Transición: cambia la transición activa y/o su duración.
+     */
+    private async executeTransitionAction(params: any, _context: any): Promise<any> {
+        const { transitionName, durationMs } = params ?? {}
+        if (transitionName !== undefined && (typeof transitionName !== 'string' || transitionName.length === 0)) {
+            throw new Error('El parámetro "transitionName" debe ser el nombre exacto de la transición (ej. "Fundido").')
+        }
+        if (durationMs !== undefined && (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0)) {
+            throw new Error('El parámetro "durationMs" debe ser un número de milisegundos mayor o igual a 0.')
+        }
+        if (transitionName === undefined && durationMs === undefined) {
+            throw new Error('La acción "Transición" requiere al menos uno de: "transitionName" o "durationMs".')
+        }
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', 'OBS: cambiando transición', { transitionName, durationMs, host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                if (transitionName !== undefined) {
+                    try {
+                        await send('SetCurrentSceneTransition', { transitionName })
+                    } catch (error) {
+                        throw new Error(`No se encontró la transición "${transitionName}" en OBS. Comprueba el nombre exacto. Detalle: ${this.messageOf(error)}`)
+                    }
+                }
+                if (durationMs !== undefined) {
+                    await send('SetCurrentSceneTransitionDuration', { transitionDuration: Math.floor(durationMs) })
+                }
+                const current = await send('GetCurrentSceneTransition').catch(() => null)
+                return {
+                    transitionName: transitionName ?? current?.transitionName ?? null,
+                    durationMs: durationMs ?? current?.transitionDuration ?? null,
+                }
+            })
+            this.context.log('info', 'OBS: transición actualizada', result)
+            return { action: 'transition', ...result, host, port }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudo cambiar la transición: ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Foto de fuente/escena (GetSourceScreenshot). Sin "source" usa la
+     * escena actual del programa. Devuelve la imagen como data URI.
+     */
+    private async executeScreenshotAction(params: any, _context: any): Promise<any> {
+        const { source, imageFormat = 'png' } = params ?? {}
+        if (imageFormat !== 'png' && imageFormat !== 'jpg' && imageFormat !== 'jpeg') {
+            throw new Error('El parámetro "imageFormat" debe ser uno de: png, jpg, jpeg.')
+        }
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', 'OBS: capturando imagen', { source, imageFormat, host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                let sourceName: string | undefined = typeof source === 'string' && source.length > 0 ? source : undefined
+                if (!sourceName) {
+                    const current = await send('GetCurrentProgramScene')
+                    sourceName = current?.currentProgramSceneName
+                    if (typeof sourceName !== 'string' || sourceName.length === 0) {
+                        throw new Error('No se pudo determinar la escena actual del programa en OBS.')
+                    }
+                }
+                try {
+                    const shot = await send('GetSourceScreenshot', { sourceName, imageFormat })
+                    if (typeof shot?.imageData !== 'string' || shot.imageData.length === 0) {
+                        throw new Error('OBS no devolvió imagen.')
+                    }
+                    return { source: sourceName, imageFormat, imageData: shot.imageData }
+                } catch (error) {
+                    throw new Error(`No se pudo capturar "${sourceName}". Comprueba el nombre exacto de la fuente/escena. Detalle: ${this.messageOf(error)}`)
+                }
+            })
+            this.context.log('info', `OBS: imagen capturada de "${result.source}" (${result.imageData.length} caracteres)`)
+            return { action: 'screenshot', ...result, host, port }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudo capturar la imagen: ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Listar escenas (GetSceneList).
+     */
+    private async executeSceneListAction(params: any, _context: any): Promise<any> {
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', 'OBS: listando escenas', { host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                const res = await send('GetSceneList')
+                const scenes = Array.isArray(res?.scenes) ? res.scenes.map((s: any) => s?.sceneName).filter((n: any) => typeof n === 'string') : []
+                return { scenes, currentProgramSceneName: res?.currentProgramSceneName ?? null }
+            })
+            this.context.log('info', `OBS: ${result.scenes.length} escenas`, { current: result.currentProgramSceneName })
+            return { action: 'scene-list', ...result, host, port }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudieron listar las escenas: ${error}`, { host, port })
             throw error
         }
     }

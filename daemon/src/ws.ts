@@ -304,6 +304,11 @@ export class WebSocketManager {
     this.broadcast('log.created', entry, 'logs');
   }
 
+  /** Eventos del módulo remoto E2E (topic `remote`): paired/received/executed. */
+  public broadcastRemote(event: 'remote.paired' | 'remote.received' | 'remote.executed', payload: any): void {
+    this.broadcast(event, payload, 'remote');
+  }
+
   public getConnectedClients(): number {
     return this.clients.size;
   }

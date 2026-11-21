@@ -37,7 +37,7 @@
     "lint:daemon": "cd daemon && bun run lint",
     "lint:web": "cd web && npm run lint",
     "clean": "rm -rf daemon/dist web/dist cli/dist data/db.sqlite*",
-    "dev:launcher": "cd launcher && cargo run",
+    "dev:launcher": "cd launcher && cargo run --bin libredeck-launcher",
     "build:launcher": "cd launcher && cargo build --release",
     "release": "semantic-release"
   },

@@ -76,8 +76,8 @@ export class HomeAssistantPlugin {
         return {
             id: 'homeassistant',
             name: 'Home Assistant',
-            version: '1.0.0',
-            description: 'Controla luces, escenas e interruptores de Home Assistant',
+            version: '1.1.0',
+            description: 'Controla luces, escenas, interruptores, automatizaciones, persianas, clima y sensores de Home Assistant',
             author: 'BunDeck',
             permissions: ['http', 'network'],
             settingsSchema: {
@@ -230,6 +230,188 @@ export class HomeAssistantPlugin {
                         },
                         required: ['entityId']
                     }
+                },
+                {
+                    id: 'scene-activate',
+                    name: 'Activar escena',
+                    description: 'Activa una escena por nombre (alias explícito de Ambiente)',
+                    icon: 'Sparkles',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Escena',
+                                description: 'Entidad de la escena (ej. scene.atardecer)',
+                                examples: ['scene.atardecer'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'scene.atardecer'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
+                },
+                {
+                    id: 'automation-trigger',
+                    name: 'Disparar automatización',
+                    description: 'Ejecuta una automatización (omite sus disparadores)',
+                    icon: 'Zap',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Automatización',
+                                description: 'Entidad de la automatización (ej. automation.buenos_dias)',
+                                examples: ['automation.buenos_dias'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'automation.buenos_dias'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
+                },
+                {
+                    id: 'cover-control',
+                    name: 'Persiana / Toldo',
+                    description: 'Abre, cierra, detiene o posiciona una persiana, toldo o cortina',
+                    icon: 'Blinds',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Entidad',
+                                description: 'Entidad de la persiana (ej. cover.salon)',
+                                examples: ['cover.salon'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'cover.salon'
+                                }
+                            },
+                            action: {
+                                type: 'string',
+                                title: 'Acción',
+                                description: 'Acción a realizar',
+                                enum: ['open', 'close', 'stop', 'set-position'],
+                                default: 'open',
+                                ui: {
+                                    component: 'select',
+                                    options: [
+                                        { value: 'open', label: 'Abrir' },
+                                        { value: 'close', label: 'Cerrar' },
+                                        { value: 'stop', label: 'Detener' },
+                                        { value: 'set-position', label: 'Ir a posición' }
+                                    ]
+                                }
+                            },
+                            position: {
+                                type: 'integer',
+                                title: 'Posición',
+                                description: 'Posición 0-100 (solo para Ir a posición)',
+                                minimum: 0,
+                                maximum: 100,
+                                ui: {
+                                    component: 'input',
+                                    type: 'number',
+                                    placeholder: '50'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
+                },
+                {
+                    id: 'climate-set',
+                    name: 'Climatización',
+                    description: 'Cambia el modo HVAC y/o la temperatura objetivo',
+                    icon: 'Thermometer',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Entidad',
+                                description: 'Entidad del clima (ej. climate.salon)',
+                                examples: ['climate.salon'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'climate.salon'
+                                }
+                            },
+                            hvacMode: {
+                                type: 'string',
+                                title: 'Modo',
+                                description: 'Modo HVAC (vacío = no cambiar)',
+                                enum: ['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'],
+                                ui: {
+                                    component: 'select',
+                                    options: [
+                                        { value: 'off', label: 'Apagado' },
+                                        { value: 'heat', label: 'Calor' },
+                                        { value: 'cool', label: 'Frío' },
+                                        { value: 'auto', label: 'Automático' },
+                                        { value: 'fan_only', label: 'Solo ventilador' },
+                                        { value: 'dry', label: 'Deshumidificar' }
+                                    ]
+                                }
+                            },
+                            temperature: {
+                                type: 'number',
+                                title: 'Temperatura',
+                                description: 'Temperatura objetivo en °C (vacío = no cambiar)',
+                                minimum: 5,
+                                maximum: 35,
+                                ui: {
+                                    component: 'input',
+                                    type: 'number',
+                                    placeholder: '21'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
+                },
+                {
+                    id: 'sensor-value',
+                    name: 'Leer sensor',
+                    description: 'Lee el estado actual de un sensor (solo lectura, sin modificar nada)',
+                    icon: 'Gauge',
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Entidad',
+                                description: 'Entidad del sensor (ej. sensor.temperatura_salon)',
+                                examples: ['sensor.temperatura_salon'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'sensor.temperatura_salon'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
                 }
             ]
         }
@@ -240,6 +422,11 @@ export class HomeAssistantPlugin {
         handlers.set('light', this.executeLightAction.bind(this))
         handlers.set('scene', this.executeSceneAction.bind(this))
         handlers.set('switch', this.executeSwitchAction.bind(this))
+        handlers.set('scene-activate', this.executeSceneActivateAction.bind(this))
+        handlers.set('automation-trigger', this.executeAutomationTriggerAction.bind(this))
+        handlers.set('cover-control', this.executeCoverAction.bind(this))
+        handlers.set('climate-set', this.executeClimateAction.bind(this))
+        handlers.set('sensor-value', this.executeSensorAction.bind(this))
         return handlers
     }
 
@@ -364,6 +551,86 @@ export class HomeAssistantPlugin {
         this.context.log('info', `Home Assistant: interruptor ${entityId} -> ${service} OK`)
         const state = await this.readState(baseUrl, token, entityId)
         return { success: true, entityId, action, service: `switch.${service}`, state }
+    }
+
+    private async executeSensorAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        this.context.log('info', `Home Assistant: leer sensor ${entityId} en ${baseUrl}`, { token: maskToken(token) })
+        const state = await this.readState(baseUrl, token, entityId)
+        if (!state) {
+            throw new Error(`No se pudo leer el sensor "${entityId}": no existe o no responde (revisa la entidad)`)
+        }
+        return { success: true, entityId, state: state.state ?? null, attributes: state.attributes ?? null, action: 'read' }
+    }
+
+    private async executeSceneActivateAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        this.context.log('info', `Home Assistant: activar escena ${entityId} en ${baseUrl}`, { token: maskToken(token) })
+        await this.callService(baseUrl, token, 'scene', 'turn_on', entityId)
+        this.context.log('info', `Home Assistant: escena ${entityId} activada`)
+        const state = await this.readState(baseUrl, token, entityId)
+        return { success: true, entityId, action: 'activate', service: 'scene.turn_on', state }
+    }
+
+    private async executeAutomationTriggerAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        this.context.log('info', `Home Assistant: disparar automatización ${entityId} en ${baseUrl}`, { token: maskToken(token) })
+        await this.callService(baseUrl, token, 'automation', 'trigger', entityId)
+        this.context.log('info', `Home Assistant: automatización ${entityId} disparada`)
+        const state = await this.readState(baseUrl, token, entityId)
+        return { success: true, entityId, action: 'trigger', service: 'automation.trigger', state }
+    }
+
+    private async executeCoverAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        const action: string = params?.action ?? 'open'
+        if (!['open', 'close', 'stop', 'set-position'].includes(action)) {
+            throw new Error(`Acción de persiana no válida: "${action}". Usa open, close, stop o set-position.`)
+        }
+        const serviceMap: Record<string, string> = { open: 'open_cover', close: 'close_cover', stop: 'stop_cover', 'set-position': 'set_cover_position' }
+        const service = serviceMap[action]
+        const extraData: Record<string, unknown> = {}
+        if (action === 'set-position') {
+            const position = Number(params?.position)
+            if (!Number.isInteger(position) || position < 0 || position > 100) {
+                throw new Error('La posición (position) debe ser un entero entre 0 y 100 para set-position')
+            }
+            extraData.position = position
+        }
+        this.context.log('info', `Home Assistant: persiana ${action} ${entityId} en ${baseUrl}`, { token: maskToken(token) })
+        await this.callService(baseUrl, token, 'cover', service, entityId, extraData)
+        this.context.log('info', `Home Assistant: persiana ${entityId} -> ${service} OK`)
+        const state = await this.readState(baseUrl, token, entityId)
+        return { success: true, entityId, action, service: `cover.${service}`, state }
+    }
+
+    private async executeClimateAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        const hvacMode = params?.hvacMode
+        const temperature = params?.temperature
+        if ((hvacMode === undefined || hvacMode === '') && (temperature === undefined || temperature === null || temperature === '')) {
+            throw new Error('Indica al menos hvacMode o temperature para climatización')
+        }
+        const applied: string[] = []
+        if (hvacMode !== undefined && hvacMode !== '') {
+            if (!['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'].includes(hvacMode)) {
+                throw new Error(`Modo HVAC no válido: "${hvacMode}". Usa off, heat, cool, auto, fan_only o dry.`)
+            }
+            this.context.log('info', `Home Assistant: clima ${entityId} modo ${hvacMode}`, { token: maskToken(token) })
+            await this.callService(baseUrl, token, 'climate', 'set_hvac_mode', entityId, { hvac_mode: hvacMode })
+            applied.push(`climate.set_hvac_mode(${hvacMode})`)
+        }
+        if (temperature !== undefined && temperature !== null && temperature !== '') {
+            const temp = Number(temperature)
+            if (!Number.isFinite(temp) || temp < 5 || temp > 35) {
+                throw new Error('La temperatura (temperature) debe estar entre 5 y 35 °C')
+            }
+            await this.callService(baseUrl, token, 'climate', 'set_temperature', entityId, { temperature: temp })
+            applied.push(`climate.set_temperature(${temp})`)
+        }
+        this.context.log('info', `Home Assistant: clima ${entityId} actualizado: ${applied.join(', ')}`)
+        const state = await this.readState(baseUrl, token, entityId)
+        return { success: true, entityId, action: 'set', applied, state }
     }
 
     public dispose(): void {

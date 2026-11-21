@@ -1,0 +1,28 @@
+# Ejemplo de despliegue con reverse proxy TLS delante (wss en prod).
+# Dominio previsto: bundeck.mikelgranero.com -> este servicio.
+services:
+  relay:
+    build: .
+    # O con imagen publicada:
+    # image: ghcr.io/mikelgmh/libredeck-relay:0.1.0
+    container_name: bundeck-relay
+    restart: unless-stopped
+    environment:
+      # Openship/openpanel inyectan PORT automáticamente; se respeta tal cual.
+      PORT: "8787"
+      RELAY_TOKEN: "${RELAY_TOKEN:?pon RELAY_TOKEN en .env}"
+      RELAY_DOMAIN: "bundeck.mikelgranero.com"
+      DATA_DIR: "/data"
+    ports:
+      - "8787:8787"
+    volumes:
+      - relay-data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  relay-data:

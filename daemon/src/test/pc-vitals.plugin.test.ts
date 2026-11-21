@@ -31,23 +31,32 @@ const FAKE = {
 }
 
 describe('PCVitalsPlugin', () => {
-    it('expone un manifest válido con la acción monitor', () => {
+    it('expone un manifest válido con la acción monitor (más 5 nuevas)', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('pc-vitals')
-        expect(manifest.version).toBe('1.0.0')
-        expect(manifest.actions).toHaveLength(1)
-        expect(manifest.actions[0].id).toBe('monitor')
-        expect(manifest.actions[0].dynamic).toBe(true)
-        expect(manifest.actions[0].schema.required).toEqual(['component', 'metric'])
-        expect(manifest.actions[0].schema.properties.component.enum).toEqual(['cpu', 'ram', 'gpu'])
-        expect(manifest.actions[0].schema.properties.metric.enum).toEqual(['usage', 'temperature'])
-        expect(JSON.parse(JSON.stringify(manifest.actions[0].schema))).toEqual(manifest.actions[0].schema)
+        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.actions.length).toBeGreaterThanOrEqual(6)
+        const byId = Object.fromEntries(manifest.actions.map((a: any) => [a.id, a]))
+        expect(byId.monitor).toBeDefined()
+        expect(byId.monitor.dynamic).toBe(true)
+        expect(byId.monitor.schema.required).toEqual(['component', 'metric'])
+        expect(byId.monitor.schema.properties.component.enum).toEqual(['cpu', 'ram', 'gpu'])
+        expect(byId.monitor.schema.properties.metric.enum).toEqual(['usage', 'temperature'])
+        expect(JSON.parse(JSON.stringify(byId.monitor.schema))).toEqual(byId.monitor.schema)
+        for (const id of ['gpu-temp', 'disk-usage', 'net-speed', 'uptime', 'process-top']) {
+            expect(byId[id], `acción ${id} registrada`).toBeDefined()
+            expect(byId[id].schema?.type).toBe('object')
+            expect(Array.isArray(byId[id].schema?.required)).toBe(true)
+        }
     })
 
-    it('registra el handler monitor', () => {
+    it('registra el handler monitor (más los nuevos)', () => {
         const { plugin } = makePlugin()
         expect(plugin.getActionHandlers().has('monitor')).toBe(true)
+        for (const id of ['gpu-temp', 'disk-usage', 'net-speed', 'uptime', 'process-top']) {
+            expect(plugin.getActionHandlers().has(id)).toBe(true)
+        }
     })
 
     it('exige component y metric', async () => {

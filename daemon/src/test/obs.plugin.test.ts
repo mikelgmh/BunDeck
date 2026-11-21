@@ -10,7 +10,7 @@ import { ObsPlugin } from '../plugins/obs.plugin'
 const context = { log: (_level: string, _message: string, _meta?: any) => {} }
 const plugin = new ObsPlugin(context)
 
-const EXPECTED_ACTIONS = ['mute', 'record', 'replay', 'scene', 'source', 'stream']
+const EXPECTED_ACTIONS = ['filter-toggle', 'mute', 'record', 'replay', 'scene', 'scene-list', 'screenshot', 'source', 'stream', 'studio-mode', 'transition']
 
 /** Returns a localhost port that is guaranteed closed (bound then released). */
 async function closedPort(): Promise<number> {
@@ -32,14 +32,14 @@ async function closedPort(): Promise<number> {
 }
 
 describe('ObsPlugin manifest', () => {
-    it('expone un manifest válido con las 6 acciones', () => {
+    it('expone un manifest válido con las 11 acciones', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('obs')
         expect(manifest.name).toBe('OBS Studio')
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toBe('1.1.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('network')
-        expect(manifest.actions).toHaveLength(6)
+        expect(manifest.actions).toHaveLength(11)
 
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(EXPECTED_ACTIONS)
@@ -62,10 +62,15 @@ describe('ObsPlugin manifest', () => {
         expect(byId.mute.schema.required).toEqual(['source'])
         expect(byId.stream.schema.required).toEqual(['action'])
         expect(byId.record.schema.required).toEqual(['action'])
+        expect(byId['filter-toggle'].schema.required).toEqual(['source', 'filter'])
         expect(Array.isArray(byId.replay.schema.required)).toBe(true)
+        expect(Array.isArray(byId['studio-mode'].schema.required)).toBe(true)
+        expect(Array.isArray(byId.transition.schema.required)).toBe(true)
+        expect(Array.isArray(byId.screenshot.schema.required)).toBe(true)
+        expect(Array.isArray(byId['scene-list'].schema.required)).toBe(true)
     })
 
-    it('getActionHandlers devuelve las 6 claves', () => {
+    it('getActionHandlers devuelve las 11 claves', () => {
         const handlers = plugin.getActionHandlers()
         expect([...handlers.keys()].sort()).toEqual(EXPECTED_ACTIONS)
         for (const key of EXPECTED_ACTIONS) {
@@ -99,10 +104,31 @@ describe('ObsPlugin validación de parámetros (sin conexión)', () => {
         const handler = plugin.getActionHandlers().get('record')!
         await expect(handler({ action: 'bogus' }, {})).rejects.toThrow(/start.*stop.*toggle|action/)
     })
+
+    it('studio-mode rechaza enabled no booleano', async () => {
+        const handler = plugin.getActionHandlers().get('studio-mode')!
+        await expect(handler({ enabled: 'yes' }, {})).rejects.toThrow(/enabled/)
+    })
+
+    it('filter-toggle exige source y filter', async () => {
+        const handler = plugin.getActionHandlers().get('filter-toggle')!
+        await expect(handler({}, {})).rejects.toThrow(/source/)
+        await expect(handler({ source: 'Mic' }, {})).rejects.toThrow(/filter/)
+    })
+
+    it('transition exige al menos un parámetro', async () => {
+        const handler = plugin.getActionHandlers().get('transition')!
+        await expect(handler({}, {})).rejects.toThrow(/transitionName|durationMs/)
+    })
+
+    it('screenshot rechaza formato inválido', async () => {
+        const handler = plugin.getActionHandlers().get('screenshot')!
+        await expect(handler({ imageFormat: 'bmp' }, {})).rejects.toThrow(/png.*jpg|imageFormat/)
+    })
 })
 
 describe('ObsPlugin sin OBS disponible', () => {
-    it('los 6 handlers fallan con error legible en vez de colgarse', async () => {
+    it('los 11 handlers fallan con error legible en vez de colgarse', async () => {
         const port = await closedPort()
         const handlers = plugin.getActionHandlers()
         const base = { host: '127.0.0.1', port, timeoutMs: 1500 }
@@ -112,7 +138,12 @@ describe('ObsPlugin sin OBS disponible', () => {
             ['stream', { ...base, action: 'toggle' }],
             ['record', { ...base, action: 'toggle' }],
             ['replay', { ...base }],
-            ['mute', { ...base, source: 'Micrófono' }]
+            ['mute', { ...base, source: 'Micrófono' }],
+            ['studio-mode', { ...base, enabled: true }],
+            ['filter-toggle', { ...base, source: 'Micrófono', filter: 'Ruido' }],
+            ['transition', { ...base, durationMs: 300 }],
+            ['screenshot', { ...base }],
+            ['scene-list', { ...base }]
         ]
 
         const started = Date.now()
@@ -126,7 +157,7 @@ describe('ObsPlugin sin OBS disponible', () => {
             expect(error, `${key} debería fallar sin OBS disponible`).toBeDefined()
             expect(String((error as Error)?.message), `${key} debe mencionar OBS`).toMatch(/OBS/)
         }
-        // 6 llamadas con timeoutMs=1500: muy por debajo del límite si no hay cuelgues.
-        expect(Date.now() - started).toBeLessThan(20000)
-    }, 30000)
+        // 11 llamadas con timeoutMs=1500: muy por debajo del límite si no hay cuelgues.
+        expect(Date.now() - started).toBeLessThan(30000)
+    }, 40000)
 })

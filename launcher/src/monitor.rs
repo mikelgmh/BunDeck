@@ -102,11 +102,12 @@ fn check_ws(port: u16) -> ServiceSnapshot {
 /// Comprueba el frontend. Devuelve el estado y si sirve Astro en :4321
 /// (para que el panel apunte ahí en vez de al puerto embebido).
 fn check_frontend(port: u16) -> (ServiceSnapshot, bool) {
-    // En dev Astro sirve :4321; en prod el daemon sirve :FRONTEND_PORT.
-    // Si DEV_MODE=true se prueba 4321 primero.
-    let dev = std::env::var("DEV_MODE").as_deref() == Ok("true");
+    // Astro sirve :4321 en dev; en prod el daemon sirve :FRONTEND_PORT.
+    // Se prueban ambos siempre (auto-detección): el launcher abierto vía
+    // `bun run dev` puede no heredar DEV_MODE=true y si no, ignoraría
+    // a Astro aunque esté en línea.
     let mut candidates = vec![port];
-    if dev && port != 4321 {
+    if port != 4321 {
         candidates.insert(0, 4321);
     }
     let agent: ureq::Agent = ureq::AgentBuilder::new()
