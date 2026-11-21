@@ -52,8 +52,52 @@
             "label": "Daemon macOS x64"
           },
           {
+            "path": "libredeck-web-dist-v*-linux-x64.tar.gz",
+            "label": "Web panel Linux x64"
+          },
+          {
+            "path": "libredeck-web-dist-v*-darwin-x64.tar.gz",
+            "label": "Web panel macOS x64"
+          },
+          {
             "path": "BunDeck-Setup-v*.exe",
             "label": "Windows Installer"
+          },
+          {
+            "path": "libredeck-cli-linux-x64",
+            "label": "CLI Linux x64 (latest)"
+          },
+          {
+            "path": "libredeck-cli-windows-x64.exe",
+            "label": "CLI Windows x64 (latest)"
+          },
+          {
+            "path": "libredeck-cli-darwin-x64",
+            "label": "CLI macOS x64 (latest)"
+          },
+          {
+            "path": "libredeck-daemon-linux-x64",
+            "label": "Daemon Linux x64 (latest)"
+          },
+          {
+            "path": "libredeck-daemon-windows-x64.exe",
+            "label": "Daemon Windows x64 (latest)"
+          },
+          {
+            "path": "libredeck-daemon-darwin-x64",
+            "label": "Daemon macOS x64 (latest)"
+          },
+          {
+            "path": "libredeck-web-dist-linux-x64.tar.gz",
+            "label": "Web panel Linux x64 (latest)"
+          },
+          {
+            "path": "libredeck-web-dist-darwin-x64.tar.gz",
+            "label": "Web panel macOS x64 (latest)"
+          },
+          {
+            "path": "BunDeck-Setup.exe",
+            "label": "Windows Installer (latest)"
           }
         ]
       }

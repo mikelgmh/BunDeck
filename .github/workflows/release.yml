@@ -212,6 +212,20 @@ jobs:
         find artifacts -name "libredeck-web-dist-v*.tar.gz" -exec mv {} . \; || true
         find artifacts -name "BunDeck-Setup-v*.exe" -exec mv {} . \; || true
 
+    - name: Create stable latest aliases (unversioned, for direct /latest/download links)
+      run: |
+        shopt -s nullglob
+        for f in libredeck-cli-v*-windows-x64.exe; do cp "$f" libredeck-cli-windows-x64.exe; done
+        for f in libredeck-cli-v*-linux-x64; do cp "$f" libredeck-cli-linux-x64; done
+        for f in libredeck-cli-v*-darwin-x64; do cp "$f" libredeck-cli-darwin-x64; done
+        for f in libredeck-daemon-v*-windows-x64.exe; do cp "$f" libredeck-daemon-windows-x64.exe; done
+        for f in libredeck-daemon-v*-linux-x64; do cp "$f" libredeck-daemon-linux-x64; done
+        for f in libredeck-daemon-v*-darwin-x64; do cp "$f" libredeck-daemon-darwin-x64; done
+        for f in libredeck-web-dist-v*-linux-x64.tar.gz; do cp "$f" libredeck-web-dist-linux-x64.tar.gz; done
+        for f in libredeck-web-dist-v*-darwin-x64.tar.gz; do cp "$f" libredeck-web-dist-darwin-x64.tar.gz; done
+        for f in BunDeck-Setup-v*.exe; do cp "$f" BunDeck-Setup.exe; done
+        ls -la libredeck-* BunDeck-*.exe 2>/dev/null || true
+
     - name: Release
       run: bunx semantic-release
       env:

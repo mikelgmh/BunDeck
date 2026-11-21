@@ -79,13 +79,13 @@ Deliberate choices:
 
 ## Measured footprint + comparison
 
-Measured in this repo, Windows 10 Pro 64-bit, idle, with `Get-Process` (WorkingSet):
+Measured in this repo on a 64-bit desktop OS at idle (resident set size):
 
 | Component | Idle RAM | Disk size | Notes |
 |---|---|---|---|
 | Daemon `bun run daemon/src/server.ts` | **~55 MB** | — | Dev, SQLite + native plugins loaded |
-| Compiled daemon `libredeck-daemon.exe` | **~46 MB** | **~138 MB** | Includes Bun runtime + SQLite + natives; less RAM than dev |
-| Launcher `libredeck-launcher.exe` (release) | **~54 MB** with window | **~6.5 MB** | Native GPUI, 2 s polling |
+| Compiled daemon `libredeck-daemon` | **~46 MB** | **~138 MB** | Includes Bun runtime + SQLite + natives; less RAM than dev (`.exe` on Windows, no extension on macOS/Linux) |
+| Launcher `libredeck-launcher` (release) | **~54 MB** with window | **~6.5 MB** | Native GPUI, 2 s polling (`.exe` on Windows) |
 | Compiled CLI | short-lived (only while running) | **~110 MB** | Not resident |
 | Panel `web/dist` | 0 (lives in your browser) | **~1.3 MB**, 10 files | Static Astro output |
 
@@ -103,19 +103,32 @@ Measured in this repo, Windows 10 Pro 64-bit, idle, with `Get-Process` (WorkingS
 
 Why Electron costs more: every app ships its own Chromium even if Chrome/Edge is already installed, and every window is a full renderer with its own JS heap, compositor and often a GPU process. For a panel that stays closed 90% of the time and a backend that must always be alive, paying for a resident Chromium makes no sense. BunDeck splits both concerns: an always-on cheap backend (Bun), on-demand UI (browser) and minimal native control (Rust).
 
-> Honest note: Electron figures are typical ecosystem ranges, not a measurement of a clone of ours. BunDeck figures are measurements from this repo (see table). To reproduce, use `Get-Process` after 1 min idle with the same `LIBREDECK_DATA_DIR`.
+> Honest note: Electron figures are typical ecosystem ranges, not a measurement of a clone of ours. BunDeck figures are measurements from this repo (see table). To reproduce, let the stack idle for 1 min with the same `LIBREDECK_DATA_DIR` and compare (`Get-Process` on PowerShell, `ps -o pid,rss,comm -p <pid>` on macOS/Linux).
 
-What about Electrobun? It uses the OS WebView (WebView2 on Windows), far lighter than embedded Chromium. Even so, in prod it would be a third resident process just to wrap the panel. Since the panel already opens fine in the browser and the launcher covers status/tray/updates, Electrobun stays **dev-only**. Fewer processes = less RAM and fewer things that can break.
+What about Electrobun? It uses the OS WebView (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), far lighter than embedded Chromium. Even so, in prod it would be a third resident process just to wrap the panel. Since the panel already opens fine in the browser and the launcher covers status/tray/updates, Electrobun stays **dev-only**. Fewer processes = less RAM and fewer things that can break.
 
 ---
 
 ## Installation
 
-### Windows (recommended)
+BunDeck is cross-platform: **Windows, macOS and Linux** are first-class citizens. Pick your OS below — every link always points at the latest release.
 
-1. Download `BunDeck-Setup-vX.Y.Z.exe` from [Releases](https://github.com/mikelgmh/libredeck/releases).
-2. Install (daemon + CLI + launcher + panel).
-3. Open **BunDeck** → **Open panel**.
+### Download (latest)
+
+| OS | What to download | Direct link |
+|---|---|---|
+| Windows | `BunDeck-Setup.exe` (installer: daemon + CLI + launcher + panel) | [BunDeck-Setup.exe](https://github.com/mikelgmh/libredeck/releases/latest/download/BunDeck-Setup.exe) |
+| Windows (portable) | Daemon + CLI standalone | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-windows-x64.exe) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-windows-x64.exe) |
+| macOS | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-darwin-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-darwin-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-darwin-x64.tar.gz) |
+| Linux | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-linux-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-linux-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-linux-x64.tar.gz) |
+
+All files for a version (including versioned filenames for pinning): [latest release page](https://github.com/mikelgmh/libredeck/releases/latest).
+
+### Per-OS notes
+
+- **Windows:** run the installer, open **BunDeck** → **Open panel**. The installer sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
+- **macOS:** download the three files, make daemon/CLI executable (`chmod +x`), run the daemon (`./libredeck-daemon-darwin-x64`), unpack the web panel next to it as `web-dist/`, then open `http://localhost:3002`.
+- **Linux:** same layout as macOS. Unpack with `tar -xzf libredeck-web-dist-linux-x64.tar.gz`.
 
 ### From source
 
@@ -130,9 +143,9 @@ bun run dev           # daemon + Astro panel + launcher
 
 ## Daily use
 
-- **Open panel:** button in the status window or `http://localhost:3002` (prod) / `http://localhost:4321` (dev).
+- **Open panel:** button in the status window or `http://localhost:3002` (prod) / `http://localhost:4321` (dev). Same on Windows, macOS and Linux.
 - **Phone on LAN:** use the IP shown by the launcher, e.g. `http://192.168.1.20:3002`.
-- **Quit:** “Quit” in the status window or tray. Stops daemon + window in order.
+- **Quit:** “Quit” in the status window (tray menu on Windows). Stops daemon + window in order.
 - **Physical Stream Deck:** plug it in and the daemon picks it up (a failed init never crashes the daemon).
 
 ---
@@ -250,7 +263,8 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 ```bash
 ./build.sh
 # web → daemon/web-dist + dist/ → compiled daemon+cli (version embedded)
-# → Rust launcher (if cargo exists) → Inno Setup (Windows)
+# → Rust launcher (if cargo exists) → platform packages
+# (Windows: Inno Setup installer; macOS/Linux: portable binaries + web-dist)
 ```
 
 - Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`LIBREDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` use `getVersion()`, no hardcoded `0.1.0`.
@@ -281,7 +295,7 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 |---|---|---|
 | Panel won’t open on `:3002` | Daemon in `DEV_MODE` or busy port | In dev use `:4321`; check `http://localhost:3001/health` and `HOST_PORT` |
 | Phone can’t reach panel | Loopback bind without LAN | Start with `LIBREDECK_BIND_LAN=1` (dev.sh/launcher already do) |
-| Two tray icons | Daemon tray + launcher | Only expected in manual dev; installed daemon disables its own |
+| Two tray icons (Windows) | Daemon tray + launcher | Only expected in manual dev; an installed/launcher-managed daemon disables its own |
 | Folder `plugin install` fails | Relative path or missing `manifest.json` | Pass an absolute path with `manifest.json` + `main.js`; the CLI already absolutizes it |
 | Old DB with odd version | Stale `app.version` | Self-heals on boot (`getVersion()`); otherwise `./dev.sh clean` |
 | Busy port | Another daemon running | `libredeck-cli status` / `stop`, or change `PORT`/`WS_PORT` |
@@ -296,7 +310,7 @@ Logs: `libredeck-cli logs --follow` or `<data>/logs/daemon.log` (detached mode).
 Easier to package, yes. But you would pay for a full resident Chromium for a panel that stays closed and a backend that must stay tiny. Measured here: ~100 MB full stack vs 250–500 MB typical for an equivalent Electron app.
 
 **Why Bun instead of Node?**
-Instant startup, built-in SQLite and WS without fragile natives, and `bun build --compile` yields a single exe with no runtime installer.
+Instant startup, built-in SQLite and WS without fragile natives, and `bun build --compile` yields a single binary with no runtime installer (`.exe` on Windows, no extension on macOS/Linux).
 
 **Why Astro + Vue instead of a React SPA?**
 The panel is 90% static + interactive islands. Astro outputs 1.3 MB of static files; Vue only where state lives (buttons, inspector, streaming). Less JS = less RAM in the browser.
