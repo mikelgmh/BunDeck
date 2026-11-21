@@ -14,8 +14,8 @@
  *
  * Config: `RELAY_URL`/`RELAY_TOKEN` de env, o `remote.relay.url` /
  * `remote.relay.token` en settings. Por defecto usa el relay público
- * (`public-relay.ts`); setting a cadena vacía explícita → `disabled`
- * (el resto del módulo remoto —pairing local por QR, policy— sigue
+ * (`public-relay.ts`); setting `remote.relay.url` a 'off'/'none'/'disabled'
+ * → `disabled` (el resto del módulo remoto —pairing local por QR, policy— sigue
  * funcionando). Reconexión exponencial 1s→30s con jitter.
  * Solo `WebSocket` global de Bun.
  */

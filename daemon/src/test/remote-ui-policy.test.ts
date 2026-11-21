@@ -137,7 +137,7 @@ describe('remote-ui: código + url', () => {
     r = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
     expect(r.body.url.startsWith('http://lan.local:8080/path/ui/')).toBe(true);
 
-    enableUi('');
+    enableUi('off');
     r = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
     expect(r.body.url).toBe('');
   });

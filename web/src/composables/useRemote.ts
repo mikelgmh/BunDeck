@@ -19,6 +19,8 @@ export interface RemoteStatusView {
   policy: string[]
   /** UI remota vía relay (nuevo backend). Ausente en daemons antiguos. */
   uiEnabled?: boolean
+  /** Estado del túnel UI (nuevo backend). Ausente en daemons antiguos. */
+  tunnel?: { status: string }
 }
 
 export interface UiPendingItem {

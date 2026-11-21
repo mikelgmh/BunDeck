@@ -1,18 +1,60 @@
 <template>
   <div data-cy="remote-pane">
+    <dialog
+      ref="approvalDialog"
+      class="bd-dlg bd-remote-approval"
+      aria-labelledby="bd-remote-approval-title"
+      data-cy="remote-ui-approval-dialog"
+      @cancel="dismissApproval"
+    >
+      <template v-if="activeApproval">
+        <div class="bd-remote-approval__body">
+          <span class="bd-remote-approval__mark" aria-hidden="true"><Globe :size="20" /></span>
+          <div>
+            <h2 id="bd-remote-approval-title">{{ t('bd.remoteUiApprovalTitle') }}</h2>
+            <p class="bd-sub">{{ t('bd.remoteUiApprovalHint') }}</p>
+          </div>
+          <dl class="bd-remote-approval__details">
+            <div>
+              <dt>{{ t('bd.remoteUiBrowser') }}</dt>
+              <dd :title="activeApproval.ua || t('bd.remoteUiEmptyUa')">{{ activeApproval.ua || t('bd.remoteUiEmptyUa') }}</dd>
+            </div>
+            <div>
+              <dt>{{ t('bd.remoteUiIp') }}</dt>
+              <dd class="bd-mono">{{ activeApproval.ip }}</dd>
+            </div>
+            <div>
+              <dt>{{ t('bd.remoteUiRequestedAt') }}</dt>
+              <dd class="bd-mono">{{ formatDateTime(activeApproval.createdAt) }}</dd>
+            </div>
+          </dl>
+          <p class="bd-hint">{{ t('bd.remoteUiApprovalWarning') }}</p>
+          <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
+        </div>
+        <div class="bd-remote-approval__actions">
+          <button class="bd-btn" data-cy="remote-ui-approval-deny" :disabled="uiLoading" @click="onApprovalDeny">
+            {{ t('bd.remoteUiDeny') }}
+          </button>
+          <button class="bd-btn bd-pri" data-cy="remote-ui-approval-allow" :disabled="uiLoading" @click="onApprovalAllow">
+            {{ t('bd.remoteUiApprove') }}
+          </button>
+        </div>
+      </template>
+    </dialog>
+
     <!-- Estado -->
     <h2>{{ t('bd.secRemote') }}</h2>
     <p class="bd-sub">{{ t('bd.remoteSub') }}</p>
 
     <!-- Sección 1 — Entrar desde internet (UI remota por túnel): la vía principal -->
-    <section class="bd-card" style="margin-top: 12px" data-cy="remote-ui-section" aria-labelledby="bd-remote-ui-title">
-      <h3 id="bd-remote-ui-title" style="display: flex; align-items: center; gap: 8px">
+    <section class="bd-card bd-remote-card" data-cy="remote-ui-section" aria-labelledby="bd-remote-ui-title">
+      <h3 id="bd-remote-ui-title" class="bd-remote-heading">
         <Globe :size="18" aria-hidden="true" />
         {{ t('bd.remoteUiTitle') }}
       </h3>
       <p class="bd-sub">{{ t('bd.remoteUiSub') }}</p>
 
-      <div class="bd-srow" data-cy="remote-ui-toggle-row">
+      <div class="bd-srow bd-remote-toggle" data-cy="remote-ui-toggle-row">
         <div>
           <b>{{ t('bd.remoteUiAllow') }}</b>
           <p data-cy="remote-ui-hint">{{ t('bd.remoteUiAllowHint') }}</p>
@@ -31,10 +73,17 @@
         </div>
       </div>
       <p v-if="uiUnsupported" class="bd-hint" data-cy="remote-ui-update">{{ t('bd.remoteUiUpdate') }}</p>
+      <p class="bd-hint" data-cy="remote-ui-tunnel">
+        {{ t('bd.remoteUiTunnel') }}:
+        <span class="bd-mono">{{ status?.tunnel?.status ?? '…' }}</span>
+        <template v-if="uiEnabled && status?.tunnel && status.tunnel.status !== 'connected'">
+          {{ t('bd.remoteUiTunnelDown') }}
+        </template>
+      </p>
 
       <template v-if="uiEnabled && !uiUnsupported">
         <!-- Abrir en móvil: código + QR de la url -->
-        <div class="bd-srow">
+        <div class="bd-srow bd-remote-open-row">
           <div>
             <b>{{ t('bd.remoteUiOpen') }}</b>
             <p>{{ t('bd.remoteUiOpenHint') }}</p>
@@ -45,42 +94,52 @@
             </button>
           </div>
         </div>
-        <div v-if="uiCode" class="bd-qr" data-cy="remote-ui-qr">
-          <img
-            v-if="uiCodeDataUrl"
-            data-cy="remote-ui-qr-img"
-            :src="uiCodeDataUrl"
-            :alt="t('bd.remoteUiTitle')"
-            width="280"
-            height="280"
-          />
-          <p class="bd-mono" data-cy="remote-ui-url" :title="uiCode.url">{{ uiCode.url }}</p>
-          <p class="bd-mono">{{ uiCode.code }}</p>
-          <p v-if="!uiExpired" class="bd-mono" data-cy="remote-ui-exp">
-            {{ t('bd.remoteUiExp', { s: fmtMMSS(uiSecsLeft) }) }}
-          </p>
-          <p v-else class="bd-err" role="alert" data-cy="remote-ui-exp">{{ t('bd.remoteUiExpired') }}</p>
-          <div class="bd-ctl">
-            <button class="bd-btn" data-cy="remote-ui-url-copy" @click="onCopyUiUrl">
-              {{ urlCopied ? t('bd.remoteUiCopied') : t('bd.remoteUiCopy') }}
-            </button>
-            <button class="bd-btn bd-dng" :disabled="uiLoading" data-cy="remote-ui-revoke-code" @click="onRevokeUiCode">
-              {{ t('bd.remoteUiRevokeCode') }}
-            </button>
+        <div v-if="uiCode" class="bd-remote-qr" data-cy="remote-ui-qr">
+          <div class="bd-remote-qr__image">
+            <img
+              v-if="uiCodeDataUrl"
+              data-cy="remote-ui-qr-img"
+              :src="uiCodeDataUrl"
+              :alt="t('bd.remoteUiTitle')"
+              width="280"
+              height="280"
+            />
+          </div>
+          <div class="bd-remote-qr__content">
+            <div class="bd-remote-field">
+              <span class="bd-remote-label">{{ t('bd.remoteUiUrlLabel') }}</span>
+              <p class="bd-mono bd-remote-url" data-cy="remote-ui-url" :title="uiCode.url">{{ uiCode.url }}</p>
+            </div>
+            <div class="bd-remote-code-row">
+              <span class="bd-remote-label">{{ t('bd.remoteUiOneTimeCode') }}</span>
+              <code class="bd-remote-one-time-code">{{ uiCode.code }}</code>
+            </div>
+            <p v-if="!uiExpired" class="bd-remote-expiry" data-cy="remote-ui-exp">
+              {{ t('bd.remoteUiExp', { s: fmtMMSS(uiSecsLeft) }) }}
+            </p>
+            <p v-else class="bd-err" role="alert" data-cy="remote-ui-exp">{{ t('bd.remoteUiExpired') }}</p>
+            <div class="bd-ctl bd-remote-qr-actions">
+              <button class="bd-btn bd-pri" data-cy="remote-ui-url-copy" @click="onCopyUiUrl">
+                {{ urlCopied ? t('bd.remoteUiCopied') : t('bd.remoteUiCopy') }}
+              </button>
+              <button class="bd-btn bd-dng" :disabled="uiLoading" data-cy="remote-ui-revoke-code" @click="onRevokeUiCode">
+                {{ t('bd.remoteUiRevokeCode') }}
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Pendientes -->
-        <h4>{{ t('bd.remoteUiPending') }}</h4>
+        <h4 class="bd-remote-subheading">{{ t('bd.remoteUiPending') }}</h4>
         <p v-if="!uiPending.length" class="bd-hint" data-cy="remote-ui-pending-empty">{{ t('bd.remoteUiNoPending') }}</p>
-        <ul v-else class="bd-log" data-cy="remote-ui-pending-list">
-          <li v-for="p in uiPending" :key="p.reqId" class="bd-pr" data-cy="remote-ui-pending-item">
-            <div style="min-width: 0">
-              <b class="bd-mono">{{ p.urlCode }}</b>
-              <p class="bd-mono" :title="p.reqId">{{ p.ua || t('bd.remoteUiEmptyUa') }} · {{ p.ip }}</p>
-              <p class="bd-mono">{{ new Date(p.createdAt).toLocaleTimeString() }}</p>
+        <ul v-else class="bd-remote-list" data-cy="remote-ui-pending-list">
+          <li v-for="p in uiPending" :key="p.reqId" class="bd-remote-row" data-cy="remote-ui-pending-item">
+            <div class="bd-remote-row__info">
+              <b class="bd-remote-row__title">{{ p.urlCode }}</b>
+              <p class="bd-remote-agent" :title="p.ua || t('bd.remoteUiEmptyUa')">{{ p.ua || t('bd.remoteUiEmptyUa') }}</p>
+              <p class="bd-remote-meta"><span class="bd-mono">{{ p.ip }}</span><span>{{ formatDateTime(p.createdAt) }}</span></p>
             </div>
-            <div style="display: flex; gap: 8px">
+            <div class="bd-remote-row__actions">
               <button
                 class="bd-btn bd-pri"
                 :disabled="uiLoading"
@@ -117,24 +176,31 @@
         </div>
 
         <!-- Sesiones -->
-        <h4>{{ t('bd.remoteUiSessions') }}</h4>
+        <h4 class="bd-remote-subheading">{{ t('bd.remoteUiSessions') }}</h4>
         <p v-if="!uiSessions.length" class="bd-hint" data-cy="remote-ui-sessions-empty">{{ t('bd.remoteUiNoSessions') }}</p>
-        <ul v-else class="bd-log" data-cy="remote-ui-sessions">
-          <li v-for="s in uiSessions" :key="s.tokenPrefix" class="bd-pr" data-cy="remote-ui-session-item">
-            <div style="min-width: 0">
-              <b class="bd-mono" :title="s.tokenPrefix">{{ s.tokenPrefix }}…</b>
-              <p class="bd-mono">{{ s.ua || t('bd.remoteUiEmptyUa') }} · {{ s.ip }}</p>
-              <p class="bd-mono">{{ new Date(s.createdAt).toLocaleString() }} → {{ new Date(s.exp).toLocaleString() }}</p>
+        <ul v-else class="bd-remote-list" data-cy="remote-ui-sessions">
+          <li v-for="s in uiSessions" :key="s.tokenPrefix" class="bd-remote-row bd-remote-session" data-cy="remote-ui-session-item">
+            <div class="bd-remote-row__info">
+              <b class="bd-remote-row__title bd-mono" :title="s.tokenPrefix">{{ s.tokenPrefix }}…</b>
+              <p class="bd-remote-agent" :title="s.ua || t('bd.remoteUiEmptyUa')">{{ s.ua || t('bd.remoteUiEmptyUa') }}</p>
+              <p class="bd-remote-meta">
+                <span class="bd-mono">{{ s.ip }}</span>
+                <span>{{ t('bd.remoteUiSessionCreated', { date: formatDateTime(s.createdAt) }) }}</span>
+                <span>{{ t('bd.remoteUiSessionExpires', { date: formatDateTime(s.exp) }) }}</span>
+              </p>
               <span v-if="s.revoked" class="bd-tag-def">{{ t('bd.remoteUiRevoked') }}</span>
             </div>
-            <div style="display: flex; gap: 8px">
+            <div class="bd-remote-row__actions">
               <button
-                class="bd-btn bd-dng"
+                class="bd-remote-revoke"
                 :disabled="s.revoked || uiLoading"
+                :aria-label="`${t('bd.remoteUiRevoke')} ${s.tokenPrefix}`"
+                :title="t('bd.remoteUiRevoke')"
                 data-cy="remote-ui-session-revoke"
                 :data-prefix="s.tokenPrefix"
                 @click="onRevokeSession(s.tokenPrefix)"
               >
+                <ShieldOff :size="16" aria-hidden="true" />
                 {{ t('bd.remoteUiRevoke') }}
               </button>
             </div>
@@ -183,24 +249,32 @@
       </div>
     </div>
     <p v-if="qrUnsupported" class="bd-hint">{{ t('bd.remoteQrUpdate') }}</p>
-    <div v-else-if="qr && qrDataUrl" class="bd-qr">
-      <img
-        data-cy="remote-qr-img"
-        :src="qrDataUrl"
-        :alt="t('bd.remoteQrTitle')"
-        width="280"
-        height="280"
-      />
-      <p v-if="!qrExpired" class="bd-mono" data-cy="remote-qr-exp">
-        {{ t('bd.remoteQrExp', { s: fmtMMSS(qrSecsLeft) }) }}
-      </p>
-      <p v-else class="bd-err" role="alert" data-cy="remote-qr-exp">{{ t('bd.remoteQrExpiredErr') }}</p>
-      <div class="bd-ctl">
-        <button class="bd-btn" :disabled="qrLoading" data-cy="remote-qr-regen" @click="onShowQr">
-          {{ t('bd.remoteQrRegen') }}
-        </button>
+    <div v-else-if="qr && qrDataUrl" class="bd-remote-qr bd-remote-pair-qr">
+      <div class="bd-remote-qr__image">
+        <img
+          data-cy="remote-qr-img"
+          :src="qrDataUrl"
+          :alt="t('bd.remoteQrTitle')"
+          width="280"
+          height="280"
+        />
       </div>
-      <p class="bd-hint">{{ t('bd.remoteQrWarn') }}</p>
+      <div class="bd-remote-qr__content">
+        <p v-if="!qrExpired" class="bd-remote-expiry" data-cy="remote-qr-exp">
+          {{ t('bd.remoteQrExp', { s: fmtMMSS(qrSecsLeft) }) }}
+        </p>
+        <p v-else class="bd-err" role="alert" data-cy="remote-qr-exp">{{ t('bd.remoteQrExpiredErr') }}</p>
+        <div class="bd-remote-field">
+          <span class="bd-remote-label">{{ t('bd.remoteFingerprint') }}</span>
+          <p class="bd-mono bd-remote-url">{{ qr.fingerprint }}</p>
+        </div>
+        <div class="bd-ctl bd-remote-qr-actions">
+          <button class="bd-btn bd-pri" :disabled="qrLoading" data-cy="remote-qr-regen" @click="onShowQr">
+            {{ t('bd.remoteQrRegen') }}
+          </button>
+        </div>
+        <p class="bd-hint">{{ t('bd.remoteQrWarn') }}</p>
+      </div>
     </div>
     <p v-else-if="qrShowError" class="bd-err" role="alert">{{ qrShowError }}</p>
 
@@ -368,16 +442,66 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
-import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload } from '../../composables/useRemote'
+import { ref, computed, onMounted, onUnmounted, reactive, watch, nextTick } from 'vue'
+import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload, type UiPendingItem } from '../../composables/useRemote'
 import RemoteQrScan from './RemoteQrScan.vue'
-import { Link2, Globe } from 'lucide-vue-next'
+import { Link2, Globe, ShieldOff } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
 const { status, devices, pair, events, loading, error, qr, qrDataUrl, qrUnsupported, qrError, refresh, genCode, fetchQr, acceptCode, revoke, savePolicy, rotate, connectWs, disconnectWs,
   uiEnabled, uiUnsupported, uiLoading, uiError, uiCode, uiCodeDataUrl, uiPending, uiSessions, uiJustToken,
   setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, clearJustToken, onRemoteEvent } = useRemote()
+
+const approvalDialog = ref<HTMLDialogElement | null>(null)
+const seenApprovalRequests = new Set<string>()
+const approvalQueue = ref<string[]>([])
+const activeApprovalId = ref('')
+const activeApproval = computed<UiPendingItem | null>(() =>
+  uiPending.value.find((item) => item.reqId === activeApprovalId.value) ?? null
+)
+
+const activateNextApproval = () => {
+  if (activeApprovalId.value || !uiEnabled.value) return
+  const pendingIds = new Set(uiPending.value.map((item) => item.reqId))
+  while (approvalQueue.value.length) {
+    const nextId = approvalQueue.value.shift()!
+    if (pendingIds.has(nextId)) {
+      activeApprovalId.value = nextId
+      return
+    }
+  }
+}
+
+watch(uiPending, (pending) => {
+  const pendingIds = new Set(pending.map((item) => item.reqId))
+  for (const item of pending) {
+    if (uiEnabled.value && !seenApprovalRequests.has(item.reqId)) {
+      seenApprovalRequests.add(item.reqId)
+      approvalQueue.value.push(item.reqId)
+    }
+  }
+  approvalQueue.value = approvalQueue.value.filter((id) => pendingIds.has(id))
+  if (activeApprovalId.value && !pendingIds.has(activeApprovalId.value)) activeApprovalId.value = ''
+  activateNextApproval()
+})
+
+watch(activeApprovalId, async (requestId) => {
+  await nextTick()
+  const dialog = approvalDialog.value
+  if (!dialog) return
+  if (requestId) {
+    if (!dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal()
+      else dialog.setAttribute('open', '')
+    }
+  } else if (dialog.open) {
+    if (typeof dialog.close === 'function') dialog.close()
+    else dialog.removeAttribute('open')
+  }
+})
+
+const formatDateTime = (timestamp: number) => new Date(timestamp).toLocaleString()
 
 const accept = reactive({ code: '', deviceId: '', pubKey: '', name: '' })
 const acceptError = ref('')
@@ -519,6 +643,25 @@ const onDeny = async (reqId: string) => {
     /* noop */
   }
 }
+
+const dismissApproval = () => {
+  const requestId = activeApprovalId.value
+  if (requestId) approvalQueue.value = approvalQueue.value.filter((id) => id !== requestId)
+  activeApprovalId.value = ''
+}
+
+const resolveApproval = async (allow: boolean) => {
+  const requestId = activeApprovalId.value
+  if (!requestId) return
+  dismissApproval()
+  await nextTick()
+  if (allow) await onAllow(requestId)
+  else await onDeny(requestId)
+  activateNextApproval()
+}
+
+const onApprovalAllow = () => resolveApproval(true)
+const onApprovalDeny = () => resolveApproval(false)
 
 const onRevokeSession = async (prefix: string) => {
   try {

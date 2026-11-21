@@ -109,7 +109,7 @@ describe('remote-qr: GET /qr', () => {
     expect(String(reuse.body.error)).toMatch(/utilizado/i);
   });
 
-  it('relay público por defecto; override por env/setting; "" explícito lo desactiva', async () => {
+  it('relay público por defecto; override por env/setting; centinela lo desactiva', async () => {
     // Sin configuración → relay público por defecto
     const def = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
     expect(def.status).toBe(200);
@@ -129,8 +129,9 @@ describe('remote-qr: GET /qr', () => {
     expect(viaSetting.body.relayUrl).toBe('wss://relay-settings.example.test');
     expect(JSON.parse(viaSetting.body.qr as string).relay).toBe('wss://relay-settings.example.test');
 
-    // Setting a cadena vacía explícita → desactivado ("")
-    db.setSetting('remote.relay.url', '');
+    // Setting centinela ('off') → desactivado ("").
+    // (getSetting coacciona '' a null: por eso el apagado usa centinela.)
+    db.setSetting('remote.relay.url', 'off');
     const off = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
     expect(off.status).toBe(200);
     expect(off.body.relayUrl).toBe('');

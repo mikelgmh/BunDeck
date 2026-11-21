@@ -36,6 +36,7 @@ type FetchOpts = {
   pending?: Array<Record<string, unknown>>
   sessions?: Array<Record<string, unknown>>
   uiCode?: Record<string, unknown> | null
+  tunnel?: string
 }
 
 function makeFetch(opts: FetchOpts = {}) {
@@ -51,7 +52,7 @@ function makeFetch(opts: FetchOpts = {}) {
     calls.push({ url: u, init })
     if (u.endsWith('/config')) return { ok: true, status: 200, json: async () => ({ apiPort: 3001, wsPort: 3003 }) }
     if (u.includes('/remote/status')) {
-      return { ok: true, status: 200, json: async () => ({ ...statusBase, uiEnabled: state.enabled }) }
+      return { ok: true, status: 200, json: async () => ({ ...statusBase, uiEnabled: state.enabled, ...(opts.tunnel ? { tunnel: { status: opts.tunnel } } : {}) }) }
     }
     if (u.includes('/remote/devices') && method === 'GET') {
       return { ok: true, status: 200, json: async () => ({ devices: [] }) }
@@ -156,6 +157,36 @@ describe('RemotePane UI remota', () => {
     expect(offs.length).toBeGreaterThanOrEqual(2)
     expect(String(offs[offs.length - 1].init?.body)).toContain('false')
     wrapper.unmount()
+  })
+
+  it('muestra el estado del túnel y avisa si no hay conexión', async () => {
+    const { fn } = makeFetch({ uiEnabled: true })
+    vi.stubGlobal('fetch', fn)
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+
+    // Sin dato de túnel (daemon antiguo): se muestra '…'.
+    const line = wrapper.find('[data-cy="remote-ui-tunnel"]')
+    expect(line.exists()).toBe(true)
+    expect(line.text()).toContain('…')
+    wrapper.unmount()
+
+    // Túnel conectado: sin aviso.
+    const { fn: fn2 } = makeFetch({ uiEnabled: true, tunnel: 'connected' })
+    vi.stubGlobal('fetch', fn2)
+    const w2 = mount(RemotePane)
+    await flushPromises()
+    expect(w2.find('[data-cy="remote-ui-tunnel"]').text()).toContain('connected')
+    expect(w2.find('[data-cy="remote-ui-tunnel"]').text()).not.toContain('bd.remoteUiTunnelDown')
+    w2.unmount()
+
+    // Túnel caído con UI habilitada: aviso de códigos caducados.
+    const { fn: fn3 } = makeFetch({ uiEnabled: true, tunnel: 'disconnected' })
+    vi.stubGlobal('fetch', fn3)
+    const w3 = mount(RemotePane)
+    await flushPromises()
+    expect(w3.find('[data-cy="remote-ui-tunnel"]').text()).toContain('bd.remoteUiTunnelDown')
+    w3.unmount()
   })
 
   it('ui-code → QR + cuenta atrás + revocar', async () => {

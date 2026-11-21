@@ -634,6 +634,8 @@
         "remoteUiAllow": "Permitir entrar desde internet",
         "remoteUiAllowHint": "Apagado por defecto. Quien opere el relay puede ver lo que haces en la página, así que úsalo solo si confías en él. Puedes cortar el acceso al instante apagando el interruptor o revocando el código.",
         "remoteUiUpdate": "Tu daemon aún no soporta UI remota (faltan /api/v1/remote/ui-*). Actualiza el daemon para usar esta sección.",
+        "remoteUiTunnel": "Túnel con el relay",
+        "remoteUiTunnelDown": "Sin conexión con el relay: los códigos nuevos caducarán en el móvil hasta que el túnel conecte. Revisa tu conexión y que el daemon esté actualizado.",
         "remoteUiOpen": "Generar QR para el móvil",
         "remoteUiOpenHint": "Crea un código de un solo uso y su QR para abrir este BunDeck en el navegador del móvil.",
         "remoteUiUrlLabel": "Enlace para el móvil",

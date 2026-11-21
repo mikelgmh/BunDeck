@@ -37,6 +37,9 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
         url: resolveRelayUrl(db),
         status: remote?.relay?.getState?.() ?? 'unknown',
       },
+      tunnel: {
+        status: remote?.tunnel?.getState?.() ?? 'unknown',
+      },
       pending: listPending(db).length,
       trusted: listDevices(db).filter((d) => !d.revoked).length,
       policy: [...DEFAULT_POLICY],

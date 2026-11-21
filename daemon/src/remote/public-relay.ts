@@ -19,9 +19,16 @@ export interface RelaySettingsLike {
   getSetting: (key: string) => string | null;
 }
 
+/** Valores del setting `remote.relay.url` que desactivan el relay. */
+const DISABLED_VALUES = new Set(['off', 'none', 'disabled']);
+
 /** URL efectiva: env > settings > relay público por defecto. */
 export function resolveRelayUrl(db: RelaySettingsLike): string {
-  return process.env.RELAY_URL ?? db.getSetting('remote.relay.url') ?? DEFAULT_PUBLIC_RELAY_URL;
+  const raw = process.env.RELAY_URL ?? db.getSetting('remote.relay.url') ?? DEFAULT_PUBLIC_RELAY_URL;
+  // Nota: DatabaseService.getSetting coacciona '' a null, así que el
+  // apagado explícito usa centinela ('off'/'none'/'disabled').
+  if (DISABLED_VALUES.has(raw.trim().toLowerCase())) return '';
+  return raw;
 }
 
 /** Token efectivo (puede ser '' en relays públicos). */
