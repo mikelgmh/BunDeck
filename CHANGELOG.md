@@ -1,3 +1,19 @@
+# [1.6.0](https://github.com/mikelgmh/libredeck/compare/v1.5.0...v1.6.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci:** daemon build sin --windows-hide-console fuera de Windows; build:win solo en Windows ([7d0417e](https://github.com/mikelgmh/libredeck/commit/7d0417e4cac994f3e9fd6f284135bb6155c723b6))
+* **ci:** qualify gpui::Window in non-Windows title_chrome stub ([7113a7e](https://github.com/mikelgmh/libredeck/commit/7113a7ed7147077ee7d75baf61cc230bfdcc4595))
+* **ci:** quote step name with colon and install Linux GPUI system deps ([f180ed5](https://github.com/mikelgmh/libredeck/commit/f180ed5847b5e3e1c9f57b1043b165cdee23bc03))
+* **ci:** shell bash en pasos con sintaxis bash para que el build de Windows no use pwsh ([d5af546](https://github.com/mikelgmh/libredeck/commit/d5af54643e097397582b689b339ca476ca6b7547))
+* **ci:** vendor xattr 0.2.3 with Linux ENOATTR fix ([41e3d0a](https://github.com/mikelgmh/libredeck/commit/41e3d0a7217f58d0da6d660676f5fb4d1f6ec68f))
+
+
+### Features
+
+* managed auto-update with signed bundles, wider sidebar ([70ab955](https://github.com/mikelgmh/libredeck/commit/70ab955e4fea57aeaefc6628a5f6d46909a8cd2f))
+
 # [1.5.0](https://github.com/mikelgmh/libredeck/compare/v1.4.0...v1.5.0) (2026-11-21)
 
 
