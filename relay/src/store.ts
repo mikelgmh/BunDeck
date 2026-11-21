@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, accessSync, constants } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export interface DeviceRow {
@@ -27,8 +28,7 @@ export class DeviceStore {
   private db: Database;
 
   constructor(dataDir: string, filename = 'relay.db') {
-    mkdirSync(dataDir, { recursive: true });
-    this.db = new Database(join(dataDir, filename));
+    this.db = openDatabaseWithFallback(dataDir, filename);
     this.db.exec(SCHEMA);
   }
 
@@ -62,4 +62,37 @@ export class DeviceStore {
   close(): void {
     this.db.close();
   }
+}
+
+/**
+ * Abre la SQLite en dataDir; si el volumen no es escribible por el usuario
+ * del contenedor (p.ej. /data montado como root con USER bun), cae a un
+ * directorio temporal escribible en vez de tumbar el relay. El registro de
+ * dispositivos es mínimo y se re-puebla con cada `register`, así que la
+ * degradación es preferible al crash-loop. Nunca lanza.
+ */
+function openDatabaseWithFallback(dataDir: string, filename: string): Database {
+  const tryOpen = (dir: string): Database | null => {
+    try {
+      mkdirSync(dir, { recursive: true });
+      accessSync(dir, constants.W_OK);
+      return new Database(join(dir, filename));
+    } catch {
+      return null;
+    }
+  };
+  const primary = tryOpen(dataDir);
+  if (primary) return primary;
+  const fallbackDir = join(tmpdir(), 'libredeck-relay');
+  const fallback = tryOpen(fallbackDir);
+  if (fallback) {
+    console.warn(
+      `[relay] ${dataDir} no es escribible, usando almacenamiento efímero en ${fallbackDir}. ` +
+        `Revisa los permisos del volumen.`,
+    );
+    return fallback;
+  }
+  // Último recurso: SQLite en memoria (sin persistencia entre reinicios).
+  console.warn('[relay] sin directorio escribible, usando SQLite en memoria.');
+  return new Database(':memory:');
 }
