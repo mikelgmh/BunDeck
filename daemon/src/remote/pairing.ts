@@ -41,9 +41,32 @@ export interface PendingCode {
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const TRUSTED_PREFIX = 'remote.trusted.';
 const PENDING_PREFIX = 'remote.pending.';
+// Tombstones de códigos ya consumidos/caducados: el `pair-accept` acepta
+// códigos desconocidos (flujo entre dos equipos: B acepta el código que ve
+// en la pantalla de A sin tener pending local), pero un código generado
+// localmente es de UN SOLO USO: tras consumirse se marca aquí hasta que
+// habría expirado, para que reutilizarlo devuelva 400 en vez de
+// re-registrar silenciosamente.
+const CONSUMED_PREFIX = 'remote.consumed.';
 
 function trustedKey(id: string): string { return `${TRUSTED_PREFIX}${id}`; }
 function pendingKey(code: string): string { return `${PENDING_PREFIX}${code}`; }
+function consumedKey(code: string): string { return `${CONSUMED_PREFIX}${code}`; }
+
+function markConsumed(db: DatabaseService, code: string): void {
+  try { db.setSetting(consumedKey(code), String(Date.now() + PENDING_TTL_MS)); } catch { /* noop */ }
+}
+
+function checkConsumed(db: DatabaseService, code: string): void {
+  let raw: string | null = null;
+  try { raw = db.getSetting(consumedKey(code)); } catch { return; }
+  if (!raw) return;
+  const until = Number(raw);
+  if (Number.isFinite(until) && until > Date.now()) {
+    throw new Error('Código ya utilizado: genera uno nuevo');
+  }
+  try { db.deleteSetting(consumedKey(code)); } catch { /* noop */ }
+}
 
 function randomCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -98,6 +121,7 @@ export function acceptInvite(
   const code = String(input.code ?? '').trim();
   if (!/^\d{6}$/.test(code)) throw new Error('Código inválido (6 dígitos)');
   if (!input.remoteDeviceId || !input.remotePubKey) throw new Error('Falta identidad remota (deviceId/pubKey)');
+  checkConsumed(db, code);
   const raw = db.getSetting(pendingKey(code));
   let policy: string[] = input.allowedActions ?? [...DEFAULT_POLICY];
   if (raw) {
@@ -105,6 +129,7 @@ export function acceptInvite(
       const p = JSON.parse(raw) as PendingCode;
       if (p.expiresAt < Date.now()) {
         db.deleteSetting(pendingKey(code));
+        markConsumed(db, code);
         throw new Error('Código caducado: genera uno nuevo');
       }
       if (Array.isArray(p.allowedActions) && p.allowedActions.length) policy = p.allowedActions;
@@ -113,6 +138,7 @@ export function acceptInvite(
       // pendiente corrupto: se consume igualmente
     }
     db.deleteSetting(pendingKey(code));
+    markConsumed(db, code);
   }
   const trusted: TrustedDevice = {
     deviceId: input.remoteDeviceId,
@@ -171,6 +197,11 @@ function prunePending(db: DatabaseService): void {
   try {
     const now = Date.now();
     for (const [k, v] of Object.entries(db.getAllSettings())) {
+      if (k.startsWith(CONSUMED_PREFIX)) {
+        const until = Number(v);
+        if (!Number.isFinite(until) || until < now) db.deleteSetting(k);
+        continue;
+      }
       if (!k.startsWith(PENDING_PREFIX)) continue;
       try {
         const p = JSON.parse(v) as PendingCode;

@@ -56,6 +56,35 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     return jsonResponse({ code: pending.code, fingerprint: pending.fingerprint, expiresAt: pending.expiresAt, deviceId: pub.deviceId, publicKey: pub.publicKey });
   }
 
+  if (path === '/api/v1/remote/qr' && method === 'GET') {
+    const pub = publicIdentity(db);
+    const pending = generatePairCode(db, {
+      deviceId: pub.deviceId,
+      pubKey: pub.publicKey,
+      fingerprint: pub.fingerprint,
+    });
+    const relayUrl = process.env.RELAY_URL ?? single(db, 'remote.relay.url') ?? '';
+    const payload = {
+      v: 1,
+      relay: relayUrl,
+      code: pending.code,
+      dev: pub.deviceId,
+      pub: pub.publicKey,
+      fp: pub.fingerprint,
+      exp: pending.expiresAt,
+    };
+    try { services.wsManager?.broadcast('remote.paired', { code: pending.code, expiresAt: pending.expiresAt }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({
+      code: pending.code,
+      fingerprint: pub.fingerprint,
+      deviceId: pub.deviceId,
+      publicKey: pub.publicKey,
+      expiresAt: pending.expiresAt,
+      relayUrl,
+      qr: JSON.stringify(payload),
+    });
+  }
+
   if (path === '/api/v1/remote/pair-accept' && method === 'POST') {
     let body: any = {};
     try { body = await req.json(); } catch { body = {}; }
