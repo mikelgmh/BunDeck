@@ -118,4 +118,16 @@ daemon/dist/
 daemon/web-dist/
 web/dist/
 cli/dist/
+launcher/target/
 installer/
+dist/
+
+# Never commit: compiled executables, Electrobun artifacts, stray data dirs
+*.exe
+build/
+daemon/data/
+web/bun.lock
+web/.astro/dev.json
+web/.astro/content.d.ts
+.agents/
+NUL

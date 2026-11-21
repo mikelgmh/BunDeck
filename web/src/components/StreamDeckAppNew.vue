@@ -29,24 +29,30 @@
       />
 
       <!-- Main Content -->
-      <div class="flex-1 flex flex-col">
+      <div class="flex-1 flex flex-col min-w-0">
         <!-- Toolbar -->
         <Toolbar
           :profiles="profiles"
           :selectedProfile="selectedProfile"
-          :gridCols="gridCols"
-          :gridRows="gridRows"
-          :currentLocale="currentLocale"
           :currentMode="appStore.mode"
           @profile-changed="handleProfileChange"
-          @grid-size-change="changeGridSize"
           @show-qr="showQRModal"
           @show-profile-settings="showProfileSettingsModal"
-          @language-changed="switchLanguage"
+          @show-settings="showSettingsModal"
           @mode-changed="appStore.setMode"
-          @check-updates="showUpdateModal"
-          @streamdeck-connected="handleStreamDeckConnected"
-          @streamdeck-disconnected="handleStreamDeckDisconnected"
+        />
+
+        <!-- Stage Bar: tamaño + páginas en una fila -->
+        <StageBar
+          :gridCols="gridCols"
+          :gridRows="gridRows"
+          :currentPage="currentPage"
+          :pages="currentPages"
+          @grid-size-change="changeGridSize"
+          @page-selected="handlePageSelected"
+          @page-created="handlePageCreated"
+          @page-deleted="handlePageDeleted"
+          @page-renamed="handlePageRenamed"
         />
 
         <!-- StreamDeck Grid -->
@@ -67,21 +73,12 @@
           @grid-size-change="changeGridSize"
           @mode-change="appStore.setMode"
         />
-
-        <!-- Page Navigation -->
-        <PageNavigation
-          :currentPage="currentPage"
-          :pages="currentPages"
-          @page-selected="handlePageSelected"
-          @page-created="handlePageCreated"
-          @page-deleted="handlePageDeleted"
-          @page-renamed="handlePageRenamed"
-        />
       </div>
 
       <!-- Sidebar Derecho - Biblioteca de Acciones -->
       <ActionsRightSidebar 
         :plugins="plugins"
+        @action-selected="addAction"
       />
     </template>
 
@@ -109,9 +106,12 @@
     
     <!-- QR Modal -->
     <QRModal ref="qrModal" />
+
+    <!-- Aviso iOS: pantalla completa solo en Safari -->
+    <IosFullscreenWarningDialog />
     
-    <!-- Profile Settings Modal -->
-    <ProfileSettingsModal 
+    <!-- Profile Settings Drawer -->
+    <ProfileDrawer
       ref="profileSettingsModal"
       :profiles="profiles"
       :selectedProfile="selectedProfile"
@@ -120,9 +120,22 @@
       @profile-updated="handleProfileUpdate"
       @profile-deleted="handleProfileDeleted"
     />
+
+    <!-- App Settings Modal -->
+    <SettingsModal
+      ref="settingsModal"
+      :currentLocale="currentLocale"
+      :showUpdates="hasElectrobunUpdater"
+      @language-changed="switchLanguage"
+      @streamdeck-connected="handleStreamDeckConnected"
+      @streamdeck-disconnected="handleStreamDeckDisconnected"
+      @check-updates="showUpdateModal"
+    />
     
-    <!-- Update Modal -->
+    <!-- Update Modal (solo bajo Electrobun: el daemon devuelve 501 en
+      /api/v1/version/check y /api/v1/update; Electrobun Updater es canónico) -->
     <UpdateModal 
+      v-if="hasElectrobunUpdater"
       ref="updateModal"
       :currentVersion="currentVersion"
       :latestVersion="latestVersion"
@@ -146,12 +159,14 @@ import { useI18nStore } from '../composables/useI18n'
 import { Edit, Grid3x3 } from 'lucide-vue-next'
 import Sidebar from './Sidebar.vue'
 import Toolbar from './Toolbar.vue'
+import StageBar from './StageBar.vue'
 import StreamDeckGrid from './StreamDeckGrid.vue'
 import ActionsRightSidebar from './ActionsRightSidebar.vue'
 import QRModal from './QRModal.vue'
+import IosFullscreenWarningDialog from './IosFullscreenWarningDialog.vue'
 import UpdateModal from './UpdateModal.vue'
-import ProfileSettingsModal from './ProfileSettingsModal.vue'
-import PageNavigation from './PageNavigation.vue'
+import ProfileDrawer from './ProfileDrawer.vue'
+import SettingsModal from './SettingsModal.vue'
 
 // Configurar Pinia
 const app = createApp({})
@@ -177,8 +192,11 @@ const handleLanguageChange = (event: Event) => {
 // QR Modal ref
 const qrModal = ref<InstanceType<typeof QRModal> | null>(null)
 
-// Profile Settings Modal ref
-const profileSettingsModal = ref<InstanceType<typeof ProfileSettingsModal> | null>(null)
+// Profile Drawer ref
+const profileSettingsModal = ref<InstanceType<typeof ProfileDrawer> | null>(null)
+
+// Settings modal ref
+const settingsModal = ref<InstanceType<typeof SettingsModal> | null>(null)
 
 // Update Modal ref
 const updateModal = ref<InstanceType<typeof UpdateModal> | null>(null)
@@ -191,7 +209,13 @@ const showProfileSettingsModal = () => {
   profileSettingsModal.value?.showModal()
 }
 
+const showSettingsModal = () => {
+  settingsModal.value?.show()
+}
+
 const showUpdateModal = async () => {
+  // Sin Electrobun no hay updater disponible (daemon devuelve 501): no-op.
+  if (!hasElectrobunUpdater) return
   // Check for updates first to get latest version info
   await checkForUpdates()
   // Always show the modal, even if no update is available
@@ -219,6 +243,8 @@ const getCurrentVersion = async () => {
 }
 
 const checkForUpdates = async () => {
+  // Sin Electrobun no hay updater disponible (daemon devuelve 501): no-op.
+  if (!hasElectrobunUpdater) return
   isCheckingUpdate.value = true
   try {
     const daemonUrl = `http://${window.location.hostname}:3001/api/v1/version/check`
@@ -247,6 +273,8 @@ const checkForUpdates = async () => {
 }
 
 const startUpdate = async () => {
+  // Sin Electrobun no hay updater disponible (daemon devuelve 501): no-op.
+  if (!hasElectrobunUpdater) return
   isUpdating.value = true
   updateResult.value = null
   try {
@@ -286,6 +314,10 @@ const stopPeriodicUpdateCheck = () => {
 }
 
 // Update system state
+// Updates are managed by the Electrobun Updater (canonical). The legacy daemon
+// endpoints return 501, so the whole update UI stays hidden in normal web builds
+// and is only enabled when running inside Electrobun (window.electrobun present).
+const hasElectrobunUpdater = typeof window !== 'undefined' && !!(window as any).electrobun
 const currentVersion = ref<string>('')
 const latestVersion = ref<string>('')
 const updateInfo = ref<any>(null)
@@ -498,16 +530,19 @@ onMounted(async () => {
     }
   })
   
-  // Initialize update system
-  await getCurrentVersion()
-  await checkForUpdates()
-  startPeriodicUpdateCheck()
+  // Initialize update system (solo bajo Electrobun; en web normal el
+  // daemon devuelve 501 y la UI de updates está oculta)
+  if (hasElectrobunUpdater) {
+    await getCurrentVersion()
+    await checkForUpdates()
+    startPeriodicUpdateCheck()
 
-  // Listen for update completion events
-  window.addEventListener('update-completed', (event: any) => {
-    updateResult.value = event.detail
-    isUpdating.value = false
-  })
+    // Listen for update completion events
+    window.addEventListener('update-completed', (event: any) => {
+      updateResult.value = event.detail
+      isUpdating.value = false
+    })
+  }
 })
 
 onUnmounted(() => {

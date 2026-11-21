@@ -18,10 +18,10 @@
                 v-for="profile in profiles"
                 :key="profile.id"
                 :class="[
-                  'p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-base-200',
+                  'p-3 rounded-xl cursor-pointer transition-[background-color,border-color,color] duration-150 border',
                   selectedProfileId === profile.id
-                    ? 'bg-primary text-primary-content shadow-md'
-                    : 'bg-base-200 text-base-content'
+                    ? 'bg-base-300 border-base-content/15 text-base-content'
+                    : 'bg-base-200 border-transparent text-base-content hover:bg-base-300/60'
                 ]"
                 @click="selectProfile(profile.id)"
               >

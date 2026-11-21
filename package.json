@@ -4,23 +4,32 @@
   "description": "LibreDeck - Open Source StreamDeck Alternative",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"bun run dev:daemon\" \"bun run dev:web\"",
+    "dev": "concurrently \"bun run dev:daemon\" \"bun run dev:web\" \"bun run dev:launcher:open\"",
     "dev:daemon": "cd daemon && bun run dev",
     "dev:web": "cd web && npm run dev",
+    "dev:launcher:open": "bun scripts/open-launcher.ts",
+    "dev:electrobun": "electrobun dev",
+    "dev:electrobun:hybrid": "concurrently \"bun run dev:web\" \"electrobun dev\"",
+    "dev:hybrid": "concurrently \"bun run dev:daemon\" \"bun run dev:web\"",
+    "dev:lan": "bun run dev",
     "build": "bun run build:daemon && bun run build:web && bun run build:cli",
     "build:daemon": "cd daemon && bun run build",
     "build:web": "cd web && npm run build",
     "build:cli": "cd cli && bun run build",
+    "build:electrobun": "electrobun build",
+    "build:electrobun:stable": "electrobun build --env=stable",
     "install:all": "bun run install:daemon && bun run install:web && bun run install:cli",
     "install:daemon": "cd daemon && bun install",
     "install:web": "cd web && npm install",
     "install:cli": "cd cli && bun install",
     "start": "cd daemon && bun run start",
-    "test": "bun run test:daemon && bun run test:web",
+    "test": "bun run test:daemon && bun run test:web && bun run test:host && bun run test:cli",
     "test:daemon": "cd daemon && bun run test",
     "test:web": "cd web && npm run test",
-    "test:e2e:open": "start-server-and-test 'bun run dev' http://localhost:4321 'cd web && npm run test:e2e:open'",
-    "test:e2e": "start-server-and-test 'bun run dev' http://localhost:4321 'cd web && npm run test:e2e'",
+    "test:host": "bun test src/bun/",
+    "test:cli": "cd cli && bun run test",
+    "test:e2e:open": "start-server-and-test 'bun run dev' http://localhost:4321 'wait-on http://localhost:3001/health && cd web && npm run test:e2e:open'",
+    "test:e2e": "start-server-and-test 'bun run dev' http://localhost:4321 'wait-on http://localhost:3001/health && cd web && npm run test:e2e'",
     "test:coverage": "bun run test:coverage:daemon && bun run test:coverage:web",
     "test:coverage:daemon": "cd daemon && bun run test:coverage",
     "test:coverage:web": "cd web && npm run test:coverage",
@@ -28,15 +37,17 @@
     "lint:daemon": "cd daemon && bun run lint",
     "lint:web": "cd web && npm run lint",
     "clean": "rm -rf daemon/dist web/dist cli/dist data/db.sqlite*",
+    "dev:launcher": "cd launcher && cargo run",
+    "build:launcher": "cd launcher && cargo build --release",
     "release": "semantic-release"
   },
   "devDependencies": {
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.2",
-    "concurrently": "^8.2.2",
-    "semantic-release": "^25.0.2",
-    "start-server-and-test": "^2.0.3"
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "concurrently": "^10.0.5",
+    "semantic-release": "^25.0.9",
+    "start-server-and-test": "^3.0.12"
   },
   "keywords": [
     "streamdeck",
@@ -51,8 +62,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "daisyui": "^5.5.5",
-    "systray": "^1.0.5",
-    "trayicon": "^1.2.2"
+    "daisyui": "^5.7.34",
+    "electrobun": "^1.18.1"
   }
 }

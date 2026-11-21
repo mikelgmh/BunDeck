@@ -45,7 +45,7 @@ WebSocket Events ←→ Action Execution
 ### Port Configuration
 
 - Daemon API: `3001` (configurable via `PORT`)
-- WebSocket: `3002` (configurable via `WS_PORT`)
+- WebSocket: `3003` (configurable via `WS_PORT`)
 - Frontend dev: `4321` (Astro dev server)
 
 ### Development Loop

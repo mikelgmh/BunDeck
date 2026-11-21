@@ -33,12 +33,48 @@ export interface ButtonData {
     textColor: string
     actions: ActionConfig[]
     backgroundImage?: string
+    showTitle?: boolean
+    mode?: 'seq' | 'par' | 'alt'
+    longPress?: string
+    confirm?: boolean
+    rules?: KeyRule[]
+    looks?: KeyLook[]
 }
 
 export interface ActionConfig {
     id: string
-    type: ActionType
+    type: string
+    pluginId?: string | null
     parameters: Record<string, any>
+    waitMs?: number
 }
 
-export type ActionType = 'shell' | 'http' | 'hotkey' | 'multimedia' | 'page'
+/** Regla de tecla: disparador + condición + ramas entonces/si-no. */
+export interface KeyRule {
+    id: string
+    on: boolean
+    when: 'press' | 'long' | 'load' | 'timer' | 'var'
+    every?: number
+    vn?: string
+    cond?: string
+    then: ActionConfig[]
+    else: ActionConfig[]
+}
+
+/** Apariencia condicional: la primera condición que se cumple manda. */
+export interface KeyLook {
+    cond: string
+    t?: string
+    i?: string
+    c?: number | null
+    bg?: number
+}
+
+/** Variable global usable en condiciones y textos {{nombre}}. */
+export interface VarDef {
+    n: string
+    t: 'num' | 'txt' | 'bool'
+    v: number | string | boolean
+}
+
+export type ActionType = string

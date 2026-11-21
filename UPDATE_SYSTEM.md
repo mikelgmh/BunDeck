@@ -1,6 +1,14 @@
-# LibreDeck Auto-Update System
+# LibreDeck Auto-Update System (DEPRECATED — Electrobun Updater is canonical)
 
-## Overview
+> **Estado actual**: el flujo GitHub-ZIP descrito abajo fue eliminado en la
+> limpieza de obsoletos. El updater canónico es el **Electrobun `Updater`**
+> en `src/bun/index.ts` (artefactos en `.../releases/latest/download` según
+> `electrobun.config.ts`). `daemon/src/update.ts` ya no existe;
+> `GET /api/v1/version/check` y `POST /api/v1/update` devuelven `501 Gone`.
+> Solo `GET /api/v1/version` (lectura) sigue activo.
+> Lo que sigue es documentación histórica, no el comportamiento vigente.
+
+## Overview (histórico)
 
 LibreDeck includes a built-in automatic update system that can download, install, and restart the application when new versions are available on GitHub.
 

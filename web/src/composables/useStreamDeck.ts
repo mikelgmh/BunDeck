@@ -14,6 +14,22 @@ export function useStreamDeck() {
   const currentPages = ref<PageData[]>([])
   const currentButtons = ref<ButtonEntity[]>([])
   const plugins = ref<any[]>([])
+  // Gestor de plugins (detalle para instalar/activar/actualizar)
+  const pluginsDetailed = ref<any[]>([])
+  const marketplace = ref<any[]>([])
+  const marketplaceRegistry = ref<string | null>(null)
+  const pluginsLoading = ref(false)
+
+  // Progreso de instalación en vivo (lo emite el daemon por WS)
+  const installProgress = ref<{ key: string; stage: string; message: string } | null>(null)
+  let installProgressTimer: ReturnType<typeof setTimeout> | null = null
+  const clearInstallProgress = () => {
+    installProgress.value = null
+    if (installProgressTimer) {
+      clearTimeout(installProgressTimer)
+      installProgressTimer = null
+    }
+  }
 
   // Grid State
   const gridCols = ref(5)
@@ -37,7 +53,13 @@ export function useStreamDeck() {
     icon: '',
     backgroundColor: '#374151',
     textColor: '#f1f5f9',
-    actions: []
+    showTitle: true,
+    mode: 'seq',
+    longPress: 'none',
+    confirm: false,
+    actions: [],
+    rules: [],
+    looks: []
   })
 
   // WebSocket
@@ -49,12 +71,12 @@ export function useStreamDeck() {
   // Flag to prevent infinite loops when receiving profile change broadcasts
   const isRemoteProfileChange = ref(false)
 
-  // Get dynamic base URLs based on current host
-  const config = ref({ wsPort: 3002, apiPort: 3001, frontendPort: 4321 });
+  // Get dynamic base URLs based on current host — puertos centralizados (API 3001, WS 3003, Frontend 3002, Astro 4321)
+  const config = ref({ wsPort: 3003, apiPort: 3001, frontendPort: 3002 });
 
   const loadConfig = async () => {
     try {
-      // En modo dev, hacer fetch al daemon directamente
+      // En modo dev, hacer fetch al daemon directamente (API 3001)
       const configUrl = typeof window !== 'undefined' && window.location.port !== '3001'
         ? 'http://localhost:3001/config'
         : '/config';
@@ -82,7 +104,7 @@ export function useStreamDeck() {
       const hostname = window.location.hostname
       return `${protocol}//${hostname}:${config.value.wsPort}`
     }
-    return 'ws://localhost:3002'
+    return 'ws://localhost:3003'
   }
 
   const getFrontendUrl = () => {
@@ -106,6 +128,57 @@ export function useStreamDeck() {
   const isChangingButton = ref(false)
   const isSaving = ref(false)
   const isSwapping = ref(false)
+
+  // La tecla seleccionada se sigue por ID de botón, no solo por posición:
+  // si el botón se mueve (drag & drop) y luego se edita, la edición debe ir
+  // al botón que estamos editando (su id), no al que ocupaba esa posición.
+  const selectedButtonId = ref<string | null>(null)
+
+  // Ecos propios por WebSocket: cada mutación lleva un mutationId que el
+  // daemon reenvía en el broadcast. Al recibir nuestro propio eco lo
+  // ignoramos (el estado local optimista ya está al día) en vez de recargar
+  // desde la BD y "rebotar" la tecla a su posición anterior.
+  const pendingMutations = new Set<string>()
+  const newMutationId = (): string =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const trackMutation = (id: string): string => {
+    pendingMutations.add(id)
+    // TTL por si el eco nunca llega (desconexión a mitad): no crecer sin cota.
+    setTimeout(() => pendingMutations.delete(id), 10000)
+    return id
+  }
+  const isOwnEcho = (payload: any): boolean => {
+    const mid = payload?.mutationId
+    if (typeof mid === 'string' && pendingMutations.has(mid)) {
+      pendingMutations.delete(mid)
+      return true
+    }
+    return false
+  }
+
+  // Guarda de swaps/reorders en curso (contador, no timeout arbitrario):
+  // mientras haya persistencia de swaps encolada se ignoran los broadcasts
+  // (llegan también los ecos tardíos, cubiertos además por mutationId).
+  let swapDepth = 0
+  const enterSwap = () => {
+    swapDepth += 1
+    isSwapping.value = true
+  }
+  const exitSwap = () => {
+    swapDepth = Math.max(0, swapDepth - 1)
+    if (swapDepth === 0) isSwapping.value = false
+  }
+
+  // Época de los botones (UI optimista): cada mutación local la incrementa.
+  // loadButtons descarta respuestas que empezaron antes de la última mutación:
+  // un GET viejo que resuelva tarde ya no puede "rebotar" el grid a sitios
+  // anteriores. Todo sigue siendo asíncrono, nada bloquea.
+  let buttonsEpoch = 0
+  const bumpButtonsEpoch = () => {
+    buttonsEpoch += 1
+  }
 
   // Computed properties
   const getButtonData = computed(() => (position: number) => {
@@ -142,7 +215,13 @@ export function useStreamDeck() {
       emoji: '',
       backgroundColor: '#374151',
       textColor: '#f1f5f9',
-      actions: []
+      showTitle: true,
+      mode: 'seq',
+      longPress: 'none',
+      confirm: false,
+      actions: [],
+      rules: [],
+      looks: []
     }
 
     // Check for dynamic values (any plugin with dynamic actions)
@@ -180,13 +259,25 @@ export function useStreamDeck() {
   }
 
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
+    // Timeout de seguridad: ningún fetch debe colgarse para siempre
+    // (dejaría la UI bloqueada en estados de carga). 30 s es generoso.
+    const { signal: callerSignal, ...rest } = options
     const response = await fetch(`${API_BASE.value}${endpoint}`, {
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-      ...options
+      headers: { 'Content-Type': 'application/json', ...rest.headers },
+      ...rest,
+      signal: callerSignal ?? AbortSignal.timeout(30000)
     })
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`)
+      let detail = ''
+      try {
+        const txt = await response.text()
+        try {
+          const j = JSON.parse(txt)
+          detail = String((j as any)?.error ?? txt)
+        } catch { detail = txt }
+      } catch {}
+      throw new Error(detail || `API Error: ${response.status}`)
     }
 
     return response.json()
@@ -267,17 +358,26 @@ export function useStreamDeck() {
               currentPage.value = null
               currentButtons.value = []
               selectedButton.value = null
+              selectedButtonId.value = null
             }
           }
         }
         break
       case 'button.created':
+        if (isOwnEcho(message.payload)) {
+          console.log('🔇 Ignoring own button.created echo (optimistic state already synced)')
+          break
+        }
         if (currentPage.value && !isSwapping.value) {
           console.log('🔌 Button created via WebSocket, reloading...')
           loadButtons()
         }
         break
       case 'button.updated':
+        if (isOwnEcho(message.payload)) {
+          console.log('🔇 Ignoring own button.updated echo (optimistic state already synced)')
+          break
+        }
         if (currentPage.value && !isSwapping.value) {
           console.log('🔌 Button updated via WebSocket, checking if should reload...')
           // Only reload if not currently swapping
@@ -286,7 +386,29 @@ export function useStreamDeck() {
           console.log('🚫 Ignoring WebSocket button update during swap')
         }
         break
+      case 'buttons.reordered': {
+        // Reordenado atómico: si es el eco de nuestro propio swap (mutationId
+        // pendiente) se ignora — el estado local optimista ya está al día y
+        // recargar aquí es lo que hacía "rebotar" la tecla a su sitio viejo.
+        // Si viene de otro cliente, recargar la página actual.
+        if (isOwnEcho(message.payload)) {
+          console.log('🔇 Ignoring own buttons.reordered echo (optimistic state already synced)')
+          break
+        }
+        const reorderedPageId = (message.payload as any)?.pageId
+        if (currentPage.value && reorderedPageId === currentPage.value.id && !isSwapping.value) {
+          console.log('🔌 Buttons reordered via WebSocket, reloading...')
+          loadButtons()
+        } else if (isSwapping.value) {
+          console.log('🚫 Ignoring WebSocket buttons reorder during swap (local state already synced)')
+        }
+        break
+      }
       case 'button.deleted':
+        if (isOwnEcho(message.payload)) {
+          console.log('🔇 Ignoring own button.deleted echo (optimistic state already synced)')
+          break
+        }
         if (currentPage.value && !isSwapping.value) {
           loadButtons()
         }
@@ -354,6 +476,47 @@ export function useStreamDeck() {
             detail: message.payload
           }));
         }
+        break
+      case 'plugin.install-progress':
+        installProgress.value = {
+          key: String(message.payload?.key ?? ''),
+          stage: String(message.payload?.stage ?? ''),
+          message: String(message.payload?.message ?? '')
+        }
+        // Limpia el cartel unos segundos después de terminar (el error se queda hasta descartarlo)
+        if (installProgressTimer) clearTimeout(installProgressTimer)
+        if (['done'].includes(installProgress.value.stage)) {
+          installProgressTimer = setTimeout(() => { installProgress.value = null }, 6000)
+        }
+        break
+      case 'plugin.status': {
+        // Red de seguridad: si el daemon emite error/éxito sin
+        // install-progress (p. ej. enable fallido), reflejarlo en el cartel
+        // para no quedarse colgado en "Arrancando…".
+        const pid = String(message.payload?.pluginId ?? '')
+        const st = String(message.payload?.status ?? '')
+        if (pid && installProgress.value && installProgress.value.key === pid && !['done', 'error'].includes(installProgress.value.stage)) {
+          if (st === 'error' || st === 'elgato-stopped') {
+            installProgress.value = {
+              key: pid,
+              stage: 'error',
+              message: String(message.payload?.error ?? message.payload?.status ?? 'Error al arrancar')
+            }
+          } else if (st === 'active') {
+            installProgress.value = { key: pid, stage: 'done', message: 'Plugin activo' }
+            if (installProgressTimer) clearTimeout(installProgressTimer)
+            installProgressTimer = setTimeout(() => { installProgress.value = null }, 6000)
+          }
+        }
+        loadPlugins()
+        break
+      }
+      case 'plugin.installed':
+      case 'plugin.uninstalled':
+      case 'plugin.enabled':
+      case 'plugin.settings':
+        // Algo cambió en los plugins: recarga listas y acciones
+        loadPlugins()
         break
     }
   }
@@ -462,6 +625,7 @@ export function useStreamDeck() {
       currentPage.value = null
       currentButtons.value = []
       selectedButton.value = null
+      selectedButtonId.value = null
       return
     }
 
@@ -555,24 +719,161 @@ export function useStreamDeck() {
 
   const loadPlugins = async () => {
     try {
+      pluginsLoading.value = true
       const pluginData = await apiRequest('/plugins/actions')
       plugins.value = pluginData
       console.log('🔌 Loaded plugins:', plugins.value)
+      try {
+        const mgr = await apiRequest('/plugins')
+        pluginsDetailed.value = mgr.detailed ?? []
+      } catch (e) {
+        console.warn('Plugin manager detail unavailable:', e)
+      }
     } catch (error) {
       console.error('Failed to load plugins:', error)
+    } finally {
+      pluginsLoading.value = false
     }
   }
 
-  const loadButtons = async () => {
+  /** Activa/desactiva un plugin (el estado gobierna la carga en el daemon). */
+  const setPluginEnabled = async (pluginId: string, enabled: boolean) => {
+    await apiRequest(`/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled })
+    })
+    await loadPlugins()
+  }
+
+  const removePlugin = async (pluginId: string) => {
+    await apiRequest(`/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' })
+    await loadPlugins()
+  }
+
+  const reloadPlugin = async (pluginId: string) => {
+    await apiRequest(`/plugins/${encodeURIComponent(pluginId)}/reload`, { method: 'POST' })
+    await loadPlugins()
+  }
+
+  const rollbackPlugin = async (pluginId: string) => {
+    await apiRequest(`/plugins/${encodeURIComponent(pluginId)}/rollback`, { method: 'POST' })
+    await loadPlugins()
+  }
+
+  const updatePlugin = async (pluginId: string, source: any = {}) => {
+    await apiRequest(`/plugins/${encodeURIComponent(pluginId)}/update`, {
+      method: 'POST',
+      body: JSON.stringify(source)
+    })
+    await loadPlugins()
+  }
+
+  const uploadPluginFile = async (file: File, force = false) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (force) form.append('force', 'true')
+    const res = await fetch(`${API_BASE.value}/plugins/upload`, { method: 'POST', body: form })
+    if (!res.ok) {
+      const txt = await res.text()
+      throw new Error(txt || `Upload failed: ${res.status}`)
+    }
+    await loadPlugins()
+    return res.json()
+  }
+
+  const installPluginFromUrl = async (url: string, opts: any = {}) => {
+    const res = await apiRequest('/plugins/install', {
+      method: 'POST',
+      body: JSON.stringify({ url, ...opts })
+    })
+    await loadPlugins()
+    return res
+  }
+
+  const loadMarketplace = async () => {
+    try {
+      const data = await apiRequest('/marketplace')
+      marketplace.value = data.plugins ?? []
+      marketplaceRegistry.value = data.registryUrl ?? null
+    } catch (e) {
+      console.error('Failed to load marketplace:', e)
+      marketplace.value = []
+    }
+  }
+
+  // ---- Servidor MCP (el daemon ES el servidor): tokens de acceso ----
+  const mcpTokens = ref<any[]>([])
+  const mcpScopes = ref<Array<{ id: string; group: string }>>([])
+  const loadMcpTokens = async () => {
+    try {
+      const data = await apiRequest('/mcp/tokens')
+      mcpTokens.value = data.tokens ?? []
+    } catch (e) {
+      console.error('Failed to load MCP tokens:', e)
+      mcpTokens.value = []
+    }
+  }
+  const loadMcpScopes = async () => {
+    try {
+      const data = await apiRequest('/mcp/scopes')
+      mcpScopes.value = data.scopes ?? []
+    } catch (e) {
+      console.error('Failed to load MCP scopes:', e)
+      mcpScopes.value = []
+    }
+  }
+  /** Crea un token; devuelve { token, secret }. El secreto solo se muestra una vez. */
+  const createMcpToken = async (name: string, scopes?: string[]) => {
+    const data = await apiRequest('/mcp/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name, ...(scopes !== undefined ? { scopes } : {}) })
+    })
+    await loadMcpTokens()
+    return data as { token: any; secret: string }
+  }
+  /** Edita nombre y/o scopes de un token. */
+  const updateMcpToken = async (id: string, patch: { name?: string; scopes?: string[] }) => {
+    const data = await apiRequest(`/mcp/tokens/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch)
+    })
+    await loadMcpTokens()
+    return data
+  }
+  const revokeMcpToken = async (id: string) => {
+    await apiRequest(`/mcp/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await loadMcpTokens()
+  }
+
+  const loadButtons = async (opts?: { force?: boolean }) => {
     if (!currentPage.value) {
       console.log('⚠️ No current page selected, cannot load buttons')
       return
     }
 
+    const pageId = currentPage.value.id
+    const epoch = buttonsEpoch
     try {
-      const buttons = await apiRequest(`/buttons?pageId=${currentPage.value.id}`)
+      const buttons = await apiRequest(`/buttons?pageId=${pageId}`)
+      if (!opts?.force && epoch !== buttonsEpoch) {
+        // Respuesta stale: mientras volaba hubo mutaciones optimistas locales
+        // más nuevas. Aplicarla rebotaría el grid → se descarta (no bloquea).
+        console.log('🔄 Discarding stale buttons response (local optimistic state is newer)')
+        return
+      }
+      // La página pudo cambiar mientras volaba la petición
+      if (!currentPage.value || currentPage.value.id !== pageId) {
+        console.log('🔄 Discarding buttons response (page changed meanwhile)')
+        return
+      }
       currentButtons.value = buttons
       console.log(`🔘 Loaded ${buttons.length} buttons for page ${currentPage.value.name}`)
+      // La selección sigue al botón por ID tras recargar
+      if (selectedButtonId.value) {
+        const sel = currentButtons.value.find((b) => b.id === selectedButtonId.value)
+        selectedButton.value = sel ? sel.position : null
+        if (!sel) selectedButtonId.value = null
+      }
     } catch (error) {
       console.error('Failed to load buttons:', error)
       currentButtons.value = []
@@ -611,8 +912,9 @@ export function useStreamDeck() {
       }
     }
 
-    selectedButton.value = position
     const button = getButton(position)
+    selectedButton.value = position
+    selectedButtonId.value = button?.id ?? null
     console.log('Selected button at position:', position, 'Found button:', button)
 
     if (button) {
@@ -625,7 +927,13 @@ export function useStreamDeck() {
         emoji: button.data?.emoji || '',
         backgroundColor: button.data?.backgroundColor || '#374151',
         textColor: button.data?.textColor || '#f1f5f9',
-        actions: button.data?.actions ? JSON.parse(JSON.stringify(button.data.actions)) : []
+        showTitle: button.data?.showTitle !== false,
+        mode: button.data?.mode || 'seq',
+        longPress: button.data?.longPress || 'none',
+        confirm: !!button.data?.confirm,
+        actions: button.data?.actions ? JSON.parse(JSON.stringify(button.data.actions)) : [],
+        rules: button.data?.rules ? JSON.parse(JSON.stringify(button.data.rules)) : [],
+        looks: button.data?.looks ? JSON.parse(JSON.stringify(button.data.looks)) : []
       }
 
       // Fix legacy PC Vitals actions that have pluginId: null
@@ -650,15 +958,25 @@ export function useStreamDeck() {
         emoji: '',
         backgroundColor: '#374151',
         textColor: '#f1f5f9',
-        actions: []
+        showTitle: true,
+        mode: 'seq',
+        longPress: 'none',
+        confirm: false,
+        actions: [],
+        rules: [],
+        looks: []
       }
     }
 
-    // Restart dynamic updates to include/exclude the newly selected button
-    await startDynamicUpdates()
+    // Restart dynamic updates to include/exclude the newly selected button.
+    // Sin bloquear: la selección debe ser instantánea aunque haya botones
+    // dinámicos (cada uno dispara un /actions/execute). Todo asíncrono.
+    void startDynamicUpdates()
 
-    // Update StreamDeck buttons to reflect the current state
-    await updateStreamDeckButtons()
+    // NOTA: no repintar el HW aquí. Seleccionar una tecla no cambia su
+    // contenido (el daemon ya repinta tras cada PUT/DELETE/reorder). Hacer
+    // un repintado completo (15-32 teclas con render+USB) en cada clic era
+    // lo que dejaba el StreamDeck "eterno" al moverse por el grid.
   }
 
   const executeButton = async (position: number) => {
@@ -702,33 +1020,70 @@ export function useStreamDeck() {
     try {
       console.log('🗑️ Deleting button at position:', position, 'Button ID:', button.id)
 
+      const mutationId = trackMutation(newMutationId())
       await apiRequest(`/buttons/${button.id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        body: JSON.stringify({ mutationId })
       })
 
       console.log('✅ Button deleted successfully')
 
       // If this was the selected button, deselect it
-      if (selectedButton.value === position) {
+      if (selectedButtonId.value === button.id || selectedButton.value === position) {
         selectedButton.value = null
+        selectedButtonId.value = null
       }
 
-      // Reload buttons to update UI
-      await loadButtons()
+      // Sincronización local sin recargar: un loadButtons aquí pisaría
+      // swaps optimistas en vuelo y haría "rebotar" el grid. El eco propio
+      // por WS se ignora por mutationId; lo ajeno sí recarga.
+      const index = currentButtons.value.findIndex(b => b.id === button.id)
+      if (index > -1) {
+        currentButtons.value.splice(index, 1)
+      }
+      bumpButtonsEpoch()
     } catch (error) {
       console.error('❌ Failed to delete button:', error)
+      // Reconciliar con la BD si el borrado falló.
+      await loadButtons({ force: true })
     }
+  }
+
+  // Resuelve el botón que se está editando POR ID, no por posición: si el
+  // botón se movió (drag & drop) después de seleccionarlo, la edición debe
+  // seguir al botón (su id), no quedarse en la posición vieja.
+  const getEditingButton = (): ButtonEntity | undefined => {
+    if (selectedButtonId.value) {
+      const byId = currentButtons.value.find((b) => b.id === selectedButtonId.value)
+      if (byId) return byId
+    }
+    return selectedButton.value !== null ? getButton(selectedButton.value) : undefined
   }
 
   // Button configuration functions
   const saveButtonConfig = async () => {
-    if (selectedButton.value === null || !currentPage.value) {
-      isSaving.value = false
+    // Si hay un autosave pendiente y guardamos ahora (p.ej. Vaciar),
+    // cancelarlo: este guardado ya lleva la data más reciente.
+    if (saveTimeout.value) {
+      clearTimeout(saveTimeout.value)
+      saveTimeout.value = null
+    }
+    // Si ya hay un guardado en vuelo, reprogramar en vez de perder el cambio.
+    if (isSaving.value) {
+      debouncedSave()
       return
     }
+    if (selectedButton.value === null || !currentPage.value) {
+      return
+    }
+    isSaving.value = true
 
+    // Editar por ID: el botón seleccionado puede haberse movido de posición
+    // (drag & drop) después de seleccionarlo. Resolver por id garantiza que
+    // el PUT/DELETE va al botón que se está editando, no al ocupante actual
+    // de la posición vieja.
     const position = selectedButton.value
-    const existingButton = getButton(position)
+    const existingButton = getEditingButton()
 
     // Only save if there's actual content to save
     const hasContent = buttonConfig.value.label?.trim() ||
@@ -736,7 +1091,9 @@ export function useStreamDeck() {
       buttonConfig.value.textBottom?.trim() ||
       buttonConfig.value.emoji?.trim() ||
       buttonConfig.value.icon?.trim() ||
-      buttonConfig.value.actions.length > 0
+      buttonConfig.value.actions.length > 0 ||
+      (buttonConfig.value.rules?.length ?? 0) > 0 ||
+      (buttonConfig.value.looks?.length ?? 0) > 0
 
     console.log('💾 Saving button at position:', position, 'Existing:', !!existingButton, 'HasContent:', hasContent)
 
@@ -745,22 +1102,30 @@ export function useStreamDeck() {
         if (hasContent) {
           // Update existing button
           console.log('📝 Updating button', existingButton.id, 'with data:', buttonConfig.value)
+          const mutationId = trackMutation(newMutationId())
           await apiRequest(`/buttons/${existingButton.id}`, {
             method: 'PUT',
-            body: JSON.stringify({ data: buttonConfig.value })
+            body: JSON.stringify({ data: buttonConfig.value, mutationId })
           })
 
           // Update local data
           existingButton.data = { ...buttonConfig.value }
+          bumpButtonsEpoch()
           console.log('✅ Button updated successfully')
+
+          // La selección sigue al botón por si se movió (drag & drop).
+          selectedButtonId.value = existingButton.id
+          selectedButton.value = existingButton.position
 
           // Force reactivity update
           await nextTick()
         } else {
           // Delete button if no content
           console.log('🗑️ Deleting button', existingButton.id, 'because no content')
+          const mutationId = trackMutation(newMutationId())
           await apiRequest(`/buttons/${existingButton.id}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            body: JSON.stringify({ mutationId })
           })
 
           // Remove from local data
@@ -768,21 +1133,27 @@ export function useStreamDeck() {
           if (index > -1) {
             currentButtons.value.splice(index, 1)
           }
+          bumpButtonsEpoch()
+          selectedButtonId.value = null
           console.log('✅ Button deleted successfully')
         }
       } else if (hasContent) {
         // Create new button only if there's content
         console.log('➕ Creating new button at position', position, 'with data:', buttonConfig.value)
+        const mutationId = trackMutation(newMutationId())
         const newButton = await apiRequest('/buttons', {
           method: 'POST',
           body: JSON.stringify({
             page_id: currentPage.value.id,
             position,
-            data: buttonConfig.value
+            data: buttonConfig.value,
+            mutationId
           })
         })
 
         currentButtons.value.push(newButton)
+        selectedButtonId.value = newButton.id
+        bumpButtonsEpoch()
         console.log('✅ Button created:', newButton.id, 'Data:', newButton)
       } else {
         // No content and no existing button - nothing to do
@@ -793,8 +1164,9 @@ export function useStreamDeck() {
       dynamicButtonValues.value.delete(position)
       console.log('🧹 Cleared dynamic values for position', position, 'to force refresh')
 
-      // Restart dynamic updates to include/exclude the newly saved button
-      await startDynamicUpdates()
+      // Restart dynamic updates to include/exclude the newly saved button.
+      // Sin bloquear: el guardado ya terminó desde el punto de vista de la UI.
+      void startDynamicUpdates()
     } catch (error) {
       console.error('❌ Failed to save button:', error)
     } finally {
@@ -804,39 +1176,14 @@ export function useStreamDeck() {
 
   // Action management functions
   const addAction = (type: string) => {
-    // Find the plugin that has this action type
-    let pluginId = null
-    for (const plugin of plugins.value) {
-      const [pid, pluginData] = plugin
-      // For full action types like 'pc-vitals.monitor', check if the plugin ID matches the prefix
-      if (type.includes('.')) {
-        const [pluginPrefix, actionId] = type.split('.')
-        if (pid === pluginPrefix && pluginData.actions && pluginData.actions.some((action: any) => action[0] === actionId)) {
-          pluginId = pid
-          break
-        }
-      } else {
-        // For simple action types, check direct match
-        if (pluginData.actions && pluginData.actions.some((action: any) => action[0] === type)) {
-          pluginId = pid
-          break
-        }
-      }
-    }
-
-    const newAction = {
-      id: Date.now().toString(),
-      type,
-      pluginId,
-      parameters: getDefaultActionParameters(type)
-    }
+    const newAction = createAction(type)
 
     // Crear nuevo objeto para disparar reactividad
     buttonConfig.value = {
       ...buttonConfig.value,
       actions: [...buttonConfig.value.actions, newAction]
     }
-    console.log('➕ Added action:', newAction, 'pluginId found:', pluginId)
+    console.log('➕ Added action:', newAction, 'pluginId found:', newAction.pluginId)
   }
 
   const removeAction = (index: number) => {
@@ -850,25 +1197,20 @@ export function useStreamDeck() {
 
   const reorderActions = async (newOrderedActions: any[]) => {
     // Bloquear recargas de WebSocket durante todo el proceso
-    isSwapping.value = true
+    enterSwap()
     console.log('🔒 isSwapping = true, blocking WebSocket reloads')
 
     // NO actualizar buttonConfig local para evitar re-renders que rompan Swapy
     // En su lugar, guardar directamente en la BD
     console.log(`🔄 Reordering actions:`, newOrderedActions.map(a => a.type).join(' → '))
 
-    // Guardar directamente con el nuevo orden
-    const position = selectedButton.value
-    if (position === null || !currentPage.value) {
-      isSwapping.value = false
+    // Guardar directamente con el nuevo orden (por ID, no por posición)
+    const button = getEditingButton()
+    if (!button || !currentPage.value) {
+      exitSwap()
       return
     }
-
-    const button = getButton(position)
-    if (!button) {
-      isSwapping.value = false
-      return
-    }
+    const position = button.position
 
     // Crear el config actualizado con las acciones reordenadas
     const updatedConfig = {
@@ -877,31 +1219,41 @@ export function useStreamDeck() {
     }
 
     try {
+      const mutationId = trackMutation(newMutationId())
       await apiRequest(`/buttons/${button.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           page_id: currentPage.value.id,
           position,
-          data: updatedConfig
+          data: updatedConfig,
+          mutationId
         })
       })
 
       console.log('✅ Actions reordered and saved')
 
-      // NO actualizar buttonConfig aquí - dejar que Swapy mantenga el orden visual
-      // y que el WebSocket sincronice cuando desbloqueemos isSwapping
+      // Sincronizar el borrador local con lo guardado (si no, el siguiente
+      // autoguardado pisaría el nuevo orden con el viejo). El componente de
+      // acciones ya muestra newOrderedActions, así que no hay re-render
+      // disruptivo. El PUT posterior del autosave llevará lo mismo.
+      buttonConfig.value = { ...updatedConfig }
+      const localBtn = currentButtons.value.find((b) => b.id === button.id)
+      if (localBtn) localBtn.data = { ...updatedConfig }
+      bumpButtonsEpoch()
 
       // Esperar antes de desbloquear para que Swapy complete su animación
       setTimeout(() => {
-        isSwapping.value = false
+        exitSwap()
         console.log('🔓 isSwapping = false, allowing WebSocket reloads')
 
-        // Ahora sí, recargar desde la API para sincronizar
+        // Ahora sí, recargar desde la API para sincronizar (con guarda de
+        // época: si mientras tanto hubo swaps optimistas más nuevos, se
+        // descarta para no rebotar el grid).
         loadButtons()
       }, 300)
     } catch (error) {
       console.error('❌ Failed to save reordered actions:', error)
-      isSwapping.value = false
+      exitSwap()
     }
   }
 
@@ -938,9 +1290,53 @@ export function useStreamDeck() {
         return { url: '' }
       case 'pc-vitals.monitor':
         return { component: 'cpu', metric: 'usage', updateInterval: 1000 }
+      case 'local.set-var':
+        return { name: '', expr: '' }
+      case 'local.toggle-var':
+        return { name: '' }
+      case 'local.toast':
+        return { text: '' }
       default:
         return {}
     }
+  }
+
+  /** Construye un objeto de acción con parámetros por defecto (para teclas y reglas). */
+  const createAction = (type: string) => {
+    // Find the plugin that has this action type
+    let pluginId = null
+    for (const plugin of plugins.value) {
+      const [pid, pluginData] = plugin
+      // For full action types like 'pc-vitals.monitor', check if the plugin ID matches the prefix
+      if (type.includes('.')) {
+        const [pluginPrefix, actionId] = type.split('.')
+        if (pid === pluginPrefix && pluginData.actions && pluginData.actions.some((action: any) => action[0] === actionId)) {
+          pluginId = pid
+          break
+        }
+      } else {
+        // For simple action types, check direct match
+        if (pluginData.actions && pluginData.actions.some((action: any) => action[0] === type)) {
+          pluginId = pid
+          break
+        }
+      }
+    }
+
+    return {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      type,
+      pluginId,
+      parameters: getDefaultActionParameters(type)
+    }
+  }
+
+  /** Ejecuta una sola acción remota (el motor de reglas la usa por acción). */
+  const executeSingleAction = async (action: any, context: Record<string, any>) => {
+    return apiRequest('/actions/execute', {
+      method: 'POST',
+      body: JSON.stringify({ action, context })
+    })
   }
 
   // Profile management functions
@@ -1139,6 +1535,7 @@ export function useStreamDeck() {
 
     currentPage.value = page
     selectedButton.value = null
+    selectedButtonId.value = null
     buttonConfig.value = {
       label: '',
       textTop: '',
@@ -1148,13 +1545,21 @@ export function useStreamDeck() {
       icon: '',
       backgroundColor: '#374151',
       textColor: '#f1f5f9',
-      actions: []
+      showTitle: true,
+      mode: 'seq',
+      longPress: 'none',
+      confirm: false,
+      actions: [],
+      rules: [],
+      looks: []
     }
 
-    await loadButtons()
+    // Nueva época: invalida GETs en vuelo de la página anterior
+    bumpButtonsEpoch()
+    await loadButtons({ force: true })
 
-    // Start dynamic updates for PC Vitals buttons
-    await startDynamicUpdates()
+    // Start dynamic updates for PC Vitals buttons (sin bloquear)
+    void startDynamicUpdates()
 
     // Save current page to database settings for StreamDeck integration
     try {
@@ -1245,6 +1650,7 @@ export function useStreamDeck() {
           currentPage.value = null
           currentButtons.value = []
           selectedButton.value = null
+          selectedButtonId.value = null
         }
       }
 
@@ -1269,6 +1675,7 @@ export function useStreamDeck() {
             currentPage.value = null
             currentButtons.value = []
             selectedButton.value = null
+            selectedButtonId.value = null
           }
         }
 
@@ -1392,96 +1799,144 @@ export function useStreamDeck() {
   }
 
   // Swap handling
-  const handleSwap = async (event: any) => {
-    console.log('🔄 Swap event received:', event)
-
-    // Bloquear recargas de WebSocket durante todo el proceso
-    isSwapping.value = true
-    console.log('🔒 isSwapping = true, blocking WebSocket reloads')
-
-    try {
-      // Get the new mapping after swap - onSwapEnd usa slotItemMap
-      const newMap = event.slotItemMap?.asObject || event.newSlotItemMap?.asObject || event.map
-
-      // Validate that newMap exists and is an object
-      if (!newMap || typeof newMap !== 'object') {
-        console.warn('❌ Invalid or missing map in swap event:', event)
-        console.log('🔍 Event structure:', JSON.stringify(event, null, 2))
-        return
-      }
-
-      console.log('📍 Current buttons before swap:', currentButtons.value.map(b => ({ id: b.id, position: b.position })))
-      console.log('🗺️ New map:', newMap)
-
-      // Create a batch of updates to minimize API calls and maintain consistency
-      const positionUpdates: Array<{ button: ButtonEntity, newPosition: number }> = []
-
-      // Find all buttons that need position updates
-      for (const button of currentButtons.value) {
-        // Find which slot this button is now in
-        const newSlot = Object.keys(newMap).find(slot =>
-          newMap[slot] === `item-${button.id}`
-        )
-
-        if (newSlot) {
-          const newPosition = parseInt(newSlot.replace('slot-', ''))
-
-          if (button.position !== newPosition) {
-            positionUpdates.push({ button, newPosition })
-          }
-        }
-      }
-
-      console.log(`📦 Position updates to save: ${positionUpdates.length}`)
-
-      // Execute all position updates - SOLO guardar en BD, NO actualizar local
-      const updatePromises = positionUpdates.map(async ({ button, newPosition }) => {
-        try {
-          // Update in backend ONLY
-          await apiRequest(`/buttons/${button.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-              data: button.data,
-              position: newPosition
-            })
-          })
-
-          console.log(`✅ Button ${button.id} saved to position ${newPosition}`)
-          return { success: true, buttonId: button.id, newPosition }
-        } catch (error) {
-          console.error(`❌ Failed to update button ${button.id} position:`, error)
-          return { success: false, buttonId: button.id, error }
-        }
-      })
-
-      // Wait for all updates to complete
-      const results = await Promise.allSettled(updatePromises)
-
-      // Log results
-      const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length
-      const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)).length
-
-      console.log(`✅ Swap completed: ${successful} successful, ${failed} failed position updates`)
-
-      // NO actualizar nada localmente - dejar que Swapy controle el DOM completamente
-      // Las posiciones están guardadas en BD, y cuando el usuario recargue la página
-      // se cargarán correctamente. Durante la sesión actual, Swapy mantiene el orden visual.
-    } finally {
-      // Desbloquear después de un pequeño delay
-      setTimeout(() => {
-        isSwapping.value = false
-        console.log('🔓 isSwapping = false, swap complete')
-      }, 100)
+  const notifySwapyResync = () => {
+    // Avisa a los grids (StreamDeckGrid / StageBoard) para que re-vinculen
+    // Swapy al DOM ya sincronizado con las nuevas posiciones.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('libredeck:swapy-resync'))
     }
   }
 
-  // Auto-save with debouncing
+  // Cola seriada de persistencia de swaps: los drag & drop rápidos se
+  // encolan en orden de inicio y se ejecutan de uno en uno. Sin esto, dos
+  // swaps del mismo botón en vuelo podían llegar al daemon desordenados y el
+  // último intent (el que ve el usuario) quedaba pisado por el anterior → al
+  // recargar, la tecla "volvía" a su posición vieja.
+  let swapChain: Promise<void> = Promise.resolve()
+
+  const handleSwap = (event: any) => {
+    console.log('🔄 Swap event received:', event)
+
+    // Get the new mapping after swap - onSwapEnd usa slotItemMap
+    const newMap = event.slotItemMap?.asObject || event.newSlotItemMap?.asObject || event.map
+
+    // Validate that newMap exists and is an object
+    if (!newMap || typeof newMap !== 'object') {
+      console.warn('❌ Invalid or missing map in swap event:', event)
+      console.log('🔍 Event structure:', JSON.stringify(event, null, 2))
+      // El DOM de Swapy puede haber quedado movido visualmente: recargar
+      // desde BD (fuente de verdad) y re-vincular Swapy. Sin bloquear.
+      // force: venimos de un estado desconocido, la BD manda.
+      void (async () => {
+        await loadButtons({ force: true })
+        await nextTick()
+        notifySwapyResync()
+      })()
+      return
+    }
+
+    console.log('📍 Current buttons before swap:', currentButtons.value.map(b => ({ id: b.id, position: b.position })))
+    console.log('🗺️ New map:', newMap)
+
+    // Find all buttons that need position updates
+    const positionUpdates: Array<{ button: ButtonEntity, newPosition: number }> = []
+
+    for (const button of currentButtons.value) {
+      // Find which slot this button is now in
+      const newSlot = Object.keys(newMap).find(slot =>
+        newMap[slot] === `item-${button.id}`
+      )
+
+      if (newSlot) {
+        const newPosition = parseInt(newSlot.replace('slot-', ''))
+
+        if (!Number.isInteger(newPosition)) continue
+        if (button.position !== newPosition) {
+          positionUpdates.push({ button, newPosition })
+        }
+      }
+    }
+
+    console.log(`📦 Position updates to save: ${positionUpdates.length}`)
+
+    if (positionUpdates.length === 0) {
+      return
+    }
+
+    if (!currentPage.value) {
+      console.error('❌ No current page, cannot save swap')
+      void (async () => {
+        await loadButtons({ force: true })
+        await nextTick()
+        notifySwapyResync()
+      })()
+      return
+    }
+
+    // Optimista inmediato: el grid y la selección se actualizan SIN esperar
+    // a la red. Todo lo posterior es asíncrono y no bloquea la UI.
+    for (const { button, newPosition } of positionUpdates) {
+      button.position = newPosition
+    }
+    bumpButtonsEpoch()
+    // La selección sigue al botón por ID si fue uno de los movidos.
+    if (selectedButtonId.value) {
+      const sel = currentButtons.value.find((b) => b.id === selectedButtonId.value)
+      if (sel) selectedButton.value = sel.position
+    }
+    console.log('✅ Swap applied locally (optimistic):', positionUpdates.map(u => ({ id: u.button.id, pos: u.newPosition })))
+    // Sin resync explícito aquí: el watcher de firma del grid en StageBoard
+    // detecta el cambio de posiciones y re-vincula Swapy una sola vez.
+
+    // Persistencia seriada en el daemon (transacción atómica por swap).
+    // Si falla, la BD queda intacta y reconciliamos el estado local con ella.
+    const pageId = currentPage.value.id
+    const mutationId = trackMutation(newMutationId())
+    const order = positionUpdates.map(({ button, newPosition }) => ({
+      id: button.id,
+      position: newPosition
+    }))
+    enterSwap()
+    swapChain = swapChain
+      .then(async () => {
+        await apiRequest('/buttons/reorder', {
+          method: 'POST',
+          body: JSON.stringify({ page_id: pageId, order, mutationId })
+        })
+        console.log('✅ Swap persisted:', order)
+      })
+      .catch(async (error) => {
+        console.error('❌ Failed to save swap, reconciling with database:', error)
+        await loadButtons({ force: true })
+        // Tras reconciliar, la selección vuelve a seguir al botón si existe.
+        if (selectedButtonId.value) {
+          const sel = currentButtons.value.find((b) => b.id === selectedButtonId.value)
+          selectedButton.value = sel ? sel.position : null
+          if (!sel) selectedButtonId.value = null
+        }
+        await nextTick()
+        notifySwapyResync()
+      })
+      .finally(() => {
+        exitSwap()
+      })
+  }
+
+  // Auto-save with debouncing.
+  // FIX vaciado lento/colgado: antes se ponía isSaving=true al PROGRAMAR el
+  // guardado y el watcher bloqueaba por isSaving. Dos mutaciones seguidas
+  // (como las de onClearKey: onUpdateField + asignación) hacían:
+  // 1ª programa timeout, 2ª hace clearTimeout + early-return por isSaving
+  // → el guardado se cancelaba y nadie lo reprogramaba, isSaving quedaba
+  // en true para siempre y el autosave moría. Ahora programar no marca
+  // isSaving; lo gestiona saveButtonConfig durante la ejecución, y si llega
+  // un cambio mientras se guarda se reprograma en vez de perderse.
   const debouncedSave = () => {
     if (saveTimeout.value) clearTimeout(saveTimeout.value)
     if (isChangingButton.value || isSwapping.value) return // Don't save while changing buttons or swapping
 
-    isSaving.value = true
     saveTimeout.value = setTimeout(() => {
+      saveTimeout.value = null
       console.log('💾 Auto-saving button config...')
       saveButtonConfig()
     }, 800) // 800ms para dar tiempo a escribir pero sentir rapidez
@@ -1760,7 +2215,7 @@ export function useStreamDeck() {
       console.log('🎛️ Sending button states to daemon...');
       await apiRequest('/devices/streamdeck/update-buttons', {
         method: 'POST',
-        body: JSON.stringify({ buttonStates })
+        body: JSON.stringify({ buttonStates, pageId: currentPage.value?.id })
       });
 
       console.log('✅ StreamDeck buttons updated successfully');
@@ -1783,6 +2238,8 @@ export function useStreamDeck() {
     gridCols,
     gridRows,
     selectedButton,
+    selectedButtonId,
+    getEditingButton,
     executingButtons,
     buttonConfig,
 
@@ -1803,6 +2260,8 @@ export function useStreamDeck() {
     deleteButton,
     saveButtonConfig,
     addAction,
+    createAction,
+    executeSingleAction,
     removeAction,
     reorderActions,
     updateActionParameter,
@@ -1832,6 +2291,33 @@ export function useStreamDeck() {
     API_BASE,
     WS_URL,
     FRONTEND_URL,
+
+    // Plugin manager (instalación / marketplace / ciclo de vida)
+    pluginsDetailed,
+    marketplace,
+    marketplaceRegistry,
+    pluginsLoading,
+    setPluginEnabled,
+    removePlugin,
+    reloadPlugin,
+    rollbackPlugin,
+    updatePlugin,
+    uploadPluginFile,
+    installPluginFromUrl,
+    loadMarketplace,
+
+    // Servidor MCP propio (tokens)
+    mcpTokens,
+    mcpScopes,
+    loadMcpTokens,
+    loadMcpScopes,
+    createMcpToken,
+    updateMcpToken,
+    revokeMcpToken,
+
+    // Progreso de instalación en vivo (WS)
+    installProgress,
+    clearInstallProgress,
 
     // Internal state for watchers
     isChangingButton,

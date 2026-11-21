@@ -1,19 +1,19 @@
 <template>
-  <div class="bg-base-200 border-t border-base-300 px-4 py-3">
-    <div class="flex items-center justify-between">
+  <div class="bg-base-200 border-t border-base-300 px-4 py-2">
+    <div class="flex items-center justify-between gap-2">
       <!-- Page Tabs -->
-      <div class="flex items-center gap-2 flex-1 overflow-x-auto" data-cy="page-nav">
+      <div class="flex items-center gap-1.5 flex-1 overflow-x-auto" data-cy="page-nav">
         <div
           v-for="page in visiblePages"
           :key="page.id"
-          class="relative group"
+          class="relative group shrink-0"
         >
           <div
             :class="[
-              'px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 whitespace-nowrap pr-8',
+              'pl-3 pr-8 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-[background-color,border-color,color] duration-150 whitespace-nowrap border',
               page.id === currentPage?.id
-                ? 'bg-primary text-primary-content shadow-md'
-                : 'bg-base-100 text-base-content hover:bg-base-300'
+                ? 'bg-base-300 border-base-content/15 text-base-content'
+                : 'bg-transparent border-transparent text-base-content/60 hover:text-base-content hover:bg-base-300/60'
             ]"
             @click="selectPage(page.id)"
           >
@@ -23,9 +23,9 @@
           <!-- Menu Button -->
           <button
             @click.stop="showPageMenu($event, page)"
-            class="absolute right-1 top-1/2 -translate-y-1/2  transition-opacity duration-200 btn btn-ghost btn-xs btn-square"
+            class="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 btn btn-ghost btn-xs btn-square min-h-0 h-6 w-6"
           >
-            <MoreVertical :size="14"  />
+            <MoreVertical :size="14" stroke-width="1.5" />
           </button>
         </div>
       </div>
@@ -33,16 +33,16 @@
       <!-- Add Page Button -->
       <button
         @click="showAddPageModal = true"
-        class="btn btn-circle btn-ghost btn-sm ml-2"
+        class="btn btn-ghost btn-sm btn-square shrink-0"
         :title="t('pageNavigation.addPage')"
         data-cy="add-page"
       >
-        <Plus :size="16" />
+        <Plus :size="16" stroke-width="1.5" />
       </button>
     </div>
 
     <!-- Page Counter -->
-    <div class="text-xs text-base-content/60 mt-2 text-center" data-cy="current-page">
+    <div class="ld-count mt-1 text-center tabular" data-cy="current-page">
       {{ t('pageNavigation.pageCounter', { current: currentPageIndex + 1, total: visiblePages.length }) }}
     </div>
 

@@ -113,10 +113,9 @@ export class WebSocketManager {
         // Update current page in database
         this.db.setCurrentPage(pageId);
         
-        // Update StreamDeck display for the new page
-        streamDeckDriver.updateFromPage(pageId).catch(error => {
-          console.error('Failed to update StreamDeck display:', error);
-        });
+        // Repintado diferido y coalescado (no await): varios page.select
+        // seguidos no deben solapar repintados completos.
+        streamDeckDriver.scheduleUpdateFromPage(pageId);
         
         // Broadcast to all other subscribed clients (exclude sender)
         this.clients.forEach((otherClient, otherClientId) => {
@@ -257,12 +256,16 @@ export class WebSocketManager {
     this.broadcast('page.deleted', { pageId }, 'pages');
   }
 
-  public broadcastButtonUpdate(buttonId: string, button: any): void {
-    this.broadcast('button.updated', { buttonId, button }, 'buttons');
+  public broadcastButtonUpdate(buttonId: string, button: any, mutationId?: string): void {
+    this.broadcast('button.updated', { buttonId, button, mutationId }, 'buttons');
   }
 
-  public broadcastButtonDeleted(buttonId: string): void {
-    this.broadcast('button.deleted', { buttonId }, 'buttons');
+  public broadcastButtonDeleted(buttonId: string, mutationId?: string): void {
+    this.broadcast('button.deleted', { buttonId, mutationId }, 'buttons');
+  }
+
+  public broadcastButtonsReordered(pageId: string, buttons: any, mutationId?: string): void {
+    this.broadcast('buttons.reordered', { pageId, buttons, mutationId }, 'buttons');
   }
 
   public broadcastActionStarted(actionId: string, context: any): void {
@@ -283,6 +286,18 @@ export class WebSocketManager {
 
   public broadcastPluginEnabled(pluginId: string, enabled: boolean): void {
     this.broadcast('plugin.enabled', { pluginId, enabled }, 'plugins');
+  }
+
+  public broadcastPluginUninstalled(pluginId: string): void {
+    this.broadcast('plugin.uninstalled', { pluginId }, 'plugins');
+  }
+
+  public broadcastPluginStatus(pluginId: string, status: string, error?: string | null): void {
+    this.broadcast('plugin.status', { pluginId, status, error: error ?? null }, 'plugins');
+  }
+
+  public broadcastPluginSettings(pluginId: string): void {
+    this.broadcast('plugin.settings', { pluginId }, 'plugins');
   }
 
   public getConnectedClients(): number {

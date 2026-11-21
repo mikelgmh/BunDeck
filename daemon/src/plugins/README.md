@@ -1,192 +1,124 @@
-# Native Plugins
+# Plugins LibreDeck (nativos + externos)
 
-Native plugins are TypeScript plugins that are bundled with LibreDeck and have full access to the system.
+## Dos tipos
 
-## Architecture
+- **Nativos** (`daemon/src/plugins/*.plugin.ts`): TypeScript compilado con
+  el daemon, acceso total al sistema. Se registran en `db.ts`
+  (`installBuiltInPlugins`) y sus handlers viven en `action-runner.ts`.
+  Para añadir uno: crea `*.plugin.ts`, expórtalo en `index.ts` e
+  instáncialo en `ActionRunner.loadNativePlugins()`.
 
-Native plugins are different from user-installed plugins:
+- **Externos** (`data/plugins/<id>/`): JS de terceros, un **Worker por
+  plugin**. Manifiesto `manifest.json` + `main.js` (o `main.mjs`/`index.js`,
+  o `main` en el manifest) que exporta `register(api)`.
 
-- **Native Plugins** (`daemon/src/plugins/`): TypeScript code compiled with the daemon, full system access
-- **User Plugins** (`data/plugins/`): JavaScript code loaded at runtime, sandboxed
+## Plugin externo mínimo
 
-## Creating a Native Plugin
+Ver plantilla completa en `daemon/src/plugins/external-template/`.
 
-### 1. Create Plugin File
+`manifest.json`:
 
-Create a new file in `daemon/src/plugins/` with the pattern `*.plugin.ts`:
-
-```typescript
-export interface PluginContext {
-  log: (level: string, message: string, meta?: any) => void
-}
-
-export class MyPlugin {
-  private context: PluginContext
-
-  constructor(context: PluginContext) {
-    this.context = context
-  }
-
-  /**
-   * Plugin metadata
-   */
-  public getManifest() {
-    return {
-      id: 'my-plugin',
-      name: 'My Plugin',
-      version: '1.0.0',
-      description: 'Description of what the plugin does',
-      author: 'Your Name',
-      native: true,
-      actions: [
-        {
-          id: 'my-action',
-          name: 'My Action',
-          description: 'What this action does',
-          schema: {
-            type: 'object',
-            properties: {
-              parameter1: {
-                type: 'string',
-                description: 'Description of parameter1'
-              }
-            },
-            required: ['parameter1']
-          }
-        }
-      ]
-    }
-  }
-
-  /**
-   * Get action handlers
-   */
-  public getActionHandlers(): Map<string, any> {
-    const handlers = new Map()
-    handlers.set('my-action', this.executeMyAction.bind(this))
-    return handlers
-  }
-
-  /**
-   * Execute action
-   */
-  private async executeMyAction(params: any, context: any): Promise<any> {
-    const { parameter1 } = params
-    
-    this.context.log('info', `Executing my action with: ${parameter1}`)
-    
-    // Your action logic here
-    
-    return {
-      success: true,
-      result: 'Action completed'
-    }
-  }
-
-  /**
-   * Cleanup resources
-   */
-  public dispose(): void {
-    // Cleanup if needed
-  }
-}
-```
-
-### 2. Register in Index
-
-Add your plugin to `index.ts`:
-
-```typescript
-import { MyPlugin } from './my-plugin.plugin'
-
-export { MyPlugin, MultimediaPlugin }
-
-export function getNativePlugins(): NativePlugin[] {
-  return [
-    // Will be auto-loaded by ActionRunner
+```json
+{
+  "id": "com.ejemplo.mi-plugin",
+  "name": "Mi Plugin",
+  "version": "1.0.0",
+  "engine": "^1.0.0",
+  "apiVersion": "2.1",
+  "permissions": ["http"],
+  "actions": [
+    { "id": "saludo", "name": "Decir hola",
+      "schema": { "type": "object", "properties": { "nombre": { "type": "string" } } } }
   ]
 }
 ```
 
-### 3. Load in ActionRunner
+`main.js`:
 
-The plugin will be automatically loaded by `ActionRunner` in the `loadNativePlugins()` method.
-
-To add a new plugin, modify `daemon/src/action-runner.ts`:
-
-```typescript
-private loadNativePlugins() {
-  // ... existing code ...
-  
-  // Load your plugin
-  const myPlugin = new MyPlugin(pluginContext);
-  this.nativePlugins.push(myPlugin);
-  
-  // Register handlers
-  for (const plugin of this.nativePlugins) {
-    // ... existing code ...
-  }
+```js
+export function register(api) {
+  api.onAction('saludo', async (params) => ({ message: `Hola, ${params.nombre ?? 'Mundo'}!` }));
 }
 ```
 
-## Plugin Context
+API disponible en el Worker: `onAction`, `emitEvent`, `log`,
+`getSetting/setSetting/deleteSetting` (async, namespaced),
+`http.fetch` (permiso `http`/`network`, timeout 30s, máx 5MB),
+`fs.readFile/writeFile/exists` (permiso `filesystem`, solo tu carpeta,
+máx 2MB), más `api.version` y `api.pluginId`.
 
-The `PluginContext` provides utilities for plugins:
+## Ciclo de vida (marketplace)
 
-- `log(level, message, meta?)` - Log to database with level: 'info', 'warn', 'error'
+- **Instalación atómica**: el daemon extrae/clona a `.staging_*`,
+  valida manifiesto + main + `engine`, calcula checksum y solo entonces
+  intercambia con el directorio activo. Si la versión nueva no arranca,
+  **revierte** a la anterior. Nunca hace `git pull` sobre el directorio
+  activo.
+- **Orígenes**: ZIP subido (UI), URL `.zip` (marketplace), repo git
+  (marketplace con pull = `git clone` a staging) o carpeta local.
+  Se guardan `source_type`, `origin`, `ref`, `commit`, `checksum`,
+  `previous_version` para rollback.
+- **Enabled gobierna**: `loadAllPlugins()` solo carga habilitados.
+  El descubrimiento del filesystem registra deshabilitado por defecto
+  (no auto-ejecuta). Activar/desactivar carga/descarga el Worker.
+- **Diagnóstico**: `status` (`active`/`error`/`disabled`), `last_error`,
+  `previous_version`. La UI muestra errores, permite recargar,
+  actualizar y revertir.
 
-## Action Schema
+Endpoints daemon:
 
-Use JSON Schema to define action parameters:
-
-```typescript
-schema: {
-  type: 'object',
-  properties: {
-    url: {
-      type: 'string',
-      format: 'uri',
-      description: 'The URL to open'
-    },
-    method: {
-      type: 'string',
-      enum: ['GET', 'POST', 'PUT', 'DELETE'],
-      default: 'GET'
-    }
-  },
-  required: ['url']
-}
+```
+GET    /api/v1/plugins               # installed + loaded + detailed
+GET    /api/v1/plugins/actions       # acciones agrupadas (editores)
+GET    /api/v1/plugins/:id           # detalle + estado
+PUT    /api/v1/plugins/:id           # { enabled: bool }
+DELETE /api/v1/plugins/:id           # desinstalar (no built-ins)
+POST   /api/v1/plugins/:id/reload
+POST   /api/v1/plugins/:id/rollback
+POST   /api/v1/plugins/:id/update    # { url?, dir?, zipPath?, ref?, force? }
+POST   /api/v1/plugins/install       # { sourceType: git|marketplace|url, url, ref?, checksum? }
+POST   /api/v1/plugins/upload        # multipart file=.zip/.plectro
+GET    /api/v1/marketplace           # proxy del registry configurado
 ```
 
-## Examples
+Registry marketplace (JSON en `marketplace.registry_url`):
 
-See `multimedia.plugin.ts` for a complete example of:
-- Cross-platform support (Windows, macOS, Linux)
-- Command execution with Bun.spawn
-- Error handling
-- Logging
+```json
+{ "plugins": [
+  { "id": "com.ejemplo.mi-plugin", "name": "Mi Plugin",
+    "version": "1.0.0", "description": "...", "author": "...",
+    "repository": "https://github.com/...", "zipUrl": "https://.../mi-plugin-1.0.0.zip" }
+] }
+```
 
-## Best Practices
+## Seguridad
 
-1. **Error Handling**: Always wrap execution in try-catch and throw meaningful errors
-2. **Logging**: Use `context.log()` for all significant events
-3. **Cleanup**: Implement `dispose()` to clean up resources (timers, file handles, etc.)
-4. **Cross-platform**: Check `process.platform` and provide implementations for each OS when possible
-5. **Type Safety**: Use TypeScript types for all parameters and return values
-6. **Documentation**: Document all parameters in the action schema
+El Worker aísla **fallos** (crash/timeout con terminate + re-spawn) y
+media permisos en el padre, pero **no es sandbox de seguridad**: un
+plugin puede importar APIs del runtime. Los permisos (`shell`,
+`system`, `filesystem` = privilegiados) son consentimiento y control
+del API mediado, no contención OS. Instala solo plugins de autores
+de confianza y revisa lo que piden.
 
-## Testing
+## Importación Elgato (.sdPlugin) — fase 2 operativa
 
-Test your plugin by:
+`daemon/src/elgato/`: detecta paquetes Elgato (repo git, `.streamDeckPlugin`
+o carpeta), convierte el manifest, compila desde fuentes si el repo no trae
+`bin/` (caso DeckCal: `bun install + bun run build`, con fallback a npm),
+instala dependencias runtime y deja el plugin habilitado por defecto como
+`elgato-stopped` con auto-arranque del runtime en segundo plano. `needs-runtime` queda solo para binarios nativos o CodePath ausente.
+El host (`host.ts`: `Bun.serve` WS + `node <CodePath> -port -pluginUUID
+-registerEvent -info`) traduce `willAppear/keyDown/keyUp/didReceiveSettings`
+y `setTitle/setImage/setState/settings/openUrl/logMessage`. La instalación
+normal (`POST /api/v1/plugins/install`) autodetecta Elgato y deriva al
+importador; `POST /api/v1/plugins/import-elgato` permite dry-run.
+Nuevos endpoints: `GET /api/v1/plugins/:id/elgato-state` y
+`POST /api/v1/plugins/:id/key` (pulso sin hardware); WS emite `elgato.state`.
 
-1. Restarting the daemon: `./dev.sh dev`
-2. Check logs for plugin loading: `✓ Loaded native plugin: My Plugin v1.0.0`
-3. Create a button with your action in the UI
-4. Execute the action and check logs for success/errors
+## Progreso en vivo
 
-## Future Improvements
-
-- Hot reload for native plugins during development
-- Plugin API for more system features (filesystem, network, etc.)
-- Plugin dependencies and inter-plugin communication
-- Performance monitoring and profiling
+El loader emite `plugin.install-progress` por WS (topic `plugins`) con
+`{ key, stage, message }`: `download` (con % y MB), `clone`, `extract`,
+`detect`, `validate`, `activate`, `load`, `done`, `error`. La UI muestra
+la caja de progreso y los errores sin que el usuario tenga que adivinar;
+los métodos aceptan además `onProgress` para tests y otros consumidores.

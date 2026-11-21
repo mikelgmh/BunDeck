@@ -5,8 +5,9 @@
   "main": "src/server.ts",
   "type": "module",
   "scripts": {
-    "dev": "bun run --watch src/server.ts",
+    "dev": "cross-env DEV_MODE=true bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
+    "dev:prod": "bun run --watch src/server.ts",
     "build": "bun build --compile src/server.ts --outfile libredeck-daemon",
     "test": "bun test",
     "test:watch": "bun test --watch",
@@ -15,25 +16,29 @@
     "format": "prettier --write src/**/*.ts"
   },
   "dependencies": {
-    "@elgato-stream-deck/node": "^7.4.0",
-    "@elgato-stream-deck/node-lib": "^7.4.0",
-    "@julusian/jpeg-turbo": "^2.3.0",
-    "@napi-rs/canvas": "^0.1.82",
-    "chokidar": "^3.5.3",
-    "mime-types": "^2.1.35",
-    "uuid": "^9.0.1"
+    "@elgato-stream-deck/node": "^7.6.3",
+    "@elgato-stream-deck/node-lib": "^7.6.3",
+    "@julusian/jpeg-turbo": "^3.0.1",
+    "@napi-rs/canvas": "^1.0.9",
+    "adm-zip": "^0.6.0",
+    "chokidar": "^5.0.0",
+    "lucide": "^1.44.0",
+    "mime-types": "^3.0.2",
+    "uuid": "^14.0.2"
   },
   "optionalDependencies": {
     "systray": "*"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/mime-types": "^2.1.4",
-    "@types/uuid": "^9.0.6",
-    "@typescript-eslint/eslint-plugin": "^6.9.0",
-    "@typescript-eslint/parser": "^6.9.0",
-    "eslint": "^8.52.0",
-    "prettier": "^3.0.3"
+    "@types/adm-zip": "^0.5.8",
+    "@types/bun": "^1.4.2",
+    "@types/mime-types": "^3.0.1",
+    "@types/uuid": "^11.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6"
   },
   "keywords": [
     "streamdeck",

@@ -1,180 +1,164 @@
 <template>
-  <div class="space-y-2" data-swapy-no-drag>
+  <div class="bd-schema" data-swapy-no-drag>
     <!-- Render each property based on its schema -->
     <div
       v-for="(property, propKey) in schemaProperties"
       :key="propKey"
-      class="form-field"
+      class="bd-fld"
     >
       <!-- String input -->
-      <div v-if="property.ui?.component === 'input' && property.ui.type === 'text'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <input
-            :value="modelValue[propKey] || property.default || ''"
-            @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
-            :type="property.ui.type"
-            :placeholder="property.ui.placeholder"
-            class="input input-bordered input-xs w-full"
-            data-swapy-no-drag
-          />
-        </label>
-      </div>
+      <template v-if="property.ui?.component === 'input' && property.ui.type === 'text'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <input
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
+          type="text"
+          :placeholder="property.ui.placeholder"
+          class="bd-inp"
+          data-swapy-no-drag
+          autocomplete="off"
+        />
+      </template>
 
       <!-- URL input -->
-      <div v-else-if="property.ui?.component === 'input' && property.ui.type === 'url'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <input
-            :value="modelValue[propKey] || property.default || ''"
-            @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
-            :type="property.ui.type"
-            :placeholder="property.ui.placeholder"
-            class="input input-bordered input-xs w-full"
-            data-swapy-no-drag
-          />
-        </label>
-      </div>
+      <template v-else-if="property.ui?.component === 'input' && property.ui.type === 'url'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <input
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
+          type="url"
+          inputmode="url"
+          :placeholder="property.ui.placeholder"
+          class="bd-inp"
+          data-swapy-no-drag
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </template>
 
       <!-- Number input -->
-      <div v-else-if="property.ui?.component === 'input' && property.ui.type === 'number'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <input
-            :value="modelValue[propKey] || property.default || 0"
-            @input="updateValue(propKey, parseInt(($event.target as HTMLInputElement).value) || 0)"
-            :type="property.ui.type"
-            :placeholder="property.ui.placeholder"
-            :min="property.ui.min"
-            :max="property.ui.max"
-            class="input input-bordered input-xs w-full"
-            data-swapy-no-drag
-          />
-        </label>
-      </div>
+      <template v-else-if="property.ui?.component === 'input' && property.ui.type === 'number'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <input
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || 0"
+          @input="updateValue(propKey, parseInt(($event.target as HTMLInputElement).value) || 0)"
+          type="number"
+          :placeholder="property.ui.placeholder"
+          :min="property.ui.min"
+          :max="property.ui.max"
+          class="bd-inp"
+          data-swapy-no-drag
+        />
+      </template>
 
       <!-- Textarea -->
-      <div v-else-if="property.ui?.component === 'textarea'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <textarea
-            :value="modelValue[propKey] || property.default || ''"
-            @input="updateValue(propKey, ($event.target as HTMLTextAreaElement).value)"
-            :placeholder="property.ui.placeholder"
-            :rows="property.ui.rows || 3"
-            class="textarea textarea-bordered textarea-xs w-full"
-            data-swapy-no-drag
-          ></textarea>
-        </label>
-      </div>
+      <template v-else-if="property.ui?.component === 'textarea'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <textarea
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @input="updateValue(propKey, ($event.target as HTMLTextAreaElement).value)"
+          :placeholder="property.ui.placeholder"
+          :rows="property.ui.rows || 3"
+          class="bd-inp"
+          data-swapy-no-drag
+        ></textarea>
+      </template>
 
       <!-- Select dropdown -->
-      <div v-else-if="property.ui?.component === 'select'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <select
-            :value="modelValue[propKey] || property.default || ''"
-            @change="updateValue(propKey, ($event.target as HTMLSelectElement).value)"
-            class="select select-bordered select-xs w-full"
-            data-swapy-no-drag
+      <template v-else-if="property.ui?.component === 'select'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <select
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @change="updateValue(propKey, ($event.target as HTMLSelectElement).value)"
+          class="bd-inp"
+          data-swapy-no-drag
+        >
+          <option value="">{{ property.ui.placeholder || 'Seleccionar...' }}</option>
+          <option
+            v-for="option in property.ui.options"
+            :key="option.value"
+            :value="option.value"
           >
-            <option value="">{{ property.ui.placeholder || 'Seleccionar...' }}</option>
-            <option
-              v-for="option in property.ui.options"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-      </div>
+            {{ option.label }}
+          </option>
+        </select>
+      </template>
 
       <!-- File input with button -->
-      <div v-else-if="property.ui?.component === 'file'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <div class="flex gap-2">
-            <input
-              :value="modelValue[propKey] || property.default || ''"
-              @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
-              :type="property.ui.type || 'text'"
-              :placeholder="property.ui.placeholder"
-              class="input input-bordered input-xs flex-1"
-              data-swapy-no-drag
-            />
-            <button
-              @click="openFileDialog(propKey)"
-              class="btn btn-ghost btn-xs"
-              title="Seleccionar archivo"
-              data-swapy-no-drag
-            >
-              <component :is="FolderOpen" />
-            </button>
-          </div>
-        </label>
-      </div>
-
-      <!-- Special case: Page selector -->
-      <div v-else-if="property.ui?.component === 'page-select'">
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
-          <select
-            :value="modelValue[propKey] || property.default || ''"
-            @change="updateValue(propKey, ($event.target as HTMLSelectElement).value)"
-            class="select select-bordered select-xs w-full"
-            data-swapy-no-drag
-          >
-            <option value="">{{ property.ui.placeholder || 'Seleccionar página...' }}</option>
-            <option
-              v-for="page in availablePages"
-              :key="page.id"
-              :value="page.id"
-            >
-              {{ page.name }}
-            </option>
-          </select>
-        </label>
-        <div v-if="selectedPageName" class="text-xs text-base-content/60 mt-1">
-          Navegará a: {{ selectedPageName }}
-        </div>
-      </div>
-
-      <!-- Hidden field (for internal use) -->
-      <div v-else-if="property.ui?.component === 'hidden'">
-        <!-- Hidden field, value managed internally -->
-      </div>
-
-      <!-- Fallback: Basic input for unknown types -->
-      <div v-else>
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text text-xs">{{ property.title || propKey }}</span>
-          </div>
+      <template v-else-if="property.ui?.component === 'file'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <div class="bd-r2">
           <input
+            :id="`sf-${propKey}`"
             :value="modelValue[propKey] || property.default || ''"
             @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
-            type="text"
-            :placeholder="property.ui?.placeholder"
-            class="input input-bordered input-xs w-full"
+            :type="property.ui.type || 'text'"
+            :placeholder="property.ui.placeholder"
+            class="bd-inp"
             data-swapy-no-drag
+            autocomplete="off"
           />
-        </label>
-      </div>
+          <button
+            @click="openFileDialog(propKey)"
+            class="bd-btn"
+            title="Seleccionar archivo"
+            :aria-label="'Seleccionar archivo: ' + (property.title || propKey)"
+            data-swapy-no-drag
+          >
+            <component :is="FolderOpen" :size="16" stroke-width="1.75" aria-hidden="true" />
+          </button>
+        </div>
+      </template>
+
+      <!-- Special case: Page selector -->
+      <template v-else-if="property.ui?.component === 'page-select'">
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <select
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @change="updateValue(propKey, ($event.target as HTMLSelectElement).value)"
+          class="bd-inp"
+          data-swapy-no-drag
+        >
+          <option value="">{{ property.ui.placeholder || 'Seleccionar página...' }}</option>
+          <option
+            v-for="page in availablePages"
+            :key="page.id"
+            :value="page.id"
+          >
+            {{ page.name }}
+          </option>
+        </select>
+        <p v-if="selectedPageName" class="bd-hint">
+          Navegará a: {{ selectedPageName }}
+        </p>
+      </template>
+
+      <!-- Hidden field (for internal use) -->
+      <template v-else-if="property.ui?.component === 'hidden'">
+        <!-- Hidden field, value managed internally -->
+      </template>
+
+      <!-- Fallback: Basic input for unknown types -->
+      <template v-else>
+        <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
+        <input
+          :id="`sf-${propKey}`"
+          :value="modelValue[propKey] || property.default || ''"
+          @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
+          type="text"
+          :placeholder="property.ui?.placeholder"
+          class="bd-inp"
+          data-swapy-no-drag
+          autocomplete="off"
+        />
+      </template>
+      <p v-if="property.description" class="bd-hint">{{ property.description }}</p>
     </div>
   </div>
 </template>

@@ -4,6 +4,10 @@ import { ActionRunner } from '../action-runner';
 import { windowWatcher } from '../window-watcher';
 import { DatabaseService } from '../db';
 import { v4 as uuidv4 } from 'uuid';
+import { handleMcpBody } from '../mcp/server';
+import { listMcpTokens, createMcpToken, updateMcpToken, revokeMcpToken, verifyMcpToken, bearerFromHeaders } from '../mcp/tokens';
+import { MCP_SCOPES } from '../mcp/scopes';
+import { importElgatoPlugin } from '../elgato/import';
 import { getSystemMetricsScript } from '../scripts/system-metrics.ps1';
 import { join, dirname } from 'path';
 import { readdir } from 'fs/promises';
@@ -11,7 +15,6 @@ import { createWriteStream, createReadStream } from 'fs';
 import { mkdir, rm, rename } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { spawn } from 'child_process';
-import { listStreamDecks } from '@elgato-stream-deck/node';
 import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 
 interface APIServices {
@@ -43,13 +46,14 @@ export async function setupAPIRoutes(
       }
     }
 
-    // Config endpoint for frontend
+    // Config endpoint for frontend — usa puertos centralizados (config.ts)
     if (path === '/config') {
       if (method === 'GET') {
+        const { WS_PORT, API_PORT, FRONTEND_PORT } = await import('../config');
         const config: any = {
-          wsPort: 3002,
-          apiPort: 3001,
-          frontendPort: 4321
+          wsPort: WS_PORT,
+          apiPort: API_PORT,
+          frontendPort: FRONTEND_PORT
         };
         return jsonResponse(config);
       }
@@ -206,19 +210,56 @@ export async function setupAPIRoutes(
           data: body.data || {}
         };
 
-        db.createButton(button);
-        services.wsManager.broadcast('button.created', { buttonId: button.id, button }, 'buttons');
-
-        // Update StreamDeck display if connected
-        if (streamDeckDriver.isConnected()) {
-          try {
-            await streamDeckDriver.updateFromPage(button.page_id);
-          } catch (error) {
-            console.error('Failed to update StreamDeck after button creation:', error);
+        try {
+          db.createButton(button);
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            return jsonResponse({ error: `La posición ${body.position} ya está ocupada en esta página` }, 409);
           }
+          throw error;
+        }
+        services.wsManager.broadcast('button.created', { buttonId: button.id, button, mutationId: (body as any)?.mutationId }, 'buttons');
+
+        // Repintado diferido (no bloquea la respuesta): el vaciado/creación
+        // respondía tras un repintado completo y parecía "pillado".
+        if (streamDeckDriver.isConnected()) {
+          streamDeckDriver.scheduleUpdateFromPage(button.page_id);
         }
 
         return jsonResponse(button, 201);
+      }
+    }
+
+    // Reordenado atómico de botones (drag & drop): una sola transacción en BD,
+    // un solo broadcast y un solo repintado del StreamDeck. Evita posiciones
+    // duplicadas por fallos parciales de N PUTs individuales.
+    if (path === '/api/v1/buttons/reorder') {
+      if (method === 'POST') {
+        try {
+          const raw = (await req.json()) as any;
+          const { page_id, order } = raw ?? {};
+          if (!page_id || !Array.isArray(order)) {
+            return jsonResponse({ error: 'page_id y order (array) requeridos' }, 400);
+          }
+
+          const updated = db.reorderButtons(page_id, order);
+          services.wsManager.broadcastButtonsReordered(page_id, updated, (raw as any)?.mutationId);
+
+          // Repintado diferido y coalescado (no bloquea la respuesta).
+          if (streamDeckDriver.isConnected()) {
+            streamDeckDriver.scheduleUpdateFromPage(page_id);
+          }
+
+          return jsonResponse({ success: true, buttons: updated });
+        } catch (error) {
+          if (error instanceof Error && /no encontrado|no pertenece|duplicada|inválido|vacío/.test(error.message)) {
+            return jsonResponse({ error: error.message }, 400);
+          }
+          if (isUniqueConstraintError(error)) {
+            return jsonResponse({ error: 'Conflicto de posiciones: recarga los botones e inténtalo de nuevo' }, 409);
+          }
+          throw error;
+        }
       }
     }
 
@@ -236,26 +277,29 @@ export async function setupAPIRoutes(
       if (method === 'PUT') {
         const body = await req.json();
 
-        // Use new complete update function if position is provided
-        if (body.position !== undefined) {
-          db.updateButtonComplete(buttonId, {
-            data: body.data,
-            position: body.position
-          });
-        } else {
-          db.updateButton(buttonId, body.data);
+        try {
+          // Use new complete update function if position is provided
+          if (body.position !== undefined) {
+            db.updateButtonComplete(buttonId, {
+              data: body.data,
+              position: body.position
+            });
+          } else {
+            db.updateButton(buttonId, body.data);
+          }
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            return jsonResponse({ error: `La posición ${body.position} ya está ocupada en esta página` }, 409);
+          }
+          throw error;
         }
 
         const updatedButton = db.getButton(buttonId);
-        services.wsManager.broadcastButtonUpdate(buttonId, updatedButton);
+        services.wsManager.broadcastButtonUpdate(buttonId, updatedButton, (body as any)?.mutationId);
 
-        // Update StreamDeck display if connected
+        // Repintado diferido (no bloquea la respuesta).
         if (streamDeckDriver.isConnected() && updatedButton) {
-          try {
-            await streamDeckDriver.updateFromPage(updatedButton.page_id);
-          } catch (error) {
-            console.error('Failed to update StreamDeck after button update:', error);
-          }
+          streamDeckDriver.scheduleUpdateFromPage(updatedButton.page_id);
         }
 
         return jsonResponse(updatedButton);
@@ -269,15 +313,13 @@ export async function setupAPIRoutes(
 
         const pageId = button.page_id;
         db.deleteButton(buttonId);
-        services.wsManager.broadcastButtonDeleted(buttonId);
+        const deleteBody = await req.json().catch(() => ({}));
+        services.wsManager.broadcastButtonDeleted(buttonId, (deleteBody as any)?.mutationId);
 
-        // Update StreamDeck display if connected
+        // Repintado diferido (no bloquea la respuesta): vaciar respondía
+        // tras el repintado completo y la UI parecía congelada.
         if (streamDeckDriver.isConnected()) {
-          try {
-            await streamDeckDriver.updateFromPage(pageId);
-          } catch (error) {
-            console.error('Failed to update StreamDeck after button deletion:', error);
-          }
+          streamDeckDriver.scheduleUpdateFromPage(pageId);
         }
 
         return jsonResponse({ success: true });
@@ -344,17 +386,308 @@ export async function setupAPIRoutes(
     // Plugins endpoints
     if (path === '/api/v1/plugins') {
       if (method === 'GET') {
-        const plugins = db.getPlugins();
+        const detailed = services.pluginLoader.listDetailed();
         const loadedPlugins = Array.from(services.pluginLoader.getLoadedPlugins().entries());
+        const installed = db.getPlugins();
 
         return jsonResponse({
-          installed: plugins,
+          installed,
           loaded: loadedPlugins.map(([id, plugin]) => ({
             id,
             manifest: plugin.manifest,
             enabled: plugin.enabled
-          }))
+          })),
+          // Detalle enriquecido para el gestor (instalados + estado + errores)
+          detailed,
         });
+      }
+    }
+
+    // Marketplace: registry remoto (lista de plugins instalables)
+    if (path === '/api/v1/marketplace') {
+      if (method === 'GET') {
+        try {
+          const registryUrl = db.getSetting('marketplace.registry_url') || process.env.LIBREDECK_MARKETPLACE_URL || '';
+          if (!registryUrl) {
+            return jsonResponse({ plugins: [], registryUrl: null, hint: 'Configura marketplace.registry_url (settings) con la URL del registry JSON' });
+          }
+          const res = await fetch(registryUrl);
+          if (!res.ok) return jsonResponse({ error: `Registry respondió ${res.status}` }, 502);
+          const data = await res.json();
+          const plugins = Array.isArray(data) ? data : (data.plugins ?? []);
+          return jsonResponse({ plugins, registryUrl });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 502);
+        }
+      }
+    }
+
+    if (path === '/api/v1/plugins/install') {
+      if (method === 'POST') {
+        try {
+          const body = await req.json();
+          const { sourceType, url, ref, version, checksum, force, origin } = body ?? {};
+          void version;
+          const prog = (stage: string, message: string) =>
+            services.wsManager.broadcast('plugin.install-progress', { key: url ?? '', stage, message, ts: Date.now() }, 'plugins');
+          let id: string;
+          const looksZip = /\.zip(\?|#|$)/i.test(url);
+          if (sourceType === 'git' || (!sourceType && url && !looksZip)) {
+            if (!url) return jsonResponse({ error: 'url requerida para git' }, 400);
+            id = await services.pluginLoader.installPluginFromGit(url, { ref, force: !!force, onProgress: prog });
+          } else if (sourceType === 'marketplace' || sourceType === 'url' || (url && looksZip)) {
+            if (!url) return jsonResponse({ error: 'url requerida' }, 400);
+            if (!looksZip) {
+              // Marketplace apuntando a repo git: clonar, no descargar zip
+              id = await services.pluginLoader.installPluginFromGit(url, { ref, force: !!force, onProgress: prog });
+              // Marcar origen marketplace aunque venga de git
+              try { db.upsertPluginRecord({ id, source_type: 'marketplace', origin: origin ?? url } as any); } catch {}
+            } else {
+              id = await services.pluginLoader.installPluginFromUrl(url, {
+                force: !!force, checksum, origin: origin ?? url, sourceType: 'marketplace', onProgress: prog,
+              });
+            }
+          } else {
+            return jsonResponse({ error: 'sourceType inválido (git | marketplace | url)' }, 400);
+          }
+          const plugin = db.getPlugin(id);
+          services.wsManager.broadcastPluginInstalled(id, plugin);
+          const status = services.pluginLoader.getStatus(id) as any;
+          const extra = status?.sourceType === 'elgato'
+            ? { elgato: true, note: status?.status === 'elgato-stopped' ? 'Plugin Elgato habilitado por defecto (arrancando runtime en segundo plano).' : `Plugin Elgato: ${status?.status ?? 'instalado'}` }
+            : {};
+          return jsonResponse({ success: true, pluginId: id, plugin, ...extra }, 201);
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+    }
+
+    // ---- Importación Elgato (.sdPlugin / repo git). Fase 2: convierte,
+    // compila desde fuentes si hace falta (DeckCal trae src/, no bin/),
+    // instala dependencias con bun (fallback npm) y habilita por defecto
+    // (elgato-stopped + auto-arranque). needs-runtime solo si es nativo
+    // o falta CodePath. Con dryRun solo informe.
+    if (path === '/api/v1/plugins/import-elgato') {
+      if (method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const { url, dir, zipPath, dryRun } = body ?? {};
+          if (!url && !dir && !zipPath) {
+            return jsonResponse({ error: 'url (repo git o .streamDeckPlugin), dir o zipPath requerido' }, 400);
+          }
+          const key = url ?? dir ?? zipPath ?? '';
+          const prog = (stage: string, message: string) =>
+            services.wsManager.broadcast('plugin.install-progress', { key, stage, message, ts: Date.now() }, 'plugins');
+          const result = await importElgatoPlugin(db, { url, dir, zipPath }, { dryRun: !!dryRun, onProgress: prog });
+          if (!result.installed) {
+            services.wsManager.broadcast('plugin.install-progress', { key, stage: 'done', message: 'Diagnóstico completado (no instalado)', ts: Date.now() }, 'plugins');
+          } else {
+            // Habilitado por defecto: arranca el runtime en segundo plano
+            // (sin bloquear la respuesta; el progreso va por WS).
+            try {
+              const rec = db.getPlugin(result.pluginId) as any;
+              if (rec && Number(rec.enabled) === 1 && rec.status === 'elgato-stopped') {
+                void services.pluginLoader.loadElgatoPlugin(result.pluginId).catch(() => {});
+              }
+            } catch {}
+          }
+          return jsonResponse(result, result.installed ? 201 : 200);
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+    }
+
+    if (path === '/api/v1/plugins/upload') {
+      if (method === 'POST') {
+        try {
+          const form = await req.formData();
+          const file = form.get('file') as any;
+          const force = form.get('force') === 'true' || form.get('force') === '1';
+          if (!file) return jsonResponse({ error: 'file requerido (.zip)' }, 400);
+          const name = (file.name ?? 'plugin.zip') as string;
+          if (!/\.(zip|plectro)$/i.test(name)) return jsonResponse({ error: 'Solo .zip / .plectro' }, 400);
+          const tmp = `${process.cwd()}/.upload_${Date.now()}.zip`;
+          const { writeFile } = await import('fs/promises');
+          await writeFile(tmp, Buffer.from(await file.arrayBuffer()));
+          try {
+            const id = await services.pluginLoader.installPluginFromZip(tmp, { force });
+            const plugin = db.getPlugin(id);
+            services.wsManager.broadcastPluginInstalled(id, plugin);
+            return jsonResponse({ success: true, pluginId: id, plugin }, 201);
+          } finally {
+            try { (await import('fs')).rmSync(tmp, { force: true }); } catch {}
+          }
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+    }
+
+    // Detalle / enable-disable / uninstall / reload / rollback / update (rutas con id)
+    if (path.startsWith('/api/v1/plugins/') && !path.startsWith('/api/v1/plugins/actions')) {
+      const rest = path.slice('/api/v1/plugins/'.length); // "<id>" o "<id>/accion"
+      const [rawId, sub] = rest.split('/');
+      const pluginId = decodeURIComponent(rawId);
+
+      if (!sub) {
+        if (method === 'GET') {
+          const status = services.pluginLoader.getStatus(pluginId);
+          if (!status) return jsonResponse({ error: 'Plugin not found' }, 404);
+          return jsonResponse(status);
+        }
+        if (method === 'PUT') {
+          try {
+            const body = await req.json();
+            const { enabled } = body ?? {};
+            if (typeof enabled !== 'boolean') return jsonResponse({ error: 'enabled (boolean) requerido' }, 400);
+            let ok = true;
+            if (enabled) ok = await services.pluginLoader.enablePlugin(pluginId);
+            else await services.pluginLoader.disablePlugin(pluginId);
+            if (enabled && !ok) {
+              const st = services.pluginLoader.getStatus(pluginId) as any;
+              const err = st?.lastError ?? `No se pudo habilitar ${pluginId}`;
+              return jsonResponse({ error: err, pluginId, enabled: true, ok: false }, 400);
+            }
+            services.wsManager.broadcastPluginEnabled(pluginId, enabled);
+            return jsonResponse({ success: true, pluginId, enabled });
+          } catch (e) {
+            return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+          }
+        }
+        if (method === 'DELETE') {
+          try {
+            await services.pluginLoader.uninstallPlugin(pluginId);
+            return jsonResponse({ success: true });
+          } catch (e) {
+            return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+          }
+        }
+      }
+
+      if (sub === 'reload' && method === 'POST') {
+        try {
+          const ok = await services.pluginLoader.reloadPlugin(pluginId);
+          return jsonResponse({ success: ok, pluginId });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+      // Ajustes generales del plugin (menú ⋯): schema + valores + instrucciones
+      if (sub === 'settings') {
+        if (method === 'GET') {
+          try {
+            return jsonResponse(services.pluginLoader.getPluginSettingsBundle(pluginId));
+          } catch (e) {
+            return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 404);
+          }
+        }
+        if (method === 'PUT') {
+          try {
+            const body = await req.json().catch(() => ({}));
+            const values = await services.pluginLoader.savePluginSettings(pluginId, body?.values ?? {});
+            services.wsManager.broadcastPluginSettings(pluginId);
+            return jsonResponse({ success: true, pluginId, values });
+          } catch (e) {
+            return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+          }
+        }
+      }
+      // Captura de token OAuth extraído en local (Electrobun Web Player).
+      // Genérico por plugin pero hoy solo spotify declara oauth en el manifest.
+      // Guarda TODO el bundle (token + caducidad + tipo) vía savePluginSettings.
+      if (sub === 'token-capture' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          if (pluginId !== 'spotify') {
+            return jsonResponse({ error: `token-capture no soportado para ${pluginId}` }, 400);
+          }
+          const { normalizeSpotifyTokenCapture } = await import('../plugins/spotify.plugin');
+          const stored = normalizeSpotifyTokenCapture(body ?? {}, Date.now());
+          const values = services.pluginLoader.savePluginSettings(pluginId, stored);
+          // Limpiar las peticiones de login pendientes (explícita y de fondo).
+          try { db.deleteSetting('plugin.spotify.loginRequestedAt'); } catch {}
+          try { db.deleteSetting('plugin.spotify.autoRefreshRequestedAt'); } catch {}
+          services.wsManager.broadcastPluginSettings(pluginId);
+          return jsonResponse({ success: true, pluginId, values, expiresAt: stored.tokenExpiresAt });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+      // Señalización de login para el host Electrobun (polling):
+      // el dialog pide login, el host lo ve y abre la ventana del Web Player.
+      if (sub === 'login-request') {
+        if (pluginId !== 'spotify') {
+          return jsonResponse({ error: `login-request no soportado para ${pluginId}` }, 400);
+        }
+        if (method === 'POST') {
+          db.setSetting('plugin.spotify.loginRequestedAt', String(Date.now()));
+          return jsonResponse({ success: true, pluginId, requestedAt: db.getSetting('plugin.spotify.loginRequestedAt') });
+        }
+        if (method === 'GET') {
+          const requestedAt = db.getSetting('plugin.spotify.loginRequestedAt');
+          let bundle: any = null;
+          try { bundle = services.pluginLoader.getPluginSettingsBundle(pluginId); } catch {}
+          return jsonResponse({
+            pluginId,
+            pending: requestedAt !== null && requestedAt !== '',
+            requestedAt,
+            configured: bundle?.configured ?? false,
+            missing: bundle?.missing ?? [],
+          });
+        }
+        if (method === 'DELETE') {
+          db.deleteSetting('plugin.spotify.loginRequestedAt');
+          return jsonResponse({ success: true, pluginId });
+        }
+      }
+      if (sub === 'rollback' && method === 'POST') {
+        try {
+          const ok = await services.pluginLoader.rollbackPlugin(pluginId);
+          return jsonResponse({ success: ok, pluginId });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+      if (sub === 'update' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const prog = (stage: string, message: string) =>
+            services.wsManager.broadcast('plugin.install-progress', { key: pluginId, stage, message, ts: Date.now() }, 'plugins');
+          const id = await services.pluginLoader.updatePlugin(pluginId, { ...(body ?? {}), onProgress: prog });
+          const plugin = db.getPlugin(id);
+          services.wsManager.broadcastPluginInstalled(id, plugin);
+          return jsonResponse({ success: true, pluginId: id, plugin });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+      // Estado visual Elgato (setTitle/setImage/setState por contexto).
+      if (sub === 'elgato-state' && method === 'GET') {
+        try {
+          const action = url.searchParams.get('action') ?? undefined;
+          const state = await services.pluginLoader.getElgatoState(pluginId, action ?? undefined);
+          return jsonResponse(state);
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 404);
+        }
+      }
+      // Pulso Elgato (keyDown+keyUp) para probar sin hardware: emula pulsar la tecla.
+      if (sub === 'key' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const { action, context } = body ?? {};
+          if (!action) return jsonResponse({ error: 'action (id corto o UUID Elgato) requerido' }, 400);
+          const fullId = action.includes('.') ? action : `${pluginId}.${action}`;
+          const res = await services.actionRunner.executeAction(
+            { type: fullId, parameters: {} },
+            { buttonId: typeof context === 'string' ? context : undefined, timestamp: Date.now(), pressType: 'short' } as any
+          );
+          return jsonResponse({ success: res.success, result: res.result, error: res.error });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
       }
     }
 
@@ -642,18 +975,29 @@ export async function setupAPIRoutes(
     if (path === '/api/v1/windows/watcher') {
       if (method === 'POST') {
         const body = await req.json()
-        const { action, rules } = body
+        const { action, rules, defaultProfileId } = body
+
+        // El listener profile-switch debe registrarse una sola vez (antes se
+        // duplicaba en cada 'start' y el perfil cambiaba N veces).
+        const ensureSwitchListener = () => {
+          const w: any = services.windowWatcher
+          if (!w.__ldSwitchBound) {
+            w.__ldSwitchBound = true
+            services.windowWatcher.on('profile-switch', (profileId: string, window: any) => {
+              // Update current profile in database and window watcher
+              db.setCurrentProfile(profileId);
+              services.windowWatcher.setCurrentProfile(profileId);
+              services.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
+            });
+          }
+        }
 
         if (action === 'start' && rules) {
           services.windowWatcher.updateRules(rules)
+          if (defaultProfileId !== undefined) services.windowWatcher.setDefaultProfile(defaultProfileId ?? null)
 
           // Connect window watcher events to WebSocket for profile switching
-          services.windowWatcher.on('profile-switch', (profileId: string, window: any) => {
-            // Update current profile in database and window watcher
-            db.setCurrentProfile(profileId);
-            services.windowWatcher.setCurrentProfile(profileId);
-            services.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
-          });
+          ensureSwitchListener()
 
           services.windowWatcher.startWatching(rules)
           return jsonResponse({ status: 'started' })
@@ -662,6 +1006,7 @@ export async function setupAPIRoutes(
           return jsonResponse({ status: 'stopped' })
         } else if (action === 'update' && rules) {
           services.windowWatcher.updateRules(rules)
+          if (defaultProfileId !== undefined) services.windowWatcher.setDefaultProfile(defaultProfileId ?? null)
           return jsonResponse({ status: 'updated' })
         }
       }
@@ -809,62 +1154,14 @@ export async function setupAPIRoutes(
       }
     }
 
+    // Deprecated: update flow moved to the Electrobun Updater (canonical).
+    // Kept as 501 so old clients fail loudly instead of hanging.
     if (path === '/api/v1/version/check') {
       if (method === 'GET') {
-        try {
-          // Get current version - try multiple locations
-          let packageJsonPath;
-          const possiblePaths = [
-            join(dirname(process.execPath), 'package.json'), // same dir as exe
-            join(dirname(process.execPath), '..', 'package.json'), // parent dir
-            join(process.cwd(), 'package.json'), // current working dir
-            join(process.cwd(), '..', 'package.json') // parent of cwd
-          ];
-
-          for (const path of possiblePaths) {
-            try {
-              await Bun.file(path).stat();
-              packageJsonPath = path;
-              break;
-            } catch { }
-          }
-
-          if (!packageJsonPath) {
-            throw new Error(`package.json not found in any of: ${possiblePaths.join(', ')}`);
-          }
-
-          const packageJson = await Bun.file(packageJsonPath).json();
-          const currentVersion = packageJson.version || '0.1.0';
-
-          // Check GitHub for latest release
-          const response = await fetch('https://api.github.com/repos/mikelgmh/libredeck/releases/latest', {
-            headers: {
-              'User-Agent': 'LibreDeck-Updater'
-            }
-          });
-
-          if (!response.ok) {
-            return errorResponse('Failed to check for updates', `GitHub API returned ${response.status}: ${response.statusText}`);
-          }
-
-          const latestRelease = await response.json();
-          const latestVersion = latestRelease.tag_name.replace('v', '');
-
-          // Compare versions (simple string comparison for now)
-          const hasUpdate = latestVersion !== currentVersion;
-
-          return jsonResponse({
-            currentVersion,
-            latestVersion,
-            hasUpdate,
-            releaseUrl: latestRelease.html_url,
-            releaseNotes: latestRelease.body,
-            publishedAt: latestRelease.published_at
-          });
-        } catch (error) {
-          console.error('Failed to check for updates:', error);
-          return errorResponse('Failed to check for updates', error);
-        }
+        return jsonResponse(
+          { error: 'Gone', message: 'Version check is managed by the Electrobun Updater, not the daemon API.' },
+          501
+        );
       }
     }
 
@@ -882,37 +1179,14 @@ export async function setupAPIRoutes(
       }
     }
 
-    // Update endpoints
+    // Deprecated: update flow moved to the Electrobun Updater (canonical).
+    // Kept as 501 so old clients fail loudly instead of hanging.
     if (path === '/api/v1/update') {
       if (method === 'POST') {
-        try {
-          // Import the update function dynamically
-          const { updateDaemon } = await import('../update');
-
-          // Run update in background
-          updateDaemon().then(result => {
-            console.log('Update completed:', result);
-
-            // Broadcast update result via WebSocket
-            services.wsManager.broadcast('update.completed', result);
-
-            // No need to exit, CLI handles restart
-          }).catch(error => {
-            console.error('Update failed:', error);
-            services.wsManager.broadcast('update.completed', {
-              success: false,
-              message: error instanceof Error ? error.message : 'Unknown error'
-            });
-          });
-
-          return jsonResponse({
-            success: true,
-            message: 'Update started in background'
-          });
-        } catch (error) {
-          console.error('Failed to start update:', error);
-          return errorResponse('Failed to start update', error);
-        }
+        return jsonResponse(
+          { error: 'Gone', message: 'Updates are managed by the Electrobun Updater, not the daemon API.' },
+          501
+        );
       }
     }
 
@@ -920,11 +1194,32 @@ export async function setupAPIRoutes(
     if (path === '/api/v1/devices/streamdeck') {
       if (method === 'GET') {
         try {
-          const devices = await listStreamDecks();
+          const devices = await streamDeckDriver.listDevices();
           return jsonResponse(devices);
         } catch (error) {
           console.error('Failed to list StreamDeck devices:', error);
           return jsonResponse({ error: 'Failed to list StreamDeck devices' }, 500);
+        }
+      }
+    }
+
+    // IPs LAN del host (el QR del panel necesita la IP LAN, no localhost,
+    // y el WebRTC del navegador ya no la expone: Chrome devuelve .local por privacidad)
+    if (path === '/api/v1/network/ips') {
+      if (method === 'GET') {
+        try {
+          const { networkInterfaces } = await import('os');
+          const nets = networkInterfaces();
+          const ips: string[] = [];
+          for (const addrs of Object.values(nets)) {
+            for (const a of addrs || []) {
+              if (a.family === 'IPv4' && !a.internal) ips.push(a.address);
+            }
+          }
+          return jsonResponse({ ips });
+        } catch (error) {
+          console.error('Failed to list network interfaces:', error);
+          return jsonResponse({ error: 'Failed to list network interfaces' }, 500);
         }
       }
     }
@@ -983,7 +1278,9 @@ export async function setupAPIRoutes(
       if (method === 'GET') {
         return jsonResponse({
           isConnected: streamDeckDriver.isConnected(),
-          connectedDevice: streamDeckDriver.getConnectedDevice()
+          connectedDevice: streamDeckDriver.getConnectedDevice(),
+          keyCount: streamDeckDriver.getKeyCount(),
+          grid: streamDeckDriver.getGridGeometry()
         });
       }
     }
@@ -1003,17 +1300,129 @@ export async function setupAPIRoutes(
     if (path === '/api/v1/devices/streamdeck/update-buttons') {
       if (method === 'POST') {
         try {
-          const body = await req.json();
-          const { buttonStates } = body;
+          const { buttonStates, pageId } = ((await req.json()) as any) ?? {};
 
           console.log('🎛️ Received button states for update:', buttonStates);
 
-          await streamDeckDriver.updateButtons(buttonStates);
-          return jsonResponse({ success: true });
+          // No bloquear: el repintado completo va en segundo plano.
+          // pageId manda; si no viene, el driver usa current.page_id.
+          const { DatabaseService: DB } = await import('../db');
+          const target = pageId ?? new DB().getSetting('current.page_id');
+          if (streamDeckDriver.isConnected() && target && target !== 'null' && target !== '') {
+            streamDeckDriver.scheduleUpdateFromPage(target);
+          } else if (streamDeckDriver.isConnected()) {
+            // Sin página conocida, delegar al path legacy en background.
+            streamDeckDriver.updateButtons(buttonStates, pageId).catch((e) =>
+              console.error('Failed to update StreamDeck buttons:', e)
+            );
+          }
+          return jsonResponse({ success: true, scheduled: true });
         } catch (error) {
           console.error('Failed to update StreamDeck buttons:', error);
           return jsonResponse({ error: 'Failed to update StreamDeck buttons' }, 500);
         }
+      }
+    }
+
+    // ---- Servidor MCP (el daemon ES el servidor) ----
+    // Clientes (Claude Code, etc.): POST /api/v1/mcp con
+    // Authorization: Bearer <token creado en Ajustes → MCP>.
+    if (path === '/api/v1/mcp') {
+      if (method === 'GET') {
+        return jsonResponse({
+          name: 'libredeck',
+          protocol: 'mcp-streamable-http-json',
+          endpoint: '/api/v1/mcp',
+          auth: 'Bearer (token de Ajustes → MCP)',
+          howto: 'Crea un token en Ajustes → MCP (marca sus permisos) y conéctalo desde tu cliente MCP. Control total: perfiles, páginas, botones, acciones, plugins, ajustes y logs.',
+        });
+      }
+      if (method === 'POST') {
+        const secret = bearerFromHeaders(req);
+        const token = verifyMcpToken(db, secret);
+        if (!token) {
+          return jsonResponse({ error: 'No autorizado: usa Authorization: Bearer <token MCP>' }, 401);
+        }
+        try {
+          const body = await req.json();
+          const { status, payload } = await handleMcpBody(body, {
+            pluginLoader: services.pluginLoader,
+            actionRunner: services.actionRunner,
+            db,
+            auth: { tokenId: token.id, tokenName: token.name, scopes: token.scopes },
+            ws: services.wsManager,
+            repaint: (pageId: string) => {
+              if (streamDeckDriver.isConnected()) {
+                streamDeckDriver.scheduleUpdateFromPage(pageId);
+              }
+            },
+          });
+          if (status === 202) return new Response(null, { status: 202 });
+          return jsonResponse(payload, status);
+        } catch (e) {
+          return jsonResponse(
+            { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
+            400
+          );
+        }
+      }
+    }
+
+    // Catálogo de permisos marcables al crear/editar un token MCP (sin auth: metadatos públicos).
+    if (path === '/api/v1/mcp/scopes') {
+      if (method === 'GET') {
+        return jsonResponse({ scopes: MCP_SCOPES });
+      }
+    }
+
+    if (path === '/api/v1/mcp/tokens') {
+      if (method === 'GET') {
+        return jsonResponse({ tokens: listMcpTokens(db) });
+      }
+      if (method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        try {
+          const { record, secret } = createMcpToken(db, body?.name ?? '', body?.scopes);
+          return jsonResponse({ token: record, secret, warning: 'Guárdalo: el secreto no se vuelve a mostrar' }, 201);
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+    }
+
+    if (path.startsWith('/api/v1/mcp/tokens/')) {
+      const tokenId = decodeURIComponent(path.split('/')[5] ?? '');
+      if (method === 'PUT') {
+        const body = await req.json().catch(() => ({}));
+        try {
+          const record = updateMcpToken(db, tokenId, { name: body?.name, scopes: body?.scopes });
+          if (!record) return jsonResponse({ error: 'Token not found' }, 404);
+          return jsonResponse({ success: true, token: record });
+        } catch (e) {
+          return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+      if (method === 'DELETE') {
+        const ok = revokeMcpToken(db, tokenId);
+        if (!ok) return jsonResponse({ error: 'Token not found' }, 404);
+        return jsonResponse({ success: true });
+      }
+    }
+
+    // ---- Jobs anti-cuelgue (operaciones largas: import/build/clone) ----
+    if (path === '/api/v1/jobs') {
+      if (method === 'GET') {
+        const { getJobManager } = await import('../jobs/manager');
+        return jsonResponse({ jobs: getJobManager().list() });
+      }
+    }
+    if (path.startsWith('/api/v1/jobs/') && path.endsWith('/cancel')) {
+      if (method === 'POST') {
+        const id = decodeURIComponent(path.split('/')[4] ?? '');
+        const { getJobManager } = await import('../jobs/manager');
+        const ok = getJobManager().cancel(id);
+        if (!ok) return jsonResponse({ error: 'Job not found o ya terminado' }, 404);
+        return jsonResponse({ success: true, jobId: id });
       }
     }
 
@@ -1024,6 +1433,11 @@ export async function setupAPIRoutes(
     console.error('API Error:', error);
     return errorResponse('Internal server error', error);
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  const msg = error instanceof Error ? `${error.message} ${String((error as any)?.code ?? '')}` : String(error);
+  return /UNIQUE constraint failed|SQLITE_CONSTRAINT_UNIQUE|SQLITE_CONSTRAINT/i.test(msg);
 }
 
 function jsonResponse(data: any, status: number = 200): Response {

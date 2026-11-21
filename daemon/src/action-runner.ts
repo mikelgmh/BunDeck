@@ -12,8 +12,12 @@ import {
   PagePlugin,
   BrowserPlugin,
   PCVitalsPlugin,
+  ObsPlugin,
+  HomeAssistantPlugin,
+  SpotifyPlugin,
   type NativePlugin
 } from './plugins';
+import { PluginSandbox } from './plugin-system/sandbox';
 
 export interface ActionDescriptor {
   id?: string;
@@ -47,35 +51,57 @@ export class ActionRunner {
   private actionHandlers: Map<string, Function> = new Map();
   private lastExecution: Map<string, number> = new Map();
   private nativePlugins: NativePlugin[] = [];
+  private sandbox = new PluginSandbox();
 
   constructor(pluginLoader: PluginLoader) {
     this.pluginLoader = pluginLoader;
     this.db = new DatabaseService();
+    // Conectar loader -> runner para plugins externos (evita doble registro) — opcional para tests con mock
+    if (typeof (this.pluginLoader as any).setActionCallbacks === 'function') {
+      (this.pluginLoader as any).setActionCallbacks(
+        (fullId: string, handler: Function) => this.registerAction(fullId, handler),
+        (fullId: string) => this.actionHandlers.delete(fullId)
+      );
+    }
     this.loadNativePlugins();
     this.setupBuiltInActions();
+  }
+
+  /** Contexto por plugin: log + ajustes generales namespaced (plugin.<id>.<key>). */
+  private makePluginContext(pluginId: string) {
+    return {
+      log: (level: string, message: string, meta?: any) => {
+        this.db.addLog({ level, message, meta, ts: Date.now() });
+      },
+      getSetting: (key: string): string | null => {
+        return this.db.getSetting(`plugin.${pluginId}.${key}`);
+      },
+      setSetting: (key: string, value: string): void => {
+        this.db.setSetting(`plugin.${pluginId}.${key}`, String(value));
+      },
+      deleteSetting: (key: string): void => {
+        this.db.deleteSetting(`plugin.${pluginId}.${key}`);
+      },
+    };
   }
 
   private loadNativePlugins() {
     console.log('🔌 Loading native plugins...');
 
-    // Create plugin context for logging
-    const pluginContext = {
-      log: (level: string, message: string, meta?: any) => {
-        this.db.addLog({ level, message, meta, ts: Date.now() });
-      }
-    };
-
-    // Load all native plugins
-    const multimediaPlugin = new MultimediaPlugin(pluginContext);
-    const shellPlugin = new ShellPlugin(pluginContext);
-    const httpPlugin = new HttpPlugin(pluginContext);
-    const utilityPlugin = new UtilityPlugin(pluginContext);
-    const hotkeyPlugin = new HotkeyPlugin(pluginContext);
-    const typeTextPlugin = new TypeTextPlugin(pluginContext);
-    const openAppPlugin = new OpenAppPlugin(pluginContext);
-    const pagePlugin = new PagePlugin(pluginContext);
-    const browserPlugin = new BrowserPlugin(pluginContext);
-    const pcVitalsPlugin = new PCVitalsPlugin(pluginContext);
+    // Load all native plugins (cada uno con su contexto y ajustes propios)
+    const multimediaPlugin = new MultimediaPlugin(this.makePluginContext('multimedia'));
+    const shellPlugin = new ShellPlugin(this.makePluginContext('shell'));
+    const httpPlugin = new HttpPlugin(this.makePluginContext('http'));
+    const utilityPlugin = new UtilityPlugin(this.makePluginContext('utility'));
+    const hotkeyPlugin = new HotkeyPlugin(this.makePluginContext('hotkey'));
+    const typeTextPlugin = new TypeTextPlugin(this.makePluginContext('type-text'));
+    const openAppPlugin = new OpenAppPlugin(this.makePluginContext('open-app'));
+    const pagePlugin = new PagePlugin(this.makePluginContext('page'));
+    const browserPlugin = new BrowserPlugin(this.makePluginContext('browser'));
+    const pcVitalsPlugin = new PCVitalsPlugin(this.makePluginContext('pc-vitals'));
+    const obsPlugin = new ObsPlugin(this.makePluginContext('obs'));
+    const homeAssistantPlugin = new HomeAssistantPlugin(this.makePluginContext('homeassistant'));
+    const spotifyPlugin = new SpotifyPlugin(this.makePluginContext('spotify'));
 
     // Set action executor for utility plugin
     utilityPlugin.setActionExecutor(this.executeAction.bind(this));
@@ -90,7 +116,10 @@ export class ActionRunner {
       openAppPlugin,
       pagePlugin,
       browserPlugin,
-      pcVitalsPlugin
+      pcVitalsPlugin,
+      obsPlugin,
+      homeAssistantPlugin,
+      spotifyPlugin
     );
 
     // Register all action handlers from native plugins

@@ -1,7 +1,9 @@
 <template>
   <div class="space-y-4" data-cy="button-editor">
-    <!-- Basic Settings -->
-    <div class="space-y-4">
+    <!-- Contenido -->
+    <section aria-labelledby="be-content-title">
+      <p id="be-content-title" class="mb-2 text-xs font-medium text-base-content/50">{{ t('buttonEditor.content') }}</p>
+      <div class="space-y-3">
       <!-- Icon Picker -->
       <IconPicker
         :model-value="buttonConfig.icon || ''"
@@ -9,89 +11,110 @@
       />
 
       <!-- Text Top -->
-      <label class="form-control w-full">
-        <div class="label">
-          <span class="label-text">{{ t('buttonEditor.textTop') }}</span>
-        </div>
-        <input 
-          :value="buttonConfig.textTop || ''" 
+      <div class="form-control w-full">
+        <label class="label py-1" for="be-text-top">
+          <span class="label-text text-[13px] font-medium">{{ t('buttonEditor.textTop') }}</span>
+        </label>
+        <input
+          id="be-text-top"
+          :value="buttonConfig.textTop || ''"
           @input="updateTextTop"
-          type="text" 
-          placeholder="Texto superior (opcional)"
-          class="input input-bordered input-sm w-full"
+          type="text"
+          :placeholder="t('buttonEditor.textTopPlaceholder') + '…'"
+          autocomplete="off"
+          spellcheck="false"
+          class="input input-bordered input-sm w-full ld-control px-3 placeholder:text-base-content/40"
           data-cy="text-top-input"
         />
-      </label>
+      </div>
 
       <!-- Text Bottom -->
-      <label class="form-control w-full">
-        <div class="label">
-          <span class="label-text">{{ t('buttonEditor.textBottom') }}</span>
-        </div>
-        <input 
-          :value="buttonConfig.textBottom || ''" 
+      <div class="form-control w-full">
+        <label class="label py-1" for="be-text-bottom">
+          <span class="label-text text-[13px] font-medium">{{ t('buttonEditor.textBottom') }}</span>
+        </label>
+        <input
+          id="be-text-bottom"
+          :value="buttonConfig.textBottom || ''"
           @input="updateTextBottom"
-          type="text" 
-          placeholder="Texto inferior (opcional)"
-          class="input input-bordered input-sm w-full"
+          type="text"
+          :placeholder="t('buttonEditor.textBottomPlaceholder') + '…'"
+          autocomplete="off"
+          spellcheck="false"
+          class="input input-bordered input-sm w-full ld-control px-3 placeholder:text-base-content/40"
           data-cy="text-bottom-input"
         />
-      </label>
+      </div>
+      </div>
+    </section>
 
+    <!-- Estilo -->
+    <section aria-labelledby="be-style-title">
+      <p id="be-style-title" class="mb-2 text-xs font-medium text-base-content/50">{{ t('buttonEditor.style') }}</p>
+      <div class="space-y-3">
       <!-- Font Size -->
-      <label class="form-control w-full">
-        <div class="label">
-          <span class="label-text">{{ t('buttonEditor.fontSize') }}</span>
-        </div>
-        <input 
-          :value="buttonConfig.fontSize || 14" 
+      <div class="form-control w-full">
+        <label class="label py-1" for="be-font-size">
+          <span class="label-text text-[13px] font-medium">{{ t('buttonEditor.fontSize') }}</span>
+        </label>
+        <input
+          id="be-font-size"
+          :value="buttonConfig.fontSize || 14"
           @input="updateFontSize"
           type="number"
           min="8"
           max="48"
           placeholder="14"
-          class="input input-bordered input-sm w-full" 
+          inputmode="numeric"
+          class="input input-bordered input-sm w-full ld-control px-3 tabular placeholder:text-base-content/40"
         />
-      </label>
+      </div>
 
       <!-- Colors -->
       <div class="grid grid-cols-2 gap-2">
-        <label class="form-control">
-          <div class="label">
-            <span class="label-text">{{ t('buttonEditor.backgroundColor') }}</span>
-          </div>
-          <input 
-            :value="buttonConfig.backgroundColor" 
+        <div class="form-control">
+          <label class="label py-1" for="be-bg">
+            <span class="label-text text-[13px] font-medium">{{ t('buttonEditor.backgroundColor') }}</span>
+          </label>
+          <input
+            id="be-bg"
+            :value="buttonConfig.backgroundColor"
             @input="updateBackgroundColor"
-            type="color" 
-            class="input input-bordered input-sm w-full h-10" 
+            type="color"
+            class="input input-bordered input-sm w-full h-8 px-1 py-1 cursor-pointer"
           />
-        </label>
+        </div>
 
-        <label class="form-control">
-          <div class="label">
-            <span class="label-text">{{ t('buttonEditor.textColor') }}</span>
-          </div>
-          <input 
-            :value="buttonConfig.textColor" 
+        <div class="form-control">
+          <label class="label py-1" for="be-fg">
+            <span class="label-text text-[13px] font-medium">{{ t('buttonEditor.textColor') }}</span>
+          </label>
+          <input
+            id="be-fg"
+            :value="buttonConfig.textColor"
             @input="updateTextColor"
-            type="color" 
-            class="input input-bordered input-sm w-full h-10" 
+            type="color"
+            class="input input-bordered input-sm w-full h-8 px-1 py-1 cursor-pointer"
           />
-        </label>
+        </div>
       </div>
-    </div>
+      </div>
+    </section>
 
     <!-- Actions Section -->
-    <div class="divider text-sm">{{ t('buttonEditor.actions') }}</div>
+    <section :aria-label="t('buttonEditor.actions')">
+    <div class="flex items-center gap-2 pt-1">
+      <span class="text-xs font-medium text-base-content/50">{{ t('buttonEditor.actions') }}</span>
+      <div class="flex-1 h-px bg-base-300" aria-hidden="true"></div>
+      <span v-if="buttonConfig.actions.length" class="ld-count" aria-live="polite">{{ buttonConfig.actions.length }}</span>
+    </div>
     
     <div 
       ref="actionsContainer"
-      class="p-2 rounded-lg transition-all duration-200"
+      class="rounded-xl border transition-[border-color,background-color] duration-150"
       :class="{
-        'min-h-[100px]': !isDraggingAction,
-        'min-h-[200px] bg-primary/5 border-2 border-primary border-dashed': isDraggingAction,
-        'bg-primary/20': isDragOver
+        'border-base-300 bg-base-100/50': !isDraggingAction,
+        'border-dashed border-primary bg-primary/5': isDraggingAction,
       }"
       @dragover.prevent="handleDragOver"
       @dragleave="handleDragLeave"
@@ -99,7 +122,7 @@
       data-cy="drop-zone"
     >
       <!-- Swapy container with slots -->
-      <div v-if="buttonConfig.actions.length > 0" class="space-y-3" data-cy="button-actions">
+      <div v-if="buttonConfig.actions.length > 0" class="space-y-2 p-2" data-cy="button-actions">
         <div 
           v-for="(action, index) in buttonConfig.actions" 
           :key="action.id"
@@ -119,15 +142,15 @@
       </div>
 
       <!-- Drop zone hint -->
-      <div v-if="!isDraggingAction" class="border-2 border-dashed border-base-content/30 rounded-lg p-4 text-center text-sm text-base-content/50 mt-4">
+      <div v-if="!isDraggingAction" class="border-t border-dashed border-base-content/15 px-3 py-3 text-center text-xs text-base-content/50" :class="{ 'border-t-0': buttonConfig.actions.length === 0 }">
         {{ t('buttonEditor.dragActionsHere') }}
       </div>
       
-      <div v-if="isDraggingAction" class="text-center py-12 text-sm font-medium" :class="isDragOver ? 'text-primary' : 'text-base-content/60'">
-        <div class="text-2xl mb-2">↓</div>
+      <div v-if="isDraggingAction" class="text-center px-3 py-8 text-[13px] font-medium" :class="isDragOver ? 'text-primary' : 'text-base-content/60'">
         {{ t('buttonEditor.dropActionHere') }}
       </div>
     </div>
+    </section>
 
     <!-- Save is automatic, no manual save button needed -->
   </div>

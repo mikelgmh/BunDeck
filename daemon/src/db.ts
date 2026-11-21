@@ -33,6 +33,17 @@ export interface Plugin {
   manifest: any; // JSON manifest
   enabled: number; // 1 = enabled, 0 = disabled
   installed_at: number;
+  updated_at?: number;
+  // Ciclo de vida marketplace/actualizaciones (migración 2, opcionales)
+  source_type?: string | null; // 'builtin' | 'zip' | 'git' | 'marketplace' | 'directory'
+  origin?: string | null; // URL repo / zip, o 'builtin'
+  ref?: string | null; // rama/tag/commit solicitado
+  commit?: string | null; // commit instalado (git)
+  checksum?: string | null; // sha256 del paquete/carpeta
+  status?: string | null; // 'active' | 'error' | 'disabled'
+  last_error?: string | null;
+  previous_version?: string | null;
+  previous_manifest?: any | null;
 }
 
 export interface Asset {
@@ -96,7 +107,17 @@ const SQL_SCHEMA = `
     version TEXT NOT NULL,
     manifest TEXT, -- JSON
     enabled INTEGER DEFAULT 1,
-    installed_at INTEGER NOT NULL
+    installed_at INTEGER NOT NULL,
+    updated_at INTEGER,
+    source_type TEXT,
+    origin TEXT,
+    ref TEXT,
+    commit_sha TEXT,
+    checksum TEXT,
+    status TEXT,
+    last_error TEXT,
+    previous_version TEXT,
+    previous_manifest TEXT
   );
 
   CREATE TABLE IF NOT EXISTS assets (
@@ -118,6 +139,11 @@ const SQL_SCHEMA = `
   -- Índices para mejor performance
   CREATE INDEX IF NOT EXISTS idx_pages_profile_id ON pages(profile_id);
   CREATE INDEX IF NOT EXISTS idx_buttons_page_id ON buttons(page_id);
+  -- NOTA: el UNIQUE(page_id, position) NO va en el schema base.
+  -- Lo crea la migración 3 DESPUÉS de reubicar duplicados existentes.
+  -- (Si se crea aquí, db.exec falla con SQLITE_CONSTRAINT_UNIQUE en DBs
+  --  antiguas con posiciones duplicadas, antes de que la migración pueda
+  --  repararlas, y el daemon no arranca.)
   CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
   CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts);
 `;
@@ -141,7 +167,7 @@ export async function initDatabase() {
   const defaultSettings = [
     { key: 'app.version', value: '0.1.0' },
     { key: 'api.port', value: '3001' },
-    { key: 'ws.port', value: '3002' },
+    { key: 'ws.port', value: '3003' },
     { key: 'security.cors_origins', value: 'http://localhost:4321,http://127.0.0.1:4321' },
     { key: 'current.profile_id', value: '' },
     { key: 'current.page_id', value: '' }
@@ -175,6 +201,70 @@ function runMigrations(db: Database) {
     console.error('❌ Migration 1 failed:', error);
   }
 
+  // Migration 2: plugin lifecycle columns (marketplace / actualizaciones)
+  try {
+    const prow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='plugins'").get() as { sql: string } | undefined;
+    const psql = prow?.sql ?? '';
+    const ensureCol = (col: string, ddl: string) => {
+      if (!psql.includes(col)) {
+        try { db.exec(`ALTER TABLE plugins ADD COLUMN ${ddl}`); console.log(`📝 Migration 2: added plugins.${col}`); }
+        catch (e) { console.error(`❌ Migration 2 failed for ${col}:`, e); }
+      }
+    };
+    ensureCol('updated_at', 'updated_at INTEGER');
+    ensureCol('source_type', 'source_type TEXT');
+    ensureCol('origin', 'origin TEXT');
+    ensureCol('ref', 'ref TEXT');
+    ensureCol('commit_sha', 'commit_sha TEXT');
+    ensureCol('checksum', 'checksum TEXT');
+    ensureCol('status', 'status TEXT');
+    ensureCol('last_error', 'last_error TEXT');
+    ensureCol('previous_version', 'previous_version TEXT');
+    ensureCol('previous_manifest', 'previous_manifest TEXT');
+  } catch (error) {
+    console.error('❌ Migration 2 failed:', error);
+  }
+
+  // Migration 3: evitar posiciones duplicadas de botones dentro de una página.
+  // 1) Reubica duplicados existentes a posiciones libres (conserva datos).
+  // 2) Crea índice UNIQUE (page_id, position) para que no vuelvan a ocurrir.
+  try {
+    const dupGroups = db.prepare(`
+      SELECT page_id, position, COUNT(*) as c FROM buttons
+      GROUP BY page_id, position HAVING c > 1
+    `).all() as { page_id: string; position: number; c: number }[];
+    if (dupGroups.length > 0) {
+      console.log(`📝 Migration 3: found ${dupGroups.length} grupos con posición duplicada, reubicando...`);
+      const relocate = db.transaction(() => {
+        for (const g of dupGroups) {
+          const rows = db.prepare(
+            'SELECT id FROM buttons WHERE page_id = ? AND position = ? ORDER BY rowid'
+          ).all(g.page_id, g.position) as { id: string }[];
+          // La primera fila conserva su posición; el resto va a posiciones libres
+          const used = new Set(
+            (db.prepare('SELECT position FROM buttons WHERE page_id = ?').all(g.page_id) as { position: number }[])
+              .map(r => r.position)
+          );
+          let candidate = 0;
+          for (let i = 1; i < rows.length; i++) {
+            while (used.has(candidate)) candidate++;
+            db.prepare('UPDATE buttons SET position = ? WHERE id = ?').run(candidate, rows[i].id);
+            used.add(candidate);
+            console.log(`📝 Migration 3: botón ${rows[i].id} reubicado a posición ${candidate}`);
+          }
+        }
+      });
+      relocate();
+      console.log('✅ Migration 3: duplicados reubicados');
+    } else {
+      console.log('ℹ️ Migration 3: sin posiciones duplicadas');
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_buttons_page_position ON buttons(page_id, position)');
+    console.log('✅ Migration 3 completed: UNIQUE(page_id, position)');
+  } catch (error) {
+    console.error('❌ Migration 3 failed:', error);
+  }
+
   console.log('✅ Database migrations completed');
 }
 
@@ -182,7 +272,7 @@ async function installBuiltInPlugins(db: Database) {
   console.log('🔌 Installing built-in plugins...');
 
   // Import built-in plugins statically to avoid dynamic import issues
-  const { ShellPlugin, HttpPlugin, HotkeyPlugin, TypeTextPlugin, MultimediaPlugin, OpenAppPlugin, PagePlugin, UtilityPlugin, BrowserPlugin, PCVitalsPlugin } = await import('./plugins/index');
+  const { ShellPlugin, HttpPlugin, HotkeyPlugin, TypeTextPlugin, MultimediaPlugin, OpenAppPlugin, PagePlugin, UtilityPlugin, BrowserPlugin, PCVitalsPlugin, ObsPlugin, HomeAssistantPlugin, SpotifyPlugin } = await import('./plugins/index');
 
   const builtInPlugins = [
     { id: 'shell', class: ShellPlugin },
@@ -194,29 +284,38 @@ async function installBuiltInPlugins(db: Database) {
     { id: 'page', class: PagePlugin },
     { id: 'utility', class: UtilityPlugin },
     { id: 'browser', class: BrowserPlugin },
-    { id: 'pc-vitals', class: PCVitalsPlugin }
+    { id: 'pc-vitals', class: PCVitalsPlugin },
+    { id: 'obs', class: ObsPlugin },
+    { id: 'homeassistant', class: HomeAssistantPlugin },
+    { id: 'spotify', class: SpotifyPlugin }
   ];
 
-  const insertPlugin = db.prepare(`
-    INSERT OR REPLACE INTO plugins (id, name, version, manifest, enabled, installed_at) 
-    VALUES (?, ?, ?, ?, ?, ?)
+  const insertIgnore = db.prepare(`
+    INSERT OR IGNORE INTO plugins (id, name, version, manifest, enabled, installed_at, updated_at, source_type, origin, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', 'builtin', 'active')
   `);
+  const updateIfNewer = db.prepare(`
+    UPDATE plugins SET name = ?, version = ?, manifest = ?, updated_at = ?, status = 'active' WHERE id = ? AND version != ?
+  `);
+  const getVersion = db.prepare('SELECT version, enabled FROM plugins WHERE id = ?');
 
   for (const pluginInfo of builtInPlugins) {
     try {
       const pluginInstance = new pluginInfo.class({ log: () => {} });
       const manifest = pluginInstance.getManifest();
 
-      insertPlugin.run(
-        manifest.id,
-        manifest.name,
-        manifest.version,
-        JSON.stringify(manifest),
-        1, // enabled
-        Date.now()
-      );
-
-      console.log(`✅ Installed built-in plugin: ${manifest.name}`);
+      const existing = getVersion.get(manifest.id) as { version: string; enabled: number } | undefined;
+      if (!existing) {
+        insertIgnore.run(manifest.id, manifest.name, manifest.version, JSON.stringify(manifest), 1, Date.now(), Date.now());
+        console.log(`✅ Installed built-in plugin: ${manifest.name} v${manifest.version}`);
+      } else if (existing.version !== manifest.version) {
+        // Actualizar solo si versión cambió, preservando enabled
+        updateIfNewer.run(manifest.name, manifest.version, JSON.stringify(manifest), Date.now(), manifest.id, manifest.version);
+        console.log(`🔄 Updated built-in plugin: ${manifest.name} ${existing.version} → ${manifest.version}`);
+      } else {
+        // Solo actualizar manifest si cambió sin bump (ej. permisos)
+        db.prepare('UPDATE plugins SET manifest = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(manifest), Date.now(), manifest.id);
+      }
     } catch (error) {
       console.error(`❌ Failed to install built-in plugin ${pluginInfo.id}:`, error);
     }
@@ -232,6 +331,11 @@ export function getDatabase(): Database {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
   return db;
+}
+
+function safeParseManifest(text: string): any {
+  try { return JSON.parse(text); }
+  catch { return { id: 'unknown', name: 'unknown', version: '0.0.0', permissions: [], actions: [] }; }
 }
 
 // Funciones de utilidad para acceso a datos
@@ -252,6 +356,18 @@ export class DatabaseService {
   setSetting(key: string, value: string): void {
     const stmt = this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     stmt.run(key, value);
+  }
+
+  deleteSetting(key: string): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
+  /** Todos los ajustes como mapa clave → valor (para MCP list_settings). */
+  getAllSettings(): Record<string, string> {
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const out: Record<string, string> = {};
+    for (const r of rows) out[r.key] = r.value;
+    return out;
   }
 
   // Profiles
@@ -456,21 +572,109 @@ export class DatabaseService {
     stmt.run(id);
   }
 
+  /**
+   * Mueve un botón a otra página (y/o posición) en una sola sentencia.
+   * La violación del UNIQUE(page_id, position) la debe gestionar el llamador.
+   */
+  moveButton(id: string, pageId: string, position?: number): void {
+    const existing = this.db.prepare('SELECT id FROM pages WHERE id = ?').get(pageId);
+    if (!existing) throw new Error(`Página destino no encontrada: ${pageId}`);
+    if (position === undefined) {
+      this.db.prepare('UPDATE buttons SET page_id = ? WHERE id = ?').run(pageId, id);
+    } else {
+      this.db.prepare('UPDATE buttons SET page_id = ?, position = ? WHERE id = ?').run(pageId, position, id);
+    }
+  }
+
+  /**
+   * Reordena botones de una página de forma ATÓMICA (una transacción).
+   * Usa posiciones temporales negativas para no colisionar con el índice
+   * UNIQUE(page_id, position) durante swaps/ciclos (0→1→2→0).
+   * Valida que todos los ids existan y pertenezcan a la página, y que no
+   * haya posiciones destino duplicadas. Lanza Error si algo no cuadra
+   * (la transacción hace rollback y la BD queda intacta).
+   */
+  reorderButtons(pageId: string, orders: Array<{ id: string; position: number }>): Button[] {
+    if (!Array.isArray(orders) || orders.length === 0) {
+      throw new Error('order vacío: nada que reordenar');
+    }
+    const seenPos = new Set<number>();
+    for (const o of orders) {
+      if (!o || typeof o.id !== 'string' || !Number.isInteger(o.position) || o.position < 0) {
+        throw new Error(`Orden inválido: ${JSON.stringify(o)}`);
+      }
+      if (seenPos.has(o.position)) {
+        throw new Error(`Posición destino duplicada: ${o.position}`);
+      }
+      seenPos.add(o.position);
+    }
+
+    const tx = this.db.transaction(() => {
+      // Validar pertenencia antes de tocar nada
+      const getPage = this.db.prepare('SELECT page_id FROM buttons WHERE id = ?');
+      for (const o of orders) {
+        const row = getPage.get(o.id) as { page_id: string } | undefined;
+        if (!row) throw new Error(`Botón no encontrado: ${o.id}`);
+        if (row.page_id !== pageId) throw new Error(`Botón ${o.id} no pertenece a la página ${pageId}`);
+      }
+      // Fase 1: posiciones temporales negativas (fuera de colisión)
+      const toTemp = this.db.prepare('UPDATE buttons SET position = ? WHERE id = ?');
+      orders.forEach((o, i) => toTemp.run(-1 - i, o.id));
+      // Fase 2: posiciones finales
+      const toFinal = this.db.prepare('UPDATE buttons SET position = ? WHERE id = ?');
+      for (const o of orders) toFinal.run(o.position, o.id);
+    });
+    tx();
+
+    return this.getButtonsByPage(pageId).filter(b => seenPos.has(b.position));
+  }
+
   // Plugins
   getPlugins(): Plugin[] {
-    const stmt = this.db.prepare('SELECT * FROM plugins ORDER BY installed_at DESC');
-    return stmt.all() as Plugin[];
+    try {
+      const stmt = this.db.prepare('SELECT * FROM plugins ORDER BY installed_at DESC');
+      return this.normalizePlugins(stmt.all() as any[]);
+    } catch {
+      const stmt = this.db.prepare('SELECT id, name, version, manifest, enabled, installed_at FROM plugins ORDER BY installed_at DESC');
+      return this.normalizePlugins(stmt.all() as any[]);
+    }
+  }
+
+  private normalizePlugins(rows: any[]): Plugin[] {
+    return rows.map((r) => ({
+      ...r,
+      manifest: typeof r.manifest === 'string' ? safeParseManifest(r.manifest) : r.manifest,
+      previous_manifest: typeof r.previous_manifest === 'string' && r.previous_manifest
+        ? safeParseManifest(r.previous_manifest) : (r.previous_manifest ?? null),
+    })) as Plugin[];
+  }
+
+  getPlugin(id: string): Plugin | null {
+    try {
+      const stmt = this.db.prepare('SELECT * FROM plugins WHERE id = ?');
+      const row = stmt.get(id) as any;
+      if (!row) return null;
+      return this.normalizePlugins([row])[0];
+    } catch {
+      return null;
+    }
   }
 
   getEnabledPlugins(): Plugin[] {
-    const stmt = this.db.prepare('SELECT * FROM plugins WHERE enabled = 1');
-    return stmt.all() as Plugin[];
+    try {
+      const stmt = this.db.prepare('SELECT * FROM plugins WHERE enabled = 1');
+      return this.normalizePlugins(stmt.all() as any[]);
+    } catch {
+      const stmt = this.db.prepare('SELECT id, name, version, manifest, enabled, installed_at FROM plugins WHERE enabled = 1');
+      return this.normalizePlugins(stmt.all() as any[]);
+    }
   }
 
   installPlugin(plugin: Plugin): void {
+    const now = Date.now();
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO plugins (id, name, version, manifest, enabled, installed_at) 
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO plugins (id, name, version, manifest, enabled, installed_at, updated_at, source_type, origin, ref, commit_sha, checksum, status, last_error, previous_version, previous_manifest)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       plugin.id,
@@ -478,8 +682,110 @@ export class DatabaseService {
       plugin.version,
       JSON.stringify(plugin.manifest),
       plugin.enabled,
-      plugin.installed_at
+      plugin.installed_at,
+      (plugin as any).updated_at ?? now,
+      (plugin as any).source_type ?? null,
+      (plugin as any).origin ?? null,
+      (plugin as any).ref ?? null,
+      (plugin as any).commit ?? (plugin as any).commit_sha ?? null,
+      (plugin as any).checksum ?? null,
+      (plugin as any).status ?? (plugin.enabled ? 'active' : 'disabled'),
+      (plugin as any).last_error ?? null,
+      (plugin as any).previous_version ?? null,
+      typeof (plugin as any).previous_manifest === 'string'
+        ? (plugin as any).previous_manifest
+        : (plugin as any).previous_manifest ? JSON.stringify((plugin as any).previous_manifest) : null
     );
+  }
+
+  upsertPluginRecord(rec: Partial<Plugin> & { id: string }): void {
+    const existing = this.getPlugin(rec.id) as any;
+    // `in` distingue "no pasar el campo" (conservar) de null explícito (limpiar).
+    // Con `??` un null explícito resucitaba el valor viejo (p.ej. last_error
+    // rancio tras una reinstalación que ya compila bien).
+    const pick = (key: string, fallback: any): any =>
+      (rec as any) && key in (rec as any) ? (rec as any)[key] : (existing?.[key] ?? fallback);
+    const pickCommit = (): any => {
+      if ((rec as any) && ('commit' in (rec as any) || 'commit_sha' in (rec as any))) {
+        return (rec as any).commit ?? (rec as any).commit_sha ?? null;
+      }
+      return existing?.commit ?? existing?.commit_sha ?? null;
+    };
+    const merged: any = {
+      name: (rec as any) && 'name' in (rec as any) ? (rec as any).name ?? rec.id : (existing?.name ?? rec.id),
+      version: (rec as any) && 'version' in (rec as any) ? (rec as any).version ?? '0.0.0' : (existing?.version ?? '0.0.0'),
+      manifest: (rec as any) && 'manifest' in (rec as any) ? (rec as any).manifest ?? { id: rec.id, name: rec.id, version: '0.0.0', permissions: [], actions: [] } : (existing?.manifest ?? { id: rec.id, name: rec.id, version: '0.0.0', permissions: [], actions: [] }),
+      enabled: (rec as any) && 'enabled' in (rec as any) ? (rec as any).enabled ?? 1 : (existing?.enabled ?? 1),
+      installed_at: existing?.installed_at ?? Date.now(),
+      updated_at: Date.now(),
+      source_type: pick('source_type', null),
+      origin: pick('origin', null),
+      ref: pick('ref', null),
+      commit: pickCommit(),
+      checksum: pick('checksum', null),
+      status: pick('status', null),
+      last_error: pick('last_error', null),
+      previous_version: pick('previous_version', null),
+      previous_manifest: pick('previous_manifest', null),
+    };
+    // Mapear commit -> commit_sha
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO plugins (id, name, version, manifest, enabled, installed_at, updated_at, source_type, origin, ref, commit_sha, checksum, status, last_error, previous_version, previous_manifest)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      rec.id, merged.name, merged.version,
+      typeof merged.manifest === 'string' ? merged.manifest : JSON.stringify(merged.manifest),
+      merged.enabled, merged.installed_at, merged.updated_at,
+      merged.source_type, merged.origin, merged.ref, merged.commit, merged.checksum,
+      merged.status, merged.last_error, merged.previous_version,
+      typeof merged.previous_manifest === 'string' ? merged.previous_manifest
+        : merged.previous_manifest ? JSON.stringify(merged.previous_manifest) : null
+    );
+  }
+
+  setPluginEnabled(id: string, enabled: boolean): void {
+    const stmt = this.db.prepare('UPDATE plugins SET enabled = ?, status = ?, updated_at = ? WHERE id = ?');
+    stmt.run(enabled ? 1 : 0, enabled ? 'active' : 'disabled', Date.now(), id);
+  }
+
+  private pluginSettingKey(pluginId: string, key: string): string {
+    return `plugin.${pluginId}.${key}`;
+  }
+
+  /** Ajustes generales del plugin (los del menú ⋯): mapa clave → valor. */
+  getPluginSettings(pluginId: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    try {
+      const rows = this.db.prepare('SELECT key, value FROM settings WHERE key LIKE ?').all(`plugin.${pluginId}.%`) as any[];
+      for (const r of rows) {
+        const k = String(r.key).slice(`plugin.${pluginId}.`.length);
+        if (k && !k.includes('.')) out[k] = r.value;
+      }
+    } catch { /* sin tabla: {} */ }
+    return out;
+  }
+
+  /** Guarda ajustes (solo claves simples [a-zA-Z0-9_-]+; valor vacío/null elimina). */
+  setPluginSettings(pluginId: string, values: Record<string, any>): void {
+    for (const [key, value] of Object.entries(values ?? {})) {
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new Error(`Clave de ajuste inválida: ${key}`);
+      const k = this.pluginSettingKey(pluginId, key);
+      if (value === null || value === undefined || value === '') {
+        this.db.prepare('DELETE FROM settings WHERE key = ?').run(k);
+      } else {
+        const s = String(value);
+        if (s.length > 8 * 1024) throw new Error(`Ajuste ${key} excede 8KB`);
+        this.setSetting(k, s);
+      }
+    }
+  }
+
+  setPluginStatus(id: string, status: string, lastError: string | null = null): void {
+    try {
+      this.db.prepare('UPDATE plugins SET status = ?, last_error = ?, updated_at = ? WHERE id = ?')
+        .run(status, lastError, Date.now(), id);
+    } catch { /* DB antigua sin columnas: ignorar */ }
   }
 
   // Logs

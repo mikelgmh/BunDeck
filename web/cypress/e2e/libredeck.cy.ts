@@ -1,4 +1,4 @@
-describe('LibreDeck E2E Tests', () => {
+describe('BunDeck E2E Tests', () => {
   beforeEach(() => {
     // Assuming the daemon is running on port 3001
     // and the frontend on port 4321
@@ -6,147 +6,119 @@ describe('LibreDeck E2E Tests', () => {
   })
 
   it('should load the main page', () => {
-    cy.contains('LibreDeck').should('be.visible')
+    cy.get('.bd-brand', { timeout: 10000 }).should('be.visible')
+    cy.get('.bd-brand').should('contain.text', 'BunDeck')
   })
 
   it('should load the application interface', () => {
-    // Wait for the app to load
     cy.get('body').should('be.visible')
 
-    // Check for basic UI elements (these will need data-cy attributes later)
-    cy.contains('Seleccionar perfil').should('be.visible')
+    // Profile tabs must appear once profiles load
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('have.length.greaterThan', 0)
+
+    // Header buttons
+    cy.get('[data-cy=bd-open-plugins]').should('be.visible')
+    cy.get('[data-cy=bd-open-qr]').should('be.visible')
+    cy.get('[data-cy=bd-open-settings]').should('be.visible')
   })
 
   it('should allow profile selection', () => {
-    // Wait for profiles to load
-    cy.get('[data-cy=profile-selector]', { timeout: 10000 }).should('be.visible')
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('have.length.greaterThan', 0)
 
-    // Get the first available option (excluding the default "Seleccionar perfil..." option)
-    cy.get('[data-cy=profile-selector] option').eq(1).then(($option) => {
-      const profileValue = $option.val()
-      if (profileValue) {
-        cy.get('[data-cy=profile-selector]').select(profileValue)
-        // Should show the selected profile
-        cy.get('[data-cy=profile-selector]').should('have.value', profileValue)
-      }
-    })
+    // Click the first profile tab: it becomes the selected tab
+    cy.get('[data-cy=bd-profile-tab]').first().click()
+    cy.get('[data-cy=bd-profile-tab]').first().should('have.attr', 'aria-selected', 'true')
   })
 
   it('should allow creating a new button', () => {
-    // First select a profile to enable button editing
-    cy.get('[data-cy=profile-selector]', { timeout: 10000 }).should('be.visible')
-    cy.get('[data-cy=profile-selector] option').eq(1).then(($option) => {
-      const profileValue = $option.val()
-      if (profileValue) {
-        cy.get('[data-cy=profile-selector]').select(profileValue)
-      }
-    })
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('have.length.greaterThan', 0)
 
-    // Select a button slot to open the editor
-    cy.get('[data-cy=button-slot]').first().click()
+    // Select a key slot: the inspector shows the title field
+    cy.get('[data-cy=bd-key]').first().click()
+    cy.get('[data-cy=bd-key-title]', { timeout: 5000 }).should('be.visible')
 
-    // Should open button editor
-    cy.get('[data-cy=button-editor]', { timeout: 5000 }).should('be.visible')
+    // Fill in the key title (inspector autosaves via debounce, no save button)
+    cy.get('[data-cy=bd-key-title]').clear().type('Test Button')
 
-    // Fill in button details
-    cy.get('[data-cy=text-top-input]').type('Test Button')
-    cy.get('[data-cy=text-bottom-input]').type('Bottom Text')
-
-    // Save button
-    cy.get('[data-cy=save-button]').click()
-
-    // Button should be visible on grid (might take a moment to update)
-    cy.contains('Test Button', { timeout: 5000 }).should('be.visible')
+    // Key label should be visible on the board (might take a moment to update)
+    cy.contains('Test Button', { timeout: 10000 }).should('be.visible')
   })
 
   it('should allow adding actions to buttons', () => {
-    // First select a profile
-    cy.get('[data-cy=profile-selector]', { timeout: 10000 }).should('be.visible')
-    cy.get('[data-cy=profile-selector] option').eq(1).then(($option) => {
-      const profileValue = $option.val()
-      if (profileValue) {
-        cy.get('[data-cy=profile-selector]').select(profileValue)
-      }
-    })
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
 
-    // Select a button
-    cy.get('[data-cy=button-slot]').first().click()
+    // Select a key
+    cy.get('[data-cy=bd-key]').first().click()
+    cy.get('[data-cy=bd-key-title]', { timeout: 5000 }).should('be.visible')
 
-    // Should open button editor and show actions section
-    cy.get('[data-cy=button-editor]', { timeout: 5000 }).should('be.visible')
+    // Clicking a library action adds it to the selected key
+    cy.get('[data-cy=bd-action-item]').first().click()
 
-    // Check if actions sidebar is visible (it should be on the right side)
-    cy.get('[data-cy=actions-sidebar]').should('be.visible')
-
-    // Try to drag an action to the button (if actions are available)
-    cy.get('[data-cy=action-item]').first().then($action => {
-      if ($action.length > 0) {
-        // If actions exist, drag the first one
-        cy.get('[data-cy=action-item]').first().trigger('dragstart')
-        cy.get('[data-cy=drop-zone]').trigger('drop')
-        
-        // Action should be added
-        cy.get('[data-cy=button-actions]').should('have.length.greaterThan', 0)
-      }
-    })
+    // Action should appear in the inspector list
+    cy.get('[data-cy=bd-action-row]', { timeout: 5000 }).should('have.length.greaterThan', 0)
   })
 
-  it('should execute button actions', () => {
-    // First select a profile
-    cy.get('[data-cy=profile-selector]', { timeout: 10000 }).should('be.visible')
-    cy.get('[data-cy=profile-selector] option').eq(1).then(($option) => {
-      const profileValue = $option.val()
-      if (profileValue) {
-        cy.get('[data-cy=profile-selector]').select(profileValue)
-      }
-    })
+  it('should switch between edit and use mode', () => {
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
 
-    // Select a button slot and create a simple button
-    cy.get('[data-cy=button-slot]').first().click()
-    cy.get('[data-cy=button-editor]', { timeout: 5000 }).should('be.visible')
-    cy.get('[data-cy=text-top-input]').type('Test Action')
-    cy.get('[data-cy=save-button]').click()
+    // Use mode shows the "use mode" empty state in the inspector
+    cy.contains('Usar').click()
+    cy.contains('Modo uso').should('be.visible')
 
-    // Verify button was created and is clickable
-    cy.get('[data-cy=button-slot]').first().should('be.visible')
-
-    // Click on the button slot (should trigger execution or editing)
-    cy.get('[data-cy=button-slot]').first().click()
-
-    // Test passes if we can interact with buttons without errors
-    cy.get('[data-cy=button-slot]').should('have.length.greaterThan', 0)
+    // Back to edit mode
+    cy.contains('Editar').click()
+    cy.contains('Elige una tecla').should('be.visible')
   })
 
   it('should support multiple pages', () => {
-    // First select a profile
-    cy.get('[data-cy=profile-selector]', { timeout: 10000 }).should('be.visible')
-    cy.get('[data-cy=profile-selector] option').eq(1).then(($option) => {
-      const profileValue = $option.val()
-      if (profileValue) {
-        cy.get('[data-cy=profile-selector]').select(profileValue)
-      }
-    })
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
 
-    // Add a new page
-    cy.get('[data-cy=add-page]').click()
-    cy.get('[data-cy=page-name-input]').type('Test Page')
-    cy.get('[data-cy=create-page]').click()
+    // Add a new page (created with a default name)
+    cy.get('[data-cy=bd-page-add]').click()
 
-    // Should show the new page in navigation
-    cy.get('[data-cy=page-nav]').contains('Test Page').should('be.visible')
+    // The new page chip appears and becomes active
+    cy.contains('Página', { timeout: 10000 }).should('be.visible')
+  })
 
-    // Should update current page indicator (check that it shows page info)
-    cy.get('[data-cy=current-page]').should('be.visible')
+  it('should rename a page from its context menu', () => {
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
+
+    // Open the per-page menu (three dots) on the first page
+    cy.get('.bd-pagemenu-btn').first().click()
+    cy.contains('Renombrar').click()
+
+    // Inline input appears: rename and confirm with Enter
+    cy.get('[data-cy=bd-page-rename-input]').clear().type('Principal{enter}')
+
+    // The chip shows the new name
+    cy.contains('Principal').should('be.visible')
   })
 
   it('should support language switching', () => {
-    // Check default language (Spanish)
-    cy.contains('Seleccionar perfil').should('be.visible')
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
 
-    // Switch to English using cy.select()
-    cy.get('[data-cy=language-selector]').select('en')
+    // Inspector empty state in Spanish
+    cy.contains('Elige una tecla').should('be.visible')
 
-    // Should show English text
-    cy.contains('Select profile').should('be.visible')
+    // Language lives in Settings → General
+    cy.get('[data-cy=bd-open-settings]').click()
+    cy.get('[data-cy=bd-language-select]').select('en')
+
+    // UI text should re-render in English inside the dialog
+    cy.get('[data-cy=bd-settings]').contains('Settings').should('be.visible')
+  })
+
+  it('should open plugins, QR and icon dialogs', () => {
+    cy.get('[data-cy=bd-profile-tab]', { timeout: 10000 }).should('be.visible')
+
+    // Plugins vive ahora en Ajustes → Plugins (debajo de Apariencia)
+    cy.get('[data-cy=bd-open-plugins]').click()
+    cy.get('[data-cy=bd-settings]').should('be.visible')
+    cy.get('[data-cy=bd-plugins]').should('be.visible')
+    cy.get('[data-cy=bd-settings]').contains('Instalados').should('be.visible')
+    cy.get('body').type('{esc}')
+
+    cy.get('[data-cy=bd-open-qr]').click()
+    cy.contains('Abrir en el móvil').should('be.visible')
   })
 })

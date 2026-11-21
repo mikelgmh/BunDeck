@@ -2,27 +2,33 @@
   <div
     v-if="show && items.length > 0"
     ref="contextMenuRef"
-    class="fixed bg-base-100 rounded-lg shadow-xl border border-base-300 py-1 min-w-48 z-10000"
+    role="menu"
+    class="fixed z-[10000] min-w-48 rounded-xl border border-base-300 bg-base-100 py-1 shadow-xl"
     :style="{ top: adjustedY + 'px', left: adjustedX + 'px' }"
     @click.stop
+    @keydown.escape="emit('close')"
+    @keydown.arrow-down.prevent="focusNext"
+    @keydown.arrow-up.prevent="focusPrev"
   >
     <button
-      v-for="item in items"
+      v-for="(item, i) in items"
       :key="item.id"
+      ref="itemRefs"
+      role="menuitem"
       @click="handleItemClick(item)"
       :class="[
-        'w-full px-4 py-2 text-left hover:bg-base-200 flex items-center gap-2 text-sm',
-        item.danger ? 'text-error' : ''
+        'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 mx-0 text-left text-[13px] font-medium transition-[background-color,color] duration-150 hover:bg-base-300/60',
+        item.danger ? 'text-error' : 'text-base-content'
       ]"
     >
-      <component :is="item.icon" :size="16" />
+      <component :is="item.icon" :size="16" stroke-width="1.5" aria-hidden="true" class="shrink-0" />
       {{ item.label }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import type { Component } from 'vue'
 
 interface MenuItem {
@@ -48,56 +54,55 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const contextMenuRef = ref<HTMLElement | null>(null)
+const itemRefs = ref<HTMLElement[]>([])
 
-// Calculate adjusted position to prevent menu from going off-screen
 const adjustedX = computed(() => {
   if (!contextMenuRef.value) return props.x
-  
-  const menuWidth = contextMenuRef.value.offsetWidth || 150 // fallback width
+  const menuWidth = contextMenuRef.value.offsetWidth || 150
   const viewportWidth = window.innerWidth
-  
-  if (props.x + menuWidth > viewportWidth) {
-    return Math.max(0, props.x - menuWidth)
-  }
-  
+  if (props.x + menuWidth > viewportWidth) return Math.max(0, props.x - menuWidth)
   return Math.max(0, props.x)
 })
 
 const adjustedY = computed(() => {
   if (!contextMenuRef.value) return props.y
-  
-  const menuHeight = contextMenuRef.value.offsetHeight || (props.items.length * 40) // fallback height
+  const menuHeight = contextMenuRef.value.offsetHeight || (props.items.length * 40)
   const viewportHeight = window.innerHeight
-  
-  if (props.y + menuHeight > viewportHeight) {
-    return Math.max(0, props.y - menuHeight)
-  }
-  
+  if (props.y + menuHeight > viewportHeight) return Math.max(0, props.y - menuHeight)
   return Math.max(0, props.y)
 })
 
-// Handle item click
 const handleItemClick = (item: MenuItem) => {
   emit('item-click', item)
   emit('close')
 }
 
-// Close context menu on click outside
+const focusNext = () => {
+  const el = document.activeElement as HTMLElement
+  const idx = itemRefs.value.indexOf(el)
+  itemRefs.value[(idx + 1) % itemRefs.value.length]?.focus()
+}
+const focusPrev = () => {
+  const el = document.activeElement as HTMLElement
+  const idx = itemRefs.value.indexOf(el)
+  itemRefs.value[(idx - 1 + itemRefs.value.length) % itemRefs.value.length]?.focus()
+}
+
 const handleClickOutside = (event: MouseEvent) => {
   if (props.show && contextMenuRef.value && !contextMenuRef.value.contains(event.target as Node)) {
     emit('close')
   }
 }
 
-// Close context menu on Escape key
 const handleEscapeKey = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && props.show) {
-    emit('close')
-  }
+  if (event.key === 'Escape' && props.show) emit('close')
 }
 
+watch(() => props.show, (v) => {
+  if (v) nextTick(() => itemRefs.value[0]?.focus())
+})
+
 onMounted(() => {
-  // Use nextTick to ensure the menu is rendered before adding click listener
   nextTick(() => {
     document.addEventListener('click', handleClickOutside)
   })
@@ -109,10 +114,3 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleEscapeKey)
 })
 </script>
-
-<style scoped>
-/* Improve button hover states */
-button:hover {
-  background-color: hsl(var(--b2)) !important;
-}
-</style>

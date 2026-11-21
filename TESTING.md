@@ -40,9 +40,9 @@ npm run test:component # Component tests
 ### Tests Globales
 ```bash
 # Desde la raíz del proyecto
-bun run test:all      # Todos los tests
+bun run test          # daemon (bun:test) + web (vitest), lo que corre CI
 bun run test:coverage # Cobertura completa
-bun run test:e2e      # Solo E2E
+bun run test:e2e       # Solo E2E
 ```
 
 ## 📁 Estructura de Tests

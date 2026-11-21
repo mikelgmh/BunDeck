@@ -282,9 +282,9 @@ defineExpose({
 
 .modal-header {
   padding: 1.5rem 1.5rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: white;
+  border-bottom: 1px solid var(--ld-line);
+  background: var(--ld-surface);
+  color: var(--ld-primary);
   margin: -1.5rem -1.5rem 1.5rem;
   border-radius: 0.5rem 0.5rem 0 0;
 }
@@ -479,8 +479,8 @@ defineExpose({
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #6366f1, #22c55e);
-  transition: width 0.3s ease;
+  background: var(--ld-accent);
+  transition: width 180ms cubic-bezier(0.2, 0, 0, 1);
   border-radius: 4px;
 }
 

@@ -50,7 +50,7 @@ describe('ButtonEditor', () => {
       },
     })
 
-    const input = wrapper.find('input[placeholder="Texto superior (opcional)"]')
+    const input = wrapper.find('[data-cy="text-top-input"]')
     await input.setValue('New Top Text')
 
     expect(wrapper.emitted('update:textTop')).toBeTruthy()
@@ -65,7 +65,7 @@ describe('ButtonEditor', () => {
       },
     })
 
-    const input = wrapper.find('input[placeholder="Texto inferior (opcional)"]')
+    const input = wrapper.find('[data-cy="text-bottom-input"]')
     await input.setValue('New Bottom Text')
 
     expect(wrapper.emitted('update:textBottom')).toBeTruthy()

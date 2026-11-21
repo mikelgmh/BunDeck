@@ -15,6 +15,53 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🎛️  LibreDeck Development Script${NC}"
 echo -e "${BLUE}=================================${NC}"
 
+# Puertos por defecto (alineados con daemon/src/config.ts)
+API_PORT="${API_PORT:-3001}"
+WS_PORT="${WS_PORT:-3003}"
+
+# Espera a que una URL responda 2xx. Uso: wait_for_health <url> [timeout_s] [interval_s]
+wait_for_health() {
+    local url="$1"
+    local timeout="${2:-30}"
+    local interval="${3:-1}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if curl -sf -o /dev/null "$url" 2>/dev/null; then
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    return 1
+}
+
+# Ayuda del script
+show_help() {
+    cat << 'EOF'
+Uso: ./dev.sh <comando>
+
+Comandos:
+  setup    Instala dependencias, configura DB, crea perfil inicial y plugin de ejemplo
+  dev      Inicia daemon (DEV_MODE) + frontend Astro con health-checks
+  build    Build de producción (daemon + frontend + CLI)
+  test     Prueba la conectividad del daemon
+  clean    Limpia dist/ y base de datos local
+  plugin   Crea el plugin de ejemplo
+  help     Muestra esta ayuda
+
+Variables de entorno:
+  NO_BROWSER=1        No abrir el navegador automáticamente en `dev`
+  NO_LAUNCHER=1       No abrir la ventana de estado GPUI en `dev`
+  API_PORT / WS_PORT   Puertos esperados (por defecto 3001 / 3003)
+  FRONTEND_PORT        Puerto esperado del frontend (autodetección si se omite)
+
+Ejemplos:
+  ./dev.sh setup
+  ./dev.sh dev
+  NO_BROWSER=1 ./dev.sh dev
+EOF
+}
+
 # Verificar prerrequisitos
 check_prereqs() {
     echo -e "${YELLOW}Verificando prerrequisitos...${NC}"
@@ -64,17 +111,19 @@ create_initial_profile() {
     # Iniciar daemon temporalmente
     cd daemon && bun run start &
     DAEMON_PID=$!
-    
-    # Esperar a que el daemon esté listo (más tiempo)
+
+    # Esperar a que el daemon esté listo (health-check con timeout, sin sleep fijo)
     echo "Esperando a que el daemon se inicialice..."
-    sleep 8
+    if ! wait_for_health "http://localhost:${API_PORT}/health" 30 1; then
+        echo "Daemon no responde tras 30s, no se pudo crear el perfil inicial"
+    fi
     
     # Verificar que el daemon esté respondiendo
-    if curl -s http://localhost:3001/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:${API_PORT}/health > /dev/null 2>&1; then
         echo "Daemon está respondiendo, creando perfil..."
-        
+
         # Crear perfil inicial vía API
-        RESPONSE=$(curl -s -X POST http://localhost:3001/api/v1/profiles \
+        RESPONSE=$(curl -s -X POST http://localhost:${API_PORT}/api/v1/profiles \
             -H "Content-Type: application/json" \
             -d '{"name":"Perfil Principal","data":{"isDefault":true}}')
         
@@ -114,8 +163,11 @@ start_dev() {
     cd web && npm run dev -- --host &
     WEB_PID=$!
     
-    # Esperar a que los servicios estén listos
-    sleep 8
+    # Esperar a que los servicios estén listos (health-check con timeout)
+    echo "Esperando a que el daemon responda..."
+    if ! wait_for_health "http://localhost:${API_PORT}/health" 30 1; then
+        echo -e "${YELLOW}⚠️  El daemon no respondió en 30s; continúa de todos modos${NC}"
+    fi
     
     # Detectar puerto del frontend dev server
     FRONTEND_PORT=""
@@ -135,31 +187,68 @@ start_dev() {
         FRONTEND_PORT=4321
     fi
     
-    # Obtener IP local
+    # Obtener IP local (portable: hostname -I en Linux, `ip` como fallback;
+    # en Windows/Git Bash puede no existir ninguno: se omite en silencio)
+    LOCAL_IP=""
     if command -v hostname &> /dev/null; then
         LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-        if [ -z "$LOCAL_IP" ]; then
-            # Fallback para Windows/WSL
-            LOCAL_IP=$(ip addr show | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d/ -f1 | head -n1)
-        fi
     fi
-    
+    if [ -z "$LOCAL_IP" ] && command -v ip &> /dev/null; then
+        LOCAL_IP=$(ip addr show 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    fi
+
     echo -e "${GREEN}🚀 LibreDeck está ejecutándose:${NC}"
-    echo -e "   📡 API: ${BLUE}http://localhost:3001${NC}"
+    echo -e "   📡 API: ${BLUE}http://localhost:${API_PORT}${NC}"
     echo -e "   🌐 Panel Local: ${BLUE}http://localhost:$FRONTEND_PORT${NC}"
     if [ -n "$LOCAL_IP" ]; then
         echo -e "   🌐 Panel Red LAN: ${BLUE}http://${LOCAL_IP}:$FRONTEND_PORT${NC}"
     fi
-    echo -e "   🔌 WebSocket: ${BLUE}ws://localhost:3002${NC}"
+    echo -e "   🔌 WebSocket: ${BLUE}ws://localhost:${WS_PORT}${NC}"
     echo ""
     echo -e "${YELLOW}Presiona Ctrl+C para detener${NC}"
-    
-    # Abrir navegador automáticamente con el puerto correcto
-    echo -e "${YELLOW}Abriendo navegador...${NC}"
-    if [ -n "$LOCAL_IP" ]; then
-        start http://${LOCAL_IP}:$FRONTEND_PORT
+
+    # Ventanita de estado GPUI: es la puerta de entrada en dev (con botón
+    # "Abrir panel"). Si se lanza, ya no hace falta auto-abrir el navegador.
+    LAUNCHER_OPENED=0
+    if [ "${NO_LAUNCHER:-0}" != "1" ]; then
+        for _exe in "launcher/target/release/libredeck-launcher" "launcher/target/release/libredeck-launcher.exe" "launcher/target/debug/libredeck-launcher" "launcher/target/debug/libredeck-launcher.exe"; do
+            if [ -x "$_exe" ]; then
+                echo -e "${BLUE}🪟 Abriendo ventana de estado (GPUI)...${NC}"
+                # Job directo (sin subshell) para que el trap de EXIT lo cierre con Ctrl+C.
+                "$_exe" &> /dev/null &
+                LAUNCHER_OPENED=1
+                break
+            fi
+        done
+        if [ "$LAUNCHER_OPENED" = "0" ]; then
+            echo -e "${YELLOW}Launcher GPUI sin compilar: 'cd launcher && cargo run' (luego ./dev.sh dev ya lo abre solo)${NC}"
+        fi
+    fi
+
+    # Abrir navegador automáticamente salvo NO_BROWSER=1 (portable: xdg-open/open/start)
+    # Si la ventanita GPUI ya abrió, ella ofrece "Abrir panel": no duplicar.
+    if [ "${NO_BROWSER:-0}" = "1" ]; then
+        echo -e "${YELLOW}NO_BROWSER=1: no se abre el navegador${NC}"
+    elif [ "$LAUNCHER_OPENED" = "1" ]; then
+        echo -e "${BLUE}Navegador no auto-abierto: usa «Abrir panel» en la ventana de estado${NC}"
     else
-        start http://localhost:$FRONTEND_PORT
+        echo -e "${YELLOW}Abriendo navegador...${NC}"
+        if [ -n "$LOCAL_IP" ]; then
+            BROWSER_URL="http://${LOCAL_IP}:$FRONTEND_PORT"
+        else
+            BROWSER_URL="http://localhost:$FRONTEND_PORT"
+        fi
+        if command -v xdg-open &> /dev/null; then
+            xdg-open "$BROWSER_URL" &> /dev/null &
+        elif command -v open &> /dev/null; then
+            open "$BROWSER_URL" &> /dev/null &
+        elif command -v start &> /dev/null; then
+            start "$BROWSER_URL" &> /dev/null &
+        elif command -v powershell.exe &> /dev/null; then
+            powershell.exe -NoProfile -Command Start-Process "$BROWSER_URL" &> /dev/null &
+        else
+            echo -e "${YELLOW}No se encontró forma de abrir el navegador; visita $BROWSER_URL${NC}"
+        fi
     fi
     
     # Esperar a que se detengan procesos
@@ -328,14 +417,14 @@ test_daemon() {
     echo -e "${YELLOW}Testing daemon connectivity...${NC}"
     
     # Test health endpoint
-    if curl -s http://localhost:3001/api/v1/test > /dev/null 2>&1; then
+    if curl -sf http://localhost:${API_PORT}/api/v1/test > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Daemon is responding${NC}"
-        echo -e "   🌐 API: ${BLUE}http://localhost:3001${NC}"
-        echo -e "   🧪 Test: ${BLUE}http://localhost:3001/api/v1/test${NC}"
-        
+        echo -e "   🌐 API: ${BLUE}http://localhost:${API_PORT}${NC}"
+        echo -e "   🧪 Test: ${BLUE}http://localhost:${API_PORT}/api/v1/test${NC}"
+
         # Test windows endpoint
         echo -e "${YELLOW}Testing windows API...${NC}"
-        WINDOWS_RESPONSE=$(curl -s http://localhost:3001/api/v1/windows/list)
+        WINDOWS_RESPONSE=$(curl -s http://localhost:${API_PORT}/api/v1/windows/list)
         if echo "$WINDOWS_RESPONSE" | grep -q "hwnd"; then
             WINDOW_COUNT=$(echo "$WINDOWS_RESPONSE" | grep -o '"hwnd"' | wc -l)
             echo -e "${GREEN}✅ Windows API working - found ${WINDOW_COUNT} windows${NC}"

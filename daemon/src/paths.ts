@@ -11,21 +11,24 @@ const isInstalled = process.execPath.includes('Program Files') ||
 
 /**
  * Get the data directory path
- * In development: ../data (relative to daemon)
- * In production: %APPDATA%/LibreDeck/data
+ * Delega a config.resolveDataDir() para path absoluto compatible con Bun --compile y Electrobun
  */
 export function getDataDir(): string {
-  if (process.env.LIBREDECK_DATA_DIR) {
-    return process.env.LIBREDECK_DATA_DIR;
+  // Lazy import para evitar ciclo
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { resolveDataDir } = require('./config');
+    return resolveDataDir();
+  } catch {
+    if (process.env.LIBREDECK_DATA_DIR) {
+      return process.env.LIBREDECK_DATA_DIR;
+    }
+    if (isInstalled) {
+      const appDataDir = process.env.APPDATA || process.env.LOCALAPPDATA || process.cwd();
+      return join(appDataDir, 'LibreDeck', 'data');
+    }
+    return join(process.cwd(), '..', 'data');
   }
-
-  if (isInstalled) {
-    const appDataDir = process.env.APPDATA || process.env.LOCALAPPDATA || process.cwd();
-    return join(appDataDir, 'LibreDeck', 'data');
-  }
-
-  // Development mode
-  return '../data';
 }
 
 /**

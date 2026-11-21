@@ -100,6 +100,25 @@ const copyUrl = async () => {
 const networkUrl = ref('')
 const isLoadingIP = ref(true)
 
+// El daemon conoce sus interfaces: fuente fiable de la IP LAN.
+// (El WebRTC del navegador ya no sirve: Chrome devuelve .local por privacidad.)
+const getDaemonLanIp = async (): Promise<string | null> => {
+  try {
+    const daemonBase = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`
+    const res = await fetch(`${daemonBase}/network/ips`)
+    if (!res.ok) return null
+    const data = await res.json()
+    const ips: string[] = Array.isArray(data?.ips) ? data.ips : []
+    // Preferir 192.168.x.x, luego 10.x.x.x, luego 172.16-31.x.x, luego cualquiera
+    const rank = (ip: string) =>
+      ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ? 2 : 3
+    ips.sort((a, b) => rank(a) - rank(b))
+    return ips[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 const getLocalIP = () => {
   return new Promise<string>((resolve, reject) => {
     // Si ya tenemos una IP que no es localhost, usarla
@@ -108,29 +127,37 @@ const getLocalIP = () => {
       return
     }
 
-    // Usar WebRTC para obtener la IP local
-    const pc = new RTCPeerConnection({ iceServers: [] })
-    pc.createDataChannel('')
-    
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        const candidate = event.candidate.candidate
-        const ipMatch = candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
-        if (ipMatch && ipMatch[1] !== '127.0.0.1') {
-          resolve(ipMatch[1])
-          pc.close()
+    // 1) Preguntar al daemon (fiable)
+    getDaemonLanIp().then((daemonIp) => {
+      if (daemonIp) {
+        resolve(daemonIp)
+        return
+      }
+
+      // 2) WebRTC como segundo intento (mejor esfuerzo: puede devolver .local)
+      const pc = new RTCPeerConnection({ iceServers: [] })
+      pc.createDataChannel('')
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const candidate = event.candidate.candidate
+          const ipMatch = candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+          if (ipMatch && ipMatch[1] !== '127.0.0.1') {
+            resolve(ipMatch[1])
+            pc.close()
+          }
         }
       }
-    }
-    
-    pc.createOffer()
-      .then(offer => pc.setLocalDescription(offer))
-      .catch(reject)
-    
-    // Timeout después de 3 segundos
-    setTimeout(() => {
-      reject(new Error('Timeout getting local IP'))
-    }, 3000)
+
+      pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .catch(reject)
+
+      // Timeout después de 3 segundos
+      setTimeout(() => {
+        reject(new Error('Timeout getting local IP'))
+      }, 3000)
+    })
   })
 }
 

@@ -14,10 +14,10 @@ rm -rf dist/*
 # Create dist directory
 mkdir -p dist
 
-# Build Web first
+# Build Web first (web usa npm, no bun — convención del repo)
 echo "📦 Building Web..."
 cd web
-bun run build
+npm run build
 cd ..
 
 # Copy web dist to daemon
@@ -44,10 +44,23 @@ bun run build
 mv libredeck-cli ../dist/
 cd ..
 
+# Launcher GPUI (ventana de estado). Requiere Rust; si no está, se omite
+# (el resto de flujos siguen funcionando con la ventana Electrobun).
+echo "📦 Building Launcher (Rust)..."
+if command -v cargo &> /dev/null; then
+    (cd launcher && cargo build --release)
+    cp launcher/target/release/libredeck-launcher dist/ 2>/dev/null || cp launcher/target/release/libredeck-launcher.exe dist/ 2>/dev/null || echo "⚠️ Launcher compilado pero no copiado a dist/"
+else
+    echo "⚠️ cargo no encontrado: se omite el launcher (instala Rust o usa bun run dev:launcher)"
+fi
+
 echo "📦 Building Installer..."
 ISCC_PATH="/c/Users/Mikel/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
+# Versión única desde package.json (no hardcodear en installer.iss)
+APP_VERSION=$(node -p "require('./package.json').version")
+echo "📌 App version: $APP_VERSION"
 if [ -f "$ISCC_PATH" ]; then
-    "$ISCC_PATH" installer.iss
+    "$ISCC_PATH" installer.iss /DAppVersion="$APP_VERSION"
     echo "✅ Installer created: installer/LibreDeck-Setup.exe"
 else
     echo "⚠️ Inno Setup not found at $ISCC_PATH"

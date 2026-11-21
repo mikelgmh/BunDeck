@@ -6,22 +6,22 @@ import { windowWatcher } from './window-watcher';
 import { DatabaseService } from './db';
 import { setupAPIRoutes } from './api/routes';
 import { streamDeckDriver } from './hw-driver/streamdeck-driver';
+import { API_PORT as PORT, WS_PORT, FRONTEND_PORT, DEV_MODE } from './config';
 
 // Import opcional del tray (solo funciona en Windows)
-let Tray: any = null;
+// systray v1 exporta una clase por defecto: `new SysTray({menu, ...})`
+let SysTrayClass: any = null;
 try {
-  Tray = require('systray');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('systray');
+  SysTrayClass = mod?.default ?? mod?.SysTray ?? mod;
 } catch (error) {
   console.log('ℹ️ Tray module not available (this is normal on Linux/macOS)');
 }
 
-const path = require('path');
-const fs = require('fs');
-
-const PORT = Number(process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1]) || Number(process.env.PORT) || 3001;
-const WS_PORT = Number(process.env.WS_PORT) || 3002;
-const FRONTEND_PORT = Number(process.argv.find(arg => arg.startsWith('--web-port='))?.split('=')[1]) || Number(process.env.FRONTEND_PORT) || 3002;
-const DEV_MODE = process.env.DEV_MODE === 'true';
+import path from 'path';
+import fs from 'fs';
+import { TRAY_ICON_BASE64 } from './tray-icon';
 
 class LibreDeckDaemon {
   private httpServer?: any;
@@ -49,11 +49,14 @@ class LibreDeckDaemon {
       // Cargar plugins
       await this.pluginLoader.loadAllPlugins();
 
-      // Inicializar StreamDeck driver
-      await this.initializeStreamDeck();
+      // StreamDeck en background: conectar el HW (HID + repintado inicial)
+      // puede tardar segundos y no debe retrasar que la API/WS escuchen.
+      void this.initializeStreamDeck();
 
       // Configurar WebSocket
       this.wsManager = new WebSocketManager(WS_PORT);
+      // Propagar eventos de plugins externos (api.emitEvent) por WS
+      this.pluginLoader.setWebSocketManager(this.wsManager);
 
       // Inicializar auto-profile switching si hay configuración guardada
       await this.initializeAutoProfileSwitching();
@@ -85,6 +88,7 @@ class LibreDeckDaemon {
             this.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
           });
 
+          if (config.defaultProfileId !== undefined) windowWatcher.setDefaultProfile(config.defaultProfileId ?? null);
           windowWatcher.startWatching(config.rules);
         }
       }
@@ -158,17 +162,15 @@ class LibreDeckDaemon {
   private initializeTray() {
     try {
       // Solo intentar inicializar tray en Windows y si el módulo está disponible
-      if (process.platform !== 'win32' || !Tray) {
+      if (process.platform !== 'win32' || !SysTrayClass) {
         console.log('ℹ️ Tray icon not supported on this platform or module not available');
         return;
       }
 
-      Tray.create({ title: 'LibreDeck Daemon' }, (tray: any) => {
-        const openItem = tray.item("Abrir LibreDeck", () => {
-          const { exec } = require('child_process');
+      const { exec } = require('child_process');
+      const openDashboard = () => {
+        try {
           const os = require('os');
-
-          // Obtener IP local
           const interfaces = os.networkInterfaces() as any;
           let localIP = 'localhost';
           for (const iface of Object.values(interfaces)) {
@@ -177,23 +179,52 @@ class LibreDeckDaemon {
                 localIP = addr.address;
                 break;
               }
+              if (localIP !== 'localhost') break;
             }
-            if (localIP !== 'localhost') break;
           }
+          // En dev el panel es Astro (4321); en prod es el frontend embebido
+          const url = DEV_MODE
+            ? `http://${localIP}:4321`
+            : `http://${localIP}:${process.env.PORT_FRONTEND || FRONTEND_PORT}`;
+          exec(`start "" "${url}"`);
+        } catch (e) {
+          console.error('Failed to open dashboard from tray:', e);
+        }
+      };
 
-          const frontendPort = process.env.PORT_FRONTEND || PORT;
-          exec(`start http://${localIP}:${frontendPort}`);
-        });
-        const quitItem = tray.item("Salir", () => {
-          tray.kill();
-          process.exit(0);
-        });
-        tray.setMenu(openItem, tray.separator(), quitItem);
-        this.tray = tray;
-        console.log('✓ Tray icon initialized');
+      // API systray v1: menú declarativo + onClick por índice.
+      // icon es el .ico de BunDeck en base64 (daemon/src/tray-icon.ts,
+      // generado desde assets/bundeck.svg): en Windows pide .ico.
+      const tray = new SysTrayClass({
+        menu: {
+          icon: TRAY_ICON_BASE64,
+          title: 'LibreDeck',
+          tooltip: 'LibreDeck Daemon',
+          items: [
+            { title: 'Abrir LibreDeck', tooltip: 'Abrir panel', checked: false, enabled: true },
+            { title: 'Salir', tooltip: 'Detener daemon y salir', checked: false, enabled: true },
+          ],
+        },
+        debug: false,
+        copyDir: true,
       });
+
+      tray.onClick((action: any) => {
+        const idx = action?.seq_id;
+        if (idx === 0) openDashboard();
+        else if (idx === 1) {
+          try { tray.kill(false); } catch { /* noop */ }
+          process.exit(0);
+        }
+      });
+      tray.onError?.((err: unknown) => {
+        console.log('ℹ️ Tray error (daemon sigue corriendo):', err);
+      });
+
+      this.tray = tray;
+      console.log('✓ Tray icon initialized (LibreDeck en bandeja del sistema)');
     } catch (error) {
-      console.log('ℹ️ Tray icon not available on this system (this is normal on Linux/macOS)');
+      console.log('ℹ️ Tray icon not available on this system (daemon sigue corriendo). Reason:', error);
     }
   }
 
@@ -236,7 +267,8 @@ class LibreDeckDaemon {
         if (url.pathname.startsWith('/assets/')) {
           try {
             const assetPath = url.pathname.replace('/assets/', '');
-            const fullPath = path.join(__dirname, '..', 'data', 'assets', assetPath);
+            const { getDataDir } = await import('./paths');
+            const fullPath = path.join(getDataDir(), 'assets', assetPath);
             const file = Bun.file(fullPath);
 
             if (await file.exists()) {
@@ -275,6 +307,21 @@ class LibreDeckDaemon {
           return new Response(response.body, {
             status: response.status,
             headers
+          });
+        }
+
+        // Config para el frontend (puertos centralizados).
+        // También servido por el frontend embebido en prod; aquí para DEV_MODE.
+        if (url.pathname === '/config') {
+          return new Response(JSON.stringify({
+            wsPort: WS_PORT,
+            apiPort: PORT,
+            frontendPort: FRONTEND_PORT
+          }), {
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json'
+            }
           });
         }
 
@@ -344,14 +391,17 @@ class LibreDeckDaemon {
             });
           }
 
-          // Servir web-dist (UI embebida)
+          // Servir web-dist (UI embebida) — híbrido: soporta web/dist (dev) y web-dist (prod) y electrobun
           try {
             let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
 
             // Buscar archivos web-dist en múltiples ubicaciones posibles
             const possiblePaths = [
-              path.join(process.cwd(), 'web-dist'),           // Desde CWD
+              path.join(process.cwd(), 'web-dist'),           // Desde CWD (prod)
               path.join(path.dirname(process.execPath), 'web-dist'), // Desde el directorio del ejecutable
+              path.join(process.cwd(), 'web', 'dist'),        // Astro dev/prod (web/dist)
+              path.join(import.meta.dir, '..', '..', 'web', 'dist'), // Relativo a daemon/src
+              path.join(import.meta.dir, '..', 'web-dist'),   // daemon/web-dist (build.sh)
             ];
 
             for (const basePath of possiblePaths) {
@@ -378,6 +428,9 @@ class LibreDeckDaemon {
           const possibleIndexPaths = [
             path.join(process.cwd(), 'web-dist', 'index.html'),
             path.join(path.dirname(process.execPath), 'web-dist', 'index.html'),
+            path.join(process.cwd(), 'web', 'dist', 'index.html'),
+            path.join(import.meta.dir, '..', '..', 'web', 'dist', 'index.html'),
+            path.join(import.meta.dir, '..', 'web-dist', 'index.html'),
           ];
 
           for (const indexPath of possibleIndexPaths) {
@@ -455,6 +508,7 @@ class LibreDeckDaemon {
       'json': 'application/json',
       'png': 'image/png',
       'jpg': 'image/jpeg',
+      'svg': 'image/svg+xml',
       'ico': 'image/x-icon'
     };
     return types[ext || ''] || 'text/plain';
@@ -471,14 +525,14 @@ class LibreDeckDaemon {
       this.wsManager.close();
     }
     if (this.tray) {
-      this.tray.kill();
+      try { this.tray.kill(false); } catch { /* noop */ }
     }
     console.log('🛑 LibreDeck daemon stopped');
   }
 }
 
-// Manejo de señales del sistema
-const daemon = new LibreDeckDaemon();
+// Manejo de señales del sistema — solo auto-arranca si es entrypoint directo (no cuando es importado por Electrobun)
+export const daemon = new LibreDeckDaemon();
 
 process.on('SIGINT', async () => {
   console.log('\nReceived SIGINT, shutting down gracefully...');
@@ -492,5 +546,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Iniciar daemon
-daemon.start().catch(console.error);
+// Iniciar daemon solo si este archivo es el entrypoint (Bun --watch / bun run)
+if (import.meta.main) {
+  daemon.start().catch(console.error);
+}

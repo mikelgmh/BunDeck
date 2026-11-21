@@ -104,8 +104,9 @@ export class PCVitalsPlugin {
         this.context.log('info', `Monitoring ${component} ${metric}`, { component, metric, updateInterval })
 
         try {
-            // Fetch current system metrics
-            const response = await fetch('http://localhost:3001/api/v1/system/metrics')
+            // Fetch current system metrics — puerto dinámico
+            const { API_PORT } = await import('../config');
+            const response = await fetch(`http://localhost:${API_PORT}/api/v1/system/metrics`)
             if (!response.ok) {
                 throw new Error(`Failed to fetch system metrics: ${response.status}`)
             }

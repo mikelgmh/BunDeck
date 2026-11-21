@@ -1,0 +1,33 @@
+{
+  "id": "com.ejemplo.mi-plugin",
+  "name": "Mi Plugin",
+  "version": "1.0.0",
+  "description": "Plantilla mínima de plugin externo para LibreDeck",
+  "author": "Tu Nombre",
+  "license": "MIT",
+  "engine": "^1.0.0",
+  "apiVersion": "2.1",
+  "main": "main.js",
+  "permissions": [],
+  "actions": [
+    {
+      "id": "saludo",
+      "name": "Decir hola",
+      "description": "Devuelve un saludo",
+      "icon": "Smile",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "title": "Nombre",
+            "description": "A quién saludar",
+            "default": "Mundo"
+          }
+        }
+      }
+    }
+  ],
+  "homepage": "https://example.com/mi-plugin",
+  "repository": "https://github.com/tu-usuario/mi-plugin"
+}

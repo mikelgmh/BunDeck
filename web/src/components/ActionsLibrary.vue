@@ -3,27 +3,30 @@
     <!-- Available Actions -->
     <div>
       
-      <div v-if="availableActions.length === 0" class="text-sm text-base-content/70">
+      <div v-if="availableActions.length === 0" class="text-[13px] text-base-content/50 px-1">
         No hay acciones disponibles
       </div>
-      <div v-else class="grid grid-cols-1 gap-3">
+      <div v-else class="grid grid-cols-1 gap-2">
         <div
           v-for="action in availableActions"
           :key="action.type"
-          class="card bg-base-100 hover:bg-base-200 cursor-grab transition-all duration-200 border border-base-300 hover:border-primary"
+          class="rounded-xl border border-base-300 bg-base-100 hover:bg-base-300/60 hover:border-base-content/20 cursor-pointer px-3 py-2.5 transition-[border-color,background-color] duration-150"
           draggable="true"
           @dragstart="handleDragStart($event, action)"
+          @click="$emit('action-selected', action.type)"
+          @keydown.enter="$emit('action-selected', action.type)"
+          tabindex="0"
+          role="button"
+          :aria-label="action.name"
           data-cy="action-item"
         >
-          <div class="card-body p-4">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                <component :is="action.icon" :size="20" class="text-primary" />
-              </div>
-              <div class="flex-1">
-                <h4 class="font-medium text-sm">{{ action.name }}</h4>
-                <p class="text-xs text-base-content/60 mt-1">{{ action.description }}</p>
-              </div>
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <component :is="action.icon" :size="16" stroke-width="1.5" class="text-primary" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <h4 class="font-medium text-[13px] leading-tight truncate">{{ action.name }}</h4>
+              <p class="text-xs text-base-content/50 mt-0.5 leading-snug line-clamp-2">{{ action.description }}</p>
             </div>
           </div>
         </div>

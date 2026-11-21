@@ -37,7 +37,7 @@ jobs:
     - name: Install dependencies (Web)
       run: |
         cd web
-        bun install
+        npm ci
 
     - name: Run tests
       run: bun run test
@@ -80,7 +80,8 @@ jobs:
 
     - name: Get version
       id: version
-      run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      shell: bash
+      run: echo "version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")" >> "$GITHUB_OUTPUT"
 
     - name: Install dependencies (CLI)
       run: |
@@ -95,7 +96,7 @@ jobs:
     - name: Install dependencies (Web)
       run: |
         cd web
-        bun install
+        npm ci
 
     - name: Build CLI
       run: |
@@ -106,7 +107,7 @@ jobs:
     - name: Build Web
       run: |
         cd web
-        bun run build
+        npm run build
 
     - name: Copy Web dist to Daemon
       run: node scripts/copy-web-dist.js
@@ -123,6 +124,16 @@ jobs:
         choco install innosetup -y
         echo "C:\Program Files (x86)\Inno Setup 6" >> $GITHUB_PATH
 
+    - name: Setup Rust (Windows only)
+      if: matrix.installer == true
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build launcher GPUI (Windows only)
+      if: matrix.installer == true
+      run: |
+        cd launcher
+        cargo build --release
+
     - name: Copy Web dist to Dist (Windows only)
       if: matrix.installer == true
       run: |
@@ -130,12 +141,13 @@ jobs:
         cp -r web/dist/* dist/web-dist/
         cp libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} dist/libredeck-daemon${{ matrix.ext }}
         cp libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} dist/libredeck-cli${{ matrix.ext }}
+        cp launcher/target/release/libredeck-launcher.exe dist/libredeck-launcher.exe
 
     - name: Build Windows Installer
       if: matrix.installer == true
       run: |
         mkdir -p installer
-        iscc installer.iss
+        iscc installer.iss /DAppVersion=${{ steps.version.outputs.version }}
         mv installer/LibreDeck-Setup.exe installer/LibreDeck-Setup-v${{ steps.version.outputs.version }}.exe
       shell: bash
 

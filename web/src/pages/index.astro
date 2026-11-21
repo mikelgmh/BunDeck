@@ -1,12 +1,12 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import StreamDeckApp from '../components/StreamDeckAppNew.vue';
+import BunDeckApp from '../components/bundeck/BunDeckApp.vue';
 import '../styles/global.css';
-import StreamDeckAppNew from '../components/StreamDeckAppNew.vue';
+import '../styles/bundeck.css';
 ---
 
-<Layout title="LibreDeck Dashboard">
-  <main class="min-h-screen bg-base-100">
-    <StreamDeckAppNew client:load />
+<Layout title="BunDeck">
+  <main class="min-h-screen">
+    <BunDeckApp client:load />
   </main>
 </Layout>
