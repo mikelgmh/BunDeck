@@ -157,6 +157,12 @@ describe('ElgatoHost con plugin falso', () => {
       const raw = db.getSetting(elgatoSettingsKey(PLUGIN_ID, 'ctx-1'));
       return !!raw && JSON.parse(raw).meeting === 'standup';
     });
+    // El plugin envía setSettings y setGlobalSettings seguidos; el poll de
+    // waitFor puede colarse entre ambos mensajes (visto en CI Linux).
+    await waitFor(() => {
+      const raw = db.getSetting(elgatoGlobalKey(PLUGIN_ID));
+      return !!raw && JSON.parse(raw).token === 'abc';
+    });
     const global = JSON.parse(db.getSetting(elgatoGlobalKey(PLUGIN_ID))!);
     expect(global.token).toBe('abc');
   });
