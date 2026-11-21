@@ -3,7 +3,6 @@
     <!-- Estado -->
     <h2>{{ t('bd.secRemote') }}</h2>
     <p class="bd-sub">{{ t('bd.remoteSub') }}</p>
-    <p class="bd-hint">{{ t('bd.remoteE2eNote') }}</p>
 
     <div class="bd-srow" data-cy="remote-status">
       <div>
@@ -17,6 +16,15 @@
       </div>
     </div>
     <p v-if="relayState === 'disabled'" class="bd-hint">{{ t('bd.remoteDisabled') }}</p>
+
+    <!-- Sección 1 — Enlazar otro BunDeck (emparejamiento daemon-daemon E2E) -->
+    <section class="bd-card" style="margin-top: 12px" data-cy="remote-pair-section" aria-labelledby="bd-remote-pair-title">
+      <h3 id="bd-remote-pair-title" style="display: flex; align-items: center; gap: 8px">
+        <Link2 :size="18" aria-hidden="true" />
+        {{ t('bd.remotePairTitle') }}
+      </h3>
+      <p class="bd-sub">{{ t('bd.remotePairSub') }}</p>
+      <p class="bd-hint">{{ t('bd.remoteE2eNote') }}</p>
 
     <!-- Generar código -->
     <div class="bd-srow">
@@ -214,9 +222,15 @@
       </div>
     </div>
 
-    <!-- UI remota vía relay -->
-    <section data-cy="remote-ui-section" aria-labelledby="bd-remote-ui-title">
-      <h3 id="bd-remote-ui-title">{{ t('bd.remoteUiTitle') }}</h3>
+      <p class="bd-hint">{{ t('bd.remotePairNeedBoth') }}</p>
+    </section>
+
+    <!-- Sección 2 — Entrar desde internet (UI remota por túnel) -->
+    <section class="bd-card" style="margin-top: 12px" data-cy="remote-ui-section" aria-labelledby="bd-remote-ui-title">
+      <h3 id="bd-remote-ui-title" style="display: flex; align-items: center; gap: 8px">
+        <Globe :size="18" aria-hidden="true" />
+        {{ t('bd.remoteUiTitle') }}
+      </h3>
       <p class="bd-sub">{{ t('bd.remoteUiSub') }}</p>
 
       <div class="bd-srow" data-cy="remote-ui-toggle-row">
@@ -371,6 +385,7 @@
 import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
 import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload } from '../../composables/useRemote'
 import RemoteQrScan from './RemoteQrScan.vue'
+import { Link2, Globe } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()

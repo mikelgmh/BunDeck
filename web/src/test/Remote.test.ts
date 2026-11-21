@@ -96,4 +96,24 @@ describe('RemotePane', () => {
     expect(code.exists()).toBe(true)
     expect(code.text()).toContain('482913')
   })
+
+  it('separa las dos funciones en dos tarjetas con título e icono propios', async () => {
+    vi.stubGlobal('fetch', mockFetch())
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    const pair = wrapper.find('[data-cy="remote-pair-section"]')
+    expect(pair.exists()).toBe(true)
+    expect(pair.text()).toContain('bd.remotePairTitle')
+    expect(pair.text()).toContain('bd.remotePairSub')
+    expect(pair.text()).toContain('bd.remotePairNeedBoth')
+    // Cada sección lleva su propio icono (Link2 vs Globe).
+    expect(pair.find('svg').exists()).toBe(true)
+    const ui = wrapper.find('[data-cy="remote-ui-section"]')
+    expect(ui.exists()).toBe(true)
+    expect(ui.text()).toContain('bd.remoteUiTitle')
+    expect(ui.text()).toContain('bd.remoteUiSub')
+    expect(ui.find('svg').exists()).toBe(true)
+    // El QR de emparejamiento se distingue por su botón propio.
+    expect(wrapper.find('[data-cy="remote-qr-show"]').text()).toContain('bd.remoteQrShow')
+  })
 })
