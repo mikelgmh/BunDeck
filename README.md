@@ -1,191 +1,191 @@
-# BunDeck — Alternativa abierta a Stream Deck
+# BunDeck — Open Stream Deck Alternative
 
 [![Build](https://github.com/mikelgmh/libredeck/workflows/Release/badge.svg)](https://github.com/mikelgmh/libredeck/actions)
 [![Release](https://img.shields.io/github/v/release/mikelgmh/libredeck)](https://github.com/mikelgmh/libredeck/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Automatiza tu PC con botones físicos o virtuales: abre apps, lanza scripts, controla OBS, Spotify, Home Assistant, multimedia y más. **Sin nube, sin cuenta, en local.**
+Automate your PC with physical or virtual buttons: open apps, run scripts, control OBS, Spotify, Home Assistant, media and more. **No cloud, no account, fully local.**
 
-- 🖥️ **Para usuarios:** instala, abre la ventanita de estado, pulsa “Abrir panel” y listo.
-- 🧩 **Para desarrolladores:** daemon Bun + panel Astro/Vue + CLI + launcher nativo Rust. Todo documentado abajo.
+- 🖥️ **For users:** install, open the status window, click “Open panel”, done.
+- 🧩 **For developers:** Bun daemon + Astro/Vue panel + CLI + native Rust launcher. Everything documented below.
 
-> Versión actual: **1.5.0** (fuente única: `package.json` raíz).
+> Current version: **1.5.0** (single source: root `package.json`).
 
 ---
 
-## Índice
+## Contents
 
-1. [En 60 segundos](#en-60-segundos)
-2. [Arquitectura: por qué cada pieza](#arquitectura-por-qué-cada-pieza)
-3. [Consumo real medido + comparativa](#consumo-real-medido--comparativa)
-4. [Instalación](#instalación)
-5. [Uso diario](#uso-diario)
-6. [Puertos, bind y datos](#puertos-bind-y-datos)
+1. [In 60 seconds](#in-60-seconds)
+2. [Architecture: why each piece](#architecture-why-each-piece)
+3. [Measured footprint + comparison](#measured-footprint--comparison)
+4. [Installation](#installation)
+5. [Daily use](#daily-use)
+6. [Ports, bind and data](#ports-bind-and-data)
 7. [CLI `libredeck-cli`](#cli-libredeck-cli)
-8. [API y WebSocket](#api-y-websocket)
+8. [API and WebSocket](#api-and-websocket)
 9. [Plugins](#plugins)
-10. [Desarrollo](#desarrollo)
-11. [Build y release](#build-y-release)
-12. [Variables de entorno](#variables-de-entorno)
-13. [Solución de problemas](#solución-de-problemas)
-14. [FAQ: por qué no Electron](#faq-por-qué-no-electron)
+10. [Development](#development)
+11. [Build and release](#build-and-release)
+12. [Environment variables](#environment-variables)
+13. [Troubleshooting](#troubleshooting)
+14. [FAQ: why not Electron](#faq-why-not-electron)
 
 ---
 
-## En 60 segundos
+## In 60 seconds
 
 ```bash
-# 1) Descarga el instalador de Releases e instala
-# 2) Abre BunDeck (ventanita de estado) → “Abrir panel”
-# 3) Crea un botón y asígnale una acción. Ya está.
+# 1) Download the installer from Releases and install it
+# 2) Open BunDeck (status window) → “Open panel”
+# 3) Create a button and assign an action. That’s it.
 ```
 
-El panel es una web local (`http://localhost:3002` en prod, `:4321` en dev). Puedes abrirlo también desde el móvil en la misma Wi-Fi con la IP LAN que muestra la ventana de estado.
+The panel is a local website (`http://localhost:3002` in prod, `:4321` in dev). You can also open it from your phone on the same Wi-Fi using the LAN IP shown in the status window.
 
 ---
 
-## Arquitectura: por qué cada pieza
+## Architecture: why each piece
 
 ```
 ┌─────────────────┐      HTTP :3001 / WS :3003      ┌──────────────────┐
-│  Panel web       │ ◄────────────────────────────► │  Daemon (Bun)     │
-│  Astro + Vue     │   API + eventos en vivo        │  SQLite + plugins │
-│  (tu navegador)  │                                │  + Stream Deck HW │
+│  Web panel       │ ◄────────────────────────────► │  Daemon (Bun)     │
+│  Astro + Vue     │   API + live events            │  SQLite + plugins │
+│  (your browser)  │                                │  + Stream Deck HW │
 └─────────────────┘                                └────────▲──────────┘
                                                            │ spawn / shutdown
                                                   ┌────────┴──────────┐
-                                                  │ Launcher Rust/GPUI │
-                                                  │ ventana + tray     │
-                                                  │ dueño ciclo de vida│
+                                                  │ Rust/GPUI launcher │
+                                                  │ window + tray      │
+                                                  │ lifecycle owner    │
                                                   └───────────────────┘
 ```
 
-| Pieza | Qué es | Por qué existe así |
+| Piece | What it is | Why it is shaped this way |
 |---|---|---|
-| **Daemon** (`daemon/`, Bun + SQLite) | Dueño de datos, acciones, plugins, hardware y API/WS. | Un solo proceso de verdad: si cierras la ventana, la automatización sigue. Bun arranca rápido, consume poco y compila a un `.exe` único con `bun build --compile`. |
-| **Panel web** (`web/`, Astro + Vue) | Solo UI de control. | Va en tu navegador: cero coste de un Chromium embebido. Astro genera una web estática diminuta (~1,3 MB). Vue solo donde hay interactividad. |
-| **Launcher** (`launcher/`, Rust + GPUI) | Ventanita de estado + bandeja. Inicia, vigila y apaga el daemon. | Estilo XAMPP: panel nativo mínimo siempre visible sin cargar una vista web. En prod es el **único dueño** del ciclo de vida —no hay doble spawn ni doble icono—. |
-| **CLI** (`cli/`, Bun) | Cliente de la API + gestor del proceso. | Para automatizar y administrar sin GUI: `start/stop/status/plugin/logs`. No duplica lógica: todo pasa por la misma API que el panel. |
-| **Electrobun** (`src/bun/`, dev-only) | Host de ventana nativa con WebView del sistema. | Útil en desarrollo/experimentos. Fuera del release canónico: en prod no aporta nada que justifique otro proceso residente. |
+| **Daemon** (`daemon/`, Bun + SQLite) | Owns data, actions, plugins, hardware and the API/WS. | A single source of truth process: closing the window never stops automation. Bun starts fast, sips memory and compiles to a single `.exe` with `bun build --compile`. |
+| **Web panel** (`web/`, Astro + Vue) | Control UI only. | Runs in your browser: zero cost of an embedded Chromium. Astro builds a tiny static site (~1.3 MB). Vue only where there is interactivity. |
+| **Launcher** (`launcher/`, Rust + GPUI) | Status window + tray. Starts, watches and stops the daemon. | XAMPP-style: a minimal native panel that is always there without loading a web view. In prod it is the **only** lifecycle owner — no double spawn, no double icon. |
+| **CLI** (`cli/`, Bun) | API client + process manager. | For scripting and headless admin: `start/stop/status/plugin/logs`. No duplicated logic: everything goes through the same API as the panel. |
+| **Electrobun** (`src/bun/`, dev-only) | Native window host using the OS WebView. | Handy for development and experiments. Out of the canonical release: in prod it adds another resident process for no real benefit. |
 
-Decisiones que evitamos a propósito:
+Deliberate choices:
 
-- **Sin doble supervisor:** o arranca el launcher, o arrancas tú el daemon. Nunca los dos a la vez (`LIBREDECK_MANAGED`, health-check previo).
-- **Sin doble bandeja:** el daemon desactiva la suya cuando lo lanza el launcher (`LIBREDECK_NO_TRAY=1`).
-- **Un solo apagado:** `POST /api/v1/admin/shutdown` → `lifecycle.ts` → para API, frontend, WS y tray en orden. CLI, launcher y host piden lo mismo.
-- **Contrato único:** la API vive bajo `/api/v1`. El CLI y el panel usan los mismos endpoints.
+- **No double supervisor:** either the launcher starts the daemon, or you do. Never both (`LIBREDECK_MANAGED`, pre-flight health check).
+- **No double tray:** the daemon disables its own tray when launched by the launcher (`LIBREDECK_NO_TRAY=1`).
+- **One shutdown path:** `POST /api/v1/admin/shutdown` → `lifecycle.ts` → stops API, frontend, WS and tray in order. CLI, launcher and host all request the same thing.
+- **One contract:** the API lives under `/api/v1`. CLI and panel use the same endpoints.
 
 ---
 
-## Consumo real medido + comparativa
+## Measured footprint + comparison
 
-Medido en este repo, Windows 10 Pro 64-bit, en reposo, con `Get-Process` (WorkingSet):
+Measured in this repo, Windows 10 Pro 64-bit, idle, with `Get-Process` (WorkingSet):
 
-| Componente | RAM en reposo | Tamaño en disco | Notas |
+| Component | Idle RAM | Disk size | Notes |
 |---|---|---|---|
-| Daemon `bun run daemon/src/server.ts` | **~55 MB** | — | Dev, con SQLite + plugins nativos cargados |
-| Daemon compilado `libredeck-daemon.exe` | **~46 MB** | **~138 MB** | Incluye runtime Bun + SQLite + nativos; menos RAM que en dev |
-| Launcher `libredeck-launcher.exe` (release) | **~54 MB** con ventana | **~6,5 MB** | GPUI nativo, sondeo cada 2 s |
-| CLI compilado | efímero (solo mientras corre) | **~110 MB** | No es residente |
-| Panel `web/dist` | 0 (vive en tu navegador) | **~1,3 MB**, 10 ficheros | Astro estático |
+| Daemon `bun run daemon/src/server.ts` | **~55 MB** | — | Dev, SQLite + native plugins loaded |
+| Compiled daemon `libredeck-daemon.exe` | **~46 MB** | **~138 MB** | Includes Bun runtime + SQLite + natives; less RAM than dev |
+| Launcher `libredeck-launcher.exe` (release) | **~54 MB** with window | **~6.5 MB** | Native GPUI, 2 s polling |
+| Compiled CLI | short-lived (only while running) | **~110 MB** | Not resident |
+| Panel `web/dist` | 0 (lives in your browser) | **~1.3 MB**, 10 files | Static Astro output |
 
-**Total prod en reposo: ~100 MB** (daemon 46 + launcher 54). El panel no suma proceso propio.
+**Prod total at idle: ~100 MB** (daemon 46 + launcher 54). The panel adds no process of its own.
 
-### Frente a una app Electron equivalente
+### Against an equivalent Electron app
 
-|  | BunDeck | Electron típico |
+|  | BunDeck | Typical Electron |
 |---|---|---|
-| Motor UI | Tu navegador o WebView del sistema (compartido) | Chromium **embebido por app** + Node propio |
-| Procesos en reposo | 2 (daemon + launcher) | 4–7 (main + renderer por ventana + GPU + helpers) |
-| RAM idle orientativa | **~100 MB** medidos | **~250–500 MB** en apps con ventana + backend |
-| Binario | Daemon 138 MB + launcher 6,5 MB + web 1,3 MB | App Electron 80–150 MB + datos Chromium |
-| Arranque | Bun ~ms, Rust nativo | Arranque frío de Chromium |
+| UI engine | Your browser or the OS WebView (shared) | **Per-app embedded Chromium** + its own Node |
+| Idle processes | 2 (daemon + launcher) | 4–7 (main + one renderer per window + GPU + helpers) |
+| Indicative idle RAM | **~100 MB** measured | **~250–500 MB** for an app with window + backend |
+| Binary | Daemon 138 MB + launcher 6.5 MB + web 1.3 MB | Electron app 80–150 MB + Chromium data |
+| Startup | Bun in ms, native Rust | Cold Chromium startup |
 
-Por qué Electron gasta más: cada app lleva su propio Chromium aunque ya tengas Chrome/Edge instalado, y cada ventana es un renderer completo con su heap JS, su compositor y a menudo su proceso GPU. Para un panel que el 90 % del tiempo está cerrado y un backend que debe vivir siempre, pagar un Chromium residente no compensa. BunDeck separa ambas cosas: backend siempre vivo y barato (Bun), UI bajo demanda (navegador) y control mínimo nativo (Rust).
+Why Electron costs more: every app ships its own Chromium even if Chrome/Edge is already installed, and every window is a full renderer with its own JS heap, compositor and often a GPU process. For a panel that stays closed 90% of the time and a backend that must always be alive, paying for a resident Chromium makes no sense. BunDeck splits both concerns: an always-on cheap backend (Bun), on-demand UI (browser) and minimal native control (Rust).
 
-> Nota honesta: las cifras Electron son rangos típicos del ecosistema, no una medición de un clon nuestro. Las de BunDeck sí son mediciones de este repo (ver tabla). Si repites la medición, usa `Get-Process` tras 1 min en reposo y con el mismo `LIBREDECK_DATA_DIR`.
+> Honest note: Electron figures are typical ecosystem ranges, not a measurement of a clone of ours. BunDeck figures are measurements from this repo (see table). To reproduce, use `Get-Process` after 1 min idle with the same `LIBREDECK_DATA_DIR`.
 
-¿Y Electrobun? Usa la WebView del sistema (WebView2 en Windows), mucho más ligera que Chromium embebido. Aun así, en prod sería un tercer proceso residente solo para envolver el panel. Como el panel ya abre perfecto en el navegador y el launcher cubre estado/tray/updates, Electrobun queda como **dev-only**. Menos procesos = menos RAM y menos cosas que pueden fallar.
+What about Electrobun? It uses the OS WebView (WebView2 on Windows), far lighter than embedded Chromium. Even so, in prod it would be a third resident process just to wrap the panel. Since the panel already opens fine in the browser and the launcher covers status/tray/updates, Electrobun stays **dev-only**. Fewer processes = less RAM and fewer things that can break.
 
 ---
 
-## Instalación
+## Installation
 
-### Windows (recomendado)
+### Windows (recommended)
 
-1. Descarga `BunDeck-Setup-vX.Y.Z.exe` de [Releases](https://github.com/mikelgmh/libredeck/releases).
-2. Instala (instala daemon + CLI + launcher + panel).
-3. Abre **BunDeck** → **Abrir panel**.
+1. Download `BunDeck-Setup-vX.Y.Z.exe` from [Releases](https://github.com/mikelgmh/libredeck/releases).
+2. Install (daemon + CLI + launcher + panel).
+3. Open **BunDeck** → **Open panel**.
 
-### Desde fuentes
+### From source
 
 ```bash
 git clone https://github.com/mikelgmh/libredeck.git
 cd libredeck
-bun run install:all   # daemon+cli con bun, web con npm (a propósito)
-bun run dev           # daemon + panel Astro + launcher
+bun run install:all   # daemon+cli with bun, web with npm (on purpose)
+bun run dev           # daemon + Astro panel + launcher
 ```
 
 ---
 
-## Uso diario
+## Daily use
 
-- **Abrir panel:** botón en la ventanita o `http://localhost:3002` (prod) / `http://localhost:4321` (dev).
-- **Móvil en LAN:** usa la IP que muestra el launcher, p. ej. `http://192.168.1.20:3002`.
-- **Apagar:** “Salir” en la ventanita o tray. Cierra daemon + ventana en orden.
-- **Stream Deck físico:** conéctalo y el daemon lo detecta solo (el fallo de init no tumba el daemon).
+- **Open panel:** button in the status window or `http://localhost:3002` (prod) / `http://localhost:4321` (dev).
+- **Phone on LAN:** use the IP shown by the launcher, e.g. `http://192.168.1.20:3002`.
+- **Quit:** “Quit” in the status window or tray. Stops daemon + window in order.
+- **Physical Stream Deck:** plug it in and the daemon picks it up (a failed init never crashes the daemon).
 
 ---
 
-## Puertos, bind y datos
+## Ports, bind and data
 
-| Servicio | Defecto | Override |
+| Service | Default | Override |
 |---|---|---|
-| API | `3001` | `PORT` o `--port=` |
+| API | `3001` | `PORT` or `--port=` |
 | WebSocket | `3003` | `WS_PORT` |
-| Frontend embebido | `3002` | `FRONTEND_PORT` o `--web-port=` |
+| Embedded frontend | `3002` | `FRONTEND_PORT` or `--web-port=` |
 | Astro dev | `4321` | `astro.config.mjs` |
-| Launcher API (solo 127.0.0.1) | `3031` | `HOST_PORT` |
+| Launcher API (127.0.0.1 only) | `3031` | `HOST_PORT` |
 
-Seguridad por defecto:
+Secure by default:
 
-- El daemon escucha en **`127.0.0.1`**. Para LAN (móvil/QR): `LIBREDECK_BIND_LAN=1` o `LIBREDECK_BIND=0.0.0.0`. `dev.sh`, el launcher y el host dev ya lo ponen cuando toca.
-- CORS no usa `*` con credenciales: refleja el `Origin` solo si es local (`localhost`, `127.0.0.1`, `::1`, `10/8`, `172.16/12`, `192.168/16`).
-- `POST /api/v1/admin/shutdown` es local por diseño; no lo expongas a WAN.
+- The daemon listens on **`127.0.0.1`**. For LAN (phone/QR): `LIBREDECK_BIND_LAN=1` or `LIBREDECK_BIND=0.0.0.0`. `dev.sh`, the Rust launcher and the dev host already set it when needed.
+- CORS never uses `*` with credentials: it echoes `Origin` only when local (`localhost`, `127.0.0.1`, `::1`, `10/8`, `172.16/12`, `192.168/16`).
+- `POST /api/v1/admin/shutdown` is local by design; don’t expose it to WAN.
 
-Datos (`daemon/src/config.ts:resolveDataDir`):
+Data (`daemon/src/config.ts:resolveDataDir`):
 
 ```
-LIBREDECK_DATA_DIR > ELECTROBUN_DATA_DIR/libredeck > %APPDATA%/LibreDeck/data (instalado) > <repo>/data (dev)
+LIBREDECK_DATA_DIR > ELECTROBUN_DATA_DIR/libredeck > %APPDATA%/LibreDeck/data (installed) > <repo>/data (dev)
 ```
 
-Ahí viven `db.sqlite`, `assets/`, `plugins/` y `logs/`. `data/` es estado local: no se commitea.
+That holds `db.sqlite`, `assets/`, `plugins/` and `logs/`. `data/` is local state: never committed.
 
 ---
 
 ## CLI `libredeck-cli`
 
 ```bash
-libredeck-cli start --detach        # arranca en segundo plano (pidfile + log en data/)
-libredeck-cli status               # API + WS (descubre WS vía /config → /health)
-libredeck-cli stop                 # 1) API shutdown 2) pidfile 3) kill dirigido por PID
+libredeck-cli start --detach        # background (pidfile + log under data/)
+libredeck-cli status               # API + WS (discovers WS via /config → /health)
+libredeck-cli stop                 # 1) API shutdown 2) pidfile 3) targeted kill by PID
 libredeck-cli plugin list
-libredeck-cli plugin install ./mi-plugin        # carpeta local
-libredeck-cli plugin install ./mi-plugin.zip    # zip local (upload)
+libredeck-cli plugin install ./my-plugin        # local folder
+libredeck-cli plugin install ./my-plugin.zip    # local zip (upload)
 libredeck-cli plugin install https://github.com/org/plugin.git --ref v1.2.0
 libredeck-cli logs -n 50 --level error
-libredeck-cli logs --follow        # WS en vivo (topic logs), con fallback a polling 2 s
+libredeck-cli logs --follow        # live WS (logs topic), falls back to 2 s polling
 ```
 
-El CLI es otro cliente más: no habla a la DB directamente, todo va por `http://localhost:<port>/api/v1`.
+The CLI is just another client: it never touches the DB directly, everything goes through `http://localhost:<port>/api/v1`.
 
 ---
 
-## API y WebSocket
+## API and WebSocket
 
-Base: `http://localhost:3001`. Salud: `GET /health` → `{ status, timestamp, version, websocket }`. Config UI: `GET /config` → `{ wsPort, apiPort, frontendPort }`.
+Base: `http://localhost:3001`. Health: `GET /health` → `{ status, timestamp, version, websocket }`. UI config: `GET /config` → `{ wsPort, apiPort, frontendPort }`.
 
-Familias principales (`daemon/src/api/*.ts`, `routes.ts` solo reparte):
+Main families (`daemon/src/api/*.ts`, `routes.ts` only dispatches):
 
 ```
 GET/POST /api/v1/profiles   GET/PUT/DELETE /api/v1/profiles/:id
@@ -201,32 +201,32 @@ GET /api/v1/version
 
 WebSocket `ws://localhost:3003`:
 
-- Cliente → `subscribe` / `unsubscribe` / `button.press` / `page.select` / `profile.select`
-- Servidor → `button.pressed`, `action.started/finished/error`, `profile.updated/navigate`, `page.created/updated/deleted/navigate`, `button.updated/deleted`, `plugin.installed/enabled`, **`log.created`** (topic `logs`)
+- Client → `subscribe` / `unsubscribe` / `button.press` / `page.select` / `profile.select`
+- Server → `button.pressed`, `action.started/finished/error`, `profile.updated/navigate`, `page.created/updated/deleted/navigate`, `button.updated/deleted`, `plugin.installed/enabled`, **`log.created`** (`logs` topic)
 
 ---
 
 ## Plugins
 
-- Nativo: crea `daemon/src/plugins/mi.plugin.ts`, expórtalo en `daemon/src/plugins/index.ts`. Se autoinstala con versión y respeta `enabled`.
-- Externo: carpeta en `<data>/plugins/<id>/` con `manifest.json` + `main.js` (`register(api)` / `onAction` / `emitEvent`). Validación en `plugin-system/validator.ts`, sandbox en `sandbox.ts`.
+- Native: create `daemon/src/plugins/my.plugin.ts`, export it from `daemon/src/plugins/index.ts`. It self-installs with versioning and respects `enabled`.
+- External: folder under `<data>/plugins/<id>/` with `manifest.json` + `main.js` (`register(api)` / `onAction` / `emitEvent`). Validation in `plugin-system/validator.ts`, sandbox in `sandbox.ts`.
 
-Instalar uno local sin comprimir:
+Install a local folder without zipping:
 
 ```bash
-libredeck-cli plugin install ./mi-plugin --force
-# equivale a POST /api/v1/plugins/install { sourceType:'directory', path:'<abs>' }
+libredeck-cli plugin install ./my-plugin --force
+# same as POST /api/v1/plugins/install { sourceType:'directory', path:'<abs>' }
 ```
 
 ---
 
-## Desarrollo
+## Development
 
 ```bash
 bun run install:all
 bun run dev              # daemon (DEV_MODE) + Astro + launcher
-./dev.sh setup           # primera vez: deps + data/ + perfil + plugin ejemplo
-./dev.sh dev             # dev con detección LAN + auto-open
+./dev.sh setup           # first time: deps + data/ + profile + example plugin
+./dev.sh dev             # dev with LAN detection + auto-open
 
 cd daemon && bun test    # 236 tests
 cd cli && bun test       # 30 tests
@@ -234,75 +234,75 @@ bun test src/bun/        # 46 tests
 cd web && npm run test   # vitest
 ```
 
-Reglas del repo (`AGENTS.md` manda):
+Repo rules (`AGENTS.md` wins):
 
-- Usa `DatabaseService` (`daemon/src/db.ts`), nunca SQL suelto. `data` es JSON-as-TEXT: parsea en el borde.
-- Rutas nuevas en `daemon/src/api/<familia>.ts`, no en el dispatcher.
-- Web con **npm**, daemon/CLI con **bun**. No lo mezcles.
-- No arranques dev servers si no te lo piden: el usuario ya los tiene abiertos.
+- Use `DatabaseService` (`daemon/src/db.ts`), never raw SQL. `data` columns are JSON-as-TEXT: parse at the boundary.
+- New routes go in `daemon/src/api/<family>.ts`, not in the dispatcher.
+- Web with **npm**, daemon/CLI with **bun**. Don’t mix them.
+- Don’t start dev servers unless asked: the user already has them running.
 
 ---
 
-## Build y release
+## Build and release
 
-Canónico prod = **launcher Rust + daemon compilado + web-dist**:
+Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 
 ```bash
 ./build.sh
-# web → daemon/web-dist + dist/ → daemon+cli compilados (versión incrustada)
-# → launcher Rust (si hay cargo) → Inno Setup (Windows)
+# web → daemon/web-dist + dist/ → compiled daemon+cli (version embedded)
+# → Rust launcher (if cargo exists) → Inno Setup (Windows)
 ```
 
-- Fuente única de versión: `package.json` raíz. Daemon/CLI la leen de `*/src/version.ts` (`LIBREDECK_VERSION` > JSON raíz incrustado > `dev`). `/health` y `/api/v1/version` usan `getVersion()`, sin `0.1.0` fijos.
-- CI (`.github/workflows/release.yml`): test → build por OS (daemon + CLI + `web-dist.tar.gz`; Windows además `BunDeck-Setup`) → `semantic-release` en `master`.
-- Electrobun queda fuera del release canónico (sus artefactos van a `.../releases/latest/download`).
+- Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`LIBREDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` use `getVersion()`, no hardcoded `0.1.0`.
+- CI (`.github/workflows/release.yml`): test → per-OS build (daemon + CLI + `web-dist.tar.gz`; Windows also `BunDeck-Setup`) → `semantic-release` on `master`.
+- Electrobun stays out of the canonical release (its updater artifacts go to `.../releases/latest/download`).
 
 ---
 
-## Variables de entorno
+## Environment variables
 
-| Var | Efecto |
+| Var | Effect |
 |---|---|
-| `PORT` / `WS_PORT` / `FRONTEND_PORT` / `HOST_PORT` | Puertos (ver tabla) |
-| `DEV_MODE=true` | Sin frontend embebido; UI en Astro `:4321` |
-| `LIBREDECK_DATA_DIR` | Data dir explícito (también tests) |
-| `LIBREDECK_BIND` / `LIBREDECK_BIND_LAN=1` | `0.0.0.0` para LAN; por defecto loopback |
-| `LIBREDECK_VERSION` | Override de versión (build/CI la inyectan) |
-| `LIBREDECK_NO_TRAY=1` / `LIBREDECK_MANAGED=1` | El daemon no crea tray / no se aut Gestiona (lo pone el launcher) |
-| `LIBREDECK_HOST_MANAGE_DAEMON=0/1` | Prohíbe/fuerza que Electrobun gestione el daemon |
-| `BUN_PATH` | Bun alternativo para el host dev |
-| `NO_LAUNCHER=1` / `NO_BROWSER=1` | No abrir launcher / navegador en dev |
+| `PORT` / `WS_PORT` / `FRONTEND_PORT` / `HOST_PORT` | Ports (see table) |
+| `DEV_MODE=true` | No embedded frontend; UI on Astro `:4321` |
+| `LIBREDECK_DATA_DIR` | Explicit data dir (also tests) |
+| `LIBREDECK_BIND` / `LIBREDECK_BIND_LAN=1` | `0.0.0.0` for LAN; loopback by default |
+| `LIBREDECK_VERSION` | Version override (build/CI inject it) |
+| `LIBREDECK_NO_TRAY=1` / `LIBREDECK_MANAGED=1` | Daemon skips tray / self-management (set by launcher) |
+| `LIBREDECK_HOST_MANAGE_DAEMON=0/1` | Forbid/force Electrobun daemon management |
+| `BUN_PATH` | Alternate bun for the dev host |
+| `NO_LAUNCHER=1` / `NO_BROWSER=1` | Don’t open launcher / browser in dev |
 
 ---
 
-## Solución de problemas
+## Troubleshooting
 
-| Síntoma | Causa probable | Qué hacer |
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| Panel no abre en `:3002` | Daemon en `DEV_MODE` o puerto ocupado | En dev usa `:4321`; revisa `http://localhost:3001/health` y `HOST_PORT` |
-| Móvil no llega al panel | Bind loopback sin LAN | Arranca con `LIBREDECK_BIND_LAN=1` (dev.sh/launcher ya lo hacen) |
-| Dos iconos en tray | Daemon con tray + launcher | Normal solo en dev manual; en instalado el daemon lo desactiva solo |
-| `plugin install` carpeta falla | Ruta relativa o sin `manifest.json` | Pasa ruta absoluta con `manifest.json` + `main.js`; el CLI ya la absolutiza |
-| DB vieja con versión rara | `app.version` antiguo | Se auto-actualiza al arrancar (`getVersion()`); si no, `./dev.sh clean` |
-| Puerto ocupado | Otro daemon corriendo | `libredeck-cli status` / `stop`, o cambia `PORT`/`WS_PORT` |
+| Panel won’t open on `:3002` | Daemon in `DEV_MODE` or busy port | In dev use `:4321`; check `http://localhost:3001/health` and `HOST_PORT` |
+| Phone can’t reach panel | Loopback bind without LAN | Start with `LIBREDECK_BIND_LAN=1` (dev.sh/launcher already do) |
+| Two tray icons | Daemon tray + launcher | Only expected in manual dev; installed daemon disables its own |
+| Folder `plugin install` fails | Relative path or missing `manifest.json` | Pass an absolute path with `manifest.json` + `main.js`; the CLI already absolutizes it |
+| Old DB with odd version | Stale `app.version` | Self-heals on boot (`getVersion()`); otherwise `./dev.sh clean` |
+| Busy port | Another daemon running | `libredeck-cli status` / `stop`, or change `PORT`/`WS_PORT` |
 
-Logs: `libredeck-cli logs --follow` o `<data>/logs/daemon.log` (modo detach).
+Logs: `libredeck-cli logs --follow` or `<data>/logs/daemon.log` (detached mode).
 
 ---
 
-## FAQ: por qué no Electron
+## FAQ: why not Electron
 
-**¿No era más fácil un Electron?**
-Más fácil de empaquetar, sí. Pero pagarías un Chromium entero siempre residente para un panel que pasa cerrado y un backend que debe ser diminuto. Medido aquí: stack completo ~100 MB frente a 250–500 MB típicos de Electron equivalente.
+**Wasn’t Electron easier?**
+Easier to package, yes. But you would pay for a full resident Chromium for a panel that stays closed and a backend that must stay tiny. Measured here: ~100 MB full stack vs 250–500 MB typical for an equivalent Electron app.
 
-**¿Por qué Bun y no Node?**
-Arranque instantáneo, SQLite y WS integrados sin nativos frágiles, y `bun build --compile` produce un exe único sin instalador de runtime.
+**Why Bun instead of Node?**
+Instant startup, built-in SQLite and WS without fragile natives, and `bun build --compile` yields a single exe with no runtime installer.
 
-**¿Por qué Astro + Vue y no React SPA?**
-El panel es 90 % estático + islas interactivas. Astro genera 1,3 MB estáticos; Vue solo donde hay estado (botones, inspector, streaming). Menos JS = menos RAM en el navegador.
+**Why Astro + Vue instead of a React SPA?**
+The panel is 90% static + interactive islands. Astro outputs 1.3 MB of static files; Vue only where state lives (buttons, inspector, streaming). Less JS = less RAM in the browser.
 
-**¿Por qué Rust para el launcher?**
-Porque su trabajo es mínimo y siempre residente: vigilar 3 puertos, mostrar estado y pedir shutdown. En Rust son 6,5 MB de binario y ~54 MB con ventana. En Electron serían cientos de MB para lo mismo.
+**Why Rust for the launcher?**
+Because its job is minimal and always resident: watch 3 ports, show status, request shutdown. In Rust that is a 6.5 MB binary and ~54 MB with window. In Electron it would be hundreds of MB for the same job.
 
-**¿Y Electrobun entonces?**
-Buena tecnología (WebView del sistema, no Chromium embebido) y útil en dev. Pero en prod duplicaba el rol del launcher. Un proceso menos, un problema menos.
+**So what is Electrobun for?**
+Good tech (OS WebView, not embedded Chromium) and handy in dev. But in prod it duplicated the launcher role. One process less, one problem less.
