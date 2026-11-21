@@ -29,6 +29,7 @@ function memContext() {
 }
 
 const runners: ActionRunner[] = []
+const realFetch = globalThis.fetch
 function makeRunner(): ActionRunner {
     const r = new ActionRunner({} as any)
     runners.push(r)
@@ -49,8 +50,10 @@ beforeAll(async () => {
 })
 
 afterEach(async () => {
-    ;(globalThis as any).fetch = undefined as any
-    // Restaura fetch real de Bun si se mockeó (Bun expone fetch global)
+    // Restaura fetch real de Bun si se mockeó (Bun expone fetch global).
+    // Nunca asignar undefined: rompería otros ficheros de test que usan fetch
+    // (p. ej. homeassistant.plugin.test.ts con Bun.serve + fetch real).
+    globalThis.fetch = realFetch
     delete (globalThis as any).__libredeckWs
     while (runners.length > 0) {
         const r = runners.pop()!
