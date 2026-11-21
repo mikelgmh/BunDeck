@@ -33,7 +33,11 @@ cp -r web/dist/* dist/web-dist/
 # Build Unified Executable (includes daemon + web server)
 echo "📦 Building Unified Executable..."
 cd daemon
-bun run build
+if [ "$(uname -s)" = "MINGW"* ] || [ "$(uname -s)" = "MSYS"* ] || [ -n "${WINDIR:-}" ]; then
+  bun run build:win
+else
+  bun run build
+fi
 mv libredeck-daemon ../dist/
 cd ..
 

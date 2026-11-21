@@ -122,7 +122,11 @@ jobs:
         LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
         cd daemon
-        bun run build
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          bun run build:win
+        else
+          bun run build
+        fi
         mv libredeck-daemon${{ matrix.ext }} ../libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
     - name: Package Web dist (non-Windows)
