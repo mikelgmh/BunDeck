@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/mikelgmh/libredeck/compare/v1.7.0...v1.7.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* prevent launcher stalls and version mismatches ([98b0b94](https://github.com/mikelgmh/libredeck/commit/98b0b94ca4d4f14eb67f827a49d86b7080647b72))
+
 # [1.7.0](https://github.com/mikelgmh/libredeck/compare/v1.6.0...v1.7.0) (2026-11-21)
 
 
