@@ -166,6 +166,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { FolderOpen } from 'lucide-vue-next'
+import { getTunnelToken, tunnelApiBase } from '../composables/useTunnel'
 
 interface SchemaProperty {
   type: string
@@ -248,7 +249,10 @@ const openFileDialog = async (propKey: string) => {
     // Construir la URL de la API del daemon
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
     const hostname = window.location.hostname
-    const apiUrl = `${protocol}//${hostname}:3001/api/v1/files/select`
+    const tunnelToken = getTunnelToken()
+    const apiUrl = tunnelToken
+      ? `${tunnelApiBase(tunnelToken)}/files/select`
+      : `${protocol}//${hostname}:3001/api/v1/files/select`
 
     console.log('🔍 Abriendo diálogo de selección de archivos...')
 

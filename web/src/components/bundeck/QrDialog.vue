@@ -27,6 +27,7 @@ import { ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import QrcodeVue from 'qrcode.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { getTunnelToken, tunnelApiBase } from '../../composables/useTunnel'
 
 const { t } = useI18nStore()
 
@@ -42,7 +43,10 @@ const loading = ref(true)
 
 const getDaemonLanIp = async (): Promise<string | null> => {
   try {
-    const daemonBase = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`
+    const tunnelToken = getTunnelToken()
+    const daemonBase = tunnelToken
+      ? tunnelApiBase(tunnelToken)
+      : `${window.location.protocol}//${window.location.hostname}:3001/api/v1`
     const res = await fetch(`${daemonBase}/network/ips`)
     if (!res.ok) return null
     const data = await res.json()

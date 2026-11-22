@@ -492,7 +492,7 @@ const onClearImage = async () => {
     onUpdateField('iconImage', '')
     await saveButtonConfig()
     if (cur.startsWith('/assets/')) {
-      fetch(`${API_BASE.value}/api/v1/assets`, {
+      fetch(`${API_BASE.value}/assets`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: cur })
@@ -1411,7 +1411,7 @@ const checkForUpdates = async () => {
   if (!hasElectrobunUpdater) return
   isCheckingUpdate.value = true
   try {
-    const url = `http://${window.location.hostname}:3001/api/v1/version/check`
+    const url = `${API_BASE.value}/version/check`
     const res = await fetch(url)
     if (res.ok) {
       const data = await res.json()
@@ -1429,7 +1429,7 @@ const startUpdate = async () => {
   isUpdating.value = true
   updateResult.value = null
   try {
-    const url = `http://${window.location.hostname}:3001/api/v1/update`
+    const url = `${API_BASE.value}/update`
     const res = await fetch(url, { method: 'POST' })
     if (!res.ok) throw new Error('Failed to start update')
   } catch (error) {
@@ -1540,7 +1540,7 @@ onMounted(async () => {
   })
   if (hasElectrobunUpdater) {
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/v1/version`)
+      const res = await fetch(`${API_BASE.value}/version`)
       if (res.ok) {
         const data = await res.json()
         currentVersion.value = data.version

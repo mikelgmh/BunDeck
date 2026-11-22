@@ -427,6 +427,7 @@ import {
   bdSetPalette, bdSetLabelMode, bdSetKeySize, bdSetRadius, bdSetBrightness, bdSetAnimations
 } from '../../composables/useBunDeckUi'
 import { useAutoProfile } from '../../composables/useAutoProfile'
+import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
 import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
 import { IDRE, RES } from '../../composables/useExpressions'
 import type { ProfileData } from '../../types/streamdeck'
@@ -640,16 +641,23 @@ const deviceStatusShort = computed(() => {
     : deviceStatus.value
 })
 const apiPort = ref(3001)
-const apiBase = () =>
-  typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:${apiPort.value}/api/v1`
-    : 'http://localhost:3001/api/v1'
+const apiBase = () => {
+  if (typeof window !== 'undefined') {
+    const tunnelToken = getTunnelToken()
+    if (tunnelToken) return tunnelApiBase(tunnelToken)
+    return `${window.location.protocol}//${window.location.hostname}:${apiPort.value}/api/v1`
+  }
+  return 'http://localhost:3001/api/v1'
+}
 
 const syncApiPort = async () => {
   try {
-    const url = typeof window !== 'undefined'
-      ? `${window.location.protocol}//${window.location.hostname}:3001/config`
-      : '/config'
+    const tunnelToken = getTunnelToken()
+    const url = tunnelToken
+      ? tunnelConfigUrl(tunnelToken)
+      : typeof window !== 'undefined'
+        ? `${window.location.protocol}//${window.location.hostname}:3001/config`
+        : '/config'
     const res = await fetch(url)
     if (res.ok) {
       const cfg = await res.json()

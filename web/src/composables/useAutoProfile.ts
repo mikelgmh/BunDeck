@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getTunnelToken, tunnelApiBase } from './useTunnel'
 
 export type AutoTarget = 'app' | 'title' | 'both'
 export type AutoOp = 'contains' | 'exact' | 'starts' | 'regex'
@@ -135,6 +136,8 @@ export function loadAutoConfigRaw(): { enabled: boolean; defaultProfileId: strin
 
 const apiBase = () => {
   if (typeof window !== 'undefined') {
+    const tunnelToken = getTunnelToken()
+    if (tunnelToken) return tunnelApiBase(tunnelToken)
     return `http://${window.location.hostname}:3001/api/v1`
   }
   return 'http://localhost:3001/api/v1'
