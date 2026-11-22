@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
 
 export interface RemoteDeviceView {
   deviceId: string
@@ -148,10 +149,14 @@ export function toggleInList(list: string[], item: string): string[] {
 
 export function useRemote() {
   const apiPort = ref(3001)
-  const apiBase = () =>
-    typeof window !== 'undefined'
-      ? `${window.location.protocol}//${window.location.hostname}:${apiPort.value}/api/v1`
-      : 'http://localhost:3001/api/v1'
+  const apiBase = () => {
+    if (typeof window !== 'undefined') {
+      const tunnelToken = getTunnelToken()
+      if (tunnelToken) return tunnelApiBase(tunnelToken)
+      return `${window.location.protocol}//${window.location.hostname}:${apiPort.value}/api/v1`
+    }
+    return 'http://localhost:3001/api/v1'
+  }
 
   const status = ref<RemoteStatusView | null>(null)
   const devices = ref<RemoteDeviceView[]>([])
@@ -210,8 +215,10 @@ export function useRemote() {
 
   const syncConfig = async () => {
     try {
-      const url =
-        typeof window !== 'undefined' && window.location.port !== '3001'
+      const tunnelToken = getTunnelToken()
+      const url = tunnelToken
+        ? tunnelConfigUrl(tunnelToken)
+        : typeof window !== 'undefined' && window.location.port !== '3001'
           ? 'http://localhost:3001/config'
           : '/config'
       const res = await fetch(url)
@@ -371,10 +378,16 @@ export function useRemote() {
   const connectWs = () => {
     try {
       if (typeof WebSocket === 'undefined') return
-      const protocol =
-        typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-      ws = new WebSocket(`${protocol}//${host}:${wsPort}`)
+      const tunnelToken = getTunnelToken()
+      const url = tunnelToken
+        ? tunnelWsUrl(tunnelToken)
+        : (() => {
+            const protocol =
+              typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+            return `${protocol}//${host}:${wsPort}`
+          })()
+      ws = new WebSocket(url)
       ws.onopen = () => {
         ws?.send(JSON.stringify({ type: 'subscribe', payload: { topics: ['remote', 'logs'] } }))
       }

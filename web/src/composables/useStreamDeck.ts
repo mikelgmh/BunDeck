@@ -1,4 +1,5 @@
 import { ref, computed, nextTick } from 'vue'
+import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 export function useStreamDeck() {
@@ -72,14 +73,19 @@ export function useStreamDeck() {
   const isRemoteProfileChange = ref(false)
 
   // Get dynamic base URLs based on current host — puertos centralizados (API 3001, WS 3003, Frontend 3002, Astro 4321)
+  // En modo túnel (/t/<token>/…) el móvil está fuera de la LAN: API y WS van
+  // por el mismo origen bajo el prefijo del túnel (ver useTunnel).
   const config = ref({ wsPort: 3003, apiPort: 3001, frontendPort: 3002 });
 
   const loadConfig = async () => {
     try {
+      const tunnelToken = getTunnelToken()
       // En modo dev, hacer fetch al daemon directamente (API 3001)
-      const configUrl = typeof window !== 'undefined' && window.location.port !== '3001'
-        ? 'http://localhost:3001/config'
-        : '/config';
+      const configUrl = tunnelToken
+        ? tunnelConfigUrl(tunnelToken)
+        : typeof window !== 'undefined' && window.location.port !== '3001'
+          ? 'http://localhost:3001/config'
+          : '/config';
       const res = await fetch(configUrl);
       const data = await res.json();
       config.value = data;
@@ -91,6 +97,8 @@ export function useStreamDeck() {
 
   const getApiBase = () => {
     if (typeof window !== 'undefined') {
+      const tunnelToken = getTunnelToken()
+      if (tunnelToken) return tunnelApiBase(tunnelToken)
       const protocol = window.location.protocol
       const hostname = window.location.hostname
       return `${protocol}//${hostname}:${config.value.apiPort}/api/v1`
@@ -100,6 +108,8 @@ export function useStreamDeck() {
 
   const getWsUrl = () => {
     if (typeof window !== 'undefined') {
+      const tunnelToken = getTunnelToken()
+      if (tunnelToken) return tunnelWsUrl(tunnelToken)
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const hostname = window.location.hostname
       return `${protocol}//${hostname}:${config.value.wsPort}`

@@ -45,7 +45,8 @@
  *    Token desconocido → 401 `{error:'invalid-token'}`; caducado → 401
  *    `{error:'expired'}`. Daemon offline → 502; sin respuesta → 504.
  *    En respuestas `text/html` se inyecta `<base href="/t/<tok>/">` tras el
- *    primer `<head…>` (best-effort).
+ *    primer `<head…>` y se reescriben `href="/…"`, `src="/…"`,
+ *    `action="/…"` a `/t/<tok>/…` (best-effort).
  *
  *  DESVIACIONES/EXTENSIONES respecto al contrato (justificadas):
  *  - Todos los mensajes relay↔daemon llevan `v:1` también en los que el
@@ -149,8 +150,18 @@ function b64(obj: unknown): string {
 
 /** Inyecta `<base href="/t/<tok>/">` tras el primer `<head…>` (best-effort). */
 export function injectBase(html: string, token: string): string {
-  if (!/<head(\s[^>]*)?>/i.test(html)) return html;
-  return html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}<base href="/t/${token}/">`);
+  const prefix = `/t/${token}`;
+  let out = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}<base href="${prefix}/">`);
+  // Reescribe URLs absolutas de assets (`href="/…"`, `src="/…"`,
+  // `action="/…"`) al prefijo del túnel: sin esto el navegador pediría
+  // `/…` en la raíz del relay (404) en vez de `/t/<tok>/…` (proxy al daemon).
+  // No toca `//…` (protocol-relative), `http:`, `data:`, `#…` ni rutas ya
+  // prefijadas (`/t/…`, `/ui/…`).
+  out = out.replace(
+    /((?:href|src|action)\s*=\s*["'])\/(?!\/|t\/|ui\/)/gi,
+    (_m, attr) => `${attr}${prefix}/`,
+  );
+  return out;
 }
 
 export function isHexToken(s: unknown, min = MIN_TOKEN_LEN): s is string {

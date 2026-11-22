@@ -7,7 +7,7 @@
  */
 import { setupAPIRoutes } from '../api/routes';
 import { buildCorsHeaders, isPreflight, preflightResponse, withCors } from './cors';
-import { serveDataAsset } from './static';
+import { findWebDistFile, findWebDistIndex, getContentType, serveDataAsset } from './static';
 import { getVersion } from '../version';
 import { API_PORT as PORT, WS_PORT, FRONTEND_PORT } from '../config';
 import type { APIServices } from '../api/types';
@@ -92,8 +92,44 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
       );
     }
 
+    // Frontend embebido (web-dist): lo mismo que el servidor dedicado de
+    // `server.ts`, para que el túnel (`/t/<token>/…`) sirva la UI real en el
+    // móvil en vez del texto plano de la API.
+    try {
+      const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+      const found = await findWebDistFile(filePath);
+      if (found) {
+        return new Response(Bun.file(found), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': getContentType(filePath),
+          },
+        });
+      }
+    } catch {
+      /* cae al fallback SPA */
+    }
+
+    // Fallback SPA a index.html (rutas del frontend sin fichero propio).
+    try {
+      const indexPath = await findWebDistIndex();
+      if (indexPath) {
+        return new Response(Bun.file(indexPath), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'text/html',
+          },
+        });
+      }
+    } catch {
+      /* sin web-dist: mensaje de diagnóstico */
+    }
+
     return new Response('BunDeck API Server', {
-      headers: corsHeaders,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
     });
   };
 }

@@ -306,7 +306,7 @@ describe('túnel inverso', () => {
         id: m.id,
         status: 200,
         headers: { 'content-type': 'text/html; charset=utf-8', 'content-length': '999' },
-        bodyB64: Buffer.from('<html><head><title>t</title></head><body>hi</body></html>', 'utf8').toString('base64'),
+        bodyB64: Buffer.from('<html><head><title>t</title><link rel="stylesheet" href="/_astro/index.css"></head><body><img src="/favicon.svg"><a href="/ui/abc">x</a></body></html>', 'utf8').toString('base64'),
       });
     };
     await publishedCode(d);
@@ -323,6 +323,11 @@ describe('túnel inverso', () => {
     const html = await res.text();
     expect(html).toContain(`<head><base href="/t/${TOK}/">`);
     expect(html).toContain('<title>t</title>');
+    // Assets absolutos reescritos al prefijo del túnel para que carguen en el móvil.
+    expect(html).toContain(`href="/t/${TOK}/_astro/index.css"`);
+    expect(html).toContain(`src="/t/${TOK}/favicon.svg"`);
+    // Las rutas /ui/… del relay no se tocan.
+    expect(html).toContain('href="/ui/abc"');
   });
 
   test('token inválido → 401; token expirado → 401 expired', async () => {
