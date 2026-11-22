@@ -161,13 +161,14 @@ pub fn fetch_manifest() -> Result<(UpdateManifest, Vec<u8>), String> {
 /// Comprueba si hay actualización para `current` en la plataforma actual.
 pub fn check_for_update(current: &str) -> Result<Option<UpdateCheck>, String> {
     let (m, _raw) = fetch_manifest()?;
-    if !is_newer(current, &m.version) {
-        return Ok(None);
-    }
     let target = current_target();
     let asset = m.assets.get(target).cloned().ok_or_else(|| {
         format!("la release {} no trae bundle para {target}", m.version)
     })?;
+    validate_asset_version(&m.version, target, &asset)?;
+    if !is_newer(current, &m.version) {
+        return Ok(None);
+    }
     let manifest_signed = asset.signature.as_ref().is_some_and(|s| !s.is_empty());
     Ok(Some(UpdateCheck {
         current: current.to_string(),
@@ -176,6 +177,17 @@ pub fn check_for_update(current: &str) -> Result<Option<UpdateCheck>, String> {
         asset,
         manifest_signed,
     }))
+}
+
+fn validate_asset_version(version: &str, target: &str, asset: &TargetAsset) -> Result<(), String> {
+    let expected = format!("bundeck-v{version}-{target}.zip");
+    if asset.bundle != expected {
+        return Err(format!(
+            "manifiesto inconsistente: declara v{version} pero el bundle es {} (se esperaba {expected})",
+            asset.bundle
+        ));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +618,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
     if !staged.is_dir() {
         return Err(format!("versión {version} no descargada"));
     }
-    let previous = active_version(&root);
+    let mut previous = active_version(&root);
     log(format!("Backup de la base de datos…"));
     match backup_database() {
         Ok(Some(p)) => log(format!("Backup en {}", p.display())),
@@ -620,11 +632,12 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
         if let Err(e) = migrate_legacy(&root) {
             log(format!("Aviso migración legacy: {e}"));
         }
+        previous = active_version(&root);
     }
 
     log("Deteniendo daemon actual…".to_string());
     let _ = super::monitor::shutdown_daemon();
-    wait_for_api_down();
+    super::monitor::wait_for_api_down();
 
     log(format!("Activando versión {version}…"));
     write_active(&root, version)?;
@@ -640,20 +653,32 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
     for line in boot {
         log(line);
     }
-    if wait_for_api_up() {
-        log(format!("BunDeck {version} en línea."));
-        prune_old_versions(&root, version);
-        Ok(())
-    } else {
-        log("El nuevo daemon no responde: revierto…".to_string());
-        if let Some(prev) = previous {
-            let _ = write_active(&root, &prev);
-            let _ = super::monitor::ensure_daemon_spawned();
-            if wait_for_api_up() {
-                return Err(format!("update a {version} falló; restaurada {prev}"));
-            }
+    match wait_for_api_version(version) {
+        Ok(()) => {
+            log(format!("BunDeck {version} en línea."));
+            prune_old_versions(&root, version);
+            Ok(())
         }
-        Err(format!("update a {version} falló y el rollback no dejó API en línea"))
+        Err(reason) => {
+            log(format!(
+                "El daemon no confirmó la versión {version} ({reason}); revierto…"
+            ));
+            if let Some(prev) = previous {
+                write_active(&root, &prev)?;
+                let _ = super::monitor::ensure_daemon_spawned();
+                return match wait_for_api_version(&prev) {
+                    Ok(()) => Err(format!(
+                        "update a {version} falló ({reason}); restaurada {prev}"
+                    )),
+                    Err(rollback_reason) => Err(format!(
+                        "update a {version} falló ({reason}) y el rollback a {prev} también falló ({rollback_reason})"
+                    )),
+                };
+            }
+            Err(format!(
+                "update a {version} falló ({reason}) y no había versión anterior para rollback"
+            ))
+        }
     }
 }
 
@@ -670,37 +695,23 @@ pub fn staged_has_launcher(root: &Path, version: &str) -> bool {
     staged_launcher_differs(root, version)
 }
 
-fn wait_for_api_down() {
-    let port = super::monitor::api_port();
-    let url = format!("http://127.0.0.1:{port}/health");
-    let ag = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(500))
-        .timeout_read(Duration::from_millis(500))
-        .timeout_write(Duration::from_millis(500))
-        .build();
-    for _ in 0..10 {
-        if ag.get(&url).call().is_err() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(400));
-    }
-}
-
-fn wait_for_api_up() -> bool {
-    let port = super::monitor::api_port();
-    let url = format!("http://127.0.0.1:{port}/health");
-    let ag = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1200))
-        .timeout_read(Duration::from_millis(1200))
-        .timeout_write(Duration::from_millis(1200))
-        .build();
+fn wait_for_api_version(expected: &str) -> Result<(), String> {
+    let mut last_seen: Option<String> = None;
     for _ in 0..25 {
-        if ag.get(&url).call().is_ok() {
-            return true;
+        if let Some(version) = super::monitor::installed_version() {
+            if version == expected {
+                return Ok(());
+            }
+            last_seen = Some(version);
         }
         std::thread::sleep(Duration::from_millis(800));
     }
-    false
+    match last_seen {
+        Some(version) => Err(format!(
+            "la API responde como v{version}, no como v{expected}"
+        )),
+        None => Err("la API no respondió con una versión válida".to_string()),
+    }
 }
 
 /// Mueve una instalación plana legacy a `versions/<instalada>/`.
@@ -860,6 +871,27 @@ mod tests {
         let m: UpdateManifest = serde_json::from_str(raw).unwrap();
         assert_eq!(m.version, "1.6.0");
         assert!(m.assets.contains_key("windows-x64"));
+    }
+
+    #[test]
+    fn rejects_bundle_from_a_different_release_version() {
+        let asset = TargetAsset {
+            bundle: "bundeck-v1.6.0-windows-x64.zip".to_string(),
+            url: "https://example/bundeck.zip".to_string(),
+            sha256: "ab".to_string(),
+            size: 1,
+            signature: None,
+        };
+        assert!(validate_asset_version("1.7.0", "windows-x64", &asset).is_err());
+        assert!(validate_asset_version(
+            "1.6.0",
+            "windows-x64",
+            &TargetAsset {
+                bundle: "bundeck-v1.6.0-windows-x64.zip".to_string(),
+                ..asset
+            }
+        )
+        .is_ok());
     }
 
     #[test]

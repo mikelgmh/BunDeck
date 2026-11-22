@@ -45,8 +45,59 @@ jobs:
     - name: Run tests
       run: bun run test
 
-  build:
+  release-version:
     needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      run: bun install
+
+    - name: Resolve release version before building artifacts
+      id: version
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION=""
+        if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+          if ! bunx semantic-release --dry-run > semantic-release-dry-run.log 2>&1; then
+            cat semantic-release-dry-run.log
+            exit 1
+          fi
+          cat semantic-release-dry-run.log
+          VERSION="$(sed -nE 's/.*The next release version is:?[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' semantic-release-dry-run.log | tail -n 1)"
+          if [ -z "$VERSION" ] && ! grep -q "There are no relevant changes" semantic-release-dry-run.log; then
+            echo "No se pudo resolver la versión prevista de semantic-release." >&2
+            exit 1
+          fi
+        fi
+        if [ -z "$VERSION" ]; then
+          VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")"
+        fi
+        echo "Building version $VERSION"
+        echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [test, release-version]
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -81,10 +132,12 @@ jobs:
       with:
         node-version: '22'
 
-    - name: Get version
+    - name: Use resolved version
       id: version
       shell: bash
-      run: echo "version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")" >> "$GITHUB_OUTPUT"
+      env:
+        VERSION: ${{ needs.release-version.outputs.version }}
+      run: echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Install dependencies (CLI)
       run: |
@@ -198,7 +251,7 @@ jobs:
           installer/BunDeck-Setup-v*.exe
 
   release:
-    needs: build
+    needs: [build, release-version]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
@@ -240,11 +293,32 @@ jobs:
     - name: Build update manifest (signed if secret present)
       env:
         LIBREDECK_UPDATE_PRIVKEY: ${{ secrets.LIBREDECK_UPDATE_PRIVKEY }}
+        VERSION: ${{ needs.release-version.outputs.version }}
       run: |
-        VER="$(ls bundeck-v*-windows-x64.zip | head -1 | sed -E 's/.*bundeck-v([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/')"
+        VER="$VERSION"
+        for target in windows-x64 linux-x64 darwin-x64; do
+          test -f "bundeck-v${VER}-${target}.zip" || {
+            echo "Falta el bundle esperado para ${VER}: ${target}" >&2
+            exit 1
+          }
+        done
         echo "Manifest version: $VER"
         node scripts/build-update-manifest.mjs --version "$VER" --assets . --out bundeck-update-manifest.json
         cat bundeck-update-manifest.json
+        node --input-type=module <<'NODE'
+        import { readFileSync } from 'node:fs';
+        const manifest = JSON.parse(readFileSync('bundeck-update-manifest.json', 'utf8'));
+        const expected = process.env.VERSION;
+        if (manifest.version !== expected) {
+          throw new Error(`Manifiesto v${manifest.version}; se esperaba v${expected}`);
+        }
+        for (const [target, asset] of Object.entries(manifest.assets)) {
+          const expectedBundle = `bundeck-v${expected}-${target}.zip`;
+          if (asset.bundle !== expectedBundle) {
+            throw new Error(`${target}: bundle ${asset.bundle}; se esperaba ${expectedBundle}`);
+          }
+        }
+        NODE
 
     - name: Create stable latest aliases (unversioned, for direct /latest/download links)
       run: |

@@ -36,6 +36,7 @@ use gpui::{
 #[cfg(windows)]
 use gpui::{AnyWindowHandle, MouseButton, Window, WindowKind};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(windows)]
@@ -99,55 +100,65 @@ struct LauncherView {
     logo: Option<PathBuf>,
     /// Hay host Electrobun (ventana nativa disponible).
     host: bool,
+    /// Todo el I/O queda fuera del hilo de la interfaz.
+    background_tx: Sender<BackgroundEvent>,
+    background_rx: Receiver<BackgroundEvent>,
+    monitor_tx: Sender<MonitorCommand>,
+    update_checking: bool,
     /// Último clic en la barra de título (doble clic = maximizar/restaurar).
     #[cfg(windows)]
     last_chrome_click: Option<Instant>,
 }
 
+enum MonitorCommand {
+    Start,
+    Stop,
+    Restart,
+}
+
+enum BackgroundEvent {
+    Monitor {
+        snapshot: Snapshot,
+        installed: Option<String>,
+        host: bool,
+        boot: Vec<String>,
+        pending_start: bool,
+    },
+    Latest(Option<LatestRelease>),
+    Log(String),
+    UpdateCheck {
+        installed: Option<String>,
+        result: Result<Option<updater::UpdateCheck>, String>,
+        latest_fallback: Option<LatestRelease>,
+        auto_download: bool,
+    },
+}
+
 impl LauncherView {
     fn new(cx: &mut Context<Self>) -> Self {
-        let mut log = vec!["Launcher iniciado.".to_string()];
-        // Intento de arranque del daemon (no bloquea la UI).
-        let (boot, spawned) = monitor::ensure_daemon_spawned();
-        log.extend(boot);
-        // Si acabamos de spawnearlo y aún no responde, el primer sondeo
-        // muestra "arrancando", no "detenido".
-        let snapshot = monitor::snapshot(spawned);
-        log.push(format!(
-            "Sondeo inicial: API {} · WS {} · Front {}",
-            snapshot.api.detail, snapshot.ws.detail, snapshot.frontend.detail
-        ));
-        let installed = monitor::installed_version();
-        if let Some(v) = &installed {
-            log.push(format!("Daemon instalado: v{v}."));
-        }
-        // Red con timeout corto; si no hay internet, se reintenta con "Buscar".
-        let latest = monitor::latest_release();
-        match &latest {
-            Some(r) => log.push(format!("Última release: {} ({})", r.tag, r.url)),
-            None => log.push("No se pudo consultar la última release (¿sin internet?).".to_string()),
-        }
-        let pending_start =
-            spawned && snapshot.api.state != State::Ok;
-        if pending_start {
-            log.push("Daemon arrancando: esperando a que la API responda…".to_string());
-        }
+        let (background_tx, background_rx) = mpsc::channel();
+        let (monitor_tx, monitor_rx) = mpsc::channel();
+        start_monitor_thread(monitor_rx, background_tx.clone());
         let mut view = Self {
-            snapshot,
-            log,
+            snapshot: Snapshot::initial(),
+            log: vec!["Launcher iniciado.".to_string()],
             polls: 1,
             tab: Tab::Status,
-            installed,
-            latest,
+            installed: None,
+            latest: None,
             update_check: None,
             update_progress: Arc::new(Mutex::new(updater::UpdateProgress::default())),
             update_busy: false,
             update_applying: false,
+            update_checking: false,
             last_applied: None,
             launcher_pending_restart: false,
-            pending_start,
+            pending_start: false,
             logo: monitor::logo_path(),
-            host: monitor::host_alive(),
+            host: false,
+            background_tx,
+            background_rx,
+            monitor_tx,
             #[cfg(windows)]
             last_chrome_click: None,
         };
@@ -156,10 +167,7 @@ impl LauncherView {
     }
 
     fn start_polling(&mut self, cx: &mut Context<Self>) {
-        // El futuro posee todo (AsyncApp + WeakEntity): nada prestado cruza
-        // el `.await`, que era lo que rechazaba el borrow checker con
-        // `Context::spawn`/`AsyncApp::spawn`. Se programa en el executor de
-        // foreground (hilo principal, no exige Send).
+        // Este loop solo drena resultados; el sondeo de red vive en un worker.
         let mut async_cx = cx.to_async();
         let foreground = async_cx.foreground_executor().clone();
         let this = cx.weak_entity();
@@ -168,31 +176,13 @@ impl LauncherView {
                 loop {
                     async_cx
                         .background_executor()
-                        .timer(Duration::from_secs(2))
+                        .timer(Duration::from_millis(250))
                         .await;
-                    // Arranque pendiente (botón Iniciar/Reiniciar): reintenta
-                    // hasta que la API responda. Rápido, no espera al boot.
-                    let want_start =
-                        this.update(&mut async_cx, |view, _| view.pending_start).unwrap_or(false);
-                    let mut boot = Vec::new();
-                    if want_start {
-                        let (lines, _) = monitor::ensure_daemon_spawned();
-                        boot = lines;
-                    }
-                    // Solo con arranque pendiente lo caído se pinta
-                    // "arrancando": tras Detener (sin pendiente) es "detenido".
-                    let snap = monitor::snapshot(want_start);
                     // Si la vista se cerró, `update` falla: terminamos el
                     // bucle en vez de girar para siempre.
                     if this
                         .update(&mut async_cx, |view, cx| {
-                            view.polls += 1;
-                            view.snapshot = snap;
-                            view.host = monitor::host_alive();
-                            if view.snapshot.api.state == State::Ok {
-                                view.pending_start = false;
-                            }
-                            view.log.extend(boot);
+                            view.consume_background_events();
                             // El hilo de descarga escribe en update_progress;
                             // el sondeo lo vuelca al registro y libera busy.
                             let mut finished_msg: Option<String> = None;
@@ -234,7 +224,7 @@ impl LauncherView {
                                     view.log.extend(alog);
                                     if let Some(v) = applied {
                                         view.log.push(format!("BunDeck {v} activo."));
-                                        view.installed = monitor::installed_version();
+                                        view.installed = Some(v.clone());
                                         view.last_applied = Some(v);
                                         if changed {
                                             view.launcher_pending_restart = true;
@@ -288,6 +278,52 @@ impl LauncherView {
         self.log.push("Registro limpiado.".to_string());
     }
 
+    fn consume_background_events(&mut self) {
+        while let Ok(event) = self.background_rx.try_recv() {
+            match event {
+                BackgroundEvent::Monitor {
+                    snapshot,
+                    installed,
+                    host,
+                    boot,
+                    pending_start,
+                } => {
+                    self.polls += 1;
+                    self.snapshot = snapshot;
+                    if let Some(version) = installed {
+                        if self.installed.as_deref() != Some(version.as_str()) {
+                            self.log.push(format!("Daemon instalado: v{version}."));
+                        }
+                        self.installed = Some(version);
+                    }
+                    self.host = host;
+                    self.pending_start = pending_start;
+                    self.log.extend(boot);
+                }
+                BackgroundEvent::Latest(latest) => {
+                    match &latest {
+                        Some(release) => self.log.push(format!(
+                            "Última release: {} ({})",
+                            release.tag, release.url
+                        )),
+                        None => self.log.push(
+                            "No se pudo consultar la última release (¿sin internet?).".to_string(),
+                        ),
+                    }
+                    self.latest = latest;
+                }
+                BackgroundEvent::Log(message) => self.log.push(message),
+                BackgroundEvent::UpdateCheck {
+                    installed,
+                    result,
+                    latest_fallback,
+                    auto_download,
+                } => self.finish_update_check(installed, result, latest_fallback, auto_download),
+            }
+        }
+        self.truncate_log();
+    }
+
     /// Abre el panel en el navegador. Devuelve true si se pudo lanzar.
     fn open_dashboard(&mut self) -> bool {
         let url = self.snapshot.dashboard_url.clone();
@@ -312,6 +348,7 @@ impl LauncherView {
             self.log.push("El daemon ya está en línea.".to_string());
         } else {
             self.pending_start = true;
+            let _ = self.monitor_tx.send(MonitorCommand::Start);
             self.log.push("Arranque solicitado: reintentando hasta que la API responda…".to_string());
         }
         self.truncate_log();
@@ -320,32 +357,60 @@ impl LauncherView {
     /// Botón Detener: orden de apagado al daemon (muere en ~2s).
     fn stop_daemon(&mut self) {
         self.pending_start = false;
-        if monitor::shutdown_daemon() {
-            self.log.push("Apagado solicitado (el daemon muere en ~2s).".to_string());
-        } else {
-            self.log.push("No se pudo pedir el apagado: ¿ya está detenido?".to_string());
-        }
+        let _ = self.monitor_tx.send(MonitorCommand::Stop);
+        self.log.push("Solicitando el apagado del daemon…".to_string());
         self.truncate_log();
     }
 
     /// Botón Reiniciar: apaga y marca arranque pendiente.
     fn restart_daemon(&mut self) {
         self.pending_start = true;
-        if monitor::shutdown_daemon() {
-            self.log.push("Reinicio solicitado: apagando y volviendo a arrancar…".to_string());
-        } else {
-            self.log.push("No respondía al apagado: intentando arranque directo…".to_string());
-        }
+        let _ = self.monitor_tx.send(MonitorCommand::Restart);
+        self.log.push("Reinicio solicitado: apagando y volviendo a arrancar…".to_string());
         self.truncate_log();
     }
 
     /// Botón Buscar: re-consulta instalada + manifiesto de update.
     /// Usa el manifiesto versionado; si no existe (release antigua),
     /// recurre a la API de GitHub para al menos informar.
-    fn check_updates(&mut self) {
-        self.installed = monitor::installed_version();
-        let current = self.installed.clone().unwrap_or_else(|| "dev".to_string());
-        match updater::check_for_update(&current) {
+    fn check_updates(&mut self, auto_download: bool) {
+        if self.update_checking {
+            return;
+        }
+        self.update_checking = true;
+        self.update_check = None;
+        self.log.push("Buscando actualizaciones…".to_string());
+        let tx = self.background_tx.clone();
+        std::thread::spawn(move || {
+            let installed = monitor::installed_version();
+            let current = installed.clone().unwrap_or_else(|| "dev".to_string());
+            let result = updater::check_for_update(&current);
+            let latest_fallback = result
+                .as_ref()
+                .err()
+                .and_then(|_| monitor::latest_release());
+            let _ = tx.send(BackgroundEvent::UpdateCheck {
+                installed,
+                result,
+                latest_fallback,
+                auto_download,
+            });
+        });
+        self.truncate_log();
+    }
+
+    fn finish_update_check(
+        &mut self,
+        installed: Option<String>,
+        result: Result<Option<updater::UpdateCheck>, String>,
+        latest_fallback: Option<LatestRelease>,
+        auto_download: bool,
+    ) {
+        self.update_checking = false;
+        if installed.is_some() {
+            self.installed = installed;
+        }
+        match result {
             Ok(Some(check)) => {
                 self.log.push(format!(
                     "Nueva versión: instalada v{} → {} (bundle {}, {:.1} MB).",
@@ -375,6 +440,7 @@ impl LauncherView {
                 self.update_check = Some(check);
             }
             Ok(None) => {
+                let current = self.installed.as_deref().unwrap_or("dev");
                 self.log.push(format!("Estás al día (v{current})."));
                 self.update_check = None;
                 self.latest = Some(LatestRelease {
@@ -387,7 +453,7 @@ impl LauncherView {
             }
             Err(e) => {
                 // Fallback informativo a latest_release clásico.
-                self.latest = monitor::latest_release();
+                self.latest = latest_fallback;
                 match (&self.installed, &self.latest) {
                     (Some(i), Some(l)) if monitor::is_newer(i, &l.tag) => {
                         self.log.push(format!(
@@ -395,9 +461,19 @@ impl LauncherView {
                             l.tag, l.url
                         ))
                     }
-                    (Some(i), Some(_)) => self.log.push(format!("Estás al día (v{i}).")),
+                    (Some(i), Some(l)) => self.log.push(format!(
+                        "No se pudo validar el manifiesto ({e}); instalada v{i}, release publicada {}.",
+                        l.tag
+                    )),
                     _ => self.log.push(format!("No se pudo completar el chequeo: {e}")),
                 }
+            }
+        }
+        if auto_download {
+            if let Some(check) = self.update_check.clone() {
+                self.start_download(check);
+            } else {
+                self.log.push("No hay actualización descargable.".to_string());
             }
         }
         self.truncate_log();
@@ -453,18 +529,18 @@ impl LauncherView {
         let check = match self.update_check.clone() {
             Some(c) => c,
             None => {
-                self.log.push("Buscando actualización primero…".to_string());
-                self.check_updates();
-                match self.update_check.clone() {
-                    Some(c) => c,
-                    None => {
-                        self.log.push("Sin actualización disponible.".to_string());
-                        self.truncate_log();
-                        return false;
-                    }
-                }
+                self.check_updates(true);
+                return false;
             }
         };
+        self.start_download(check);
+        false
+    }
+
+    fn start_download(&mut self, check: updater::UpdateCheck) {
+        if self.update_busy || self.update_applying {
+            return;
+        }
         // 4) Descarga en hilo de fondo (progreso vía Arc<Mutex>).
         self.update_busy = true;
         *self.update_progress.lock().unwrap() = updater::UpdateProgress {
@@ -489,7 +565,6 @@ impl LauncherView {
                 }
             }
         });
-        false
     }
 
     /// Aplica una versión ya staged en un hilo de fondo: backup +
@@ -559,32 +634,33 @@ impl LauncherView {
 
     /// Botón Ventana Electrobun: pide al host que abra su dashboard.
     /// Sin host no hay ventana nativa: lo explica y sugiere Abrir panel.
-    /// Devuelve true si hay que cerrar la ventanita (handoff completado).
-    fn open_electrobun(&mut self) -> bool {
+    fn open_electrobun(&mut self) {
         if !self.host {
             self.log.push(
                 "Sin host Electrobun: la ventana nativa solo existe con `electrobun dev`. Usa Abrir panel."
                     .to_string(),
             );
             self.truncate_log();
-            return false;
+            return;
         }
-        if let Some(body) = monitor::host_post("open-window") {
-            let opened = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|v| v.get("opened")?.as_bool())
-                .unwrap_or(false);
-            if opened {
-                self.log.push("Ventana Electrobun abierta.".to_string());
-            } else {
-                self.log.push("El host ya tenía su ventana abierta.".to_string());
-            }
-            self.truncate_log();
-            return true;
-        }
-        self.log.push("El host no respondió. Usa Abrir panel.".to_string());
-        self.truncate_log();
-        false
+        let tx = self.background_tx.clone();
+        std::thread::spawn(move || {
+            let message = match monitor::host_post("open-window") {
+                Some(body) => {
+                    let opened = serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|v| v.get("opened")?.as_bool())
+                        .unwrap_or(false);
+                    if opened {
+                        "Ventana Electrobun abierta.".to_string()
+                    } else {
+                        "El host ya tenía su ventana abierta.".to_string()
+                    }
+                }
+                None => "El host no respondió. Usa Abrir panel.".to_string(),
+            };
+            let _ = tx.send(BackgroundEvent::Log(message));
+        });
     }
 
     fn dot_color(state: State) -> gpui::Rgba {
@@ -594,6 +670,87 @@ impl LauncherView {
             State::Down => theme::danger(),
         }
     }
+}
+
+fn start_monitor_thread(
+    commands: Receiver<MonitorCommand>,
+    events: Sender<BackgroundEvent>,
+) {
+    std::thread::spawn(move || {
+        let mut initial = true;
+        let mut pending_start = false;
+
+        loop {
+            let boot = if initial || pending_start {
+                let (lines, was_spawned) = monitor::ensure_daemon_spawned();
+                if initial {
+                    pending_start = was_spawned;
+                }
+                lines
+            } else {
+                Vec::new()
+            };
+
+            let snapshot = monitor::snapshot(pending_start);
+            if snapshot.api.state == State::Ok {
+                pending_start = false;
+            }
+            let installed = monitor::installed_version();
+            let host = monitor::host_alive();
+            if events
+                .send(BackgroundEvent::Monitor {
+                    snapshot,
+                    installed,
+                    host,
+                    boot,
+                    pending_start,
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            if initial {
+                let latest = monitor::latest_release();
+                if events.send(BackgroundEvent::Latest(latest)).is_err() {
+                    return;
+                }
+                initial = false;
+            }
+
+            match commands.recv_timeout(Duration::from_secs(2)) {
+                Ok(MonitorCommand::Start) => pending_start = true,
+                Ok(MonitorCommand::Stop) => {
+                    pending_start = false;
+                    let message = if monitor::shutdown_daemon() {
+                        "Apagado solicitado (el daemon se detendrá en breve)."
+                    } else {
+                        "No se pudo pedir el apagado: ¿ya está detenido?"
+                    };
+                    if events.send(BackgroundEvent::Log(message.to_string())).is_err() {
+                        return;
+                    }
+                }
+                Ok(MonitorCommand::Restart) => {
+                    let stopped = monitor::shutdown_daemon();
+                    if stopped {
+                        monitor::wait_for_api_down();
+                    }
+                    pending_start = true;
+                    let message = if stopped {
+                        "Reinicio solicitado: apagando y volviendo a arrancar…"
+                    } else {
+                        "No respondía al apagado: intentando arranque directo…"
+                    };
+                    if events.send(BackgroundEvent::Log(message.to_string())).is_err() {
+                        return;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    });
 }
 
 /// Etiqueta de sección en mayúsculas apagadas (estilo XAMPP por bloques).
@@ -679,6 +836,7 @@ impl Render for LauncherView {
             })
             .unwrap_or_default();
         let update_busy = self.update_busy;
+        let update_checking = self.update_checking;
         let update_applying = self.update_applying;
         let launcher_pending_restart = self.launcher_pending_restart;
         let update_btn_label = if launcher_pending_restart {
@@ -1027,10 +1185,14 @@ impl Render for LauncherView {
                                     .cursor_pointer()
                                     .hover(|s| s.border_color(theme::secondary_text()))
                                     .on_click(cx.listener(|view, _, _, cx| {
-                                        view.check_updates();
+                                        view.check_updates(false);
                                         cx.notify();
                                     }))
-                                    .child("Buscar".to_string()),
+                                    .child(if update_checking {
+                                        "Buscando…".to_string()
+                                    } else {
+                                        "Buscar".to_string()
+                                    }),
                             )
                             .child(if update_available {
                                 div()
@@ -1135,11 +1297,8 @@ impl Render for LauncherView {
                             .cursor_pointer()
                             .hover(|s| s.border_color(theme::secondary_text()))
                             .on_click(cx.listener(|view, _, _, cx| {
-                                if view.open_electrobun() {
-                                    cx.quit();
-                                } else {
-                                    cx.notify();
-                                }
+                                view.open_electrobun();
+                                cx.notify();
                             }))
                             .child("Ventana Electrobun".to_string()),
                     )
@@ -1334,7 +1493,7 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
     match ev {
         TrayEvent::ShowLauncher => show_launcher(cx, state),
         TrayEvent::OpenPanel => {
-            let url = monitor::snapshot(false).dashboard_url.clone();
+            let url = format!("http://localhost:{}", monitor::frontend_port());
             if open::that(&url).is_err() {
                 eprintln!("[launcher] no se pudo abrir el navegador ({url})");
             } else {
@@ -1348,16 +1507,18 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
         TrayEvent::OpenElectrobun => {
             // Como el botón "Ventana Electrobun": handoff al host; sin
             // host, se abre el panel web como alternativa.
-            let opened = monitor::host_post("open-window")
-                .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
-                .and_then(|v| v.get("opened")?.as_bool())
-                .unwrap_or(false);
-            if !opened {
-                let url = monitor::snapshot(false).dashboard_url.clone();
-                if open::that(&url).is_err() {
-                    eprintln!("[launcher] sin host Electrobun y no se pudo abrir ({url})");
+            std::thread::spawn(|| {
+                let opened = monitor::host_post("open-window")
+                    .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+                    .and_then(|v| v.get("opened")?.as_bool())
+                    .unwrap_or(false);
+                if !opened {
+                    let url = format!("http://localhost:{}", monitor::frontend_port());
+                    if open::that(&url).is_err() {
+                        eprintln!("[launcher] sin host Electrobun y no se pudo abrir ({url})");
+                    }
                 }
-            }
+            });
         }
         TrayEvent::Quit => {
             if let Some(tray) = state.borrow_mut().tray.take() {

@@ -40,6 +40,28 @@ pub struct Snapshot {
     pub dashboard_url: String,
 }
 
+impl Snapshot {
+    /// Estado inmediato sin I/O para pintar la ventana mientras se sondea
+    /// el daemon en segundo plano.
+    pub fn initial() -> Self {
+        Self {
+            api: ServiceSnapshot {
+                state: State::Starting,
+                detail: "consultando…".to_string(),
+            },
+            ws: ServiceSnapshot {
+                state: State::Starting,
+                detail: "consultando…".to_string(),
+            },
+            frontend: ServiceSnapshot {
+                state: State::Starting,
+                detail: "consultando…".to_string(),
+            },
+            dashboard_url: format!("http://localhost:{}", frontend_port()),
+        }
+    }
+}
+
 fn env_port(name: &str, fallback: u16) -> u16 {
     std::env::var(name)
         .ok()
@@ -290,6 +312,22 @@ pub fn shutdown_daemon() -> bool {
         .timeout_write(Duration::from_millis(1500))
         .build();
     agent.post(&url).call().is_ok()
+}
+
+/// Espera a que termine el daemon tras aceptar el apagado.
+pub fn wait_for_api_down() {
+    let url = format!("http://127.0.0.1:{}/health", api_port());
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(500))
+        .timeout_read(Duration::from_millis(500))
+        .timeout_write(Duration::from_millis(500))
+        .build();
+    for _ in 0..10 {
+        if agent.get(&url).call().is_err() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(400));
+    }
 }
 
 /// Versión instalada según el daemon (GET /api/v1/version -> {version}).
