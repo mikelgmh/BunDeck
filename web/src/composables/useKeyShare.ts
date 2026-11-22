@@ -92,12 +92,22 @@ export interface SharedDoc {
 }
 
 const str = (v: any, n: number) => String(v ?? '').slice(0, n)
+/**
+ * Normaliza la base de la API: acepta tanto el origen (`http://host:3001`)
+ * como la base con prefijo (`http://host:3001/api/v1`, la forma de `API_BASE`
+ * en BunDeckApp). Sin esto la subida concatenaba `/api/v1/api/v1/assets`
+ * y el daemon respondía 404 `API endpoint not found`.
+ */
+export function normalizeApiBase(apiBase: unknown): string {
+  const base = typeof apiBase === 'string' ? apiBase.replace(/\/+$/, '') : ''
+  return base.replace(/\/api\/v1$/, '')
+}
 /** URL absoluta de un asset `/assets/…` contra la base de la API (puerto 3001). */
 export function assetUrl(apiBase: unknown, rel: unknown): string {
   if (typeof rel !== 'string' || !rel) return ''
   if (/^https?:\/\//i.test(rel) || rel.startsWith('data:')) return rel
   if (!rel.startsWith('/')) return rel
-  const base = typeof apiBase === 'string' ? apiBase.replace(/\/+$/, '') : ''
+  const base = normalizeApiBase(apiBase)
   return `${base}${rel}`
 }
 /** file → `/assets/…` validado (un segmento, extensión de imagen). */

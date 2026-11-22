@@ -79,7 +79,7 @@
       </div>
     </div>
 
-    <div class="bd-itabs" role="tablist">
+    <div v-if="hasButton" class="bd-itabs" role="tablist">
       <button
         role="tab"
         data-cy="bd-tab-actions"

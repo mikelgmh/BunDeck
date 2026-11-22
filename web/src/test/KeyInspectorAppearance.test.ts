@@ -128,12 +128,20 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     }
   })
 
-  it('vuelve a Acciones al vaciarse la tecla (las pestañas no se quedan “muertas”)', async () => {
+  it('sin botón no hay pestañas que parezcan rotas (solo estado vacío)', async () => {
+    const wrapper = mountInspector(baseConfig, { hasButton: false })
+    expect(wrapper.find('[data-cy="bd-tab-actions"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-tab-rules"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-tab-appearance"]').exists()).toBe(false)
+  })
+
+  it('al vaciarse la tecla desaparecen las pestañas (no se quedan “muertas”)', async () => {
     const wrapper = mountInspector()
     await openAppearance(wrapper)
     expect(wrapper.find('[data-cy="bd-tab-appearance"]').attributes('aria-selected')).toBe('true')
     await wrapper.setProps({ hasButton: false })
-    expect(wrapper.find('[data-cy="bd-tab-actions"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[data-cy="bd-tab-appearance"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-tab-actions"]').exists()).toBe(false)
   })
 
   it('reglas con then/else corruptos no tumban la pestaña', async () => {

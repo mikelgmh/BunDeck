@@ -38,10 +38,11 @@ describe('KeyInspector', () => {
     const wrapper = mount(KeyInspector, {
       props: { ...baseProps, selectedPosition: 3, hasButton: false },
     })
-    console.log('EMPTY HTML:', wrapper.html().slice(0, 2000))
     expect(wrapper.text()).toContain('bd.emptyKey')
-    // Editor must still render so actions can be added: tabs + footer
-    expect(wrapper.html()).toContain('bd-itabs')
+    // Sin botón no hay pestañas que parezcan rotas: solo estado vacío + footer
+    expect(wrapper.find('[data-cy="bd-tab-actions"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-tab-rules"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-tab-appearance"]').exists()).toBe(false)
     expect(wrapper.html()).toContain('bd-ifoot')
   })
 

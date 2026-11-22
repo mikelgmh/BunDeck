@@ -84,7 +84,7 @@ import { ref, computed } from 'vue'
 import { X, Search, ImagePlus, Trash2 } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
-import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
+import { assetUrl, isAssetRef, normalizeApiBase } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
 
@@ -164,7 +164,7 @@ const uploadFile = async (file: File | undefined | null) => {
   try {
     const fd = new FormData()
     fd.append('file', file, file.name)
-    const res = await fetch(`${props.apiBase.replace(/\/+$/, '')}/api/v1/assets`, { method: 'POST', body: fd })
+    const res = await fetch(`${normalizeApiBase(props.apiBase)}/api/v1/assets`, { method: 'POST', body: fd })
     const body: any = await res.json().catch(() => ({}))
     if (!res.ok || !body?.url) {
       uploadError.value = typeof body?.error === 'string' && body.error ? body.error : t('bd.imageUploadFail')

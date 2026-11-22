@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import IconPickerDialog from '../components/bundeck/IconPickerDialog.vue'
 import StageBoard from '../components/bundeck/StageBoard.vue'
-import { assetUrl, isAssetRef, cleanKey } from '../composables/useKeyShare'
+import { assetUrl, isAssetRef, cleanKey, normalizeApiBase } from '../composables/useKeyShare'
 
 vi.mock('../composables/useI18n', () => ({
   useI18nStore: () => ({ t: (key: string) => key }),
@@ -29,6 +29,14 @@ describe('assetUrl / isAssetRef', () => {
     expect(assetUrl('', '/assets/a.png')).toBe('/assets/a.png')
     expect(assetUrl('http://x', 'https://cdn/y.png')).toBe('https://cdn/y.png')
     expect(assetUrl('http://x', '')).toBe('')
+  })
+  it('normalizeApiBase acepta origen o base con /api/v1', () => {
+    expect(normalizeApiBase('http://localhost:3001')).toBe('http://localhost:3001')
+    expect(normalizeApiBase('http://localhost:3001/')).toBe('http://localhost:3001')
+    expect(normalizeApiBase('http://localhost:3001/api/v1')).toBe('http://localhost:3001')
+    expect(normalizeApiBase('http://localhost:3001/api/v1/')).toBe('http://localhost:3001')
+    expect(normalizeApiBase('https://relay.example/t/abc123/api/v1')).toBe('https://relay.example/t/abc123')
+    expect(assetUrl('http://localhost:3001/api/v1', '/assets/key-1.png')).toBe('http://localhost:3001/assets/key-1.png')
   })
   it('solo acepta ficheros de imagen dentro de /assets', () => {
     expect(isAssetRef('/assets/key-1.png')).toBe(true)
@@ -83,6 +91,24 @@ describe('IconPickerDialog pestaña imagen', () => {
     expect(url).toBe('http://localhost:3001/api/v1/assets')
     expect(w.emitted('pick-image')).toBeTruthy()
     expect((w.emitted('pick-image') as any)[0][0]).toBe('/assets/key-1.png')
+  })
+
+  it('sube contra /api/v1/assets aunque apiBase ya traiga el prefijo (BunDeckApp)', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ url: '/assets/key-2.png' }),
+    })) as any
+    const w = mountDialog({ apiBase: 'http://localhost:3001/api/v1' })
+    await w.find('[data-cy="bd-icon-tab-image"]').trigger('click')
+    const input = w.find('input[type="file"]')
+    const file = new File(['img'], 'foto.png', { type: 'image/png' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await nextTick()
+    await nextTick()
+    const url = (global.fetch as any).mock.calls[0][0]
+    expect(url).toBe('http://localhost:3001/api/v1/assets')
+    expect((w.emitted('pick-image') as any)[0][0]).toBe('/assets/key-2.png')
   })
 
   it('muestra error si el daemon rechaza', async () => {
