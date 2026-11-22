@@ -1,3 +1,11 @@
+## [1.7.2](https://github.com/mikelgmh/libredeck/compare/v1.7.1...v1.7.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **relay:** rewrite Astro island asset URLs through tunnel so approved phone loads CSS/JS ([da49cbd](https://github.com/mikelgmh/libredeck/commit/da49cbd7013b74abf5c5a63e2c512e5780a5eecf))
+* **web:** init iconImage and content checks so cleared key images don't persist ([ef93458](https://github.com/mikelgmh/libredeck/commit/ef934582453dfc2b19f1e034da50320c6e1894f0))
+
 ## [1.7.1](https://github.com/mikelgmh/libredeck/compare/v1.7.0...v1.7.1) (2026-11-22)
 
 
