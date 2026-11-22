@@ -45,8 +45,9 @@
  *    Token desconocido → 401 `{error:'invalid-token'}`; caducado → 401
  *    `{error:'expired'}`. Daemon offline → 502; sin respuesta → 504.
  *    En respuestas `text/html` se inyecta `<base href="/t/<tok>/">` tras el
- *    primer `<head…>` y se reescriben `href="/…"`, `src="/…"`,
- *    `action="/…"` a `/t/<tok>/…` (best-effort).
+ *    primer `<head…>` y se reescriben las absolutas de mismo origen en
+ *    `href`/`src`/`srcset`/`action`/`poster`/`component-url`/`renderer-url`/
+ *    `before-hydration-url` a `/t/<tok>/…` (best-effort, islands de Astro).
  *
  *  DESVIACIONES/EXTENSIONES respecto al contrato (justificadas):
  *  - Todos los mensajes relay↔daemon llevan `v:1` también en los que el
@@ -152,16 +153,26 @@ function b64(obj: unknown): string {
 export function injectBase(html: string, token: string): string {
   const prefix = `/t/${token}`;
   let out = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}<base href="${prefix}/">`);
-  // Reescribe URLs absolutas de assets (`href="/…"`, `src="/…"`,
-  // `action="/…"`) al prefijo del túnel: sin esto el navegador pediría
-  // `/…` en la raíz del relay (404) en vez de `/t/<tok>/…` (proxy al daemon).
+  // Reescribe URLs absolutas de assets al prefijo del túnel: sin esto el
+  // navegador pediría `/…` en la raíz del relay (401) en vez de
+  // `/t/<tok>/…` (proxy al daemon) y la app aprobada quedaría sin
+  // estilos ni JS. Cubre `href`/`src`/`action` clásicos, `srcset` (lista
+  // `url 1x, url 2x`), `poster` y los atributos de islands de Astro
+  // (`component-url`, `renderer-url`, `before-hydration-url`), que son los
+  // que cargan los bundles `/_astro/…` del frontend compilado.
   // No toca `//…` (protocol-relative), `http:`, `data:`, `#…` ni rutas ya
   // prefijadas (`/t/…`, `/ui/…`).
+  const ATTRS = 'href|src|srcset|action|poster|component-url|renderer-url|before-hydration-url';
   out = out.replace(
-    /((?:href|src|action)\s*=\s*["'])\/(?!\/|t\/|ui\/)/gi,
-    (_m, attr) => `${attr}${prefix}/`,
+    new RegExp(`((?:${ATTRS})\\s*=\\s*["'])([^"']*)(["'])`, 'gi'),
+    (_m, pre: string, val: string, post: string) => pre + rewriteAssetUrls(val, prefix) + post,
   );
   return out;
+}
+
+/** Prefija `/t/<tok>` a cada URL absoluta de mismo origen dentro de un valor de atributo. */
+function rewriteAssetUrls(val: string, prefix: string): string {
+  return val.replace(/(^|[\s,])\/(?!\/|t\/|ui\/)/g, `$1${prefix}/`);
 }
 
 export function isHexToken(s: unknown, min = MIN_TOKEN_LEN): s is string {
