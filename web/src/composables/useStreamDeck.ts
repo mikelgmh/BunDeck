@@ -52,6 +52,7 @@ export function useStreamDeck() {
     fontSize: 14,
     emoji: '',
     icon: '',
+    iconImage: '',
     backgroundColor: '#374151',
     textColor: '#f1f5f9',
     showTitle: true,
@@ -222,6 +223,7 @@ export function useStreamDeck() {
       textBottom: '',
       fontSize: 14,
       icon: '',
+      iconImage: '',
       emoji: '',
       backgroundColor: '#374151',
       textColor: '#f1f5f9',
@@ -915,8 +917,11 @@ export function useStreamDeck() {
         }
       } else {
         // For new buttons, only save if there's actual content
-        const hasContent = buttonConfig.value.label?.trim() || buttonConfig.value.emoji?.trim() ||
-          buttonConfig.value.iconImage?.trim() || (buttonConfig.value.actions?.length ?? 0) > 0
+        const hasContent = buttonConfig.value.label?.trim() || buttonConfig.value.textTop?.trim() ||
+          buttonConfig.value.textBottom?.trim() || buttonConfig.value.emoji?.trim() ||
+          buttonConfig.value.icon?.trim() ||
+          buttonConfig.value.iconImage?.trim() || (buttonConfig.value.actions?.length ?? 0) > 0 ||
+          (buttonConfig.value.rules?.length ?? 0) > 0 || (buttonConfig.value.looks?.length ?? 0) > 0
         if (hasContent) {
           await saveButtonConfig()
         }
@@ -935,6 +940,7 @@ export function useStreamDeck() {
         textBottom: button.data?.textBottom || '',
         fontSize: button.data?.fontSize || 14,
         icon: button.data?.icon || '',
+        iconImage: typeof button.data?.iconImage === 'string' ? button.data.iconImage : '',
         emoji: button.data?.emoji || '',
         backgroundColor: button.data?.backgroundColor || '#374151',
         textColor: button.data?.textColor || '#f1f5f9',
@@ -966,6 +972,7 @@ export function useStreamDeck() {
         textBottom: '',
         fontSize: 14,
         icon: '',
+        iconImage: '',
         emoji: '',
         backgroundColor: '#374151',
         textColor: '#f1f5f9',
@@ -1555,6 +1562,7 @@ export function useStreamDeck() {
       fontSize: 14,
       emoji: '',
       icon: '',
+      iconImage: '',
       backgroundColor: '#374151',
       textColor: '#f1f5f9',
       showTitle: true,
@@ -2203,7 +2211,10 @@ export function useStreamDeck() {
             button.data.textBottom?.trim() ||
             button.data.emoji?.trim() ||
             button.data.icon ||
-            (button.data.actions && button.data.actions.length > 0)
+            (typeof button.data.iconImage === 'string' && button.data.iconImage.trim()) ||
+            (button.data.actions && button.data.actions.length > 0) ||
+            (button.data.rules && button.data.rules.length > 0) ||
+            (button.data.looks && button.data.looks.length > 0)
           );
 
           console.log(`Button ${i}: exists=${!!button}, hasContent=${hasContent}`, {

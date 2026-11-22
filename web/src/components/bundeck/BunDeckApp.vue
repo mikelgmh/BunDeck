@@ -1463,6 +1463,7 @@ watch(selectedButton, (newVal, oldVal) => {
       textBottom: '',
       fontSize: 14,
       icon: '',
+      iconImage: '',
       emoji: '',
       backgroundColor: '#374151',
       textColor: '#f1f5f9',
