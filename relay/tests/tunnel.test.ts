@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DeviceStore } from '../src/store';
 import { PairingStore } from '../src/pairing';
 import { RelayServer } from '../src/relay';
-import { setUiPageHandler } from '../src/tunnel';
+import { setUiPageHandler, TunnelState } from '../src/tunnel';
 
 const TOKEN = 'test-relay-token';
 const servers: RelayServer[] = [];
@@ -235,6 +235,30 @@ describe('túnel inverso', () => {
     expect(await statusOf(base, CODE)).toEqual({ status: 'approved', sessionToken: TOK });
     // Segundo poll: approved pero sin token.
     expect(await statusOf(base, CODE)).toEqual({ status: 'approved' });
+  });
+
+  test('el QR caduca, pero la sesión aprobada sigue viva y el URL no se reutiliza', () => {
+    let now = 1_000;
+    const state = new TunnelState({ now: () => now });
+    const socket = { send: () => true, close: () => {} };
+    state.registerDevice(socket, 'daemon-expiry');
+    expect(state.publish(socket, CODE, 10_000)).toEqual({ deviceId: 'daemon-expiry' });
+
+    const request = state.ensureRequest(CODE, { ua: 'Mobile', ip: '127.0.0.1' });
+    expect('reqId' in request).toBe(true);
+    if (!('reqId' in request)) throw new Error('request was not created');
+    expect(state.decide(request.reqId, true)).toBe('ok');
+    expect(state.bind(CODE, TOK, 30_000)).toBe('ok');
+    expect(state.status(CODE)).toEqual({ status: 'approved', sessionToken: TOK });
+
+    now = 11_000;
+    state.prune();
+    expect(state.status(CODE)).toEqual({ status: 'approved' });
+    expect(state.ensureRequest(CODE, { ua: 'Another mobile', ip: '127.0.0.2' })).toMatchObject({ state: 'bound' });
+
+    now = 30_001;
+    state.prune();
+    expect(state.status(CODE)).toEqual({ status: 'expired' });
   });
 
   test('http-req → http-res roundtrip con eco (GET con query, POST con cuerpo)', async () => {

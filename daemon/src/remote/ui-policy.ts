@@ -34,7 +34,7 @@ const UI_CONSUMED_PREFIX = 'remote.ui.consumed.';
 const UI_SESSION_PREFIX = 'remote.ui.session.';
 
 export const UI_CODE_TTL_MS = 10 * 60 * 1000; // 10 min, como pairing
-export const UI_PENDING_TTL_MS = 10 * 60 * 1000;
+export const UI_PENDING_TTL_MS = 2 * 60 * 1000; // igual que la ventana de aprobación del relay
 export const UI_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 
 export interface UiCode {
@@ -207,6 +207,10 @@ function markConsumed(db: DatabaseService, urlCode: string): void {
  * No valida `enabled`: lo hace el API layer (403 maestro).
  */
 export function createUiCode(db: DatabaseService): UiCode {
+  // Solo debe existir un código QR pendiente de uso. Si el anterior ya se
+  // consumió al aprobar, UI_CODE_KEY está vacío y su publicación se conserva
+  // en el relay únicamente para que el móvil termine el handshake.
+  if (readCode(db)) revokeUiCode(db);
   const now = Date.now();
   const code: UiCode = {
     code: random6(),
@@ -237,7 +241,7 @@ export function revokeUiCode(db: DatabaseService): boolean {
 }
 
 /** Consume el urlCode (un solo navegador). Idempotente. */
-export function consumeUrlCode(db: DatabaseService, urlCode: string): void {
+export function consumeUrlCode(db: DatabaseService, urlCode: string, unpublish = true): void {
   const cur = readCode(db);
   if (cur && cur.urlCode === urlCode) {
     try {
@@ -247,7 +251,14 @@ export function consumeUrlCode(db: DatabaseService, urlCode: string): void {
     }
   }
   markConsumed(db, urlCode);
-  try { getTunnelClient()?.unpublishUiCode?.(urlCode); } catch { /* noop */ }
+  // No retirar del relay al aprobar: el navegador todavía necesita consultar
+  // /status para recibir el token y ser redirigido a la sesión. El relay lo
+  // invalida al caducar o revocar la sesión.
+  if (unpublish) {
+    try { getTunnelClient()?.unpublishUiCode?.(urlCode); } catch { /* noop */ }
+  } else {
+    try { getTunnelClient()?.consumeUiCode?.(urlCode); } catch { /* noop */ }
+  }
 }
 
 // ---------- Cola de pendientes (memoria con TTL) ----------
@@ -501,8 +512,9 @@ function findTunnelPending(reqId: string): any | null {
  * Aprueba un pendiente. Si el reqId vive en el TunnelClient, decide por él
  * (emite `ui-decision` + `ui-bind` al relay) y persiste la sesión en
  * settings para que `GET /ui-sessions` y `validateUiSession` la vean;
- * si no, usa el store local. En ambos casos el urlCode se consume
- * (un solo navegador).
+ * si no, usa el store local. En ambos casos el urlCode se consume para
+ * impedir otra solicitud, pero la publicación del relay se conserva para
+ * completar el poll de aprobación del navegador.
  */
 export function approveUiPending(
   db: DatabaseService,
@@ -527,7 +539,7 @@ export function approveUiPending(
       ip: String(hit?.ip ?? ''),
       revoked: false,
     });
-    consumeUrlCode(db, String(hit?.urlCode ?? ''));
+    consumeUrlCode(db, String(hit?.urlCode ?? ''), false);
     audit(db, `[remote-ui] navegador aprobado (req ${reqId}, vía túnel, prefijo ${token.slice(0, 8)})`);
     return { ok: true, sessionToken: token };
   }

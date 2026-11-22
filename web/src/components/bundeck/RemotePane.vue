@@ -17,7 +17,7 @@
           <dl class="bd-remote-approval__details">
             <div>
               <dt>{{ t('bd.remoteUiBrowser') }}</dt>
-              <dd :title="activeApproval.ua || t('bd.remoteUiEmptyUa')">{{ activeApproval.ua || t('bd.remoteUiEmptyUa') }}</dd>
+              <dd class="bd-remote-approval__agent" :title="activeApproval.ua || t('bd.remoteUiEmptyUa')">{{ activeApproval.ua || t('bd.remoteUiEmptyUa') }}</dd>
             </div>
             <div>
               <dt>{{ t('bd.remoteUiIp') }}</dt>
@@ -161,12 +161,17 @@
             </div>
           </li>
         </ul>
-        <div v-if="uiJustToken" class="bd-code" data-cy="remote-ui-token-once" role="alert">
-          <b>{{ t('bd.remoteUiTokenTitle') }}</b>
-          <p class="bd-hint">{{ t('bd.remoteUiTokenWarn') }}</p>
-          <p class="bd-mono" data-cy="remote-ui-token-value">{{ uiJustToken }}</p>
-          <div class="bd-ctl">
-            <button class="bd-btn" data-cy="remote-ui-token-copy" @click="onCopyUiToken">
+        <div v-if="uiJustToken" class="bd-remote-token" data-cy="remote-ui-token-once" role="alert">
+          <div class="bd-remote-token__heading">
+            <div>
+              <b>{{ t('bd.remoteUiTokenTitle') }}</b>
+              <p class="bd-hint">{{ t('bd.remoteUiTokenWarn') }}</p>
+            </div>
+            <KeyRound :size="18" aria-hidden="true" />
+          </div>
+          <p class="bd-mono bd-remote-token-value" data-cy="remote-ui-token-value"><code>{{ uiJustToken }}</code></p>
+          <div class="bd-remote-token__actions">
+            <button class="bd-btn bd-pri" data-cy="remote-ui-token-copy" @click="onCopyUiToken">
               {{ tokenCopied ? t('bd.remoteUiCopied') : t('bd.remoteUiTokenCopy') }}
             </button>
             <button class="bd-btn" data-cy="remote-ui-token-ok" @click="clearJustToken">
@@ -211,8 +216,8 @@
     </section>
 
     <!-- Sección 2 — Enlazar otro BunDeck (emparejamiento daemon-daemon E2E) -->
-    <section class="bd-card" style="margin-top: 12px" data-cy="remote-pair-section" aria-labelledby="bd-remote-pair-title">
-      <h3 id="bd-remote-pair-title" style="display: flex; align-items: center; gap: 8px">
+    <section class="bd-card bd-remote-card" data-cy="remote-pair-section" aria-labelledby="bd-remote-pair-title">
+      <h3 id="bd-remote-pair-title" class="bd-remote-heading">
         <Link2 :size="18" aria-hidden="true" />
         {{ t('bd.remotePairTitle') }}
       </h3>
@@ -231,7 +236,7 @@
         </button>
       </div>
     </div>
-    <div v-if="pair" class="bd-code" data-cy="remote-pair-code">
+    <div v-if="pair" class="bd-remote-pair-code" data-cy="remote-pair-code">
       <span class="bd-code-num">{{ pair.code }}</span>
       <span class="bd-mono">{{ pair.fingerprint }}</span>
     </div>
@@ -445,7 +450,7 @@
 import { ref, computed, onMounted, onUnmounted, reactive, watch, nextTick } from 'vue'
 import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload, type UiPendingItem } from '../../composables/useRemote'
 import RemoteQrScan from './RemoteQrScan.vue'
-import { Link2, Globe, ShieldOff } from 'lucide-vue-next'
+import { Link2, Globe, ShieldOff, KeyRound } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -631,8 +636,11 @@ const onAllow = async (reqId: string) => {
   tokenCopied.value = false
   try {
     await allowPending(reqId)
-  } catch {
-    /* noop */
+    // El URL aprobado es de un solo uso. Sustituirlo de inmediato para que
+    // el siguiente móvil tenga un enlace vigente en el QR visible.
+    await requestUiCode()
+  } catch (e) {
+    if (!uiError.value) uiError.value = e instanceof Error ? e.message : String(e)
   }
 }
 

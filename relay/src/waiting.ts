@@ -169,7 +169,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     lang: 'es',
     title: 'Sala de espera — BunDeck Relay',
     pendingTitle: 'Esperando aprobación en el equipo anfitrión',
-    pendingBody: 'Muestra este código al anfitrión para que apruebe tu acceso.',
+    pendingBody: 'Deja esta pestaña abierta mientras el anfitrión aprueba el acceso. La solicitud caduca en 2 minutos.',
     codeLabel: 'Tu código',
     cancel: 'Cancelar',
     cancelledTitle: 'Espera cancelada',
@@ -182,7 +182,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     deniedBody: 'El anfitrión ha denegado el acceso. Pide un código nuevo e inténtalo de nuevo.',
     expiredTitle: 'Enlace caducado o inválido',
     expiredBody:
-      'Este enlace ya no es válido (caduca a los 2 minutos). Pide un código nuevo al anfitrión.',
+      'El enlace ya no está disponible: puede haber caducado, haberse usado o haberse revocado. Pide un QR nuevo al anfitrión.',
     privacy:
       'El equipo anfitrión debe aprobar tu acceso. El operador del relay puede ver el tráfico (protegido con TLS entre tu navegador y el relay).',
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
@@ -191,7 +191,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     lang: 'en',
     title: 'Waiting room — BunDeck Relay',
     pendingTitle: 'Waiting for approval on the host machine',
-    pendingBody: 'Show this code to the host so they can approve your access.',
+    pendingBody: 'Keep this tab open while the host approves access. The request expires after 2 minutes.',
     codeLabel: 'Your code',
     cancel: 'Cancel',
     cancelledTitle: 'Wait cancelled',
@@ -203,7 +203,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     deniedTitle: 'Access denied',
     deniedBody: 'The host denied access. Ask for a new code and try again.',
     expiredTitle: 'Expired or invalid link',
-    expiredBody: 'This link is no longer valid (it expires after 2 minutes). Ask the host for a new code.',
+    expiredBody: 'This link is no longer available. It may have expired, been used, or been revoked. Ask the host for a new QR code.',
     privacy:
       'The host machine must approve your access. The relay operator can see the traffic (protected with TLS between your browser and the relay).',
     noCredentials: 'This page will never ask for your username or password.',

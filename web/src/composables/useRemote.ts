@@ -479,6 +479,9 @@ export function useRemote() {
   /** Pide un código de UI (`POST /ui-code`) y renderiza la `url` a QR (reutiliza `qrcode`). */
   const requestUiCode = async () => {
     uiError.value = ''
+    // No seguir mostrando un QR de un solo uso mientras se obtiene el nuevo.
+    uiCode.value = null
+    uiCodeDataUrl.value = ''
     uiLoading.value = true
     try {
       const data = await uiFetch('/remote/ui-code', { method: 'POST', body: JSON.stringify({}) })

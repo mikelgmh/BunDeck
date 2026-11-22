@@ -43,6 +43,7 @@ function makeFetch(opts: FetchOpts = {}) {
   const calls: Array<{ url: string; init?: RequestInit }> = []
   let enabled = opts.uiEnabled ?? false
   let pending = opts.pending ?? []
+  let nextCode = 0
   const sessions = opts.sessions ?? []
   const state = { enabled, pending: [...pending], sessions: [...sessions], code: opts.uiCode ?? null as unknown }
 
@@ -70,10 +71,12 @@ function makeFetch(opts: FetchOpts = {}) {
     if (u.includes('/remote/ui-code')) {
       if (opts.ui404) return { ok: false, status: 404, json: async () => ({}) }
       if (method === 'POST') {
+        nextCode += 1
+        const urlCode = `abc${String(nextCode).padStart(3, '0')}`
         state.code = {
-          code: '123456',
-          urlCode: 'abc123',
-          url: 'https://relay.example/ui#abc123',
+          code: String(123450 + nextCode),
+          urlCode,
+          url: `https://relay.example/ui/${urlCode}`,
           expiresAt: Date.now() + 120000,
         }
         return { ok: true, status: 200, json: async () => state.code }
@@ -253,9 +256,17 @@ describe('RemotePane UI remota', () => {
 
     expect(wrapper.find('[data-cy="remote-ui-pending-list"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-cy="remote-ui-pending-item"]').length).toBe(1)
-
-    await wrapper.find('[data-cy="remote-ui-allow"]').trigger('click')
+    await wrapper.find('[data-cy="remote-ui-open"]').trigger('click')
     await flushPromises()
+    const firstUrl = wrapper.find('[data-cy="remote-ui-url"]').text()
+    const approvalDialog = wrapper.find('[data-cy="remote-ui-approval-dialog"]')
+    expect(approvalDialog.exists()).toBe(true)
+    expect(approvalDialog.attributes('open')).toBeDefined()
+
+    await approvalDialog.find('[data-cy="remote-ui-approval-allow"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="remote-ui-url"]').text()).not.toBe(firstUrl)
+    expect(fn.mock.calls.filter(([url, init]) => String(url).includes('/remote/ui-code') && init?.method === 'POST')).toHaveLength(2)
     const tokenBox = wrapper.find('[data-cy="remote-ui-token-once"]')
     expect(tokenBox.exists()).toBe(true)
     expect(tokenBox.text()).toContain('SECRET-TOKEN-123')

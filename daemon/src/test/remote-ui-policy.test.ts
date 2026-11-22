@@ -224,6 +224,7 @@ describe('remote-ui: delegación al TunnelClient', () => {
         { reqId: 'tun-1', urlCode, ua: 'TunUA', ip: '7.7.7.7', receivedAt: Date.now(), expiresAt: Date.now() + 60000 },
       ],
       published: [] as any[],
+      unpublished: [] as string[],
       revoked: [] as string[],
       getPending() { return this.pendings; },
       decideUiRequest(reqId: string, allow: boolean, _exp?: number) {
@@ -235,7 +236,11 @@ describe('remote-ui: delegación al TunnelClient', () => {
         return { ok: true, allowed: true, sessionToken: TUN_TOKEN };
       },
       publishUiCode(urlCode: string, exp: number) { this.published.push({ urlCode, exp }); },
-      unpublishUiCode(urlCode: string) { this.published = this.published.filter((p: any) => p.urlCode !== urlCode); },
+      consumeUiCode(urlCode: string) { this.published = this.published.filter((p: any) => p.urlCode !== urlCode); },
+      unpublishUiCode(urlCode: string) {
+        this.unpublished.push(urlCode);
+        this.published = this.published.filter((p: any) => p.urlCode !== urlCode);
+      },
       revokeUiSession(token: string) { this.revoked.push(token); return true; },
     };
     return t;
@@ -261,9 +266,11 @@ describe('remote-ui: delegación al TunnelClient', () => {
     // Sesión persistida en settings (visible para /ui-sessions y validate).
     expect(validateUiSession(db, TUN_TOKEN)).toMatchObject({ ok: true });
 
-    // urlCode de un solo uso: consumido en settings y retirado del relay.
+    // Se elimina del registro de republicación, pero no se retira del relay:
+    // el móvil aún necesita consultar /status para recibir el token.
     expect(db.getSetting('remote.ui.code')).toBeNull();
     expect(tunnel.published.some((x: any) => x.urlCode === c.body.urlCode)).toBe(false);
+    expect(tunnel.unpublished).not.toContain(c.body.urlCode);
 
     // Revocar por prefijo pide unbind al túnel con el token completo.
     const del = await remoteCall(`/api/v1/remote/ui-sessions/${TUN_TOKEN.slice(0, 8)}`, 'DELETE');

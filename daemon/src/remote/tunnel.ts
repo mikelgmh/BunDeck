@@ -350,6 +350,15 @@ export class TunnelClient {
     this.send({ v: 1, kind: 'ui-unpublish', urlCode });
   }
 
+  /**
+   * Marca el código como consumido para no republicarlo al reconectar, sin
+   * enviar ui-unpublish: el relay debe conservarlo hasta entregar el token
+   * de sesión al navegador que ya está esperando.
+   */
+  consumeUiCode(urlCode: string): void {
+    this.published.delete(urlCode);
+  }
+
   publishedCodes(): Array<{ urlCode: string; exp: number }> {
     return [...this.published.entries()].map(([urlCode, exp]) => ({ urlCode, exp }));
   }

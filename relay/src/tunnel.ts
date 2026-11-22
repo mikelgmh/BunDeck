@@ -168,6 +168,8 @@ export class TunnelState {
   private readonly pending = new Map<string, PendingReq>();
   private readonly pendingByCode = new Map<string, string>();
   private readonly bindings = new Map<string, CodeBinding>();
+  /** URL-codes approved once; they cannot start another approval flow. */
+  private readonly usedCodes = new Map<string, number>();
   private readonly bridges = new Map<string, { browser: TunnelSocket; deviceId: string; token: string }>();
   private readonly now: () => number;
   private readonly uiTimeout: number;
@@ -240,18 +242,24 @@ export class TunnelState {
         state: 'pending' | 'denied' | 'bound';
         ua: string;
         ip: string;
-      } {
+       } {
     const now = this.now();
+    const b = this.bindings.get(urlCode);
+    const s = b ? this.sessions.get(b.sessionToken) : undefined;
+    if (b && s && s.exp > now) {
+      return { reqId: '', deviceId: s.deviceId, created: false, state: 'bound', ua: meta.ua, ip: meta.ip };
+    }
+    if (b) this.bindings.delete(urlCode);
+    const usedUntil = this.usedCodes.get(urlCode);
+    if (usedUntil !== undefined) {
+      if (usedUntil > now) return { error: 'expired' };
+      this.usedCodes.delete(urlCode);
+    }
     const entry = this.codes.get(urlCode);
     if (!entry) return { error: 'unknown-code' };
     if (entry.exp <= now) {
       this.dropCode(urlCode);
       return { error: 'expired' };
-    }
-    const b = this.bindings.get(urlCode);
-    const s = b ? this.sessions.get(b.sessionToken) : undefined;
-    if (b && s && s.exp > now) {
-      return { reqId: '', deviceId: entry.deviceId, created: false, state: 'bound', ua: meta.ua, ip: meta.ip };
     }
     const existingId = this.pendingByCode.get(urlCode);
     if (existingId) {
@@ -326,6 +334,12 @@ export class TunnelState {
     if (prev && prev.sessionToken !== sessionToken) this.dropSession(prev.sessionToken);
     this.sessions.set(sessionToken, { deviceId: entry.deviceId, exp, urlCode });
     this.bindings.set(urlCode, { sessionToken, exp, consumed: false });
+    this.usedCodes.set(urlCode, entry.exp);
+    const pendingId = this.pendingByCode.get(urlCode);
+    if (pendingId) {
+      this.pendingByCode.delete(urlCode);
+      this.pending.delete(pendingId);
+    }
     return 'ok';
   }
 
@@ -355,12 +369,6 @@ export class TunnelState {
 
   status(urlCode: string): { status: TunnelStatus; sessionToken?: string } {
     const now = this.now();
-    const entry = this.codes.get(urlCode);
-    if (!entry) return { status: 'expired' };
-    if (entry.exp <= now) {
-      this.dropCode(urlCode);
-      return { status: 'expired' };
-    }
     const b = this.bindings.get(urlCode);
     if (b) {
       const s = this.sessions.get(b.sessionToken);
@@ -372,6 +380,17 @@ export class TunnelState {
         return { status: 'approved' };
       }
       this.bindings.delete(urlCode);
+    }
+    const usedUntil = this.usedCodes.get(urlCode);
+    if (usedUntil !== undefined) {
+      if (usedUntil > now) return { status: 'expired' };
+      this.usedCodes.delete(urlCode);
+    }
+    const entry = this.codes.get(urlCode);
+    if (!entry) return { status: 'expired' };
+    if (entry.exp <= now) {
+      this.dropCode(urlCode);
+      return { status: 'expired' };
     }
     const reqId = this.pendingByCode.get(urlCode);
     if (reqId) {
@@ -446,6 +465,7 @@ export class TunnelState {
 
   private dropCode(urlCode: string): void {
     this.codes.delete(urlCode);
+    this.usedCodes.delete(urlCode);
     const reqId = this.pendingByCode.get(urlCode);
     if (reqId) {
       this.pendingByCode.delete(urlCode);
@@ -521,8 +541,22 @@ export class TunnelState {
   prune(): void {
     const now = this.now();
     for (const [code, e] of [...this.codes]) {
-      if (e.exp <= now) this.dropCode(code);
+      if (e.exp > now) continue;
+      const binding = this.bindings.get(code);
+      const session = binding ? this.sessions.get(binding.sessionToken) : undefined;
+      if (session && session.exp > now) {
+        // Expira el QR, no la sesión que ya fue aprobada con él.
+        this.codes.delete(code);
+        const pendingId = this.pendingByCode.get(code);
+        if (pendingId) {
+          this.pendingByCode.delete(code);
+          this.pending.delete(pendingId);
+        }
+      } else {
+        this.dropCode(code);
+      }
     }
+    for (const [code, exp] of [...this.usedCodes]) if (exp <= now) this.usedCodes.delete(code);
     for (const [tok, s] of [...this.sessions]) {
       if (s.exp <= now) this.dropSession(tok);
     }
@@ -557,6 +591,7 @@ export class TunnelState {
     this.pending.clear();
     this.pendingByCode.clear();
     this.bindings.clear();
+    this.usedCodes.clear();
     this.sessions.clear();
     this.devices.clear();
     this.wsDevices.clear();
