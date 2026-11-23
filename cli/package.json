@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "bun run --watch src/cli.ts",
-    "build": "bun build --compile src/cli.ts --outfile libredeck-cli",
+    "build": "node scripts/build.mjs",
     "start": "bun run src/cli.ts",
     "test": "bun test"
   },

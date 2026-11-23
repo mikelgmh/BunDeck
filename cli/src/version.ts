@@ -1,7 +1,8 @@
 // Fuente única de versión: root package.json (canónica).
-// `bun build --compile` incrusta el JSON en el binario (versión fijada en build);
-// en dev se lee en vivo. LIBREDECK_VERSION la sobrescribe en ambos casos
-// (la inyectan build.sh y CI en tiempo de build).
+// En binario compilado la versión se HORNEA con --define en el build
+// (ver cli/scripts/build.mjs): `bun build --compile` no propaga el env
+// del build al binario. En dev se lee en vivo. LIBREDECK_VERSION en
+// runtime la sobrescribe en ambos casos.
 import rootPkg from "../../package.json";
 
 export function getVersion(): string {
