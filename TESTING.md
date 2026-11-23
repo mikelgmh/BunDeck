@@ -93,6 +93,11 @@ web/
 - **Component testing**: Soportado con Vite
 - **Estado**: Configurado, requiere agregar `data-cy` attributes gradualmente
 
+### Playwright (E2E actual)
+- **Config**: `web/playwright.config.ts` (baseURL `http://localhost:4321`, un worker).
+- **Servidores**: NO los arranca solo — daemon (`:3001`) y web dev (`:4321`) deben estar en marcha.
+- **Aislamiento**: `global-setup.ts` crea el perfil dedicado **"E2E Runner"** (+ página `E2E Home`) y apunta `current.profile_id/page_id` a él; `global-teardown.ts` lo borra todo y restaura la vista previa del usuario. Los tests NUNCA tocan perfiles/páginas del usuario: cada spec crea sus propias páginas y las borra en `afterEach`. Así se puede seguir usando la app mientras corre la suite.
+
 ## 📝 Escribir Tests
 
 ### Test Unitario (Bun Test Runner)

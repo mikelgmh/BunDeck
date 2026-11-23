@@ -1,5 +1,5 @@
 import { test, expect, type Browser } from '@playwright/test';
-import { collapseLeftPanel } from './helpers';
+import { collapseLeftPanel, getRunnerProfile } from './helpers';
 
 // Sincronización multi-dispositivo: lo que se hace en una ventana debe
 // llegar a otra ventana aislada (contexto aparte = incógnito, como la
@@ -46,9 +46,8 @@ test.describe('Multi-dispositivo (dos ventanas)', () => {
     request,
   }) => {
     // Fijar la vista actual para que ambas ventanas arranquen en lo mismo.
-    const profiles = await apiJson(request, 'GET', '/profiles');
-    expect(profiles.length).toBeGreaterThan(0);
-    const profile = profiles[0];
+    // Siempre sobre el perfil dedicado (no tocar perfiles del usuario).
+    const profile = await getRunnerProfile(request);
     const pages = await apiJson(request, 'GET', `/pages?profileId=${profile.id}`);
     const page0 = pages.find((p: any) => p.is_folder === 0) ?? pages[0];
     await apiJson(request, 'POST', '/settings', { key: 'current.profile_id', value: profile.id });
@@ -89,10 +88,8 @@ test.describe('Multi-dispositivo (dos ventanas)', () => {
     const btnLabel = `${tag}-tecla`;
     const btnLabel2 = `${tag}-tecla-edit`;
 
-    // Punto de partida: primer perfil + su primera página no-carpeta.
-    const profiles = await apiJson(request, 'GET', '/profiles');
-    expect(profiles.length).toBeGreaterThan(0);
-    const baseProfile = profiles[0];
+    // Punto de partida: perfil dedicado + su primera página no-carpeta.
+    const baseProfile = await getRunnerProfile(request);
     const basePages = await apiJson(request, 'GET', `/pages?profileId=${baseProfile.id}`);
     const basePage = basePages.find((p: any) => p.is_folder === 0) ?? basePages[0];
     await apiJson(request, 'POST', '/settings', { key: 'current.profile_id', value: baseProfile.id });

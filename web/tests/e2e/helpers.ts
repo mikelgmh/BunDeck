@@ -142,6 +142,23 @@ export async function gotoBoard(page: Page): Promise<void> {
     .waitFor({ state: 'visible', timeout: 30_000 });
 }
 
+/** Perfil dedicado de la suite E2E (creado por global-setup). */
+export const RUNNER_PROFILE = 'E2E Runner';
+
+/** Busca el perfil dedicado; falla alto si el globalSetup no corrió. */
+export async function getRunnerProfile(request: APIRequestContext): Promise<Profile> {
+  const res = await request.get(`${API_BASE}/profiles`);
+  if (!res.ok()) throw new Error(`GET /profiles -> ${res.status()}`);
+  const profiles = (await res.json()) as Profile[];
+  const runner = profiles.find((p) => p.name === RUNNER_PROFILE);
+  if (!runner) {
+    throw new Error(
+      `No existe el perfil "${RUNNER_PROFILE}" (¿corrió global-setup? ¿arrancaste con playwright test?)`,
+    );
+  }
+  return runner;
+}
+
 /** Acepta el diálogo "esta página se muestra en un Stream Deck" si aparece.
  *
  *  Las páginas clásicas nuevas se auto-asignan al deck de ejemplo y pasar a

@@ -10,6 +10,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: './tests/e2e/global-setup.ts',
+  globalTeardown: './tests/e2e/global-teardown.ts',
   timeout: 30_000,
   // El daemon es compartido: los workers en paralelo se pisan
   // (current.page_id, páginas creadas). Serie como Cypress.
