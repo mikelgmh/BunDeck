@@ -66,7 +66,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Search, X, Settings } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
-import { actionSurfaceKind } from '../../composables/useActionPresentation'
+import { actionSurfaceKind, matchesActionQuery } from '../../composables/useActionPresentation'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
 const { t } = useI18nStore()
@@ -131,7 +131,7 @@ const flat = computed(() => {
   }
   const q = query.value.trim().toLowerCase()
   if (!q) return list
-  return list.filter((a) => (a.name + ' ' + a.group).toLowerCase().includes(q))
+  return list.filter((a) => matchesActionQuery(a, q))
 })
 
 const groups = computed(() => {

@@ -925,7 +925,11 @@ const handleProfileDuplicate = async (profileId: string) => {
     const baseCopy = t('bd.profileCopyName', { name: orig.name })
     const copyName = uniqueProfileName(baseCopy)
     const created = await apiPost('/profiles', { name: copyName, data: cleanData })
-    // Copia páginas y botones
+    // Copia páginas y botones en DOS pasadas: primero todas las páginas
+    // (mapa id viejo → nuevo completo) y después los botones, para que las
+    // referencias `pageId` "hacia adelante" también se reescriban. Con una
+    // sola pasada las referencias a páginas aún no creadas quedaban colgadas
+    // al perfil original.
     const pages = await apiGet(`/pages?profileId=${encodeURIComponent(profileId)}`)
     const pageIdMap = new Map<string, string>()
     const asPageData = (d: unknown): Record<string, unknown> => {
@@ -935,6 +939,7 @@ const handleProfileDuplicate = async (profileId: string) => {
       }
       return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
     }
+    const createdPages: Array<{ orig: any; copy: any }> = []
     for (const pg of pages ?? []) {
       const np = await apiPost('/pages', {
         profile_id: created.id,
@@ -944,23 +949,34 @@ const handleProfileDuplicate = async (profileId: string) => {
         data: asPageData(pg.data)
       })
       pageIdMap.set(pg.id, np.id)
+      createdPages.push({ orig: pg, copy: np })
+    }
+    const remapRefs = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return
+      for (const a of obj.actions ?? []) {
+        const pid = a?.parameters?.pageId
+        if (typeof pid === 'string' && pageIdMap.has(pid)) a.parameters.pageId = pageIdMap.get(pid)
+      }
+      for (const r of obj.rules ?? []) {
+        remapRefs({ actions: r?.then })
+        remapRefs({ actions: r?.else })
+      }
+    }
+    for (const { orig, copy } of createdPages) {
       let buttons: any[] = []
       try {
-        buttons = await apiGet(`/buttons?pageId=${encodeURIComponent(pg.id)}`)
+        buttons = await apiGet(`/buttons?pageId=${encodeURIComponent(orig.id)}`)
       } catch {
         buttons = []
       }
       for (const b of buttons ?? []) {
         // Reescribe referencias a páginas internas (carpetas) al nuevo id
         const bdata = JSON.parse(JSON.stringify(b.data ?? {}))
-        for (const a of bdata.actions ?? []) {
-          const pid = a?.parameters?.pageId
-          if (typeof pid === 'string' && pageIdMap.has(pid)) a.parameters.pageId = pageIdMap.get(pid)
-        }
-        await apiPost('/buttons', { page_id: np.id, position: b.position, data: bdata })
+        remapRefs(bdata)
+        await apiPost('/buttons', { page_id: copy.id, position: b.position, data: bdata })
       }
     }
-    // Repara referencias cruzadas a páginas creadas después (segunda pasada ligera)
+    // Recargar para mostrar el duplicado y seleccionarlo.
     await loadProfiles()
     bdShowToast(t('bd.profileDuplicated', { name: copyName }))
     try {
@@ -1136,7 +1152,16 @@ const onPageDelete = async (page: PageData | null) => {
     isFolder: page.is_folder === 1,
     buttons: currentButtons.value
       .filter((b) => b.page_id === page.id)
-      .map((b) => ({ position: b.position, data: JSON.parse(JSON.stringify(b.data)) }))
+      .map((b: any) => ({
+        position: b.position,
+        x: b.x ?? null,
+        y: b.y ?? null,
+        w: b.w ?? 1,
+        h: b.h ?? 1,
+        parent_widget_id: b.parent_widget_id ?? null,
+        widget_type: b.widget_type ?? null,
+        data: JSON.parse(JSON.stringify(b.data)),
+      }))
   }
   const ok = await withPageOp(async () => {
     await deletePage(page.id)
@@ -1147,10 +1172,21 @@ const onPageDelete = async (page: PageData | null) => {
     try {
       const restored = await createPage(uniquePageName(snapshot.name), snapshot.isFolder)
       for (const btn of snapshot.buttons) {
-        await fetch(`${API_BASE}/buttons`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ page_id: restored.id, position: btn.position, data: btn.data })
+        // apiPost (no fetch crudo): antes se usaba `${API_BASE}/buttons` con el
+        // ComputedRef sin desenvolver → URL "[object Object]/buttons", el POST
+        // fallaba en silencio y el Deshacer restauraba la página VACÍA.
+        // Se conserva también la geometría libre (x/y/w/h): sin ella las
+        // teclas restauradas colapsaban a positions legacy.
+        await apiPost('/buttons', {
+          page_id: restored.id,
+          position: btn.position,
+          ...(btn.x !== undefined && btn.x !== null ? { x: btn.x } : {}),
+          ...(btn.y !== undefined && btn.y !== null ? { y: btn.y } : {}),
+          w: btn.w ?? 1,
+          h: btn.h ?? 1,
+          ...(btn.parent_widget_id ? { parent_widget_id: btn.parent_widget_id } : {}),
+          ...(btn.widget_type ? { widget_type: btn.widget_type } : {}),
+          data: btn.data,
         })
       }
       await loadProfile()
@@ -1486,14 +1522,24 @@ const onGridSizeChange = async (dx: number, dy: number) => {
 /** Persistir geometría GridStack al mover/redimensionar (misma tecla, mismos drawers).
  *  Los PUT van en paralelo y el estado local se fusiona con las filas que
  *  devuelve el daemon: antes eran N PUTs en serie + un GET completo, y en
- *  modo libre con varias teclas la UI se quedaba "pillada". */
+ *  modo libre con varias teclas la UI se quedaba "pillada".
+ *  La geometría se acota a la cuadrícula (+1 fila de extensión, como
+ *  planFreeCell): un resize salvaje (p. ej. h=25) ya no puede estirar la
+ *  placa a decenas de filas con el stepper marcando 3. */
 const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number; w: number; h: number }>) => {
   const targets = (items ?? []).filter((it) => it?.id)
   if (!targets.length) return
+  const cols = Math.max(1, gridCols.value)
+  const rows = Math.max(1, gridRows.value)
   try {
-    const updated = await Promise.all(targets.map((it) =>
-      apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x: it.x, y: it.y, w: it.w, h: it.h })
-    ))
+    const updated = await Promise.all(targets.map((it) => {
+      const w = Math.min(cols, Math.max(1, Math.round(Number(it.w) || 1)))
+      const h0 = Math.max(1, Math.round(Number(it.h) || 1))
+      const x = Math.min(Math.max(0, Math.floor(Number(it.x) || 0)), Math.max(0, cols - w))
+      const y = Math.min(Math.max(0, Math.floor(Number(it.y) || 0)), rows)
+      const h = Math.min(h0, rows, Math.max(1, rows - y + 1))
+      return apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x, y, w, h })
+    }))
     const byId = new Map<string, any>()
     for (const b of updated ?? []) {
       if (b && typeof b.id === 'string') byId.set(b.id, b)

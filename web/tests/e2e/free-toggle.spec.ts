@@ -80,17 +80,39 @@ async function createTestPage(page: any) {
   return created;
 }
 
-/** Acepta el diálogo "esta página se muestra en un Stream Deck" si aparece.
- *
- *  Las páginas clásicas nuevas se auto-asignan al deck de ejemplo y pasar a
- *  Libre exige desasignarla: el toggle abre este confirm. Sin aceptarlo la
- *  placa libre nunca aparece (es lo que parecía "switch bloqueado").
- */
 async function gridSize(page: any) {
   const cols = Number(await page.locator('[data-cy=bd-grid-cols] output').innerText());
   const rows = Number(await page.locator('[data-cy=bd-grid-rows] output').innerText());
   return { cols, rows };
 }
+
+test('crear tecla con acción conserva el icono por defecto tras el autosave', async ({
+  page,
+  request,
+}) => {
+  await createTestPage(page);
+
+  // Click en tecla vacía (slot 0) y añadir Delay desde la biblioteca.
+  await page.locator('[data-swapy-slot="slot-0"] [data-cy=bd-key]').click();
+  await page.locator('#bd-q').fill('Delay');
+  const postPromise = page.waitForResponse(
+    (res: any) => res.url().includes('/api/v1/buttons') && res.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await page.locator('[data-cy=bd-action-item]').first().click();
+  const postRes = await postPromise;
+  expect(postRes.status()).toBe(201);
+  const created = await postRes.json();
+  createdButtonIds.push(created.id);
+  expect(created?.data?.icon, 'la tecla creada trae icono por defecto').toBeTruthy();
+
+  // El autosave posterior (800 ms) no debe borrarlo.
+  await page.waitForTimeout(2000);
+  const fresh = await request.get(`${API}/buttons?pageId=${testPageId}`);
+  expect(fresh.ok()).toBeTruthy();
+  const row = ((await fresh.json()) as any[]).find((b: any) => b.id === created.id);
+  expect(row?.data?.icon, 'el icono sobrevive al autosave').toBe(created.data.icon);
+});
 
 test('Fija -> Libre persiste sin revertir y respeta las filas configuradas', async ({
   page,

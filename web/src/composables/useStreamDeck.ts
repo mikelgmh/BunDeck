@@ -1372,7 +1372,10 @@ export function useStreamDeck() {
         }
       } else if (hasContent) {
         // Create new button only if there's content (con icono por defecto
-        // si el usuario no eligió visual).
+        // si el usuario no eligió visual). El borrador se normaliza ANTES de
+        // enviar: si no, el autosave posterior reenviaba el draft sin icono
+        // y lo borraba de la BD recién creada.
+        buttonConfig.value = ensureDefaultIcon(buttonConfig.value)
         console.log('➕ Creating new button at position', position, 'with data:', buttonConfig.value)
         const mutationId = trackMutation(newMutationId())
         const newButton = await apiRequest('/buttons', {
@@ -2002,6 +2005,10 @@ export function useStreamDeck() {
 
       console.log('✅ Page updated successfully')
     } catch (error: any) {
+      // Nombre duplicado: mensaje legible (como en createPage).
+      if (error.message?.includes('already exists')) {
+        throw new Error(`Ya existe una página con el nombre "${updates.name || page.name}" en este perfil`)
+      }
       // If the page doesn't exist on the server (404), show warning but don't update locally
       if (error.message?.includes('404') || error.message?.includes('Not Found')) {
         console.warn('⚠️ Page not found on server, cannot update')
@@ -2012,6 +2019,15 @@ export function useStreamDeck() {
       throw error
     }
   }
+
+  // Cola seriada de guardados de tamaño de rejilla: varios clics seguidos en
+  // +/- disparaban PUTs concurrentes con el objeto completo y ganaba el más
+  // lento (steppers, BD y F5 quedaban distintos). En cola, el último gana.
+
+  // Cola seriada de guardados de tamaño de rejilla: varios clics seguidos en
+  // +/- disparaban PUTs concurrentes con el objeto completo y ganaba el más
+  // lento (steppers, BD y F5 quedaban distintos). En cola, el último gana.
+  let gridSaveChain: Promise<void> = Promise.resolve()
 
   // Grid management functions
   const changeGridSize = async (deltaX: number, deltaY: number) => {
@@ -2033,54 +2049,62 @@ export function useStreamDeck() {
       }
     }
 
-    // Save grid size to profile data only if changed
+    // Save grid size to profile data only if changed (serializado: el cuerpo
+    // del PUT se lee al enviar, no al pulsar, para no pisar clics en vuelo).
     if (changed && currentProfile.value) {
-      try {
-        // Create a simple data object with grid size
-        const updatedData = {
-          gridCols: gridCols.value,
-          gridRows: gridRows.value
-        }
-
-        console.log('💾 Saving grid size:', updatedData)
-
-        const response = await apiRequest(`/profiles/${currentProfile.value.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            name: currentProfile.value.name,
-            data: updatedData
-          })
-        })
-
-        console.log('✅ Grid size saved successfully:', response)
-
-        // Update local profile data reference
-        // Parse current data if it's a string
-        let currentData = currentProfile.value.data
-        if (typeof currentData === 'string') {
-          try {
-            currentData = JSON.parse(currentData)
-          } catch (e) {
-            currentData = {}
-          }
-        }
-
-        // Update or initialize data object
-        if (!currentData || typeof currentData !== 'object') {
-          currentProfile.value.data = updatedData
-        } else {
-          currentProfile.value.data = {
-            ...currentData,
+      const profileId = currentProfile.value.id
+      const profileName = currentProfile.value.name
+      const run = gridSaveChain.then(async () => {
+        if (currentProfile.value?.id !== profileId) return
+        try {
+          // Create a simple data object with grid size
+          const updatedData = {
             gridCols: gridCols.value,
             gridRows: gridRows.value
           }
+
+          console.log('💾 Saving grid size:', updatedData)
+
+          const response = await apiRequest(`/profiles/${profileId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              name: profileName,
+              data: updatedData
+            })
+          })
+
+          console.log('✅ Grid size saved successfully:', response)
+
+          // Update local profile data reference
+          // Parse current data if it's a string
+          let currentData = currentProfile.value.data
+          if (typeof currentData === 'string') {
+            try {
+              currentData = JSON.parse(currentData)
+            } catch (e) {
+              currentData = {}
+            }
+          }
+
+          // Update or initialize data object
+          if (!currentData || typeof currentData !== 'object') {
+            currentProfile.value.data = updatedData
+          } else {
+            currentProfile.value.data = {
+              ...currentData,
+              gridCols: gridCols.value,
+              gridRows: gridRows.value
+            }
+          }
+
+          console.log('📦 Updated local profile data:', currentProfile.value.data)
+
+        } catch (error) {
+          console.error('❌ Failed to save grid size:', error)
         }
-
-        console.log('📦 Updated local profile data:', currentProfile.value.data)
-
-      } catch (error) {
-        console.error('❌ Failed to save grid size:', error)
-      }
+      })
+      gridSaveChain = run.then(() => undefined, () => undefined)
+      await run
     }
   }
 

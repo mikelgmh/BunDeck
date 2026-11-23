@@ -156,6 +156,14 @@ test('borrar una página se puede deshacer desde el toast', async ({ page, reque
   const created = await createPageRes.json();
   testPageId = created.id;
 
+  // Dos teclas con contenido: el Deshacer debe restaurarlas (no solo la página).
+  for (const [pos, label] of [[0, 'E2E Undo A'], [1, 'E2E Undo B']] as const) {
+    const res = await request.post(`${API}/buttons`, {
+      data: { page_id: created.id, position: pos, data: { label, actions: [] } },
+    });
+    expect(res.status()).toBe(201);
+  }
+
   const chip = page.locator('.bd-page .bd-chip', { hasText: created.name }).first();
   await expect(chip).toBeVisible({ timeout: 10000 });
 
@@ -170,15 +178,22 @@ test('borrar una página se puede deshacer desde el toast', async ({ page, reque
   const gone = await request.get(`${API}/pages?profileId=${profileId}`);
   expect((await gone.json()).some((p: any) => p.id === testPageId)).toBe(false);
 
-  // Deshacer desde el toast restaura página (y su selección).
+  // Deshacer desde el toast restaura página Y botones.
   await expect(page.locator('.bd-toast')).toBeVisible({ timeout: 5000 });
   await page.locator('.bd-toast button').click();
   await expect(
     page.locator('.bd-page .bd-chip', { hasText: created.name }).first(),
   ).toBeVisible({ timeout: 15000 });
   const back = await request.get(`${API}/pages?profileId=${profileId}`);
-  expect((await back.json()).some((p: any) => p.name === created.name)).toBe(true);
+  expect(back.ok()).toBeTruthy();
+  const pagesAfter = await back.json();
+  const restored = pagesAfter.find((p: any) => p.name === created.name);
+  expect(restored, 'la página restaurada existe en BD').toBeTruthy();
+  const btnsRes = await request.get(`${API}/buttons?pageId=${restored.id}`);
+  expect(btnsRes.ok()).toBeTruthy();
+  const labels = ((await btnsRes.json()) as any[]).map((b: any) => b?.data?.label).sort();
+  // Sin el fix del Deshacer (fetch a "[object Object]/buttons") volvían 0.
+  expect(labels).toEqual(['E2E Undo A', 'E2E Undo B']);
   // La restaurada es una página nueva: actualizar el id para la limpieza.
-  const pages = await back.json();
-  testPageId = pages.find((p: any) => p.name === created.name).id;
+  testPageId = restored.id;
 });

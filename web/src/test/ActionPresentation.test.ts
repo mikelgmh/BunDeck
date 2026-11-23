@@ -6,7 +6,8 @@ import {
   findActionAdata,
   findControlAction,
   isControlAction,
-  controlComponentOf
+  controlComponentOf,
+  matchesActionQuery
 } from '../composables/useActionPresentation'
 
 const pluginsOf = (...actions: any[]) => [['audio-mixer', { manifest: { name: 'Mezclador' }, actions: actions.map((a) => [a.id, a]) }]]
@@ -52,5 +53,25 @@ describe('useActionPresentation', () => {
     expect(controlComponentOf('audio-mixer.volume-control')).toBe('volume-range')
     expect(controlComponentOf('otra')).toBeNull()
     expect(CONTROL_ACTION_COMPONENTS['audio-mixer.volume-control']).toBe('volume-range')
+  })
+
+  it('matchesActionQuery: biblioteca y paleta usan nombre + tipo + grupo', () => {
+    const toast = { name: 'Mostrar mensaje', type: 'local.toast', group: 'Lógica' }
+    const delay = { name: 'Retardo', type: 'utility.delay', group: 'Utility Actions' }
+    const ha = { name: 'Entidad', type: 'homeassistant.entity', group: 'Home Assistant' }
+    // Casos que fallaban antes de unificar (0 resultados aunque existía):
+    expect(matchesActionQuery(toast, 'toast')).toBe(true)
+    expect(matchesActionQuery(delay, 'utility.delay')).toBe(true)
+    expect(matchesActionQuery(delay, 'retardo')).toBe(true)
+    expect(matchesActionQuery(ha, 'home assistant')).toBe(true)
+    // Insensible a mayúsculas y a campos ausentes.
+    expect(matchesActionQuery(toast, 'MOSTRAR')).toBe(true)
+    expect(matchesActionQuery({ name: 'X' }, 'x')).toBe(true)
+    // Sin query todo pasa; sin coincidencia nada pasa.
+    expect(matchesActionQuery(toast, '')).toBe(true)
+    expect(matchesActionQuery(toast, '   ')).toBe(true)
+    expect(matchesActionQuery(toast, 'zzzz')).toBe(false)
+    expect(matchesActionQuery(toast, 'mostrar zzz')).toBe(false)
+    expect(matchesActionQuery(null as any, 'x')).toBe(false)
   })
 })

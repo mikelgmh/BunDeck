@@ -18,6 +18,25 @@ export const CONTROL_COMPONENTS = ['volume-range'] as const
 export type ControlComponent = (typeof CONTROL_COMPONENTS)[number]
 
 /**
+ * ¿Coincide una acción con la búsqueda del usuario? Biblioteca y paleta usan
+ * el MISMO criterio (nombre + tipo + grupo): antes la biblioteca miraba
+ * nombre+tipo y la paleta nombre+grupo, así que `toast` daba 0 en paleta y
+ * `home assistant` 0 en biblioteca aunque la acción existía.
+ */
+export function matchesActionQuery(
+  action: { name?: unknown; type?: unknown; group?: unknown },
+  query: unknown,
+): boolean {
+  const q = String(query ?? '').trim().toLowerCase()
+  if (!q) return true
+  const haystack = [action?.name, action?.type, action?.group]
+    .map((v) => (typeof v === 'string' ? v : ''))
+    .join(' ')
+    .toLowerCase()
+  return q.split(/\s+/).every((token) => token.length === 0 || haystack.includes(token))
+}
+
+/**
  * Qué tipo de acción renderiza cada componente de control.
  * Fuente de verdad del render y de las reglas de compatibilidad.
  */

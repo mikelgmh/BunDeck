@@ -330,6 +330,84 @@ test('cambiar filas/columnas redimensiona la rejilla y persiste al recargar', as
   });
 });
 
+test('clics seguidos en filas/columnas no pierden updates (sin carrera)', async ({
+  page,
+  request,
+}) => {
+  const createPagePromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/pages') && res.request().method() === 'POST',
+  );
+  await page.locator('[data-cy=bd-page-add]').click();
+  const createPageRes = await createPagePromise;
+  expect(createPageRes.status()).toBe(201);
+  const created = await createPageRes.json();
+  testPageId = created.id;
+  const pageName: string = created.name;
+
+  await expect(
+    page.locator('.bd-page .bd-chip[aria-pressed="true"]').filter({ hasText: pageName }).first(),
+  ).toBeVisible({ timeout: 10000 });
+  await page.waitForTimeout(250);
+  await collapseLeftPanel(page);
+
+  const rowsOut = page.locator('[data-cy=bd-grid-rows] output');
+  const colsOut = page.locator('[data-cy=bd-grid-cols] output');
+  const rows0 = Number(await rowsOut.innerText());
+  const cols0 = Number(await colsOut.innerText());
+
+  // Ráfaga sin esperas intermedias: antes ganaba el PUT más lento y los
+  // steppers, la BD y F5 quedaban en tres estados distintos.
+  await page.locator('[data-cy=bd-grid-cols] [data-d="c1"]').click();
+  await page.locator('[data-cy=bd-grid-rows] [data-d="r1"]').click();
+  await expect(rowsOut).toHaveText(String(rows0 + 1), { timeout: 10000 });
+  await expect(colsOut).toHaveText(String(cols0 + 1), { timeout: 10000 });
+
+  // Quiescencia: ningún PUT en vuelo 500 ms.
+  let inFlight = 1;
+  while (inFlight > 0) {
+    inFlight = 0;
+    const done = page.waitForResponse(
+      (res) => res.url().includes('/api/v1/profiles/') && res.request().method() === 'PUT',
+      { timeout: 500 },
+    ).then(
+      () => 1,
+      () => 0,
+    );
+    inFlight = await done;
+  }
+
+  const profilesRes = await request.get(`${API}/profiles`);
+  const profiles = await profilesRes.json();
+  const activeName = (
+    await page.locator('[data-cy=bd-profile-tab][aria-selected="true"]').first().innerText()
+  ).trim();
+  const prof = profiles.find((p: any) => p.name === activeName);
+  const data = typeof prof.data === 'string' ? JSON.parse(prof.data) : prof.data;
+  expect(
+    { cols: data.gridCols, rows: data.gridRows },
+    'BD coincide con los steppers tras la ráfaga',
+  ).toEqual({ cols: cols0 + 1, rows: rows0 + 1 });
+
+  await page.reload();
+  await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('[data-cy=bd-grid-rows] output')).toHaveText(String(rows0 + 1), {
+    timeout: 10000,
+  });
+  await expect(page.locator('[data-cy=bd-grid-cols] output')).toHaveText(String(cols0 + 1), {
+    timeout: 10000,
+  });
+
+  // Restaurar (también en ráfaga).
+  await page.locator('[data-cy=bd-grid-cols] [data-d="c-1"]').click();
+  await page.locator('[data-cy=bd-grid-rows] [data-d="r-1"]').click();
+  await expect(page.locator('[data-cy=bd-grid-rows] output')).toHaveText(String(rows0), {
+    timeout: 10000,
+  });
+  await expect(page.locator('[data-cy=bd-grid-cols] output')).toHaveText(String(cols0), {
+    timeout: 10000,
+  });
+});
+
 test('permite separar dos teclas y conserva la separación al recargar', async ({
   page,
   request,

@@ -176,6 +176,62 @@ test.describe('Perfiles en la barra superior', () => {
     expect(btns.length).toBeGreaterThanOrEqual(1);
   });
 
+  test('duplicar reescribe pageId hacia adelante al id nuevo', async ({ page, request }) => {
+    const base = tag('Fwd');
+    const seed = await createProfileViaApi(request, base);
+    created.push(seed.id);
+    // Página A (orden 0) con tecla que referencia a B (orden 1, posterior).
+    const pageA = await request.post(`${API}/pages`, {
+      data: { profile_id: seed.id, name: 'Fwd A', order_idx: 0, data: {} },
+    });
+    const pageB = await request.post(`${API}/pages`, {
+      data: { profile_id: seed.id, name: 'Fwd B', order_idx: 1, data: {} },
+    });
+    const idA = (await pageA.json()).id;
+    const idB = (await pageB.json()).id;
+    const btnRes = await request.post(`${API}/buttons`, {
+      data: {
+        page_id: idA,
+        position: 0,
+        data: {
+          label: 'salto',
+          actions: [{ id: 'e2e-fwd', type: 'page.page', pluginId: 'page', parameters: { pageId: idB } }],
+        },
+      },
+    });
+    expect(btnRes.status()).toBe(201);
+
+    await gotoBoard(page);
+    await openMenuFor(page, base);
+    const dupRes = page.waitForResponse(
+      (res) => res.url().includes('/api/v1/profiles') && res.request().method() === 'POST',
+    );
+    await page.getByTestId('bd-profile-duplicate').click();
+    const res = await dupRes;
+    expect(res.status()).toBe(201);
+    const copy = await res.json();
+    created.push(copy.id);
+
+    // El POST /profiles responde al crear la fila; las páginas/botones se
+    // copian después en la misma rutina. Esperar a la selección del duplicado
+    // (ocurre al final, tras copiar todo) antes de verificar por API.
+    const copyTab = page.locator('[data-cy=bd-profile-tab]', { hasText: copy.name }).first();
+    await expect(copyTab).toBeVisible({ timeout: 15000 });
+    await expect(copyTab).toHaveAttribute('aria-selected', 'true');
+
+    const copyPages = await (await request.get(`${API}/pages?profileId=${copy.id}`)).json();
+    const copyA = copyPages.find((p: any) => p.name === 'Fwd A');
+    const copyB = copyPages.find((p: any) => p.name === 'Fwd B');
+    expect(copyA, 'copia de A existe').toBeTruthy();
+    expect(copyB, 'copia de B existe').toBeTruthy();
+    const copyBtns = await (await request.get(`${API}/buttons?pageId=${copyA.id}`)).json();
+    expect(copyBtns.length).toBeGreaterThanOrEqual(1);
+    const ref = copyBtns[0]?.data?.actions?.[0]?.parameters?.pageId;
+    // Sin la segunda pasada quedaba el id ORIGINAL (referencia cross-perfil rota).
+    expect(ref, 'pageId reescrito al duplicado').toBe(copyB.id);
+    expect(ref).not.toBe(idB);
+  });
+
   test('eliminar pide confirmación y quita la pestaña', async ({ page, request }) => {
     const base = tag('Del');
     const seed = await createProfileViaApi(request, base);

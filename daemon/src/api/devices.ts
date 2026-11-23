@@ -23,6 +23,14 @@ import {
 
 const KINDS: DeviceKind[] = ['deck', 'phone', 'tablet'];
 
+/** Igualdad superficial de mapas deviceId → pageId (para no re-emitir). */
+function assignmentsChanged(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return true;
+  return ka.some((k) => b[k] !== a[k]);
+}
+
 function cleanDeviceInput(body: any, isCreate: boolean): { ok: boolean; error?: string; value?: any } {
   const kind = body?.kind ?? (isCreate ? 'phone' : undefined);
   if (kind !== undefined && !KINDS.includes(kind)) {
@@ -78,9 +86,17 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
     if (!profile) return jsonResponse({ error: 'Profile not found' }, 404);
 
     if (method === 'GET') {
+      // OJO: antes se emitía `assignment.updated` en CADA GET, aunque no
+      // hubiera cambiado nada. Como el propio frontend se suscribe y al
+      // recibirlo refetchea (devices-changed → loadAssignments), se formaba
+      // una tormenta auto-sostenida (GET → broadcast → GET → …) que agotaba
+      // los sockets del navegador. Solo se avisa si algo cambió de verdad.
+      const before = db.getAssignments(profileId);
       const fixed = db.repairAssignments(profileId);
       const assignments = db.getAssignments(profileId);
-      services.wsManager.broadcast('assignment.updated', { profileId, assignments }, 'pages');
+      if (assignmentsChanged(before, assignments) || fixed.dropped.length > 0) {
+        services.wsManager.broadcast('assignment.updated', { profileId, assignments }, 'pages');
+      }
       return jsonResponse({ assignments, repaired: fixed });
     }
 
