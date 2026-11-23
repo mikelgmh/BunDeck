@@ -108,7 +108,7 @@
           <div class="bd-remote-qr__content">
             <div class="bd-remote-field">
               <span class="bd-remote-label">{{ t('bd.remoteUiUrlLabel') }}</span>
-              <p class="bd-mono bd-remote-url" data-cy="remote-ui-url" :title="uiCode.url">{{ uiCode.url }}</p>
+              <p class="bd-mono bd-remote-url" data-cy="remote-ui-url" :title="uiShareUrl">{{ uiShareUrl }}</p>
             </div>
             <div class="bd-remote-code-row">
               <span class="bd-remote-label">{{ t('bd.remoteUiOneTimeCode') }}</span>
@@ -213,6 +213,82 @@
         </ul>
         <p v-if="uiError" class="bd-err" role="alert" data-cy="remote-ui-error">{{ uiError }}</p>
       </template>
+    </section>
+
+    <!-- Sección LAN — Invitación para la red local (mismo código que el QR) -->
+    <section class="bd-card bd-remote-card" data-cy="remote-lan-section" aria-labelledby="bd-remote-lan-title">
+      <h3 id="bd-remote-lan-title" class="bd-remote-heading">
+        <Globe :size="18" aria-hidden="true" />
+        {{ t('bd.lanInviteTitle') }}
+      </h3>
+      <p class="bd-sub">{{ t('bd.lanInviteHint') }}</p>
+
+      <div class="bd-srow">
+        <div>
+          <b>{{ t('bd.lanInviteGenerate') }}</b>
+          <p>{{ t('bd.qrHint') }}</p>
+        </div>
+        <div class="bd-ctl">
+          <button class="bd-btn bd-pri" :disabled="lanLoading" data-cy="remote-lan-generate" @click="onLanGenerate">
+            {{ t('bd.lanInviteGenerate') }}
+          </button>
+        </div>
+      </div>
+      <div v-if="lanInvite && lanLink" class="bd-remote-qr" data-cy="remote-lan-invite">
+        <div class="bd-remote-qr__content">
+          <div class="bd-remote-field">
+            <span class="bd-remote-label">{{ t('bd.lanInviteLinkLabel') }}</span>
+            <p class="bd-mono bd-remote-url" data-cy="remote-lan-url" :title="lanLink">{{ lanLink }}</p>
+          </div>
+          <div class="bd-ctl bd-remote-qr-actions">
+            <button class="bd-btn bd-pri" data-cy="remote-lan-copy" @click="onCopyLanLink">
+              {{ lanLinkCopied ? t('bd.lanInviteCopied') : t('bd.lanInviteCopy') }}
+            </button>
+            <button class="bd-btn" :disabled="lanLoading" data-cy="remote-lan-regen" @click="onLanGenerate">
+              {{ t('bd.lanInviteRegen') }}
+            </button>
+            <button class="bd-btn bd-dng" :disabled="lanLoading" data-cy="remote-lan-revoke" @click="onLanRevoke">
+              {{ t('bd.lanInviteRevoke') }}
+            </button>
+          </div>
+          <p v-if="!lanExpired" class="bd-remote-expiry" data-cy="remote-lan-exp">
+            {{ t('bd.lanInviteExp', { s: fmtMMSS(lanSecsLeft) }) }}
+          </p>
+          <p v-else class="bd-err" role="alert" data-cy="remote-lan-exp">{{ t('bd.lanInviteExpired') }}</p>
+        </div>
+      </div>
+
+      <h4 class="bd-remote-subheading">{{ t('bd.lanSessionsTitle') }}</h4>
+      <p v-if="!lanSessions.length" class="bd-hint" data-cy="remote-lan-sessions-empty">{{ t('bd.lanSessionsEmpty') }}</p>
+      <ul v-else class="bd-remote-list" data-cy="remote-lan-sessions">
+        <li v-for="s in lanSessions" :key="s.tokenPrefix" class="bd-remote-row bd-remote-session" data-cy="remote-lan-session-item">
+          <div class="bd-remote-row__info">
+            <b class="bd-remote-row__title bd-mono" :title="s.tokenPrefix">{{ s.tokenPrefix }}…</b>
+            <p class="bd-remote-agent" :title="s.ua || t('bd.remoteUiEmptyUa')">{{ s.ua || t('bd.remoteUiEmptyUa') }}</p>
+            <p class="bd-remote-meta">
+              <span class="bd-mono">{{ s.ip }}</span>
+              <span>{{ t('bd.lanSessionCreated', { date: formatDateTime(s.createdAt) }) }}</span>
+              <span>{{ t('bd.lanSessionExpires', { date: formatDateTime(s.exp) }) }}</span>
+            </p>
+            <span v-if="s.revoked" class="bd-tag-def">{{ t('bd.lanSessionRevoked') }}</span>
+          </div>
+          <div class="bd-remote-row__actions">
+            <button
+              class="bd-remote-revoke"
+              :disabled="s.revoked || lanLoading"
+              :aria-label="`${t('bd.lanSessionRevoke')} ${s.tokenPrefix}`"
+              :title="t('bd.lanSessionRevoke')"
+              data-cy="remote-lan-session-revoke"
+              :data-prefix="s.tokenPrefix"
+              @click="onLanRevokeSession(s.tokenPrefix)"
+            >
+              <ShieldOff :size="16" aria-hidden="true" />
+              {{ t('bd.lanSessionRevoke') }}
+            </button>
+          </div>
+        </li>
+      </ul>
+      <p v-if="lanError" class="bd-err" role="alert" data-cy="remote-lan-error">{{ lanError }}</p>
     </section>
 
     <!-- Sección 2 — Enlazar otro BunDeck (emparejamiento daemon-daemon E2E) -->
@@ -449,6 +525,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, reactive, watch, nextTick } from 'vue'
 import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload, type UiPendingItem } from '../../composables/useRemote'
+import { buildLanInviteUrl } from '../../utils/lanInvite'
+import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
 import { Link2, Globe, ShieldOff, KeyRound } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
@@ -456,7 +534,8 @@ import { useI18nStore } from '../../composables/useI18n'
 const { t } = useI18nStore()
 const { status, devices, pair, events, loading, error, qr, qrDataUrl, qrUnsupported, qrError, refresh, genCode, fetchQr, acceptCode, revoke, savePolicy, rotate, connectWs, disconnectWs,
   uiEnabled, uiUnsupported, uiLoading, uiError, uiCode, uiCodeDataUrl, uiPending, uiSessions, uiJustToken,
-  setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, clearJustToken, onRemoteEvent } = useRemote()
+  setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, clearJustToken, onRemoteEvent,
+  apiBase, lanInvite, lanSessions, lanLoading, lanError, requestLanInvite, revokeLanInvite, loadLanSessions, revokeLanSession } = useRemote()
 
 const approvalDialog = ref<HTMLDialogElement | null>(null)
 const seenApprovalRequests = new Set<string>()
@@ -553,6 +632,8 @@ const onShowQr = async () => {
 // --- UI remota vía relay ---
 const urlCopied = ref(false)
 const tokenCopied = ref(false)
+// Enlace para el móvil con ?kiosk=1 (como el QR): el escaneo aterriza en kiosco.
+const uiShareUrl = computed(() => (uiCode.value?.url ? withKioskParam(uiCode.value.url) : ''))
 let uiPollTimer: number | null = null
 let uiUnsub: (() => void) | null = null
 
@@ -680,8 +761,8 @@ const onRevokeSession = async (prefix: string) => {
 }
 
 const onCopyUiUrl = async () => {
-  if (!uiCode.value?.url) return
-  urlCopied.value = await copyText(uiCode.value.url)
+  if (!uiShareUrl.value) return
+  urlCopied.value = await copyText(uiShareUrl.value)
   if (urlCopied.value) window.setTimeout(() => { urlCopied.value = false }, 2000)
 }
 
@@ -824,9 +905,70 @@ const onRotate = async () => {
   }
 }
 
+// --- Invitación LAN (red local solo-por-invitación) ---
+const lanBase = ref('')
+const lanLinkCopied = ref(false)
+const lanLink = computed(() =>
+  lanInvite.value && lanBase.value ? buildLanInviteUrl(lanBase.value, lanInvite.value.code) : ''
+)
+const lanSecsLeft = computed(() =>
+  lanInvite.value ? Math.max(0, Math.ceil((lanInvite.value.expiresAt - now.value) / 1000)) : 0
+)
+const lanExpired = computed(() => !!lanInvite.value && lanSecsLeft.value <= 0)
+
+/** Base del enlace: el propio origen si ya es LAN; si el panel está en
+ *  localhost, la primera IP LAN del daemon. */
+const resolveLanBase = async (): Promise<string> => {
+  try {
+    const host = window.location.hostname
+    if (host && host !== 'localhost' && host !== '127.0.0.1') return window.location.origin
+    const res = await fetch(`${apiBase()}/network/ips`)
+    if (res.ok) {
+      const data = await res.json()
+      const ips: string[] = Array.isArray(data?.ips) ? data.ips : []
+      if (ips.length > 0) return `${window.location.protocol}//${ips[0]}:${window.location.port}`
+    }
+  } catch { /* fallback abajo */ }
+  return window.location.origin
+}
+
+const onLanGenerate = async () => {
+  lanLinkCopied.value = false
+  try {
+    lanBase.value = await resolveLanBase()
+    await requestLanInvite()
+    now.value = Date.now()
+    startQrTick()
+    await loadLanSessions()
+  } catch {
+    /* error expuesto en lanError */
+  }
+}
+
+const onLanRevoke = async () => {
+  try {
+    await revokeLanInvite()
+    await loadLanSessions()
+  } catch { /* noop */ }
+  lanLinkCopied.value = false
+}
+
+const onLanRevokeSession = async (prefix: string) => {
+  try {
+    await revokeLanSession(prefix)
+  } catch { /* noop */ }
+}
+
+const onCopyLanLink = async () => {
+  if (!lanLink.value) return
+  lanLinkCopied.value = await copyText(lanLink.value)
+  if (lanLinkCopied.value) window.setTimeout(() => { lanLinkCopied.value = false }, 2000)
+}
+
 onMounted(() => {
   mobileLike.value = isMobileLike()
   refresh().catch(() => {})
+  loadLanSessions().catch(() => {})
   connectWs()
   // En vivo: poll 5s + WS topic `remote` (si el composable lo soporta).
   startUiPoll()

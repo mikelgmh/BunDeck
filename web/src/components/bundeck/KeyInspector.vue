@@ -133,15 +133,33 @@
       <!-- ACCIONES -->
       <template v-else-if="tab === 'actions'">
         <h1 class="bd-ttl" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">{{ t('bd.inspectorTitle') }}</h1>
+        <!-- Subtabs por tipo de pulsación: cada tipo tiene su propia lista.
+             `click` equivale al `actions[]` legacy (espejo en lectura y
+             escritura). Las reglas `when: double/triple` conviven: se
+             ejecutan DESPUÉS de la lista del mismo tipo. -->
+        <div class="bd-seg" role="tablist" :aria-label="t('bd.pressKind')" style="margin-bottom: 12px; width: 100%">
+          <button
+            v-for="k in pressKinds"
+            :key="k"
+            role="tab"
+            :data-cy="`bd-press-kind-${k}`"
+            :aria-selected="pressTab === k"
+            :aria-pressed="pressTab === k"
+            @click="pressTab = k"
+          >
+            {{ t(pressKindLabel[k]) }} <span class="bd-cnt">{{ pressCount(k) }}</span>
+          </button>
+        </div>
+        <p class="bd-hint" style="margin: 0 0 12px">{{ t('bd.pressKindHint') }}</p>
         <div
           @dragover.prevent="dragOver = true"
           @dragleave="dragOver = false"
           @drop.prevent="onDrop"
           :style="dragOver ? 'outline: 2px dashed var(--bd-ac); outline-offset: 4px; border-radius: 12px;' : undefined"
         >
-          <ol v-if="buttonConfig.actions?.length" ref="actionsList" class="bd-al">
+          <ol v-if="pressList?.length" ref="actionsList" class="bd-al" :key="`bd-al-${pressTab}`">
             <li
-              v-for="(action, i) in buttonConfig.actions"
+              v-for="(action, i) in pressList"
               :key="action.id ?? i"
               class="bd-ac"
               data-cy="bd-action-row"
@@ -154,9 +172,9 @@
                   :show-wait="execMode === 'seq'"
                   :plugins="plugins"
                   :available-pages="availablePages"
-                  @update-action="(idx, patch) => emit('update-action', idx, patch)"
-                  @update-param="(idx, k, v) => emit('update-action-param', idx, k, v)"
-                  @remove="(idx) => emit('remove-action', idx)"
+                  @update-action="(idx, patch) => updPressAction(idx, patch)"
+                  @update-param="(idx, k, v) => updPressParam(idx, k, v)"
+                  @remove="(idx) => rmPressAction(idx)"
                 >
                   <template #handle>
                     <button
@@ -176,15 +194,15 @@
                       :disabled="i === 0"
                       aria-label="Subir"
                       title="Subir"
-                      @click="emit('move-action', i, -1)"
+                      @click="movePressAction(i, -1)"
                     >
                       <ChevronUp :size="16" stroke-width="1.75" aria-hidden="true" />
                     </button>
                     <button
-                      :disabled="i === (buttonConfig.actions?.length ?? 0) - 1"
+                      :disabled="i === (pressList?.length ?? 0) - 1"
                       aria-label="Bajar"
                       title="Bajar"
-                      @click="emit('move-action', i, 1)"
+                      @click="movePressAction(i, 1)"
                     >
                       <ChevronDown :size="16" stroke-width="1.75" aria-hidden="true" />
                     </button>
@@ -196,7 +214,7 @@
           <p v-else class="bd-hint">{{ t('bd.noActions') }}</p>
         </div>
 
-        <button class="bd-btn bd-wide" data-cy="bd-add-action" @click="emit('open-palette', 'acts')">
+        <button class="bd-btn bd-wide" data-cy="bd-add-action" @click="emit('open-palette', `press:${pressTab}`)">
           <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.addAction') }}<kbd class="bd-kbd">Ctrl K</kbd>
         </button>
         <p class="bd-hint" style="margin-top: 12px">{{ t('bd.rulesHintShort') }}</p>
@@ -225,6 +243,8 @@
             <label class="bd-lb" :for="`bd-rw-${ri}`" style="margin: 0">{{ t('bd.ruleWhen') }}</label>
             <select :id="`bd-rw-${ri}`" class="bd-inp" :value="r.when ?? 'press'" @change="setRule(ri, { when: ($event.target as HTMLSelectElement).value })">
               <option value="press">{{ t('bd.whenPress') }}</option>
+              <option value="double">{{ t('bd.whenDouble') }}</option>
+              <option value="triple">{{ t('bd.whenTriple') }}</option>
               <option value="long">{{ t('bd.whenLong') }}</option>
               <option value="load">{{ t('bd.whenLoad') }}</option>
               <option value="timer">{{ t('bd.whenTimer') }}</option>
@@ -529,6 +549,11 @@ import type { Swapy } from 'swapy'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ActionCard from './ActionCard.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import {
+  normalizePressActions,
+  setActionsForKind,
+  type PressKind,
+} from '../../composables/usePressActions'
 import { ev, fmt, intp, usedVarNames } from '../../composables/useExpressions'
 import { vars, getVar, getEnv, displayTick } from '../../composables/useVars'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
@@ -570,13 +595,53 @@ interface Emits {
   (e: 'open-icon-picker'): void
   (e: 'open-look-icon', index: number): void
   (e: 'clear-image'): void
-  (e: 'action-drop-selected', actionType: string): void
+  (e: 'action-drop-selected', actionType: string, kind?: PressKind): void
 }
 
 const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '' })
 const emit = defineEmits<Emits>()
 
 const tab = ref<'actions' | 'rules' | 'appearance' | 'behavior'>('actions')
+// Subtab por tipo de pulsación dentro de Acciones.
+const pressKinds: PressKind[] = ['click', 'double', 'triple', 'long']
+const pressKindLabel: Record<PressKind, string> = {
+  click: 'bd.pressClick',
+  double: 'bd.pressDouble',
+  triple: 'bd.pressTriple',
+  long: 'bd.pressLong',
+}
+const pressTab = ref<PressKind>('click')
+/** Listas normalizadas (click migra de `actions[]` legacy en lectura). */
+const pressLists = computed(() => normalizePressActions(props.buttonConfig))
+const pressList = computed<any[]>(() =>
+  pressTab.value === 'click' ? asList(props.buttonConfig?.actions) : pressLists.value[pressTab.value]
+)
+const pressCount = (k: PressKind): number =>
+  k === 'click' ? asList(props.buttonConfig?.actions).length : pressLists.value[k].length
+/** Escribe la lista del subtab activo (click espeja a `actions[]`). */
+const setPressList = (list: any[]) => {
+  const next = setActionsForKind(props.buttonConfig, pressTab.value, list)
+  emit('update-field', 'pressActions', next.pressActions)
+  if (pressTab.value === 'click') emit('update-field', 'actions', next.actions)
+}
+const rmPressAction = (i: number) => setPressList(pressList.value.filter((_, j) => j !== i))
+const movePressAction = (i: number, dir: -1 | 1) => {
+  const list = [...pressList.value]
+  const j = i + dir
+  if (j < 0 || j >= list.length) return
+  ;[list[i], list[j]] = [list[j], list[i]]
+  setPressList(list)
+}
+const updPressAction = (i: number, patch: Record<string, any>) => {
+  const list = [...pressList.value]
+  list[i] = { ...list[i], ...patch }
+  setPressList(list)
+}
+const updPressParam = (i: number, k: string, v: any) => {
+  const list = [...pressList.value]
+  list[i] = { ...list[i], parameters: { ...(list[i]?.parameters ?? {}), [k]: v } }
+  setPressList(list)
+}
 // Sin tecla no hay reglas/aspecto que mostrar: volver a acciones evita
 // que las pestaÃ±as parezcan "no clicables" (mismo empty-state en todas).
 watch(
@@ -658,7 +723,7 @@ const initSwapy = async () => {
     swapyInstance = createSwapy(actionsList.value, { animation: 'dynamic' })
     swapyInstance.onSwapStart(() => {
       swapping = true
-      orderBeforeSwap = (props.buttonConfig.actions ?? []).map(actionKey)
+      orderBeforeSwap = pressList.value.map(actionKey)
     })
     swapyInstance.onSwapEnd((event: any) => {
       const map = event.slotItemMap
@@ -676,14 +741,17 @@ const initSwapy = async () => {
           .filter((x: any) => x?.itemId)
           .map((x: any) => String(x.itemId).replace(/^item-/, ''))
       }
-      const actions = props.buttonConfig.actions ?? []
+      const actions = pressList.value
       const reordered = itemIds
         .map((k) => actions.find((a: any, i: number) => actionKey(a, i) === k))
         .filter(Boolean)
       const changed =
         reordered.length === actions.length &&
         itemIds.some((k, index) => k !== orderBeforeSwap[index])
-      if (changed) emit('reorder-actions', reordered)
+      if (changed) {
+        if (pressTab.value === 'click') emit('reorder-actions', reordered)
+        else setPressList(reordered)
+      }
     setTimeout(() => {
       swapping = false
       orderBeforeSwap = []
@@ -706,13 +774,16 @@ const onGlobalDragEnd = () => {
 }
 
 watch(
-  () => props.buttonConfig?.actions?.length ?? 0,
+  () => (tab.value === 'actions' ? pressList.value.length : 0),
   async (len) => {
     if (swapping) return
     if (len > 0 && tab.value === 'actions') await initSwapy()
     else destroySwapy()
   }
 )
+watch(pressTab, async () => {
+  await initSwapy()
+})
 watch(() => props.selectedPosition, async () => {
   await initSwapy()
 })
@@ -865,7 +936,7 @@ const onDrop = (event: DragEvent) => {
     const raw = event.dataTransfer?.getData('application/json')
     if (!raw) return
     const data = JSON.parse(raw)
-    if (data?.type) emit('action-drop-selected', data.type)
+    if (data?.type) emit('action-drop-selected', data.type, pressTab.value)
   } catch {
     /* noop */
   }
@@ -875,9 +946,9 @@ const onDrop = (event: DragEvent) => {
 const onGripKey = (e: KeyboardEvent, i: number) => {
   if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
   const j = i + (e.key === 'ArrowUp' ? -1 : 1)
-  if (j < 0 || j >= (props.buttonConfig.actions?.length ?? 0)) return
+  if (j < 0 || j >= pressList.value.length) return
   e.preventDefault()
-  emit('move-action', i, e.key === 'ArrowUp' ? -1 : 1)
+  movePressAction(i, e.key === 'ArrowUp' ? -1 : 1)
   nextTick(() => {
     document.querySelector<HTMLElement>(`.bd-grip[data-gi="${j}"]`)?.focus()
   })

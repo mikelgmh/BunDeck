@@ -30,6 +30,9 @@ export const handlePages: ApiHandler = async (_req, { url, method, path, db, ser
         name: body.name,
         order_idx: body.order_idx || 0,
         is_folder: body.is_folder || 0,
+        parent_id: body.parent_id ?? null,
+        grid_cols: body.grid_cols ?? null,
+        grid_rows: body.grid_rows ?? null,
         data: body.data || {},
       };
 

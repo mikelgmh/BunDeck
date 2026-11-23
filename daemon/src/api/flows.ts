@@ -10,11 +10,11 @@ import { jsonResponse } from './http-helpers';
 import { resolveNavTargets } from '../sessions';
 import type { ApiHandler } from './types';
 
-const PRESS_TYPES = ['short', 'long', 'double', 'touch-start', 'touch-end'] as const;
+const PRESS_TYPES = ['short', 'long', 'double', 'triple', 'touch-start', 'touch-end'] as const;
 
 function normalizePressType(v: unknown): string {
   if (typeof v === 'string' && (PRESS_TYPES as readonly string[]).includes(v)) return v;
-  if (v === 'press') return 'short';
+  if (v === 'press' || v === 'click') return 'short';
   return 'short';
 }
 

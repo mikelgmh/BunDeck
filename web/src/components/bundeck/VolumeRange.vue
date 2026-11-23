@@ -165,6 +165,8 @@ const orient = ref<'square' | 'h' | 'v'>('square')
 let ro: ResizeObserver | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let setTimer: ReturnType<typeof setTimeout> | null = null
+/** Evita que el poll pise un ajuste en curso (respuestas viejas). */
+let applying = false
 
 const shown = computed(() => {
   const v = pending.value ?? volume.value
@@ -194,6 +196,9 @@ const runAction = async (type: string, parameters: Record<string, any> = {}) => 
 }
 
 const refresh = async () => {
+  // No pisar lo que el usuario está arrastrando ni una escritura en curso:
+  // ya se sincroniza al soltar (flush).
+  if (applying || pending.value !== null) return
   try {
     const r = await runAction('audio-mixer.get-levels', {})
     const lv = r?.result?.master ?? r?.master
@@ -223,26 +228,32 @@ const onSlider = (raw: string) => {
 }
 
 const flush = async () => {
-  if (props.readonly || pending.value === null) return
+  if (props.readonly || pending.value === null || applying) return
   const v = pending.value
   pending.value = null
-  volume.value = v
+  applying = true
   try {
     await applyVolume(v)
+    // Solo se consolida si el sistema lo aplicó: si falla, refresh revierte.
+    volume.value = v
+    muted.value = false
   } catch {
     /* se reintentará en el siguiente poll */
   } finally {
+    applying = false
     void refresh()
   }
 }
 
 const toggleMute = async () => {
-  if (props.readonly) return
+  if (props.readonly || applying) return
   const body: Record<string, any> = { mute: 'toggle' }
   if (props.app) body.app = props.app
+  applying = true
   try {
     await runAction('audio-mixer.app-volume', body)
   } finally {
+    applying = false
     void refresh()
   }
 }

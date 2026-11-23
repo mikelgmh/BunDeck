@@ -27,18 +27,58 @@
         </div>
       </div>
 
-      <!-- Local: misma red -->
+      <!-- Local: misma red (solo con invitación) -->
       <template v-if="tab === 'local'">
+        <p class="bd-hint" style="text-align: center">{{ t('bd.lanInviteTitle') }}</p>
         <div class="bd-qrbox" role="img" :aria-label="t('bd.qrTitle')">
-          <QrcodeVue v-if="!loading" :value="networkUrl" :size="280" level="M" render-as="svg" :margin="2" />
-          <p v-else class="bd-hint">Cargando…</p>
+          <QrcodeVue v-if="!loading && lanDisplayUrl" :value="lanDisplayUrl" :size="280" level="M" render-as="svg" :margin="2" />
+          <p v-else-if="loading" class="bd-hint">Cargando…</p>
+          <p v-else-if="lanInviteError" class="bd-err" role="alert" style="text-align: center">{{ lanInviteError }}</p>
         </div>
-        <p class="bd-hint" style="text-align: center">{{ t('bd.qrHint') }}</p>
-        <div class="bd-r2">
-          <label class="bd-sr" for="bd-qu">{{ t('bd.address') }}</label>
-          <input type="text" id="bd-qu" class="bd-inp" readonly :value="networkUrl" @focus="($event.target as HTMLInputElement).select()" />
-          <button class="bd-btn" @click="copy">{{ t('bd.copy') }}</button>
-        </div>
+        <p class="bd-hint" style="text-align: center">{{ t('bd.lanInviteHint') }}</p>
+        <!-- El enlace lleva LA MISMA invitación que el QR (un único sistema):
+          pegarlo en otro PC sin cámara equivale a escanear. -->
+        <template v-if="lanInvite">
+          <div class="bd-lan-link-row">
+            <label class="bd-sr" for="bd-lan-url">{{ t('bd.lanInviteLinkLabel') }}</label>
+            <input type="text" id="bd-lan-url" data-cy="lan-invite-link" class="bd-inp bd-mono" readonly :value="lanInvite.url" :title="t('bd.lanInviteLinkLabel')" @focus="($event.target as HTMLInputElement).select()" />
+            <button class="bd-btn" data-cy="lan-invite-copy" @click="copyLanLink">{{ linkCopied ? t('bd.lanInviteCopied') : t('bd.lanInviteCopy') }}</button>
+          </div>
+          <p
+            v-if="lanInvite.expiresAt > 0 && !lanInviteExpired"
+            class="bd-remote-expiry"
+            style="text-align: center"
+            data-cy="lan-invite-exp"
+          >
+            {{ t('bd.lanInviteExp', { s: fmtMMSS(lanInviteSecsLeft) }) }}
+          </p>
+          <p v-else-if="lanInviteExpired" class="bd-err" role="alert" style="text-align: center" data-cy="lan-invite-exp">
+            {{ t('bd.lanInviteExpired') }}
+          </p>
+          <div class="bd-r2" style="justify-content: center">
+            <button class="bd-btn bd-pri" :disabled="lanInviteLoading" data-cy="lan-invite-regen" @click="regenLanInvite">
+              {{ t('bd.lanInviteRegen') }}
+            </button>
+            <button class="bd-btn bd-dng" :disabled="lanInviteLoading" data-cy="lan-invite-revoke" @click="revokeLanInvite">
+              {{ t('bd.lanInviteRevoke') }}
+            </button>
+          </div>
+        </template>
+        <template v-else-if="!loading && !lanInviteError">
+          <div class="bd-r2" style="justify-content: center">
+            <button class="bd-btn bd-pri" :disabled="lanInviteLoading" data-cy="lan-invite-generate" @click="regenLanInvite">
+              {{ t('bd.lanInviteGenerate') }}
+            </button>
+          </div>
+        </template>
+        <!-- Compatibilidad: daemon antiguo sin /lan-invite → URL directa clásica. -->
+        <template v-if="lanLegacyUrl">
+          <div class="bd-r2">
+            <label class="bd-sr" for="bd-qu">{{ t('bd.address') }}</label>
+            <input type="text" id="bd-qu" class="bd-inp" readonly :value="lanLegacyUrl" @focus="($event.target as HTMLInputElement).select()" />
+            <button class="bd-btn" @click="copy">{{ t('bd.copy') }}</button>
+          </div>
+        </template>
       </template>
 
       <!-- Internet: QR de acceso remoto (igual que Ajustes → Acceso remoto) -->
@@ -95,49 +135,47 @@
       </template>
     </div>
   </dialog>
-  <Teleport to="body">
-    <dialog
-      ref="approvalDialog"
-      class="bd-dlg bd-remote-approval"
-      aria-labelledby="bd-qr-approval-title"
-      data-cy="qr-internet-approval-dialog"
-      @cancel="dismissApproval"
-    >
-      <template v-if="activeApproval">
-        <div class="bd-remote-approval__body">
-          <span class="bd-remote-approval__mark" aria-hidden="true"><Globe :size="20" /></span>
+  <dialog
+    ref="approvalDialog"
+    class="bd-dlg bd-remote-approval"
+    aria-labelledby="bd-qr-approval-title"
+    data-cy="qr-internet-approval-dialog"
+    @cancel="dismissApproval"
+  >
+    <template v-if="activeApproval">
+      <div class="bd-remote-approval__body">
+        <span class="bd-remote-approval__mark" aria-hidden="true"><Globe :size="20" /></span>
+        <div>
+          <h2 id="bd-qr-approval-title">{{ t('bd.remoteUiApprovalTitle') }}</h2>
+          <p class="bd-sub">{{ t('bd.remoteUiApprovalHint') }}</p>
+        </div>
+        <dl class="bd-remote-approval__details">
           <div>
-            <h2 id="bd-qr-approval-title">{{ t('bd.remoteUiApprovalTitle') }}</h2>
-            <p class="bd-sub">{{ t('bd.remoteUiApprovalHint') }}</p>
+            <dt>{{ t('bd.remoteUiBrowser') }}</dt>
+            <dd class="bd-remote-approval__agent" :title="activeApproval.ua || t('bd.remoteUiEmptyUa')">{{ activeApproval.ua || t('bd.remoteUiEmptyUa') }}</dd>
           </div>
-          <dl class="bd-remote-approval__details">
-            <div>
-              <dt>{{ t('bd.remoteUiBrowser') }}</dt>
-              <dd class="bd-remote-approval__agent" :title="activeApproval.ua || t('bd.remoteUiEmptyUa')">{{ activeApproval.ua || t('bd.remoteUiEmptyUa') }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('bd.remoteUiIp') }}</dt>
-              <dd class="bd-mono">{{ activeApproval.ip }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('bd.remoteUiRequestedAt') }}</dt>
-              <dd class="bd-mono">{{ formatDateTime(activeApproval.createdAt) }}</dd>
-            </div>
-          </dl>
-          <p class="bd-hint">{{ t('bd.remoteUiApprovalWarning') }}</p>
-          <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
-        </div>
-        <div class="bd-remote-approval__actions">
-          <button class="bd-btn" data-cy="qr-internet-approval-deny" :disabled="uiLoading" @click="onApprovalDeny">
-            {{ t('bd.remoteUiDeny') }}
-          </button>
-          <button class="bd-btn bd-pri" data-cy="qr-internet-approval-allow" :disabled="uiLoading" @click="onApprovalAllow">
-            {{ t('bd.remoteUiApprove') }}
-          </button>
-        </div>
-      </template>
-    </dialog>
-  </Teleport>
+          <div>
+            <dt>{{ t('bd.remoteUiIp') }}</dt>
+            <dd class="bd-mono">{{ activeApproval.ip }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('bd.remoteUiRequestedAt') }}</dt>
+            <dd class="bd-mono">{{ formatDateTime(activeApproval.createdAt) }}</dd>
+          </div>
+        </dl>
+        <p class="bd-hint">{{ t('bd.remoteUiApprovalWarning') }}</p>
+        <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
+      </div>
+      <div class="bd-remote-approval__actions">
+        <button class="bd-btn" data-cy="qr-internet-approval-deny" :disabled="uiLoading" @click="onApprovalDeny">
+          {{ t('bd.remoteUiDeny') }}
+        </button>
+        <button class="bd-btn bd-pri" data-cy="qr-internet-approval-allow" :disabled="uiLoading" @click="onApprovalAllow">
+          {{ t('bd.remoteUiApprove') }}
+        </button>
+      </div>
+    </template>
+  </dialog>
 </template>
 
 <script setup lang="ts">
@@ -146,6 +184,8 @@ import { X, Globe } from 'lucide-vue-next'
 import QrcodeVue from 'qrcode.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { getTunnelToken, tunnelApiBase } from '../../composables/useTunnel'
+import { buildLanInviteUrl } from '../../utils/lanInvite'
+import { withKioskParam } from '../../composables/useKiosk'
 import { useRemote } from '../../composables/useRemote'
 
 const { t } = useI18nStore()
@@ -160,6 +200,98 @@ const dialog = ref<HTMLDialogElement | null>(null)
 const tab = ref<'local' | 'internet'>('internet')
 const networkUrl = ref('')
 const loading = ref(true)
+
+// --- Invitación LAN (pestaña Local): el QR y el enlace copiable llevan la
+// MISMA URL con el MISMO ?invite= (un único sistema). ---
+const lanInvite = ref<{ code: string; url: string; expiresAt: number } | null>(null)
+const lanInviteLoading = ref(false)
+const lanInviteError = ref('')
+const lanLegacyUrl = ref('')
+const linkCopied = ref(false)
+
+const lanInviteSecsLeft = computed(() =>
+  lanInvite.value ? Math.max(0, Math.ceil((lanInvite.value.expiresAt - now.value) / 1000)) : 0
+)
+const lanInviteExpired = computed(() => !!lanInvite.value && lanInviteSecsLeft.value <= 0)
+/** Lo que codifica el QR local: invitación si la hay, URL directa legacy si no. */
+const lanDisplayUrl = computed(() => lanInvite.value?.url || lanLegacyUrl.value || networkUrl.value)
+
+const lanApiBase = () => {
+  const tunnelToken = getTunnelToken()
+  if (tunnelToken) return tunnelApiBase(tunnelToken)
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  return `${window.location.protocol}//${hostname}:3001/api/v1`
+}
+
+const requestLanInvite = async () => {
+  lanInviteLoading.value = true
+  lanInviteError.value = ''
+  try {
+    const res = await fetch(`${lanApiBase()}/remote/lan-invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    if (res.status === 404) {
+      // Daemon antiguo sin /lan-invite: URL directa clásica (compat).
+      lanLegacyUrl.value = networkUrl.value
+      lanInvite.value = null
+      return null
+    }
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const j = await res.json()
+        detail = String((j as any)?.error ?? detail)
+      } catch { /* noop */ }
+      // Gestión solo-anfitrión: el panel debe abrirse en localhost.
+      lanInviteError.value = res.status === 403 ? t('bd.lanInviteHostOnly') : detail
+      lanInvite.value = null
+      return null
+    }
+    const data = await res.json()
+    const base = networkUrl.value.split('?')[0]
+    const url = buildLanInviteUrl(base || window.location.origin, String(data.code ?? ''))
+    lanInvite.value = { code: String(data.code ?? ''), url, expiresAt: Number(data.expiresAt ?? 0) }
+    lanLegacyUrl.value = ''
+    now.value = Date.now()
+    return lanInvite.value
+  } catch (e) {
+    lanInviteError.value = e instanceof Error ? e.message : String(e)
+    lanInvite.value = null
+    return null
+  } finally {
+    lanInviteLoading.value = false
+  }
+}
+
+const regenLanInvite = async () => {
+  linkCopied.value = false
+  await requestLanInvite()
+}
+
+const revokeLanInvite = async () => {
+  lanInviteLoading.value = true
+  try {
+    await fetch(`${lanApiBase()}/remote/lan-invite`, { method: 'DELETE' })
+  } catch { /* mejor esfuerzo */ }
+  finally {
+    lanInviteLoading.value = false
+  }
+  lanInvite.value = null
+  linkCopied.value = false
+}
+
+const copyLanLink = async () => {
+  if (!lanInvite.value?.url) return
+  try {
+    await navigator.clipboard.writeText(lanInvite.value.url)
+    linkCopied.value = true
+    window.setTimeout(() => {
+      linkCopied.value = false
+    }, 2000)
+  } catch { /* noop */ }
+}
 
 // --- Internet (acceso remoto) ---
 const {
@@ -275,16 +407,24 @@ const ensureInternet = async () => {
 }
 
 const ensureLocal = async () => {
-  if (networkUrl.value) return
-  loading.value = true
-  try {
-    const localIP = await getLocalIP()
-    networkUrl.value = `${window.location.protocol}//${localIP}:${window.location.port}`
-  } catch {
-    networkUrl.value = window.location.origin
-  } finally {
-    loading.value = false
+  if (!networkUrl.value) {
+    loading.value = true
+    try {
+      const localIP = await getLocalIP()
+      // El escaneo local aterriza ya en kiosco (?kiosk=1).
+      networkUrl.value = withKioskParam(`${window.location.protocol}//${localIP}:${window.location.port}`)
+    } catch {
+      networkUrl.value = withKioskParam(window.location.origin)
+    } finally {
+      loading.value = false
+    }
   }
+  // La invitación LAN (QR + enlace copiable) es de un solo uso y 15 min:
+  // generar al abrir si no hay o caducó.
+  if (!lanInvite.value || lanInviteExpired.value) {
+    await requestLanInvite()
+  }
+  startSecTick()
 }
 
 const switchTab = (v: 'local' | 'internet') => {
@@ -321,7 +461,8 @@ const onRegen = async () => {
 const onCopyUiUrl = async () => {
   if (!uiCode.value?.url) return
   try {
-    await navigator.clipboard.writeText(uiCode.value.url)
+    // El enlace copiado también pide kiosco, como el QR.
+    await navigator.clipboard.writeText(withKioskParam(uiCode.value.url))
     urlCopied.value = true
     window.setTimeout(() => {
       urlCopied.value = false
@@ -350,7 +491,7 @@ const onDeny = async (reqId: string) => {
 }
 
 // Aviso de aprobación a pantalla completa, como en Ajustes → Acceso remoto:
-// modal propia (vía Teleport) en lugar de botones bajo el QR.
+// modal propia (hermana dentro de .bundeck, sin Teleport para no perder estilos) en lugar de botones bajo el QR.
 const approvalDialog = ref<HTMLDialogElement | null>(null)
 const seenApprovalRequests = new Set<string>()
 const approvalQueue = ref<string[]>([])
@@ -434,6 +575,19 @@ watch(uiExpired, (expired) => {
   }, 1000)
 })
 
+// Si la invitación LAN caduca con la modal abierta, regenerarla para
+// que siempre haya un QR/enlace vigente.
+watch(lanInviteExpired, (expired) => {
+  if (!expired) return
+  if (tab.value !== 'local' || !dialog.value?.open) return
+  if (lanInviteLoading.value) return
+  if (regenTimer !== null) return
+  regenTimer = window.setTimeout(() => {
+    regenTimer = null
+    if (tab.value === 'local' && dialog.value?.open && lanInviteExpired.value) void regenLanInvite()
+  }, 1000)
+})
+
 // Por si la aprobación llega por otro cliente (p. ej. Ajustes abierto),
 // el aumento de sesiones cierra la modal.
 watch(
@@ -509,15 +663,7 @@ const show = async () => {
     /* noop */
   }
   if (tab.value === 'local') {
-    loading.value = true
-    try {
-      const localIP = await getLocalIP()
-      networkUrl.value = `${window.location.protocol}//${localIP}:${window.location.port}`
-    } catch {
-      networkUrl.value = window.location.origin
-    } finally {
-      loading.value = false
-    }
+    await ensureLocal()
     // Precarga del estado remoto en segundo plano para que la pestaña
     // Internet abra sin retardo.
     refresh().catch(() => {})

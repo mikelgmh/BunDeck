@@ -1,5 +1,12 @@
 import { ref, computed, nextTick } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
+import {
+  parseLanInviteFromUrl, stripLanInviteFromUrl,
+  getStoredLanSession, setStoredLanSession, clearStoredLanSession,
+  isLanDeniedError, LAN_DENIED_CODE,
+} from '../utils/lanInvite'
+import { ensurePressMirror, pressExtraCount } from './usePressActions'
+import { resolvePageSize } from './useDevices'
 import { getOrCreateDeviceId, isNavigationForMe } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
@@ -154,6 +161,13 @@ export function useStreamDeck() {
   // Clientes conectados y su vista actual (GET /sessions).
   const sessions = ref<any[]>([])
 
+  // Invitación LAN (?invite= del QR/enlace): sesión portadora para el
+  // daemon cuando NO somos localhost. `lanDenied` muestra la pantalla
+  // "Sin permiso" (el anfitrión en localhost nunca la ve: está exento).
+  const lanDenied = ref(false)
+  const lanSession = ref<string | null>(getStoredLanSession())
+  const lanRedeeming = ref(false)
+
   // Flag to prevent infinite loops when receiving page change broadcasts
   const isRemotePageChange = ref(false)
 
@@ -204,7 +218,11 @@ export function useStreamDeck() {
       if (tunnelToken) return tunnelWsUrl(tunnelToken)
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const hostname = window.location.hostname
-      return `${protocol}//${hostname}:${config.value.wsPort}`
+      const base = `${protocol}//${hostname}:${config.value.wsPort}`
+      // Invitado LAN: el upgrade también exige invitación; la cookie viaja
+      // sola, pero el query cubre el caso sin cookies.
+      if (lanSession.value) return `${base}?invite=${encodeURIComponent(lanSession.value)}`
+      return base
     }
     return 'ws://localhost:3003'
   }
@@ -375,9 +393,18 @@ export function useStreamDeck() {
     // Timeout de seguridad: ningún fetch debe colgarse para siempre
     // (dejaría la UI bloqueada en estados de carga). 30 s es generoso.
     const { signal: callerSignal, ...rest } = options
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((rest.headers as Record<string, string>) ?? {}),
+    }
+    // Invitado LAN: el navegador ya envía la cookie `ld_lan`, pero el
+    // header cubre clientes sin cookies y evita depender de ellas.
+    if (!getTunnelToken() && lanSession.value && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${lanSession.value}`
+    }
     const response = await fetch(`${API_BASE.value}${endpoint}`, {
-      headers: { 'Content-Type': 'application/json', ...rest.headers },
       ...rest,
+      headers,
       signal: callerSignal ?? AbortSignal.timeout(30000)
     })
 
@@ -387,13 +414,74 @@ export function useStreamDeck() {
         const txt = await response.text()
         try {
           const j = JSON.parse(txt)
-          detail = String((j as any)?.error ?? txt)
+          detail = String((j as any)?.error ?? (j as any)?.code ?? txt)
+          if ((j as any)?.code === LAN_DENIED_CODE && !getTunnelToken()) lanDenied.value = true
         } catch { detail = txt }
       } catch {}
+      if ((response.status === 401 || response.status === 403) && isLanDeniedError(detail, response.status) && !getTunnelToken()) {
+        lanDenied.value = true
+      }
       throw new Error(detail || `API Error: ${response.status}`)
     }
 
     return response.json()
+  }
+
+  /**
+   * Canjea `?invite=<código>` (QR/enlace) por una sesión LAN y la guarda.
+   * El código es de un solo uso: al recargar ya consumido, el daemon
+   * responde 401 pero la cookie `ld_lan` fijada mantiene el acceso.
+   * Devuelve true si hay sesión utilizable (nueva o previa).
+   */
+  const redeemLanInviteFromUrl = async (search?: string): Promise<boolean> => {
+    if (getTunnelToken()) return true
+    const code = parseLanInviteFromUrl(search)
+    if (code && !lanRedeeming.value) {
+      lanRedeeming.value = true
+      try {
+        const res = await fetch(`${API_BASE.value}/remote/lan-redeem`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+          signal: AbortSignal.timeout(30000),
+        })
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}))
+          const token = String((data as any)?.sessionToken ?? '')
+          if (token) {
+            lanSession.value = token
+            setStoredLanSession(token)
+          }
+          lanDenied.value = false
+        }
+      } catch {
+        /* sin sesión nueva: se sigue con la previa/cookie si la hay */
+      } finally {
+        lanRedeeming.value = false
+        try {
+          const clean = stripLanInviteFromUrl(window.location.href)
+          if (clean !== window.location.href) window.history.replaceState(null, '', clean)
+        } catch {
+          /* sin history: el código ya no se reusa porque el canje lo consumió */
+        }
+      }
+    }
+    if (lanSession.value) return true
+    // Sonda ligera: ¿nos deja pasar (cookie válida / localhost)?
+    try {
+      await apiRequest('/profiles')
+      lanDenied.value = false
+      return true
+    } catch (e) {
+      if (isLanDeniedError(e)) {
+        lanDenied.value = true
+        clearStoredLanSession()
+        lanSession.value = null
+        return false
+      }
+      // Otro error (daemon caído): no es denegación, no mostrar "Sin permiso".
+      return true
+    }
   }
 
   // WebSocket functions
@@ -408,9 +496,15 @@ export function useStreamDeck() {
         console.log('🔌 WebSocket connected, identifying session...', { deviceId: deviceId.value })
         // Sesión propia: el daemon restaura nuestra vista (reconexión) o
         // aplica el startup profile asignado, y responde `session.state`.
+        // Invitado LAN: la invitación viaja en `hello` (o ya en el query).
         ws?.send(JSON.stringify({
           type: 'hello',
-          payload: { deviceId: deviceId.value, kind: 'browser', name: 'Navegador' }
+          payload: {
+            deviceId: deviceId.value,
+            kind: 'browser',
+            name: 'Navegador',
+            ...(lanSession.value ? { invite: lanSession.value } : {}),
+          }
         }))
         ws?.send(JSON.stringify({
           type: 'subscribe',
@@ -439,14 +533,29 @@ export function useStreamDeck() {
 
   const handleWebSocketMessage = async (message: any) => {
     switch (message.type) {
+      case 'error':
+        // Sin invitación el daemon deniega con LAN_INVITE_REQUIRED.
+        if (message?.payload?.code === LAN_DENIED_CODE && !getTunnelToken()) {
+          lanDenied.value = true
+        }
+        break
       case 'connected':
         console.log('🔗 WebSocket connected:', message.payload)
         if (message.payload?.clientId) clientId.value = message.payload.clientId
+        if (message.payload?.lanAuthRequired && !getTunnelToken()) {
+          // El socket queda en cuarentena hasta un `hello` con invitación.
+          console.warn('🔒 WS en cuarentena: falta invitación LAN (?invite= del QR)')
+        }
         break
       case 'session.state':
         console.log('🪪 Session state:', message.payload)
         if (message.payload?.clientId) clientId.value = message.payload.clientId
         if (message.payload?.deviceId) deviceId.value = message.payload.deviceId
+        if (message.payload?.lanSessionToken && typeof message.payload.lanSessionToken === 'string') {
+          lanSession.value = message.payload.lanSessionToken
+          setStoredLanSession(message.payload.lanSessionToken)
+        }
+        if (message.payload?.lanAuthed) lanDenied.value = false
         if ('startupProfileId' in (message.payload ?? {})) {
           sessionStartupProfileId.value = message.payload.startupProfileId
         }
@@ -748,6 +857,29 @@ export function useStreamDeck() {
     await pluginsPromise
   }
 
+  // El tamaño de grid es POR PÁGINA (`pages.grid_cols/grid_rows`; NULL =
+  // hereda del perfil). El perfil solo aporta el default. Centraliza la
+  // regla en resolvePageSize (espejo del daemon), igual que StageBoard.
+  const parseProfileData = (d: any): Record<string, any> => {
+    let cur: any = d
+    if (typeof cur === 'string') {
+      try {
+        cur = JSON.parse(cur)
+      } catch {
+        return {}
+      }
+    }
+    return cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}
+  }
+  const applyGridForPage = (page: any, profileData: any) => {
+    const size = resolvePageSize(
+      { grid_cols: page?.grid_cols ?? null, grid_rows: page?.grid_rows ?? null },
+      profileData
+    )
+    gridCols.value = size.cols
+    gridRows.value = size.rows
+  }
+
   const loadProfile = async () => {
     if (!selectedProfile.value) {
       stopDynamicUpdates()
@@ -786,7 +918,8 @@ export function useStreamDeck() {
         }
       }
 
-      // Restore grid size from profile data
+      // Restore grid size: la página manda (grid_cols/grid_rows propios);
+      // el perfil solo es el default heredado (NULL = heredar).
       if (profileData?.gridCols) {
         gridCols.value = profileData.gridCols
         console.log('📐 Restored gridCols from profile:', gridCols.value)
@@ -825,12 +958,13 @@ export function useStreamDeck() {
 
       if (targetPage) {
         currentPage.value = targetPage
+        applyGridForPage(targetPage, profileData)
         await loadButtons()
 
         // Start dynamic updates for PC Vitals buttons
         await startDynamicUpdates()
       } else {
-        // Create default page
+        // Create default page (tamaño propio en columnas, no en data)
         currentPage.value = await apiRequest('/pages', {
           method: 'POST',
           body: JSON.stringify({
@@ -838,7 +972,9 @@ export function useStreamDeck() {
             name: 'Página Principal',
             order_idx: 0,
             is_folder: 0,
-            data: { gridCols: gridCols.value, gridRows: gridRows.value }
+            grid_cols: gridCols.value,
+            grid_rows: gridRows.value,
+            data: {}
           })
         })
         currentPages.value = [currentPage.value]
@@ -1034,6 +1170,15 @@ export function useStreamDeck() {
     try {
       const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
       currentPages.value = pages
+      // La página actual pudo cambiar de tamaño en otro cliente: refresca
+      // su fila y el grid (selectPage ya aplica el tamaño al reubicar).
+      if (currentPage.value) {
+        const fresh = pages.find((p: PageData) => p.id === currentPage.value?.id)
+        if (fresh) {
+          currentPage.value = fresh
+          applyGridForPage(fresh, parseProfileData(currentProfile.value?.data))
+        }
+      }
       if (currentPage.value && !pages.find((p: PageData) => p.id === currentPage.value?.id)) {
         const remainingPages = pages.filter((p: PageData) => p.is_folder === 0)
         if (remainingPages.length > 0) {
@@ -1130,6 +1275,7 @@ export function useStreamDeck() {
           buttonConfig.value.textBottom?.trim() || buttonConfig.value.emoji?.trim() ||
           buttonConfig.value.icon?.trim() ||
           buttonConfig.value.iconImage?.trim() || (buttonConfig.value.actions?.length ?? 0) > 0 ||
+          pressExtraCount(buttonConfig.value) > 0 ||
           (buttonConfig.value.rules?.length ?? 0) > 0 || (buttonConfig.value.looks?.length ?? 0) > 0
         if (hasContent) {
           await saveButtonConfig()
@@ -1157,7 +1303,8 @@ export function useStreamDeck() {
         confirm: !!button.data?.confirm,
         actions: button.data?.actions ? JSON.parse(JSON.stringify(button.data.actions)) : [],
         rules: button.data?.rules ? JSON.parse(JSON.stringify(button.data.rules)) : [],
-        looks: button.data?.looks ? JSON.parse(JSON.stringify(button.data.looks)) : []
+        looks: button.data?.looks ? JSON.parse(JSON.stringify(button.data.looks)) : [],
+        pressActions: button.data?.pressActions ? JSON.parse(JSON.stringify(button.data.pressActions)) : undefined
       }
 
       // Fix legacy PC Vitals actions that have pluginId: null
@@ -1171,9 +1318,9 @@ export function useStreamDeck() {
         })
       }
 
-      buttonConfig.value = buttonData
+      buttonConfig.value = ensurePressMirror(buttonData)
     } else {
-      buttonConfig.value = {
+      buttonConfig.value = ensurePressMirror({
         label: '',
         textTop: '',
         textBottom: '',
@@ -1190,7 +1337,7 @@ export function useStreamDeck() {
         actions: [],
         rules: [],
         looks: []
-      }
+      })
     }
     // El draft recién cargado es el punto limpio: no hay cambios pendientes.
     snapshotButtonConfig()
@@ -1308,6 +1455,9 @@ export function useStreamDeck() {
     }
     isSaving.value = true
 
+    // Espejo actions[] <-> pressActions.click antes de persistir.
+    buttonConfig.value = ensurePressMirror(buttonConfig.value)
+
     // Editar por ID: el botón seleccionado puede haberse movido de posición
     // (drag & drop) después de seleccionarlo. Resolver por id garantiza que
     // el PUT/DELETE va al botón que se está editando, no al ocupante actual
@@ -1323,6 +1473,7 @@ export function useStreamDeck() {
       buttonConfig.value.icon?.trim() ||
       buttonConfig.value.iconImage?.trim() ||
       (buttonConfig.value.actions?.length ?? 0) > 0 ||
+      pressExtraCount(buttonConfig.value) > 0 ||
       (buttonConfig.value.rules?.length ?? 0) > 0 ||
       (buttonConfig.value.looks?.length ?? 0) > 0
 
@@ -1417,19 +1568,19 @@ export function useStreamDeck() {
     const newAction = createAction(type)
 
     // Crear nuevo objeto para disparar reactividad
-    buttonConfig.value = {
+    buttonConfig.value = ensurePressMirror({
       ...buttonConfig.value,
       actions: [...buttonConfig.value.actions, newAction]
-    }
+    })
     bumpConfigVersion()
   }
 
   const removeAction = (index: number) => {
     // Crear nuevo objeto para disparar reactividad
-    buttonConfig.value = {
+    buttonConfig.value = ensurePressMirror({
       ...buttonConfig.value,
       actions: buttonConfig.value.actions.filter((_, i) => i !== index)
-    }
+    })
     bumpConfigVersion()
   }
 
@@ -1451,10 +1602,10 @@ export function useStreamDeck() {
     const position = button.position
 
     // Crear el config actualizado con las acciones reordenadas
-    const updatedConfig = {
+    const updatedConfig = ensurePressMirror({
       ...buttonConfig.value,
       actions: newOrderedActions
-    }
+    })
 
     try {
       const mutationId = trackMutation(newMutationId())
@@ -1506,10 +1657,10 @@ export function useStreamDeck() {
       }
     }
     // Crear nuevo objeto para disparar reactividad
-    buttonConfig.value = {
+    buttonConfig.value = ensurePressMirror({
       ...buttonConfig.value,
       actions
-    }
+    })
     bumpConfigVersion()
   }
 
@@ -1821,9 +1972,12 @@ export function useStreamDeck() {
     }
 
     currentPage.value = page
+    // El grid lo define la página (hereda del perfil si es NULL): al
+    // cambiar de página se restaura su tamaño, no se conserva el anterior.
+    applyGridForPage(page, parseProfileData(currentProfile.value?.data))
     selectedButton.value = null
     selectedButtonId.value = null
-    buttonConfig.value = {
+    buttonConfig.value = ensurePressMirror({
       label: '',
       textTop: '',
       textBottom: '',
@@ -1840,7 +1994,7 @@ export function useStreamDeck() {
       actions: [],
       rules: [],
       looks: []
-    }
+    })
     snapshotButtonConfig()
 
     // Nueva época: invalida GETs en vuelo de la página anterior
@@ -1893,7 +2047,11 @@ export function useStreamDeck() {
           name: name.trim(),
           order_idx: currentPages.value.length,
           is_folder: isFolder ? 1 : 0,
-          data: { gridCols: gridCols.value, gridRows: gridRows.value }
+          // Tamaño propio en columnas (hereda la vista actual); el daemon
+          // ya no lo lee de `data`.
+          grid_cols: gridCols.value,
+          grid_rows: gridRows.value,
+          data: {}
         })
       })
 
@@ -2002,6 +2160,9 @@ export function useStreamDeck() {
           name: updates.name || page.name,
           order_idx: updates.order_idx || page.order_idx,
           is_folder: updates.is_folder !== undefined ? updates.is_folder : page.is_folder,
+          // Tamaño propio de la página (columnas reales, no `data`).
+          ...(updates.grid_cols !== undefined ? { grid_cols: updates.grid_cols } : {}),
+          ...(updates.grid_rows !== undefined ? { grid_rows: updates.grid_rows } : {}),
           // Normalizar: page.data llega como TEXT serializado del daemon;
           // reenviarlo tal cual sumaba una capa de JSON.stringify por guardado.
           data: updates.data !== undefined ? updates.data : normalizePageData((page as any).data)
@@ -2065,56 +2226,34 @@ export function useStreamDeck() {
       }
     }
 
-    // Save grid size to profile data only if changed (serializado: el cuerpo
-    // del PUT se lee al enviar, no al pulsar, para no pisar clics en vuelo).
-    if (changed && currentProfile.value) {
-      const profileId = currentProfile.value.id
-      const profileName = currentProfile.value.name
+    // Save grid size to the CURRENT PAGE (serializado: el cuerpo del PUT
+    // se lee al enviar, no al pulsar, para no pisar clics en vuelo). El
+    // perfil no se toca: su grid es solo el default heredado.
+    if (changed && currentPage.value) {
+      const pageId = currentPage.value.id
       const run = gridSaveChain.then(async () => {
-        if (currentProfile.value?.id !== profileId) return
+        if (currentPage.value?.id !== pageId) return
         try {
-          // Create a simple data object with grid size
-          const updatedData = {
-            gridCols: gridCols.value,
-            gridRows: gridRows.value
-          }
+          console.log('💾 Saving grid size:', { grid_cols: gridCols.value, grid_rows: gridRows.value })
 
-          console.log('💾 Saving grid size:', updatedData)
-
-          const response = await apiRequest(`/profiles/${profileId}`, {
+          const updatedPage = await apiRequest(`/pages/${pageId}`, {
             method: 'PUT',
             body: JSON.stringify({
-              name: profileName,
-              data: updatedData
+              grid_cols: gridCols.value,
+              grid_rows: gridRows.value
             })
           })
 
-          console.log('✅ Grid size saved successfully:', response)
+          console.log('✅ Grid size saved successfully')
 
-          // Update local profile data reference
-          // Parse current data if it's a string
-          let currentData = currentProfile.value.data
-          if (typeof currentData === 'string') {
-            try {
-              currentData = JSON.parse(currentData)
-            } catch (e) {
-              currentData = {}
-            }
+          // Refleja la fila del daemon (fuente de verdad del tamaño).
+          const index = currentPages.value.findIndex(p => p.id === pageId)
+          if (index > -1) {
+            currentPages.value[index] = updatedPage
           }
-
-          // Update or initialize data object
-          if (!currentData || typeof currentData !== 'object') {
-            currentProfile.value.data = updatedData
-          } else {
-            currentProfile.value.data = {
-              ...currentData,
-              gridCols: gridCols.value,
-              gridRows: gridRows.value
-            }
+          if (currentPage.value?.id === pageId) {
+            currentPage.value = updatedPage
           }
-
-          console.log('📦 Updated local profile data:', currentProfile.value.data)
-
         } catch (error) {
           console.error('❌ Failed to save grid size:', error)
         }
@@ -2533,6 +2672,12 @@ export function useStreamDeck() {
     loadSessions,
     navigateSession,
     setSessionStartupProfile,
+
+    // Invitación LAN (QR/enlace): "Sin permiso" para directos sin invitar
+    lanDenied,
+    lanSession,
+    lanRedeeming,
+    redeemLanInviteFromUrl,
 
     // URLs
     API_BASE,

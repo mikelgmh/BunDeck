@@ -7,15 +7,16 @@
  */
 
 /** Pulsación física/lógica que dispara un flujo de botón. */
-export type PressType = 'short' | 'long' | 'double' | 'touch-start' | 'touch-end';
+export type PressType = 'short' | 'long' | 'double' | 'triple' | 'touch-start' | 'touch-end';
 
 /** Triggers heredados del cliente (KeyInspector/useKeyEngine). */
 export type LegacyTrigger = 'press' | 'long' | 'load' | 'timer' | 'var';
 
 /** Mapea triggers heredados a PressType de botón. Solo press/long son de botón. */
 export function legacyTriggerToPress(trigger: string): PressType | null {
-  if (trigger === 'press') return 'short';
+  if (trigger === 'press' || trigger === 'click') return 'short';
   if (trigger === 'long') return 'long';
+  if (trigger === 'double' || trigger === 'triple') return trigger;
   return null;
 }
 

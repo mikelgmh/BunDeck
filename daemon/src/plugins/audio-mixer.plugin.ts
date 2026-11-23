@@ -48,7 +48,7 @@ export class AudioMixerPlugin {
             permissions: ['system'],
             instructions:
                 'Control de audio del sistema.\n\n' +
-                '· Windows: necesita nircmd.exe en el PATH para volumen por app y micro (listar/salidas usa AudioDeviceCmdlets).\n' +
+                '· Windows: el volumen maestro funciona sin dependencias; el volumen por app necesita nircmd.exe en el PATH (listar/salidas usa AudioDeviceCmdlets).\n' +
                 '· Linux: necesita pactl (PipeWire/PulseAudio).\n' +
                 '· macOS: soporta volumen maestro y micro con osascript; el volumen por app y el cambio de salida no están soportados por el sistema.',
             actions: [
@@ -183,27 +183,107 @@ export class AudioMixerPlugin {
 
     private async winAppVolume(app: string | undefined, volume: number | undefined, mute: string | undefined): Promise<any> {
         const target = app && app.length > 0 ? app : null
+        // Volumen por app en Windows sigue necesitando nircmd (sin API del sistema).
+        if (target) {
+            try {
+                if (mute !== undefined) {
+                    const state = mute === 'true' ? '1' : mute === 'false' ? '0' : '2'
+                    const r = await this.run(['nircmd.exe', 'muteappvolume', target, state])
+                    this.checkOk(r, 'ajustar el silencio')
+                }
+                if (volume !== undefined) {
+                    const r = await this.run(['nircmd.exe', 'setappvolume', target, String(volume / 100)])
+                    this.checkOk(r, 'ajustar el volumen')
+                }
+                return { platform: 'windows', method: 'nircmd', app: target, volume: volume ?? null, mute: mute ?? null, applied: true }
+            } catch (error) {
+                if (isCommandNotFound(error) || (error as any)?.code === 'COMMAND_NOT_FOUND') throw missingToolError('nircmd.exe', NIRCMD_HINT)
+                throw error
+            }
+        }
+        // Volumen maestro: Core Audio (MMDeviceEnumerator) vía PowerShell, sin dependencias.
         try {
-            if (mute !== undefined) {
-                const state = mute === 'true' ? '1' : mute === 'false' ? '0' : '2'
-                const args = target
-                    ? ['nircmd.exe', 'muteappvolume', target, state]
-                    : ['nircmd.exe', 'mutesysvolume', state]
-                const r = await this.run(args)
-                this.checkOk(r, 'ajustar el silencio')
+            if (mute === 'toggle') {
+                const cur = await this.winMasterGet()
+                await this.winMasterSet(undefined, !cur.muted)
+            } else if (mute !== undefined) {
+                await this.winMasterSet(volume, mute === 'true')
+            } else {
+                // Solo volumen: desilencia (mover el slider reactiva el sonido).
+                await this.winMasterSet(volume, volume !== undefined ? false : undefined)
             }
-            if (volume !== undefined) {
-                const args = target
-                    ? ['nircmd.exe', 'setappvolume', target, String(volume / 100)]
-                    : ['nircmd.exe', 'setsysvolume', String(Math.round(volume * 655.35))]
-                const r = await this.run(args)
-                this.checkOk(r, 'ajustar el volumen')
-            }
-            return { platform: 'windows', method: 'nircmd', app: target ?? '(maestro)', volume: volume ?? null, mute: mute ?? null, applied: true }
+            const after = await this.winMasterGet()
+            return { platform: 'windows', method: 'coreaudio', app: '(maestro)', volume: after.master, mute: mute ?? null, muted: after.muted, applied: true }
         } catch (error) {
-            if (isCommandNotFound(error) || (error as any)?.code === 'COMMAND_NOT_FOUND') throw missingToolError('nircmd.exe', NIRCMD_HINT)
+            if (isCommandNotFound(error) || (error as any)?.code === 'COMMAND_NOT_FOUND') {
+                throw new Error(`No se encontró PowerShell en este equipo. Detalle: ${this.msg(error)}`)
+            }
             throw error
         }
+    }
+
+    /** C# inline para Core Audio: maestro + mute del endpoint predeterminado. */
+    private static readonly WIN_COREAUDIO_CS = [
+        'using System;',
+        'using System.Runtime.InteropServices;',
+        '[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+        'interface IAudioEndpointVolume {',
+        ' int _0(); int _1(); int _2(); int _3();',
+        ' int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);',
+        ' int _4();',
+        ' int GetMasterVolumeLevelScalar(out float pfLevel);',
+        ' int _5(); int _6(); int _7(); int _8();',
+        ' int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);',
+        ' int GetMute([MarshalAs(UnmanagedType.Bool)] out bool pbMute);',
+        '}',
+        '[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+        'interface IMMDevice {',
+        ' int Activate(ref Guid id, int clsCtx, int activationParams, out IAudioEndpointVolume aev);',
+        '}',
+        '[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }',
+        '[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+        'interface IMMDeviceEnumerator {',
+        ' int _0();',
+        ' int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);',
+        '}',
+        'public class BdAudio {',
+        ' static IAudioEndpointVolume Vol() {',
+        '  var e = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());',
+        '  IMMDevice dev; Marshal.ThrowExceptionForHR(e.GetDefaultAudioEndpoint(0, 1, out dev));',
+        '  Guid iid = typeof(IAudioEndpointVolume).GUID;',
+        '  IAudioEndpointVolume v; Marshal.ThrowExceptionForHR(dev.Activate(ref iid, 23, 0, out v));',
+        '  return v;',
+        ' }',
+        ' public static float Get() { float l; Marshal.ThrowExceptionForHR(Vol().GetMasterVolumeLevelScalar(out l)); return l * 100f; }',
+        ' public static void Set(float pct) { Marshal.ThrowExceptionForHR(Vol().SetMasterVolumeLevelScalar(pct / 100f, System.Guid.Empty)); }',
+        ' public static bool GetMute() { bool m; Marshal.ThrowExceptionForHR(Vol().GetMute(out m)); return m; }',
+        ' public static void SetMute(bool m) { Marshal.ThrowExceptionForHR(Vol().SetMute(m, System.Guid.Empty)); }',
+        '}'
+    ].join(' ')
+
+    private winPsPrelude(): string {
+        return `Add-Type -TypeDefinition '${AudioMixerPlugin.WIN_COREAUDIO_CS}'`
+    }
+
+    private async winMasterGet(): Promise<{ master: number; muted: boolean }> {
+        const script = `${this.winPsPrelude()}; [int]([BdAudio]::Get()); if ([BdAudio]::GetMute()) { 'mute:1' } else { 'mute:0' }`
+        const r = await this.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: 30000 })
+        this.checkOk(r, 'leer el volumen maestro')
+        const lines = r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+        const master = Number(lines[0])
+        if (!Number.isFinite(master)) {
+            throw new Error(`No se pudo leer el volumen maestro (salida inesperada: ${r.stdout.trim().slice(0, 120)}).`)
+        }
+        const muted = lines.some((l) => /mute:1/i.test(l))
+        return { master: Math.min(100, Math.max(0, Math.round(master))), muted }
+    }
+
+    private async winMasterSet(volume: number | undefined, mute: boolean | undefined): Promise<void> {
+        const steps: string[] = [this.winPsPrelude()]
+        if (volume !== undefined) steps.push(`[BdAudio]::Set(${Math.round(volume)})`)
+        if (mute !== undefined) steps.push(mute ? '[BdAudio]::SetMute($true)' : '[BdAudio]::SetMute($false)')
+        const r = await this.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', steps.join('; ')], { timeoutMs: 30000 })
+        this.checkOk(r, 'ajustar el volumen')
     }
 
     private async linuxAppVolume(app: string | undefined, volume: number | undefined, mute: string | undefined): Promise<any> {
@@ -443,23 +523,14 @@ export class AudioMixerPlugin {
             }
         }
         if (process.platform === 'win32') {
-            // Sin dependencias: winmm.dll waveOutGetVolume devuelve el nivel
-            // maestro (0-0xFFFF por canal). El silencio no se expone por
-            // winmm: se devuelve muted:false y el frontend lo gestiona.
+            // Core Audio (MMDeviceEnumerator) vía PowerShell: volumen real del
+            // endpoint predeterminado, sin dependencias. winmm está obsoleto y
+            // suele devolver 100 aunque el maestro esté a otro nivel.
             try {
-                const script = [
-                    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices;",
-                    "public class BdVol { [DllImport(\"winmm.dll\")] public static extern int waveOutGetVolume(IntPtr hwo, out uint dwVolume); }';",
-                    '$v = 0; [BdVol]::waveOutGetVolume([IntPtr]::Zero, [ref]$v) | Out-Null;',
-                    '[int]((($v -band 0xFFFF) / 65535) * 100)'
-                ].join(' ')
-                const r = await this.run(['powershell.exe', '-NoProfile', '-Command', script])
-                const master = Number(r.stdout.trim().split(/\\s+/).pop())
-                if (r.exitCode === 0 && Number.isFinite(master)) {
-                    return {
-                        platform: 'windows', master: Math.min(100, Math.max(0, Math.round(master))),
-                        muted: false, simulated: false, source: 'winmm'
-                    }
+                const cur = await this.winMasterGet()
+                return {
+                    platform: 'windows', master: cur.master,
+                    muted: cur.muted, simulated: false, source: 'coreaudio'
                 }
             } catch (error) {
                 this.context.log('warn', `Mezclador: no se pudo leer el volumen maestro: ${this.msg(error)}`)

@@ -79,6 +79,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
+import { simpleIcon } from '../../composables/useSimpleIcons'
 import type { DeckWidget } from '../../composables/useDeckLayouts'
 import { getVar, setVarValue } from '../../composables/useVars'
 import { useI18nStore } from '../../composables/useI18n'
@@ -104,7 +105,7 @@ const emit = defineEmits<Emits>()
 const icons = LucideIcons as Record<string, any>
 const iconComp = computed(() => {
   const n = props.widget.icon
-  return typeof n === 'string' && n ? icons[n] ?? null : null
+  return typeof n === 'string' && n ? icons[n] ?? simpleIcon(n) ?? null : null
 })
 
 const ariaLabel = computed(() => {

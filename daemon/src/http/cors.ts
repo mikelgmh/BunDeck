@@ -34,7 +34,7 @@ export function isLocalOrigin(origin: string | null): boolean {
 export function buildCorsHeaders(origin: string | null): Record<string, string> {
   const base = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Lan-Invite',
   };
   if (origin && isLocalOrigin(origin)) {
     return {

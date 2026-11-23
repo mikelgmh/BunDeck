@@ -1,6 +1,6 @@
 <template>
-  <section class="bd-stage">
-    <div class="bd-tool">
+  <section class="bd-stage" :class="{ 'bd-kiosk': kiosk }" :data-cy="kiosk ? 'bd-kiosk-grid' : undefined">
+    <div v-if="!kiosk" class="bd-tool">
       <div class="bd-tgrp">
         <div class="bd-seg" role="group" :aria-label="t('bd.mode')">
           <button data-md="edit" :aria-pressed="mode === 'edit'" @click="$emit('mode-change', 'edit')">
@@ -23,15 +23,15 @@
 
         <div class="bd-step" v-if="mode === 'edit'" data-cy="bd-grid-rows">
           <span>{{ t('bd.rows') }}</span>
-          <button data-d="r-1" :aria-label="t('bd.decreaseRow')" :disabled="gridRows <= 2" @click="$emit('grid-size-change', 0, -1)">−</button>
+          <button data-d="r-1" :aria-label="t('bd.decreaseRow')" :disabled="!canDecRow" :title="decRowBlocked ? t('bd.gridShrinkBlocked') : undefined" @click="$emit('grid-size-change', 0, -1)">−</button>
           <output>{{ gridRows }}</output>
-          <button data-d="r1" :aria-label="t('bd.increaseRow')" :disabled="gridRows >= 6" @click="$emit('grid-size-change', 0, 1)">+</button>
+          <button data-d="r1" :aria-label="t('bd.increaseRow')" :disabled="gridRows >= GRID_ROWS_MAX" @click="$emit('grid-size-change', 0, 1)">+</button>
         </div>
         <div class="bd-step" v-if="mode === 'edit'" data-cy="bd-grid-cols">
           <span>{{ t('bd.columns') }}</span>
-          <button data-d="c-1" :aria-label="t('bd.decreaseCol')" :disabled="gridCols <= 3" @click="$emit('grid-size-change', -1, 0)">−</button>
+          <button data-d="c-1" :aria-label="t('bd.decreaseCol')" :disabled="!canDecCol" :title="decColBlocked ? t('bd.gridShrinkBlocked') : undefined" @click="$emit('grid-size-change', -1, 0)">−</button>
           <output>{{ gridCols }}</output>
-          <button data-d="c1" :aria-label="t('bd.increaseCol')" :disabled="gridCols >= 8" @click="$emit('grid-size-change', 1, 0)">+</button>
+          <button data-d="c1" :aria-label="t('bd.increaseCol')" :disabled="gridCols >= GRID_COLS_MAX" @click="$emit('grid-size-change', 1, 0)">+</button>
         </div>
         <button
           v-if="isGsMode && mode === 'edit'"
@@ -125,12 +125,12 @@
               :tabindex="mode === 'use' && !getButton(index - 1) ? -1 : undefined"
               :style="keyColorVar(index - 1)"
               data-cy="bd-key"
-              @click="onKeyClick(index - 1)"
+              @click="onKeyClick($event, index - 1)"
               @dblclick="mode === 'edit' ? $emit('button-execute', index - 1) : null"
               @pointerdown="onPressStart($event, index - 1)"
-              @pointerup="onPressEnd(index - 1)"
-              @pointercancel="onPressCancel"
-              @pointerleave="onPressCancel"
+              @pointerup="onPressUp($event, index - 1)"
+              @pointercancel="onPressCancel($event)"
+              @pointerleave="onPressCancel($event)"
               @contextmenu.prevent.stop="showContextMenu($event, index - 1)"
               @dragover.prevent="onDragOver($event, index - 1)"
               @dragleave="onDragLeave($event)"
@@ -165,7 +165,7 @@
                   {{ actionCount(index - 1) }}
                 </span>
               </template>
-              <Plus v-else-if="mode === 'edit'" :size="16" stroke-width="1.75" aria-hidden="true" />
+              <Plus v-else-if="mode === 'edit' && !kiosk" :size="16" stroke-width="1.75" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -230,12 +230,12 @@
                   :style="keyColorVar(b.position)"
                   :data-position="b.position"
                   data-cy="bd-key"
-                  @click="onKeyClick(b.position)"
+                  @click="onKeyClick($event, b.position)"
                   @dblclick="mode === 'edit' ? $emit('button-execute', b.position) : null"
                   @pointerdown="onPressStart($event, b.position)"
-                  @pointerup="onPressEnd(b.position)"
-                  @pointercancel="onPressCancel"
-                  @pointerleave="onPressCancel"
+                  @pointerup="onPressUp($event, b.position)"
+                  @pointercancel="onPressCancel($event)"
+                  @pointerleave="onPressCancel($event)"
                   @contextmenu.prevent.stop="showContextMenu($event, b.position)"
                   @dragover.prevent="onDragOver($event, b.position)"
                   @dragleave="onDragLeave($event)"
@@ -264,7 +264,7 @@
                     <small v-else-if="labelMode !== 'n' && showTitleOf(b.position) && keyLabel(b.position)">{{ keyLabel(b.position) }}</small>
                     <span v-if="actionCount(b.position) > 1" class="bd-bdg">{{ actionCount(b.position) }}</span>
                   </template>
-                  <Plus v-else-if="mode === 'edit'" :size="16" stroke-width="1.75" aria-hidden="true" />
+                  <Plus v-else-if="mode === 'edit' && !kiosk" :size="16" stroke-width="1.75" aria-hidden="true" />
                 </button>
               </div>
               <span
@@ -282,7 +282,7 @@
       </div>
 
       </template>
-      <div class="bd-pages">
+      <div v-if="!kiosk" class="bd-pages">
         <template v-for="page in currentPages" :key="page.id">
           <input
             v-if="renamingPageId === page.id"
@@ -371,8 +371,18 @@ import {
 import VolumeRange from './VolumeRange.vue'
 import { findControlAction } from '../../composables/useActionPresentation'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
+import {
+  gridResizeFits,
+  GRID_COLS_MAX,
+  GRID_COLS_MIN,
+  GRID_ROWS_MAX,
+  GRID_ROWS_MIN,
+} from '../../composables/useDeckLayouts'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { bdAnimations, bdLongPressMs } from '../../composables/useBunDeckUi'
+import { createPressFx, playPressFx, clearHoldFx } from '../../composables/usePressFx'
+import { hasLongContent } from '../../composables/usePressActions'
 import { checkPageCompatibility, parseLayoutMode, resolvePageSize, resolveDeckSize, type LogicalDevice, type CompatView } from '../../composables/useDevices'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 import type { ButtonEntity, PageData } from '../../types/streamdeck'
@@ -396,6 +406,8 @@ interface Props {
   /** Datos con apariencia condicional ya aplicada (opcional). */
   displayData?: (position: number) => any
   mode: 'edit' | 'use'
+  /** Modo kiosco: solo grid, sin toolbar ni navegación de páginas ni menús. */
+  kiosk?: boolean
   labelMode: 'a' | 'h' | 'n'
   currentPages: PageData[]
   currentPage: PageData | null
@@ -411,12 +423,16 @@ interface Props {
   previewDeviceId?: string | null
   /** `profiles.data` del perfil actual (herencia del tamaño de página). */
   profileData?: any
+  /** Umbral de hold en ms (por defecto el ajuste `bdLongPressMs`). */
+  longPressMs?: number | null
 }
 
 interface Emits {
   (e: 'button-click', position: number): void
   (e: 'button-execute', position: number): void
   (e: 'button-long-press', position: number): void
+  /** Toque corto en modo uso (el engine decide click/double/triple). */
+  (e: 'button-tap', position: number): void
   (e: 'button-delete', position: number): void
   (e: 'button-export', position: number): void
   (e: 'button-import', position: number): void
@@ -443,6 +459,7 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   keySize: 76,
+  kiosk: false,
   devices: () => [],
   assignments: () => ({}),
   previewDeviceId: null,
@@ -582,6 +599,9 @@ const destroyGs = () => {
     clearTimeout(gsChangeTimer)
     gsChangeTimer = null
   }
+  clearHoldTimer()
+  fx.cancel()
+  destroyFxNodes()
   try { gs?.destroy(false) } catch { /* noop */ }
   gs = null
   gsReady.value = false
@@ -619,6 +639,11 @@ const initGs = async (retries = 2) => {
         float: true,
         disableOneColumnMode: true,
         minRow: Math.max(1, props.gridRows),
+        // El arrastre no extiende la placa más allá del contenido existente:
+        // sin maxRow, soltar abajo crecía las filas con el stepper sin tocar.
+        // (column ya acota el ancho; las columnas heredadas fuera de rango
+        // las reubica el propio GridStack al adoptar.)
+        maxRow: gsMaxRow.value,
         staticGrid: props.mode !== 'edit',
         resizable: { handles: 'se' },
         // GridStack ignora mousedown en <button>; el asa hermana permite mover
@@ -708,7 +733,7 @@ watch(() => props.gridCols, (cols) => {
 watch(() => props.gridRows, () => {
   if (!isGsMode.value || !gs) return
   try {
-    if (typeof gs.updateOptions === 'function') gs.updateOptions({ minRow: Math.max(1, props.gridRows) } as any)
+    if (typeof gs.updateOptions === 'function') gs.updateOptions({ minRow: Math.max(1, props.gridRows), maxRow: gsMaxRow.value } as any)
   } catch { /* noop */ }
 })
 watch(() => props.keySize, () => {
@@ -723,6 +748,11 @@ watch(() => props.keySize, () => {
 // a ancho completo y tapaba los "+" de abajo.
 watch(gsItems, () => {
   if (!isGsMode.value || !gs) return
+  // El tope de arrastre sigue al contenido (ver gsMaxRow): sin esto, tras
+  // mover un widget el límite vivo quedaba obsoleto.
+  try {
+    if (typeof gs.updateOptions === 'function') gs.updateOptions({ maxRow: gsMaxRow.value } as any)
+  } catch { /* noop */ }
   void nextTick().then(adoptGsWidgets)
 })
 // Swapy mueve nodos DOM imperativamente y el patch de Vue sobre esos nodos
@@ -770,6 +800,44 @@ const countUsed = computed(() => {
 })
 
 const getLucideIcon = (iconName: string) => dynamicIcon(iconName)
+
+/** ¿Cabe el contenido actual en cols×rows? (clásico: por position; libre:
+ *  por geometría x/y/w/h, derivando de position si falta, como el render). */
+const contentFits = (cols: number, rows: number): boolean => {
+  const positions: number[] = []
+  if ((props.layoutMode ?? 'classic') === 'classic') {
+    const total = Math.max(0, props.gridCols * props.gridRows)
+    for (let i = 0; i < total; i++) {
+      if (props.getButton(i)) positions.push(i)
+    }
+  }
+  return gridResizeFits(
+    (props.layoutMode ?? 'classic') === 'gridstack' ? 'gridstack' : 'classic',
+    positions,
+    (props.allButtons ?? []) as any[],
+    cols,
+    rows,
+  )
+}
+
+/** Reducir filas/columnas no puede dejar teclas fuera del grid: en libre el
+ *  stepper antes no hacía nada visible (GridStack manda sobre los botones)
+ *  y la config quedaba inconsistente con la placa. */
+const canDecRow = computed(() => props.gridRows > GRID_ROWS_MIN && contentFits(props.gridCols, props.gridRows - 1))
+const canDecCol = computed(() => props.gridCols > GRID_COLS_MIN && contentFits(props.gridCols - 1, props.gridRows))
+/** Motivo del bloqueo (para el tooltip): mínimo alcanzado vs contenido. */
+const decRowBlocked = computed(() => props.gridRows > GRID_ROWS_MIN && !canDecRow.value)
+const decColBlocked = computed(() => props.gridCols > GRID_COLS_MIN && !canDecCol.value)
+
+/** Tope de filas para GridStack: arrastrar no puede extender la placa más
+ *  allá de lo configurado… salvo el desbordamiento ya existente (no se
+ *  recoloca nada a la fuerza; el usuario lo recoge creciendo el grid o
+ *  subiendo widgets, y ya no puede encoger debajo del contenido). */
+const gsMaxRow = computed(() => {
+  let bottom = Math.max(1, props.gridRows)
+  for (const item of gsItems.value) bottom = Math.max(bottom, item.y + item.h)
+  return bottom
+})
 
 /**
  * Resolver la apariencia es relativamente caro (entorno + expresiones + texto).
@@ -868,53 +936,121 @@ const keyAriaLabel = (position: number) => {
   return keyLabel(position) || 'Tecla'
 }
 
-const onKeyClick = (position: number) => {
-  if (longFired) {
-    longFired = false
+const onKeyClick = (event: MouseEvent | KeyboardEvent, position: number) => {
+  if (props.mode !== 'use') {
+    emit('button-click', position)
     return
   }
-  if (props.mode === 'use') {
-    emit('button-execute', position)
+  // Modo uso: el tap táctil/ratón ya salió por pointerup; el clic posterior
+  // se ignora. Solo el teclado (Enter/Espacio, sin pointer previo) llega aquí.
+  if (suppressClickPos === position) {
+    suppressClickPos = null
     return
   }
-  emit('button-click', position)
+  if (lastPointer.pos === position && Date.now() - lastPointer.t < 700) return
+  if (isVolume(position) || !props.getButton(position)) return
+  const el = event.currentTarget as HTMLElement | null
+  playPressFx(el, 'click', { animations: animOn() })
+  emit('button-tap', position)
 }
 
-// Pulsación larga (solo modo uso y si la tecla tiene reglas «long»).
-// 600 ms mantenida → emite button-long-press y el clic posterior se consume.
-let longTimer: ReturnType<typeof setTimeout> | null = null
-let longFired = false
-const LONG_MS = 600
-const hasLongRules = (position: number) =>
-  !!bdata(position)?.rules?.some((r: any) => r?.on && r?.when === 'long')
+// Pulsación: FX + hold configurable + multi-tap (Fase A+B).
+// - pointerdown arma el hold solo si la tecla tiene contenido `long`
+//   (lista o regla); al cumplirse emite button-long-press y el clic/tap
+//   posterior se consume (suppressClickPos + holdFired).
+// - pointerup cuenta el tap (ventana 340 ms, máx 3, por tecla) para el FX
+//   inmediato y emite button-tap; el ENGINE decide click/double/triple.
+// - Sin contenido long no hay timer: tap directo, como antes.
+const fx = createPressFx()
+const animOn = () => bdAnimations.value !== false
+const effLongMs = () =>
+  Number.isFinite(+(props.longPressMs ?? NaN))
+    ? Math.min(1200, Math.max(200, Math.round(+(props.longPressMs as number))))
+    : (bdLongPressMs.value ?? 500)
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let holdFired = false
+let holdPos = -1
+let downPos = -1
+let suppressClickPos: number | null = null
+const lastPointer = { pos: -1, t: 0 }
+const clearHoldTimer = () => {
+  if (holdTimer) {
+    clearTimeout(holdTimer)
+    holdTimer = null
+  }
+}
 const onPressStart = (event: PointerEvent, position: number) => {
   if (props.mode !== 'use' || (event.button !== undefined && event.button !== 0)) return
-  if (!hasLongRules(position)) return
-  longFired = false
-  if (longTimer) clearTimeout(longTimer)
-  longTimer = setTimeout(() => {
-    longTimer = null
-    longFired = true
+  lastPointer.pos = position
+  lastPointer.t = Date.now()
+  if (suppressClickPos !== null && suppressClickPos !== position) suppressClickPos = null
+  if (isVolume(position) || !props.getButton(position)) return
+  downPos = position
+  if (!hasLongContent(bdata(position))) return
+  const el = event.currentTarget as HTMLElement | null
+  fx.onPressDown(el, position, effLongMs(), animOn())
+  holdFired = false
+  holdPos = position
+  clearHoldTimer()
+  const pt = { x: event.clientX, y: event.clientY }
+  holdTimer = setTimeout(() => {
+    holdTimer = null
+    holdFired = true
+    suppressClickPos = position
+    if (el) {
+      clearHoldFx(el)
+      playPressFx(el, 'long', { animations: animOn(), point: pt })
+    }
     emit('button-long-press', position)
-  }, LONG_MS)
+  }, effLongMs())
 }
-const onPressEnd = (_position: number) => {
-  if (longTimer) {
-    clearTimeout(longTimer)
-    longTimer = null
+const onPressUp = (event: PointerEvent, position: number) => {
+  clearHoldTimer()
+  const el = event.currentTarget as HTMLElement | null
+  if (el) clearHoldFx(el)
+  if (props.mode !== 'use') {
+    downPos = -1
+    return
   }
+  if (downPos !== position) {
+    // Se soltó fuera de la tecla (ya pasó por pointerleave/cancel).
+    holdFired = false
+    return
+  }
+  downPos = -1
+  if (holdFired && holdPos === position) {
+    holdFired = false
+    return // el long consume el tap posterior
+  }
+  holdFired = false
+  if (isVolume(position) || !props.getButton(position)) return
+  // Solo cuenta si hubo pointerdown previo (evita doble tap con el click).
+  lastPointer.pos = position
+  lastPointer.t = Date.now()
+  const kind = fx.onPressUp(position)
+  playPressFx(el, kind, {
+    animations: animOn(),
+    point: { x: event.clientX, y: event.clientY },
+  })
+  emit('button-tap', position)
 }
-const onPressCancel = () => {
-  if (longTimer) {
-    clearTimeout(longTimer)
-    longTimer = null
-  }
-  longFired = false
+const onPressCancel = (event?: Event) => {
+  clearHoldTimer()
+  const el = (event?.currentTarget ?? null) as HTMLElement | null
+  if (el) clearHoldFx(el)
+  holdFired = false
+  downPos = -1
+  fx.cancel()
 }
 
 const actionCount = (position: number) => {
   const d = bdata(position)
-  return (d?.actions?.length ?? 0) + (d?.rules?.length ?? 0)
+  const pa = (d?.pressActions ?? {}) as Record<string, unknown>
+  let extra = 0
+  for (const k of ['click', 'double', 'triple', 'long']) {
+    if (Array.isArray(pa[k])) extra += (pa[k] as unknown[]).length
+  }
+  return (d?.actions?.length ?? 0) + extra + (d?.rules?.length ?? 0)
 }
 
 /** Control interactivo de la tecla (hoy: volumen). La presencia de la ACCIÓN
@@ -1027,8 +1163,15 @@ const onKeyNav = (event: KeyboardEvent) => {
 }
 
 // Menú contextual (clic derecho) — también en modo Usar: exportar/importar.
+// En kiosco no hay menú: solo ejecución directa.
 const contextMenu = ref({ show: false, x: 0, y: 0, position: -1 })
 const contextMenuItems = computed(() => {
+  if (props.kiosk) {
+    const button = props.getButton(contextMenu.value.position)
+    return button
+      ? [{ id: 'execute', label: t('bd.pressKey'), icon: Play, danger: false }]
+      : []
+  }
   const button = props.getButton(contextMenu.value.position)
   // t('bd.*') no se puede usar fuera del setup traducido aquí, pero el
   // componente ya importa `t` de useI18nStore: lo usamos para etiquetas.
@@ -1050,6 +1193,8 @@ const contextMenuItems = computed(() => {
 })
 const showContextMenu = (event: MouseEvent, position: number) => {
   event.preventDefault()
+  // En kiosco no hay menús: el clic derecho no hace nada.
+  if (props.kiosk) return
   contextMenu.value = { show: true, x: event.clientX, y: event.clientY, position }
 }
 const hideContextMenu = () => {
@@ -1143,8 +1288,18 @@ onMounted(() => {
   document.addEventListener('click', onDocClick)
   window.addEventListener('libredeck:swapy-resync', resyncSwapy)
 })
+const destroyFxNodes = () => {
+  try {
+    for (const root of [container.value, gsContainer.value]) {
+      root?.querySelectorAll('.bd-kfx').forEach((n) => n.remove())
+    }
+  } catch { /* noop */ }
+}
 onUnmounted(() => {
   swapy.value?.destroy()
+  clearHoldTimer()
+  fx.destroy()
+  destroyFxNodes()
   destroyGs()
   document.removeEventListener('keydown', onEsc)
   document.removeEventListener('click', onDocClick)

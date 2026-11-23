@@ -7,6 +7,14 @@
  */
 import { setupAPIRoutes } from '../api/routes';
 import { buildCorsHeaders, isPreflight, preflightResponse, withCors } from './cors';
+import {
+  evaluateLanAccess,
+  lanDeniedResponse,
+  markLanContext,
+  withLanCookie,
+  getPeerIp,
+} from './lan-guard';
+import { DatabaseService } from '../db';
 import { findWebDistFile, findWebDistIndex, getContentType, serveDataAsset } from './static';
 import { getVersion } from '../version';
 import { API_PORT as PORT, WS_PORT, FRONTEND_PORT } from '../config';
@@ -21,8 +29,8 @@ export interface DaemonHttpDeps {
 }
 
 /** Construye el `fetch` que usa `Bun.serve` para la API. Reutilizable por el túnel. */
-export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request, server?: any) => Promise<Response> {
+  return async (req: Request, server?: any): Promise<Response> => {
     const url = new URL(req.url);
     const origin = req.headers.get('origin');
     const corsHeaders = buildCorsHeaders(origin);
@@ -32,15 +40,33 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
       return preflightResponse(req);
     }
 
+    // Guardia LAN solo-por-invitación (ver http/lan-guard.ts). El túnel del
+    // relay llama sin socket (server undefined → via 'tunnel', ya autenticado
+    // por el relay) y localhost queda exento.
+    const peerIp = getPeerIp(req, server);
+    let verdict;
+    try {
+      verdict = evaluateLanAccess(new DatabaseService(), req, peerIp);
+    } catch {
+      // Sin BD (tests de handler puro): solo loopback/túnel/público.
+      verdict = { ok: false as const, status: 401 as const, code: 'LAN_INVITE_REQUIRED', message: 'Sin permiso' };
+      if (peerIp === null) verdict = { ok: true as const, via: 'tunnel' as const };
+    }
+    markLanContext(req, { via: verdict.ok ? verdict.via : 'denied', peerIp });
+    if (!verdict.ok) {
+      return withCors(lanDeniedResponse(req, verdict), origin);
+    }
+    const finish = (res: Response): Response => withCors(withLanCookie(res, verdict), origin);
+
     // Servir assets estáticos (subidos por el usuario en <data>/assets)
     if (url.pathname.startsWith('/assets/')) {
       const served = await serveDataAsset(url.pathname.replace('/assets/', ''), corsHeaders);
-      if (served) return served;
+      if (served) return finish(served);
 
-      return new Response('Asset not found', {
+      return finish(new Response('Asset not found', {
         status: 404,
         headers: corsHeaders,
-      });
+      }));
     }
 
     // Manejar rutas API
@@ -53,13 +79,13 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
         onShutdown: deps.onShutdown,
       });
 
-      return withCors(response, origin);
+      return finish(response);
     }
 
     // Config para el frontend (puertos centralizados).
     // También servido por el frontend embebido en prod; aquí para DEV_MODE.
     if (url.pathname === '/config') {
-      return new Response(
+      return finish(new Response(
         JSON.stringify({
           wsPort: WS_PORT,
           apiPort: PORT,
@@ -71,12 +97,12 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
             'Content-Type': 'application/json',
           },
         }
-      );
+      ));
     }
 
     // Health check
     if (url.pathname === '/health') {
-      return new Response(
+      return finish(new Response(
         JSON.stringify({
           status: 'ok',
           timestamp: Date.now(),
@@ -89,7 +115,7 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
             'Content-Type': 'application/json',
           },
         }
-      );
+      ));
     }
 
     // Frontend embebido (web-dist): lo mismo que el servidor dedicado de
@@ -99,12 +125,12 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
       const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
       const found = await findWebDistFile(filePath);
       if (found) {
-        return new Response(Bun.file(found), {
+        return finish(new Response(Bun.file(found), {
           headers: {
             ...corsHeaders,
             'Content-Type': getContentType(filePath),
           },
-        });
+        }));
       }
     } catch {
       /* cae al fallback SPA */
@@ -114,22 +140,22 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request) => Promi
     try {
       const indexPath = await findWebDistIndex();
       if (indexPath) {
-        return new Response(Bun.file(indexPath), {
+        return finish(new Response(Bun.file(indexPath), {
           headers: {
             ...corsHeaders,
             'Content-Type': 'text/html',
           },
-        });
+        }));
       }
     } catch {
       /* sin web-dist: mensaje de diagnóstico */
     }
 
-    return new Response('BunDeck API Server', {
+    return finish(new Response('BunDeck API Server', {
       headers: {
         ...corsHeaders,
         'Content-Type': 'text/plain; charset=utf-8',
       },
-    });
+    }));
   };
 }

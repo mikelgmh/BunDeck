@@ -47,6 +47,55 @@ export const DECK_COLS_DEFAULT = 6
 export const DECK_ROWS_DEFAULT = 4
 export const DECK_COLS_MAX = 12
 export const DECK_ROWS_MAX = 12
+/** Límites duros de los steppers de filas/columnas (UI y `changeGridSize`). */
+export const GRID_COLS_MIN = 3
+export const GRID_COLS_MAX = 8
+export const GRID_ROWS_MIN = 2
+export const GRID_ROWS_MAX = 6
+
+/** ¿Caben todas las posiciones clásicas en cols×rows?
+ *  Reducir el grid no puede dejar teclas fuera (se volverían invisibles). */
+export function classicPositionsFit(positions: Array<unknown>, cols: number, rows: number): boolean {
+  const c = Math.max(1, Math.floor(Number(cols)) || 1)
+  const r = Math.max(1, Math.floor(Number(rows)) || 1)
+  const total = c * r
+  for (const p of positions ?? []) {
+    if (!Number.isInteger(p)) continue
+    const n = p as number
+    if (n < 0 || n >= total) return false
+  }
+  return true
+}
+
+/** Extensión mínima del grid libre para no dejar widgets fuera.
+ *  Sin geometría (tecla clásica) deriva de position con `cols`, igual que
+ *  el render (`gsItems` en StageBoard): al reducir columnas, esas teclas se
+ *  re-envuelven, así que el límite siempre se calcula con las columnas
+ *  candidatas.
+ *  OJO: a diferencia del render, aquí NO se acota por arriba: un widget con
+ *  x/y fuera del candidato es justo lo que debe bloquear el encogido (el
+ *  render/GridStack lo reubicarían, pero el usuario pidió no encoger en ese
+ *  caso en vez de reordenar a sus espaldas). */
+export function freeContentBounds(
+  buttons: Array<{ position?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>,
+  cols: number,
+): { cols: number; rows: number } {
+  const c = Math.max(1, Math.floor(Number(cols)) || 1)
+  let right = 0
+  let bottom = 0
+  for (const b of buttons ?? []) {
+    const pos = (b as any)?.position
+    const w = Math.max(1, Math.round(Number((b as any)?.w) || 1))
+    const h = Math.max(1, Math.round(Number((b as any)?.h) || 1))
+    const rawX = Number.isFinite((b as any)?.x) ? Number((b as any).x) : (Number.isInteger(pos) ? (pos as number) % c : 0)
+    const rawY = Number.isFinite((b as any)?.y) ? Number((b as any).y) : (Number.isInteger(pos) ? Math.floor((pos as number) / c) : 0)
+    const bx = Math.max(0, Math.floor(rawX))
+    const by = Math.max(0, Math.floor(rawY))
+    right = Math.max(right, bx + w)
+    bottom = Math.max(bottom, by + h)
+  }
+  return { cols: right, rows: bottom }
+}
 const LS_KEY = 'bundeck:deck-layouts-v1'
 
 export const uid = (p = 'w'): string =>
@@ -64,6 +113,23 @@ export function rectsOverlap(a: DeckWidget, b: DeckWidget): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
+/** ¿Cabe el contenido actual en cols×rows tras un resize?
+ *  Punto único para steppers, `onGridSizeChange` y tests: en clásico mandan
+ *  las posiciones; en libre, la geometría (derivando de position si falta). */
+export function gridResizeFits(
+  layoutMode: 'classic' | 'gridstack',
+  classicPositions: Array<unknown>,
+  freeButtons: Array<{ position?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>,
+  cols: number,
+  rows: number,
+): boolean {
+  if (layoutMode === 'gridstack') {
+    const c = Math.max(1, Math.floor(Number(cols)) || 1)
+    const b = freeContentBounds(freeButtons, c)
+    return b.cols <= c && b.rows <= Math.max(1, Math.floor(Number(rows)) || 1)
+  }
+  return classicPositionsFit(classicPositions, cols, rows)
+}
 /** ¿Cabe el widget en (x,y) sin solapar a otros? */
 export function canPlace(widgets: DeckWidget[], candidate: DeckWidget, cols: number, rows: number, ignoreId?: string): boolean {
   const c = clampWidget(candidate, cols, rows)

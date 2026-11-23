@@ -63,6 +63,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import * as LucideIcons from 'lucide-vue-next'
+import { simpleIcon } from '../composables/useSimpleIcons'
 
 interface Props {
   plugins: any[]
@@ -97,7 +98,7 @@ const availableActions = computed(() => {
         // Get icon from action data or use a default
         let iconName = actionData.icon || 'Settings'
 
-        const icon = (LucideIcons as any)[iconName] || (LucideIcons as any)['Settings']
+        const icon = (LucideIcons as any)[iconName] || simpleIcon(iconName) || (LucideIcons as any)['Settings']
 
         actions.push({
           type: `${pluginId}.${actionId}`,

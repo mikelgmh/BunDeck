@@ -77,7 +77,7 @@ export interface ActionContext {
   profileId?: string;
   userId?: string;
   timestamp: number;
-  pressType?: 'short' | 'long' | 'double' | 'touch-start' | 'touch-end';
+  pressType?: 'short' | 'long' | 'double' | 'triple' | 'touch-start' | 'touch-end';
 }
 
 export interface ActionResult {
@@ -632,7 +632,11 @@ export class ActionRunner {
     const { nodes, hasContent, mode } = buttonDataToNodes(data, pressType);
     let finalNodes = nodes;
     if (mode === 'alt' && pressType === 'short') {
-      const actions = Array.isArray(data?.actions) ? data.actions : [];
+      // `pressActions.click` manda si tiene contenido (espejo de `actions[]`).
+      const rawClick = (data as any)?.pressActions?.click
+      const actions = Array.isArray(rawClick) && rawClick.length
+        ? rawClick
+        : (Array.isArray(data?.actions) ? data.actions : []);
       if (!actions.length) {
         return { success: true, runId: uuidv4(), cancelled: false, results: [], duration: 0, empty: true };
       }
@@ -651,8 +655,8 @@ export class ActionRunner {
   }
 
   private normalizePressType(v: unknown): PressType | null {
-    return v === 'short' || v === 'long' || v === 'double' || v === 'touch-start' || v === 'touch-end'
-      ? v : v === 'press' ? 'short' : null;
+    return v === 'short' || v === 'long' || v === 'double' || v === 'triple' || v === 'touch-start' || v === 'touch-end'
+      ? v : v === 'press' || v === 'click' ? 'short' : null;
   }
 
   /** Cancela una ejecución de flujo en curso. */

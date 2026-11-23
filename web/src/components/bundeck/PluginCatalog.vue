@@ -80,6 +80,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { Check, Package, TriangleAlert } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
+import { simpleIcon } from '../../composables/useSimpleIcons'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -125,7 +126,7 @@ const category = ref('all')
 const compatibleOnly = ref(false)
 
 const icons = LucideIcons as Record<string, any>
-const iconFor = (p: CatalogItem) => icons[(p as any).icon] ?? Package
+const iconFor = (p: CatalogItem) => icons[(p as any).icon] ?? simpleIcon((p as any).icon) ?? Package
 
 const categories = computed(() => [...new Set(items.value.map((p) => p.category))].sort())
 

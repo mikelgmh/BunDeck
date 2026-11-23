@@ -1958,6 +1958,10 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       if (args?.gridCols !== undefined) data.gridCols = gridDim(args.gridCols, 'gridCols');
       if (args?.gridRows !== undefined) data.gridRows = gridDim(args.gridRows, 'gridRows');
       const created = db.createProfile({ id: randomUUID(), name: reqStr(args, 'name'), data });
+      // Si el usuario recrea el `default`, se levanta el veto de borrado.
+      if (String(args?.name ?? '').toLowerCase() === 'default') {
+        try { db.deleteSetting('default.dismissed'); } catch { /* noop */ }
+      }
       ctx.ws?.broadcastProfileUpdate(created.id, created);
       recordInverse(ctx, 'create_profile', `crear perfil ${created.name}`, { tool: 'delete_profile', arguments: { id: created.id } });
       return { profile: { ...created, data: parseData(created.data) } };
@@ -1968,6 +1972,10 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       if (!existing) throw new Error('Perfil no encontrado');
       const updates: any = {};
       if (args?.name !== undefined) updates.name = reqStr(args, 'name');
+      // Renombrar a `default` lo vuelve a gestionar (levanta el veto).
+      if (String(args?.name ?? '').toLowerCase() === 'default') {
+        try { db.deleteSetting('default.dismissed'); } catch { /* noop */ }
+      }
       const merged: any = { ...parseData(existing.data), ...(args?.data !== undefined ? parseData(args.data) : {}) };
       if (args?.gridCols !== undefined) merged.gridCols = gridDim(args.gridCols, 'gridCols');
       if (args?.gridRows !== undefined) merged.gridRows = gridDim(args.gridRows, 'gridRows');
@@ -2000,6 +2008,11 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       const id = reqStr(args, 'id');
       const snap = db.getProfile(id);
       if (!snap) throw new Error('Perfil no encontrado');
+      // El `default` SÍ se puede borrar: se marca el veto para no recrearlo
+      // solo en el arranque (se respeta la decisión del usuario).
+      if (id === 'default' || (snap as any).name === 'default') {
+        try { db.setSetting('default.dismissed', '1'); } catch { /* noop */ }
+      }
       const snapPages = db.getPagesByProfile(id).map((pg: any) => ({
         page: { ...pg, data: parseData(pg.data) },
         buttons: db.getButtonsByPage(pg.id),

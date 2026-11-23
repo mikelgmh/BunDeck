@@ -69,6 +69,60 @@ function getLucideModule(): Promise<any> {
   return lucideModulePromise;
 }
 
+// Cache del módulo 'simple-icons' (marcas como YouTube/Twitch/GitHub que
+// Lucide eliminó y por eso en el HW caían al fallback de texto). Solo se
+// carga bajo demanda, la primera vez que se pide un icono de marca.
+let simpleIconsModulePromise: Promise<any> | null = null;
+function getSimpleIconsModule(): Promise<any> {
+  if (!simpleIconsModulePromise) {
+    simpleIconsModulePromise = import('simple-icons').catch((e) => {
+      simpleIconsModulePromise = null;
+      throw e;
+    });
+  }
+  return simpleIconsModulePromise;
+}
+
+/** slug (minúsculas) → icono simple-icons, construido una sola vez. */
+let simpleIconsBySlugCache: Map<string, any> | null = null;
+async function getSimpleIconsBySlug(): Promise<Map<string, any>> {
+  if (simpleIconsBySlugCache) return simpleIconsBySlugCache;
+  const mod: any = await getSimpleIconsModule();
+  const map = new Map<string, any>();
+  for (const v of Object.values(mod)) {
+    const icon: any = v;
+    if (icon && typeof icon.slug === 'string' && typeof icon.path === 'string') {
+      map.set(icon.slug, icon);
+    }
+  }
+  simpleIconsBySlugCache = map;
+  return map;
+}
+
+/**
+ * Resuelve un icono de marca simple-icons a partir del nombre guardado:
+ * - `si:<slug>` (pestaña «Simple Icons» del selector): p. ej. `si:youtube`.
+ * - Nombre Lucide de marca eliminada (perfiles antiguos): `Youtube`,
+ *   `Twitch`, `Github` → slugs `youtube`, `twitch`, `github`.
+ * Devuelve el `path` SVG (glifo sólido 24×24) o null si no es una marca.
+ */
+async function getSimpleIconPath(iconName: string): Promise<string | null> {
+  const siPrefixed = /^si:([a-z0-9]+)$/.exec(iconName.trim());
+  const slug = siPrefixed
+    ? siPrefixed[1]
+    : /^[A-Za-z][A-Za-z0-9]*$/.test(iconName) && /^(youtube|twitch|github)$/i.test(iconName)
+      ? iconName.toLowerCase()
+      : null;
+  if (!slug) return null;
+  try {
+    const map = await getSimpleIconsBySlug();
+    const icon = map.get(slug);
+    return icon && typeof icon.path === 'string' ? icon.path : null;
+  } catch {
+    return null;
+  }
+}
+
 export class StreamDeckDriver {
   private streamDeck: StreamDeck | null = null;
   private connectedDevice: string | null = null;
@@ -798,7 +852,10 @@ export class StreamDeckDriver {
       }
       
       if (!iconData || !Array.isArray(iconData) || iconData.length === 0) {
-        return false;
+        // Lucide eliminó las marcas (YouTube/Twitch/GitHub…): probar con
+        // simple-icons (`si:<slug>` o el nombre heredado). Sin esto el HW
+        // caía al fallback de texto mientras la web sí mostraba el logo.
+        return await this.tryDrawSimpleIcon(ctx, canvasLib, iconName, cx, cy, box, color);
       }
 
       // iconData es array de [tag, attrs] como [["path", {d: "..."}]]
@@ -867,6 +924,36 @@ export class StreamDeckDriver {
       return ok;
     } catch (e) {
       // console.error('Failed to draw lucide icon', iconName, e);
+      try { ctx.restore(); } catch { /* noop */ }
+      return false;
+    }
+  }
+
+  /**
+   * Dibuja un icono de marca simple-icons centrado en (cx, cy) dentro de un
+   * cuadrado `box`, tintado con `color`. Los glifos de simple-icons son
+   * sólidos (una sola ruta con relleno), al contrario que los trazos Lucide.
+   */
+  private async tryDrawSimpleIcon(
+    ctx: any, canvasLib: any, iconName: string, cx: number, cy: number, box: number, color: string,
+  ): Promise<boolean> {
+    try {
+      const path = await getSimpleIconPath(iconName);
+      if (!path) return false;
+      const P2D = (canvasLib as any)?.Path2D ?? (globalThis as any)?.Path2D;
+      if (!P2D) return false;
+      const scale = box / 24;
+      ctx.save();
+      try {
+        ctx.translate(cx - (24 * scale) / 2, cy - (24 * scale) / 2);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = color;
+        ctx.fill(new P2D(path));
+      } finally {
+        ctx.restore();
+      }
+      return true;
+    } catch {
       try { ctx.restore(); } catch { /* noop */ }
       return false;
     }

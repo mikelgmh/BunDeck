@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { streamDeckDriver } from './hw-driver/streamdeck-driver';
 import { windowWatcher } from './window-watcher';
 import { DatabaseService } from './db';
+import { isLoopbackIp, hasValidLanSession, LAN_DENIED_CODE } from './http/lan-guard';
+import { redeemLanInvite, validateLanSession } from './remote/lan-invites';
 import { parseLayoutMode, resolvePageSize, isHardwareDeviceId } from './devices';
 import { getEventBus, BUS_WS_FORWARD, busWsTopic, type EventBus } from './events/bus';
 import { resolveNavTargets, normalizeDeviceKind, type NavTargets } from './sessions';
@@ -28,6 +30,13 @@ export interface WebSocketClient {
   lastSeen: number;
   /** 'ws' | 'tunnel' */
   source: string;
+  /** IP remota del socket (null en túnel). */
+  ip: string | null;
+  /**
+   * ¿Autorizado a controlar? Loopback y túnel (ya autenticado por el relay)
+   * nacen autorizados; el resto debe presentar invitación/sesión en `hello`.
+   */
+  lanAuthed: boolean;
 }
 
 export interface SessionView {
@@ -63,7 +72,17 @@ export class WebSocketManager {
       port: this.port,
       fetch: (req, server) => {
         // Upgrade the request to a WebSocket
-        if (server.upgrade(req)) {
+        // Guardia LAN: la IP y la sesión viajan en `ws.data`; el mensaje
+        // `hello` puede completar la autenticación después (ver
+        // handleClientMessage). Sin invitación el cliente queda en
+        // cuarentena: solo `hello` recibe respuesta.
+        let ip: string | null = null;
+        let lanAuthed = false;
+        try {
+          ip = server?.requestIP?.(req)?.address ?? null;
+          lanAuthed = (!!ip && isLoopbackIp(ip)) || hasValidLanSession(this.db, req);
+        } catch { /* cuarentena por defecto */ }
+        if (server.upgrade(req, { data: { ip, lanAuthed } })) {
           return; // do not return a Response
         }
         return new Response('WebSocket server', { status: 200 });
@@ -87,6 +106,7 @@ export class WebSocketManager {
         },
         open: (ws: any) => {
           const clientId = uuidv4();
+          const upgradeData = (ws as any)?.data ?? {};
           const client: WebSocketClient = {
             id: clientId,
             ws,
@@ -101,6 +121,8 @@ export class WebSocketManager {
             connectedAt: Date.now(),
             lastSeen: Date.now(),
             source: 'ws',
+            ip: typeof upgradeData.ip === 'string' ? upgradeData.ip : null,
+            lanAuthed: upgradeData.lanAuthed === true,
           };
 
           this.clients.set(clientId, client);
@@ -118,6 +140,9 @@ export class WebSocketManager {
               profileId: client.profileId,
               pageId: client.pageId,
               timestamp: Date.now(),
+              // Sin invitación el cliente queda en cuarentena hasta `hello`.
+              lanAuthed: client.lanAuthed,
+              lanAuthRequired: !client.lanAuthed,
             }
           }));
         },
@@ -167,6 +192,25 @@ export class WebSocketManager {
   private handleClientMessage(clientId: string, message: WebSocketMessage) {
     const client = this.clients.get(clientId);
     if (!client) return;
+
+    // Cuarentena LAN: sin invitación solo `hello` recibe respuesta (que es
+    // donde se presenta). El resto se deniega con el código que la web usa
+    // para mostrar la pantalla "Sin permiso".
+    if (!client.lanAuthed) {
+      const t = message?.type;
+      if (t === 'hello' || t === 'register' || t === 'identify') {
+        this.handleHello(clientId, message.payload ?? {});
+        return;
+      }
+      this.sendToClient(clientId, {
+        type: 'error',
+        payload: {
+          code: LAN_DENIED_CODE,
+          message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que genere una invitación (QR o enlace) y vuelve a intentarlo.',
+        },
+      });
+      return;
+    }
 
     switch (message.type) {
       case 'hello':
@@ -256,6 +300,44 @@ export class WebSocketManager {
     const client = this.clients.get(clientId);
     if (!client) return;
 
+    // Autenticación LAN en `hello` (solo si aún no está autorizado):
+    // acepta sesión portadora o código de invitación de un solo uso.
+    if (!client.lanAuthed) {
+      const presented =
+        (typeof payload?.sessionToken === 'string' && payload.sessionToken) ||
+        (typeof payload?.invite === 'string' && payload.invite) ||
+        (typeof payload?.lanInvite === 'string' && payload.lanInvite) ||
+        (typeof payload?.token === 'string' && payload.token) ||
+        null;
+      let authed = false;
+      let freshToken: string | null = null;
+      if (presented) {
+        if (validateLanSession(this.db, presented).ok) {
+          authed = true;
+        } else {
+          // ¿Código de un solo uso? Se canjea aquí mismo y se devuelve la
+          // sesión en `session.state` para que el cliente la reuse en HTTP.
+          const r = redeemLanInvite(this.db, presented, { ua: '', ip: client.ip ?? '' });
+          if (r.ok && r.token) {
+            authed = true;
+            freshToken = r.token;
+          }
+        }
+      }
+      if (!authed) {
+        this.sendToClient(clientId, {
+          type: 'error',
+          payload: {
+            code: LAN_DENIED_CODE,
+            message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que genere una invitación (QR o enlace) y vuelve a intentarlo.',
+          },
+        });
+        return;
+      }
+      client.lanAuthed = true;
+      (client as any).lanSessionToken = freshToken;
+    }
+
     const rawId = typeof payload?.deviceId === 'string' && payload.deviceId.length > 0
       ? payload.deviceId
       : (typeof payload?.device_id === 'string' && payload.device_id.length > 0 ? payload.device_id : null);
@@ -312,8 +394,14 @@ export class WebSocketManager {
 
     this.sendToClient(clientId, {
       type: 'session.state',
-      payload: this.sessionPayloadFor(client),
+      payload: {
+        ...this.sessionPayloadFor(client),
+        lanAuthed: true,
+        // Sesión recién canjeada desde un código (solo esta vez).
+        ...((client as any).lanSessionToken ? { lanSessionToken: (client as any).lanSessionToken } : {}),
+      },
     });
+    try { delete (client as any).lanSessionToken; } catch { /* noop */ }
   }
 
   private sessionPayloadFor(client: WebSocketClient): any {
@@ -929,6 +1017,9 @@ export class WebSocketManager {
       connectedAt: Date.now(),
       lastSeen: Date.now(),
       source: 'tunnel',
+      // El relay ya validó la sesión UI antes de reenviar: exento LAN.
+      ip: null,
+      lanAuthed: true,
     });
     return clientId;
   }

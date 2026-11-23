@@ -26,6 +26,10 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
       };
 
       const createdProfile = db.createProfile(profile);
+      // Si el usuario recrea el `default`, se levanta el veto de borrado.
+      if (String(body.name ?? '').toLowerCase() === 'default') {
+        db.deleteSetting('default.dismissed');
+      }
       services.wsManager.broadcastProfileUpdate(profile.id, createdProfile);
 
       return jsonResponse(createdProfile, 201);
@@ -52,6 +56,10 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
         );
       }
       db.updateProfile(profileId, body);
+      // Renombrar a `default` lo vuelve a gestionar (levanta el veto).
+      if (String((body as any)?.name ?? '').toLowerCase() === 'default') {
+        db.deleteSetting('default.dismissed');
+      }
 
       const updatedProfile = db.getProfile(profileId);
       services.wsManager.broadcastProfileUpdate(profileId, updatedProfile);
@@ -60,6 +68,14 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
     }
 
     if (method === 'DELETE') {
+      // El `default` SÍ se puede borrar: se marca el veto para no recrearlo
+      // solo en el arranque (se respeta la decisión del usuario).
+      const existing = db.getProfile(profileId);
+      const data = (existing as any)?.data;
+      const parsed = typeof data === 'string' ? (() => { try { return JSON.parse(data); } catch { return {}; } })() : (data ?? {});
+      if (profileId === 'default' || existing?.name === 'default' || (parsed as any)?.isDefault) {
+        db.setSetting('default.dismissed', '1');
+      }
       db.deleteProfile(profileId);
       // Con topic 'profiles': los clientes suscritos lo reciben y recargan;
       // sin topic llegaba a todos pero el frontend lo ignoraba (sin handler).

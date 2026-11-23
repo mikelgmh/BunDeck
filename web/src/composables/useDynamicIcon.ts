@@ -1,4 +1,5 @@
 import { defineAsyncComponent, type Component } from 'vue'
+import { simpleIcon } from './useSimpleIcons'
 
 /**
  * Iconos Lucide por nombre dinámico (el nombre viene de datos: tecla, plugin...).
@@ -15,7 +16,11 @@ import { defineAsyncComponent, type Component } from 'vue'
 const cache = new Map<string, Component>()
 
 export function dynamicIcon(name: unknown): Component | null {
-  if (typeof name !== 'string' || !name || !/^[A-Za-z][A-Za-z0-9]*$/.test(name)) return null
+  if (typeof name !== 'string' || !name) return null
+  // Marcas Simple Icons (`si:<slug>`, pestaña «Marcas» del selector).
+  const si = simpleIcon(name)
+  if (si) return si
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) return null
   let c = cache.get(name)
   if (!c) {
     c = defineAsyncComponent(() =>

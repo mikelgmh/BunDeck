@@ -8,10 +8,11 @@
       </button>
     </div>
     <div class="bd-itabs" role="tablist" :aria-label="t('bd.iconTitle')" style="padding: 0 24px">
-      <button role="tab" :aria-selected="!imgTab" @click="imgTab = false">{{ t('bd.iconTabIcons') }}</button>
-      <button role="tab" :aria-selected="imgTab" data-cy="bd-icon-tab-image" @click="imgTab = true">{{ t('bd.iconTabImage') }}</button>
+      <button role="tab" :aria-selected="tab === 'icons'" @click="switchTab('icons')">{{ t('bd.iconTabIcons') }}</button>
+      <button role="tab" :aria-selected="tab === 'brands'" @click="switchTab('brands')">{{ t('bd.iconTabBrands') }}</button>
+      <button role="tab" :aria-selected="tab === 'image'" data-cy="bd-icon-tab-image" @click="switchTab('image')">{{ t('bd.iconTabImage') }}</button>
     </div>
-    <div v-if="!imgTab" style="padding: 12px 24px 0">
+    <div v-if="tab === 'icons'" style="padding: 12px 24px 0">
       <div class="bd-srch" style="margin: 0">
         <Search :size="16" stroke-width="1.75" aria-hidden="true" />
         <label class="bd-sr" for="bd-iq">{{ t('bd.searchIcons') }}</label>
@@ -25,8 +26,22 @@
         />
       </div>
     </div>
+    <div v-else-if="tab === 'brands'" style="padding: 12px 24px 0">
+      <div class="bd-srch" style="margin: 0">
+        <Search :size="16" stroke-width="1.75" aria-hidden="true" />
+        <label class="bd-sr" for="bd-bq">{{ t('bd.searchBrands') }}</label>
+        <input
+          type="text"
+          id="bd-bq"
+          class="bd-inp"
+          :placeholder="t('bd.searchBrands')"
+          autocomplete="off"
+          v-model="brandQuery"
+        />
+      </div>
+    </div>
     <div class="bd-pb">
-      <template v-if="!imgTab">
+      <template v-if="tab === 'icons'">
       <p class="bd-cap">{{ t('bd.iconsCount', { n: total.toLocaleString('es-ES') }) }}</p>
       <div class="bd-ig">
         <button
@@ -42,6 +57,25 @@
         </button>
       </div>
       <button v-if="visible.length < filtered.length" class="bd-btn" @click="shown += 192">
+        {{ t('bd.showMore') }}
+      </button>
+      </template>
+      <template v-else-if="tab === 'brands'">
+      <p class="bd-cap">{{ t('bd.brandsCount', { n: brandFiltered.length }) }}</p>
+      <div class="bd-ig">
+        <button
+          v-for="mark in visibleBrands"
+          :key="mark.name"
+          class="bd-ib"
+          :title="mark.title"
+          :aria-label="mark.title"
+          :aria-pressed="mark.name === current"
+          @click="pick(mark.name)"
+        >
+          <component :is="brandComps[mark.name]" :size="22" aria-hidden="true" />
+        </button>
+      </div>
+      <button v-if="visibleBrands.length < brandFiltered.length" class="bd-btn" @click="shown += 192">
         {{ t('bd.showMore') }}
       </button>
       </template>
@@ -83,6 +117,7 @@
 import { ref, computed } from 'vue'
 import { X, Search, ImagePlus, Trash2 } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
+import { SIMPLE_ICON_LIST, simpleIcon } from '../../composables/useSimpleIcons'
 import { assetUrl, isAssetRef, normalizeApiBase } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
@@ -106,8 +141,9 @@ const emit = defineEmits<Emits>()
 
 const dialog = ref<HTMLDialogElement | null>(null)
 const query = ref('')
+const brandQuery = ref('')
 const shown = ref(96)
-const imgTab = ref(false)
+const tab = ref<'icons' | 'brands' | 'image'>('icons')
 const dragImg = ref(false)
 const uploading = ref(false)
 const uploadError = ref('')
@@ -120,6 +156,9 @@ const currentImageUrl = computed(() => {
 
 const all = ref<Record<string, any>>({})
 let lucideLoading: Promise<void> | null = null
+/** Marcas eliminadas de Lucide que viven en Simple Icons: se ocultan de la
+ *  pestaña «Iconos» para no duplicarlas con la pestaña «Marcas». */
+const BRAND_LUCIDE_DUPES = new Set(['youtube', 'twitch', 'github'])
 /** Catálogo completo bajo demanda: evita traer todo lucide al chunk inicial
  *  (y al chunk del diálogo hasta que se abre). Comparte el chunk diferido
  *  de `lucide-vue-next` con useDynamicIcon. */
@@ -131,6 +170,7 @@ const ensureLucide = () => {
       if (key === 'default' || key === 'icons' || key === 'Icon' || key === 'Lucide') continue
       if (!/^[A-Z]/.test(key)) continue
       if (/Icon$/.test(key)) continue
+      if (BRAND_LUCIDE_DUPES.has(key.toLowerCase())) continue
       if (typeof value !== 'object' && typeof value !== 'function') continue
       out[key] = value
     }
@@ -139,6 +179,13 @@ const ensureLucide = () => {
     lucideLoading = null
   })
   return lucideLoading
+}
+
+/** Componentes de la pestaña «Marcas» (Simple Icons, estáticos). */
+const brandComps: Record<string, any> = {}
+for (const mark of SIMPLE_ICON_LIST) {
+  const c = simpleIcon(mark.name)
+  if (c) brandComps[mark.name] = c
 }
 
 const kebab = (name: string) => name.replace(/([a-z])([A-Z0-9])/g, '$1-$2').toLowerCase()
@@ -151,6 +198,19 @@ const filtered = computed(() => {
 })
 const total = computed(() => filtered.value.length)
 const visible = computed(() => filtered.value.slice(0, shown.value))
+
+const brandFiltered = computed(() => {
+  const q = brandQuery.value.trim().toLowerCase()
+  if (!q) return SIMPLE_ICON_LIST
+  return SIMPLE_ICON_LIST.filter((m) => m.title.toLowerCase().includes(q) || m.name.includes(q))
+})
+const visibleBrands = computed(() => brandFiltered.value.slice(0, shown.value))
+
+const switchTab = (next: 'icons' | 'brands' | 'image') => {
+  tab.value = next
+  shown.value = 96
+  if (next === 'icons') void ensureLucide()
+}
 
 const pick = (name: string) => {
   emit('pick', name)
@@ -201,13 +261,14 @@ const onImgDrop = (e: DragEvent) => {
   void uploadFile(f)
 }
 
-const show = (tab: 'icons' | 'image' = 'icons') => {
+const show = (initial: 'icons' | 'brands' | 'image' = 'icons') => {
   query.value = ''
+  brandQuery.value = ''
   shown.value = 96
-  imgTab.value = tab === 'image'
+  tab.value = initial
   uploadError.value = ''
   dragImg.value = false
-  if (tab === 'icons') void ensureLucide()
+  if (initial === 'icons') void ensureLucide()
   dialog.value?.showModal()
 }
 const close = () => dialog.value?.close()

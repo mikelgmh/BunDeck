@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
+import { withKioskParam } from './useKiosk'
 
 export interface RemoteDeviceView {
   deviceId: string
@@ -180,6 +181,56 @@ export function useRemote() {
   const uiSessions = ref<UiSessionItem[]>([])
   /** Token de sesión recién creado: se muestra UNA vez y se limpia al descartar. */
   const uiJustToken = ref('')
+
+  // ---------- Invitaciones LAN (QR/enlace solo-por-invitación) ----------
+  // Mismo sistema que el QR local de QrDialog: un solo código vigente
+  // (?invite=) que el daemon canjea por sesión. Gestión solo-anfitrión.
+  const lanInvite = ref<{ code: string; expiresAt: number } | null>(null)
+  const lanSessions = ref<UiSessionItem[]>([])
+  const lanLoading = ref(false)
+  const lanError = ref('')
+
+  /** Genera (o regenera) la invitación LAN vigente. Devuelve código + caducidad. */
+  const requestLanInvite = async () => {
+    lanError.value = ''
+    lanLoading.value = true
+    try {
+      const data = await api('/remote/lan-invite', { method: 'POST', body: JSON.stringify({}) })
+      lanInvite.value = { code: String(data.code ?? ''), expiresAt: Number(data.expiresAt ?? 0) }
+      return lanInvite.value
+    } catch (e) {
+      lanError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      lanLoading.value = false
+    }
+  }
+
+  const revokeLanInvite = async () => {
+    lanError.value = ''
+    lanLoading.value = true
+    try {
+      await api('/remote/lan-invite', { method: 'DELETE' })
+    } catch (e) {
+      lanError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      lanInvite.value = null
+      lanLoading.value = false
+    }
+  }
+
+  const loadLanSessions = async () => {
+    const data = await api('/remote/lan-sessions')
+    lanSessions.value = Array.isArray(data.sessions) ? data.sessions : []
+    return lanSessions.value
+  }
+
+  const revokeLanSession = async (prefix: string) => {
+    lanError.value = ''
+    await api(`/remote/lan-sessions/${encodeURIComponent(prefix)}`, { method: 'DELETE' })
+    await loadLanSessions().catch(() => {})
+  }
   const remoteListeners = new Set<(msg: { type: string; payload: unknown }) => void>()
 
   const notifyRemote = (msg: { type: string; payload: unknown }) => {
@@ -507,7 +558,10 @@ export function useRemote() {
       }
       if (uiCode.value.url) {
         const { default: QRCode } = await import('qrcode')
-        uiCodeDataUrl.value = await QRCode.toDataURL(uiCode.value.url, { width: 280, margin: 2 })
+        // El escaneo aterriza ya en kiosco (?kiosk=1). La sala de espera del
+        // relay (/ui/<code>) ignora el query y, tras aprobar, redirige a
+        // /t/<token>/ (sin param): esa entrada cae en modo uso por túnel.
+        uiCodeDataUrl.value = await QRCode.toDataURL(withKioskParam(uiCode.value.url), { width: 280, margin: 2 })
       } else {
         uiCodeDataUrl.value = ''
       }
@@ -614,6 +668,15 @@ export function useRemote() {
     denyPending,
     revokeSession,
     clearJustToken,
-    onRemoteEvent
+    onRemoteEvent,
+    // Invitaciones LAN (QR/enlace)
+    lanInvite,
+    lanSessions,
+    lanLoading,
+    lanError,
+    requestLanInvite,
+    revokeLanInvite,
+    loadLanSessions,
+    revokeLanSession
   }
 }

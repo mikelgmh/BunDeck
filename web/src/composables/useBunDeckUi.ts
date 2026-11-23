@@ -30,6 +30,10 @@ export const bdKeySize = ref<number>(prefs.keySize ?? 76)
 export const bdRadius = ref<number>(prefs.radius ?? 16)
 export const bdBrightness = ref<number>(prefs.brightness ?? 80)
 export const bdAnimations = ref<boolean>(prefs.animations ?? true)
+/** Tiempo de hold para la pulsación larga (ms). Antes 600 fijo en StageBoard. */
+export const bdLongPressMs = ref<number>(
+  Number.isFinite(+prefs.longPressMs) ? Math.min(1200, Math.max(200, Math.round(+prefs.longPressMs))) : 500,
+)
 // En pantallas estrechas (<1360px) la biblioteca arranca plegada para que el grid respire.
 export const bdShowLeft = ref<boolean>(prefs.showLeft ?? wideEnough)
 export const bdShowRight = ref<boolean>(prefs.showRight ?? true)
@@ -59,6 +63,7 @@ function persist() {
         radius: bdRadius.value,
         brightness: bdBrightness.value,
         animations: bdAnimations.value,
+        longPressMs: bdLongPressMs.value,
         showLeft: bdShowLeft.value,
         showRight: bdShowRight.value
       })
@@ -90,6 +95,10 @@ export function bdSetBrightness(v: number) {
 }
 export function bdSetAnimations(v: boolean) {
   bdAnimations.value = v
+  persist()
+}
+export function bdSetLongPressMs(v: number) {
+  bdLongPressMs.value = Math.min(1200, Math.max(200, Math.round(+v || 500)))
   persist()
 }
 export function bdSetPanels(l: boolean, r: boolean) {

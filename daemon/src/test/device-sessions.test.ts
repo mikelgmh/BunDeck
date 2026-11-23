@@ -84,6 +84,9 @@ function addClient(
     connectedAt: Date.now(),
     lastSeen: Date.now(),
     source: 'ws',
+    // Fixture sin socket: equivale a loopback (exento LAN).
+    ip: '127.0.0.1',
+    lanAuthed: true,
   });
   // Persistir la vista inicial como haría `hello`
   db.upsertDeviceSession({
@@ -262,6 +265,7 @@ describe('device-sessions: hello, reconexión y startup', () => {
       id: 'c-H', ws: fakeWs(inbox), subscriptions: new Set(),
       deviceId: 'c-H', kind: 'unknown', name: null,
       profileId: null, pageId: null, connectedAt: Date.now(), lastSeen: Date.now(), source: 'ws',
+      ip: '127.0.0.1', lanAuthed: true,
     });
     send(mgr, 'c-H', { type: 'hello', payload: { deviceId: 'dev-hello', kind: 'browser', name: 'PC' } });
     const state = lastOfType(inbox, 'session.state');
@@ -286,6 +290,7 @@ describe('device-sessions: hello, reconexión y startup', () => {
       id: 'c-R2', ws: fakeWs(inbox2), subscriptions: new Set(),
       deviceId: 'c-R2', kind: 'unknown', name: null,
       profileId: null, pageId: null, connectedAt: Date.now(), lastSeen: Date.now(), source: 'ws',
+      ip: '127.0.0.1', lanAuthed: true,
     });
     send(mgr, 'c-R2', { type: 'hello', payload: { deviceId: 'dev-recon', kind: 'browser' } });
     const state = lastOfType(inbox2, 'session.state');
@@ -304,6 +309,7 @@ describe('device-sessions: hello, reconexión y startup', () => {
       id: 'c-S', ws: fakeWs(inbox), subscriptions: new Set(),
       deviceId: 'c-S', kind: 'unknown', name: null,
       profileId: null, pageId: null, connectedAt: Date.now(), lastSeen: Date.now(), source: 'ws',
+      ip: '127.0.0.1', lanAuthed: true,
     });
     send(mgr, 'c-S', { type: 'hello', payload: { deviceId: 'dev-startup', kind: 'hardware' } });
     const state = lastOfType(inbox, 'session.state');

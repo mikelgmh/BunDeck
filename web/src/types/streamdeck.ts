@@ -12,6 +12,12 @@ export interface PageData {
     name: string
     order_idx: number
     is_folder: number // 1 = folder, 0 = page
+    /** Carpeta padre (NULL = raíz). */
+    parent_id?: string | null
+    /** Tamaño propio de la página (NULL = hereda del perfil). */
+    grid_cols?: number | null
+    /** Tamaño propio de la página (NULL = hereda del perfil). */
+    grid_rows?: number | null
     data: any
 }
 
@@ -41,6 +47,13 @@ export interface ButtonData {
     backgroundColor: string
     textColor: string
     actions: ActionConfig[]
+    /** Listas por tipo de pulsación (Fase B). `actions[]` legacy = click. */
+    pressActions?: {
+      click?: ActionConfig[]
+      double?: ActionConfig[]
+      triple?: ActionConfig[]
+      long?: ActionConfig[]
+    }
     backgroundImage?: string
     showTitle?: boolean
     mode?: 'seq' | 'par' | 'alt'
@@ -62,7 +75,7 @@ export interface ActionConfig {
 export interface KeyRule {
     id: string
     on: boolean
-    when: 'press' | 'long' | 'load' | 'timer' | 'var'
+    when: 'press' | 'long' | 'double' | 'triple' | 'load' | 'timer' | 'var'
     every?: number
     vn?: string
     cond?: string

@@ -129,8 +129,8 @@
             <div><b>{{ t('bd.longPressTime') }}</b><p>{{ t('bd.longPressTimeHint') }}</p></div>
             <div class="bd-ctl">
               <div class="bd-rg">
-                <input type="range" class="bd-inp" min="200" max="1200" step="50" v-model.number="mock.longpress" :aria-label="t('bd.longPressTime')" />
-                <output>{{ mock.longpress }} ms</output>
+                <input type="range" class="bd-inp" min="200" max="1200" step="50" :value="bdLongPressMs" :aria-label="t('bd.longPressTime')" @input="bdSetLongPressMs(+($event.target as HTMLInputElement).value)" />
+                <output>{{ bdLongPressMs }} ms</output>
               </div>
             </div>
           </div>
@@ -546,8 +546,8 @@ const DiagnosticsPane = defineAsyncComponent(() => import('./DiagnosticsPane.vue
 const AutoProfileDialog = defineAsyncComponent(() => import('./AutoProfileDialog.vue'))
 import { useI18nStore } from '../../composables/useI18n'
 import {
-  bdPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations,
-  bdSetPalette, bdSetLabelMode, bdSetKeySize, bdSetRadius, bdSetBrightness, bdSetAnimations
+  bdPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs,
+  bdSetPalette, bdSetLabelMode, bdSetKeySize, bdSetRadius, bdSetBrightness, bdSetAnimations, bdSetLongPressMs
 } from '../../composables/useBunDeckUi'
 import { useAutoProfile } from '../../composables/useAutoProfile'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
@@ -648,7 +648,7 @@ function loadMock() {
 }
 const mock = ref({
   autostart: false, tray: true, updates: true, undo: true,
-  dim: '5 min', idle: '', orientation: '0°', longpress: 500, haptic: true, sound: false,
+  dim: '5 min', idle: '', orientation: '0°', haptic: true, sound: false,
   k1: true, k2: true, k3: false, port: 4455, log: '', dev: false,
   ...loadMock()
 })
@@ -1011,6 +1011,7 @@ const resetAll = () => {
   bdSetRadius(16)
   bdSetBrightness(80)
   bdSetAnimations(true)
+  bdSetLongPressMs(500)
   emit('notify', t('bd.settingsReset'))
 }
 

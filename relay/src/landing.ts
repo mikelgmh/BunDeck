@@ -75,6 +75,34 @@ const STR = {
     version: 'versión',
     docs: 'Ver documentación del relay',
     api: '¿Eres un cliente? <code>Accept: application/json</code> en <code>/</code> devuelve <code>{service, version, online}</code>. Salud: <code>/health</code>.',
+    scanTitle: 'Escanear un QR de BunDeck',
+    scanSub: 'Apunta la cámara al QR que muestra tu BunDeck (emparejamiento o acceso remoto) y te diremos qué es y qué hacer con él. Funciona en el móvil y tras reverse proxy.',
+    scanOpen: 'Escanear QR',
+    scanClose: 'Detener cámara',
+    scanAgain: 'Escanear otro',
+    scanNoCam: 'Sin cámara o permiso denegado. Pega el contenido del QR abajo.',
+    scanNoNative: 'Este navegador no detecta QR por sí solo: pega el contenido del QR abajo.',
+    scanPastePh: '…o pega aquí el texto del QR',
+    scanValidate: 'Validar',
+    scanCopy: 'Copiar',
+    scanOpenUrl: 'Abrir enlace',
+    scanResult: 'Resultado',
+    scanPairHint: 'Código de 6 dígitos: introdúcelo en tu BunDeck en Ajustes → Acceso remoto → Aceptar código.',
+    scanPairQrHint: 'QR de emparejamiento de BunDeck. Acepta el código en tu BunDeck (Ajustes → Acceso remoto).',
+    scanRelayHint: 'URL de relay (wss): úsala como RELAY_URL en tu BunDeck.',
+    scanUiHint: 'Enlace de acceso remoto: ábrelo en el móvil para pedir acceso y apruébalo en el equipo anfitrión.',
+    scanTunnelHint: 'Enlace tuneleado: ábrelo para cargar la UI remota de BunDeck.',
+    scanHttpHint: 'Enlace web incluido en el QR.',
+    scanOtherHint: 'Texto sin formato reconocido: cópialo donde lo necesites.',
+    scanExpired: 'Aviso: este QR ya caducó; genera uno nuevo.',
+    scanJsqrNote: 'Sin dependencias: la cámara usa BarcodeDetector nativo. jsqr no se incrusta porque pesaría ~60 KB en cada visita (esta página se sirve con no-store); si tu navegador no lo soporta, usa el pegado manual.',
+    scanKindPairQr: 'QR de emparejamiento',
+    scanKindPairCode: 'Código de emparejamiento',
+    scanKindRelayUrl: 'URL de relay',
+    scanKindUiUrl: 'Acceso remoto (/ui/)',
+    scanKindTunnelUrl: 'Enlace tuneleado (/t/)',
+    scanKindHttpUrl: 'Enlace web',
+    scanKindOther: 'Texto',
     footer: 'BunDeck Relay · E2E opaco · Tus comandos nunca se ven aquí',
   },
   en: {
@@ -100,6 +128,34 @@ const STR = {
     version: 'version',
     docs: 'Read the relay docs',
     api: 'Are you a client? <code>Accept: application/json</code> on <code>/</code> returns <code>{service, version, online}</code>. Health: <code>/health</code>.',
+    scanTitle: 'Scan a BunDeck QR',
+    scanSub: 'Point the camera at the QR shown by your BunDeck (pairing or remote access) and we will tell you what it is and what to do with it. Works on mobile and behind a reverse proxy.',
+    scanOpen: 'Scan QR',
+    scanClose: 'Stop camera',
+    scanAgain: 'Scan another',
+    scanNoCam: 'No camera or permission denied. Paste the QR content below.',
+    scanNoNative: 'This browser does not detect QR codes by itself: paste the QR content below.',
+    scanPastePh: '…or paste the QR text here',
+    scanValidate: 'Validate',
+    scanCopy: 'Copy',
+    scanOpenUrl: 'Open link',
+    scanResult: 'Result',
+    scanPairHint: '6-digit code: enter it in your BunDeck under Settings → Remote access → Accept code.',
+    scanPairQrHint: 'BunDeck pairing QR. Accept the code in your BunDeck (Settings → Remote access).',
+    scanRelayHint: 'Relay URL (wss): use it as RELAY_URL in your BunDeck.',
+    scanUiHint: 'Remote access link: open it on the phone to request access and approve it on the host machine.',
+    scanTunnelHint: 'Tunnelled link: open it to load the remote BunDeck UI.',
+    scanHttpHint: 'Web link contained in the QR.',
+    scanOtherHint: 'Unrecognized plain text: copy it wherever you need it.',
+    scanExpired: 'Warning: this QR already expired; generate a new one.',
+    scanJsqrNote: 'No dependencies: the camera uses the native BarcodeDetector. jsqr is not embedded because it would add ~60 KB to every visit (this page is served with no-store); if your browser lacks support, use manual paste.',
+    scanKindPairQr: 'Pairing QR',
+    scanKindPairCode: 'Pairing code',
+    scanKindRelayUrl: 'Relay URL',
+    scanKindUiUrl: 'Remote access (/ui/)',
+    scanKindTunnelUrl: 'Tunnelled link (/t/)',
+    scanKindHttpUrl: 'Web link',
+    scanKindOther: 'Text',
     footer: 'BunDeck Relay · opaque E2E · Your commands are never visible here',
   },
 } as const;
@@ -107,6 +163,33 @@ const STR = {
 export function renderLanding(d: LandingData): string {
   const t = STR[d.lang];
   const ws = esc(d.wsUrl);
+  // Cadenas para el JS del escáner (JSON = comillas seguras; se escapa `</`).
+  const L = JSON.stringify({
+    open: t.scanOpen,
+    close: t.scanClose,
+    again: t.scanAgain,
+    noCam: t.scanNoCam,
+    copy: t.scanCopy,
+    copied: t.copied,
+    kinds: {
+      'pair-qr': t.scanKindPairQr,
+      'pair-code': t.scanKindPairCode,
+      'relay-url': t.scanKindRelayUrl,
+      'ui-url': t.scanKindUiUrl,
+      'tunnel-url': t.scanKindTunnelUrl,
+      'http-url': t.scanKindHttpUrl,
+      other: t.scanKindOther,
+    },
+    hints: {
+      pairQr: t.scanPairQrHint,
+      pairCode: t.scanPairHint,
+      relayUrl: t.scanRelayHint,
+      uiUrl: t.scanUiHint,
+      tunnelUrl: t.scanTunnelHint,
+      httpUrl: t.scanHttpHint,
+      other: t.scanOtherHint,
+    },
+  }).replace(/<\//g, '<\\/');
   return `<!doctype html>
 <html lang="${t.lang}">
 <head>
@@ -132,6 +215,16 @@ code{background:rgba(148,163,184,.18);padding:2px 7px;border-radius:6px;font-siz
 .urlbox code{flex:1;min-width:220px;font-size:15px;padding:10px 12px}
 button{cursor:pointer;border:0;border-radius:10px;padding:10px 18px;font-weight:700;background:#22c55e;color:#052e16}
 button:active{transform:scale(.97)}
+a.abtn{display:inline-block;text-decoration:none;background:#22c55e;color:#052e16;border-radius:10px;padding:10px 18px;font-weight:700}
+[hidden]{display:none!important}
+#qrscan-video{width:100%;max-height:320px;border-radius:10px;background:#000;object-fit:cover;margin-top:10px}
+#qrscan-paste{width:100%;box-sizing:border-box;border-radius:10px;padding:10px 12px;font:inherit;font-size:13.5px;background:rgba(148,163,184,.12);color:inherit;border:1px solid rgba(148,163,184,.25);margin-top:10px}
+.btnrow{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.err{color:#f87171;font-size:13px}
+.kind{display:inline-block;font-size:12.5px;font-weight:700;background:rgba(34,197,94,.15);border:1px solid #166534;border-radius:999px;padding:2px 10px}
+.bigcode{font-size:30px;letter-spacing:8px;font-weight:800;margin:8px 0}
+.resbox{margin-top:10px}
+.resbox code{display:block}
 .hint{font-size:13px;opacity:.75;margin-top:8px}
 .stats{display:flex;gap:22px;flex-wrap:wrap;font-size:14px}
 .stats b{font-size:22px;display:block}
@@ -154,6 +247,26 @@ a{color:#4ade80}
 <li><strong>${t.s3t}</strong><br>${t.s3b}</li>
 </ol>
 </div>
+<div class="card"><h2>${t.scanTitle}</h2>
+<p>${t.scanSub}</p>
+<button id="qrscan-open" type="button">${t.scanOpen}</button>
+<div id="qrscan-panel" hidden>
+<video id="qrscan-video" playsinline muted autoplay></video>
+<canvas id="qrscan-canvas" hidden></canvas>
+<p id="qrscan-err" class="err" role="alert" hidden></p>
+<p id="qrscan-nonative" class="hint" hidden>${t.scanNoNative}</p>
+<textarea id="qrscan-paste" rows="3" placeholder="${esc(t.scanPastePh)}"></textarea>
+<div class="btnrow"><button id="qrscan-validate" type="button">${t.scanValidate}</button></div>
+<div id="qrscan-result" class="resbox" hidden>
+<p><strong>${t.scanResult}:</strong> <span id="qrscan-kind" class="kind"></span><span id="qrscan-expired" class="err" hidden> ${t.scanExpired}</span></p>
+<code id="qrscan-text"></code>
+<p id="qrscan-code" class="bigcode" hidden></p>
+<p id="qrscan-hint" class="hint"></p>
+<div class="btnrow"><button id="qrscan-copy" type="button">${t.scanCopy}</button><a id="qrscan-openurl" class="abtn" href="#" target="_blank" rel="noopener" hidden>${t.scanOpenUrl}</a></div>
+</div>
+</div>
+<p class="hint">${t.scanJsqrNote}</p>
+</div>
 <div class="card"><h2>${t.statusTitle}</h2>
 <div class="stats">
 <div><b>${d.online}</b>${t.online}</div>
@@ -166,6 +279,142 @@ a{color:#4ade80}
 </div>
 <script>
 (function(){var b=document.getElementById('copy-btn'),u=document.getElementById('relay-url');if(!b||!u)return;var done='${t.copied}';b.addEventListener('click',function(){var txt=u.textContent||'';function ok(){var o=b.textContent;b.textContent=done;setTimeout(function(){b.textContent=o;},1500);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(ok,ok);}else{var ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok();}});})();
+</script>
+<script>
+/* Escáner QR del lado cliente (misma estrategia que RemoteQrScan.vue de BunDeck):
+   getUserMedia con facingMode environment + BarcodeDetector nativo (solo si
+   declara qr_code) con loop cada 400ms sobre frames de <video> vía <canvas>,
+   más pegado manual como fallback. Sin dependencias npm: jsqr NO se incrusta
+   porque añadiría ~60 KB a cada visita y esta página se sirve con
+   cache-control: no-store; nativo + pegado cubren los navegadores modernos.
+   Sin eval ni handlers inline (compatible con CSP estricta). */
+(function(){
+var openBtn=document.getElementById('qrscan-open'),panel=document.getElementById('qrscan-panel'),
+video=document.getElementById('qrscan-video'),canvas=document.getElementById('qrscan-canvas'),
+errEl=document.getElementById('qrscan-err'),nonative=document.getElementById('qrscan-nonative'),
+paste=document.getElementById('qrscan-paste'),validateBtn=document.getElementById('qrscan-validate'),
+result=document.getElementById('qrscan-result'),kindEl=document.getElementById('qrscan-kind'),
+expiredEl=document.getElementById('qrscan-expired'),textEl=document.getElementById('qrscan-text'),
+codeEl=document.getElementById('qrscan-code'),hintEl=document.getElementById('qrscan-hint'),
+copyBtn=document.getElementById('qrscan-copy'),openUrl=document.getElementById('qrscan-openurl');
+if(!openBtn||!panel||!video||!validateBtn||!copyBtn) return;
+var L=${L};
+var stream=null,timer=null,stopped=true,detector=null;
+function show(el,on){ if(el) el.hidden=!on; }
+function setErr(m){ if(!errEl) return; if(m){ errEl.textContent=m; show(errEl,true); } else show(errEl,false); }
+function trim(s){ return String(s==null?'':s).replace(/^\\s+|\\s+$/g,''); }
+/* Espejo de classifyQrText (relay/src/qrscan.ts): misma clasificación sin dependencias. */
+function classify(s){
+  s=trim(s);
+  if(!s) return {kind:'other',text:''};
+  if(/^\\d{6}$/.test(s)) return {kind:'pair-code',text:s,code:s};
+  if(s.charAt(0)==='{'){
+    try{
+      var o=JSON.parse(s);
+      if(o&&typeof o==='object'&&!Array.isArray(o)){
+        if(o.v===1&&/^\\d{6}$/.test(trim(o.code))&&typeof o.dev==='string'&&o.dev!==''&&typeof o.pub==='string'&&o.pub!==''){
+          return {kind:'pair-qr',text:s,code:trim(o.code),relay:(typeof o.relay==='string'?o.relay:''),expired:(typeof o.exp==='number'?o.exp<=Date.now():false)};
+        }
+      }
+    }catch(e){}
+    return {kind:'other',text:s};
+  }
+  var u=null;
+  try{ u=new URL(s); }catch(e){ u=null; }
+  if(!u) return {kind:'other',text:s};
+  var proto=String(u.protocol||'').toLowerCase();
+  if(proto==='ws:'||proto==='wss:') return {kind:'relay-url',text:s,url:s};
+  if(proto!=='http:'&&proto!=='https:') return {kind:'other',text:s};
+  var parts=u.pathname.split('/').filter(function(p){return p!=='';});
+  if(parts.length>=2&&parts[0]==='ui') return {kind:'ui-url',text:s,url:s,urlCode:parts[1]};
+  if(parts.length>=1&&parts[0]==='t') return {kind:'tunnel-url',text:s,url:s};
+  return {kind:'http-url',text:s,url:s};
+}
+function hintFor(c){
+  if(c.kind==='pair-code') return L.hints.pairCode;
+  if(c.kind==='pair-qr') return L.hints.pairQr;
+  if(c.kind==='relay-url') return L.hints.relayUrl;
+  if(c.kind==='ui-url') return L.hints.uiUrl;
+  if(c.kind==='tunnel-url') return L.hints.tunnelUrl;
+  if(c.kind==='http-url') return L.hints.httpUrl;
+  return L.hints.other;
+}
+function render(c){
+  if(kindEl) kindEl.textContent=(L.kinds[c.kind]||c.kind);
+  if(textEl) textEl.textContent=c.text;
+  show(expiredEl,!!c.expired);
+  if(codeEl){ if(c.code){ codeEl.textContent=c.code; show(codeEl,true); } else show(codeEl,false); }
+  if(hintEl) hintEl.textContent=hintFor(c);
+  if(openUrl){ if(c.url&&/^https?:/i.test(c.url)){ openUrl.href=c.url; show(openUrl,true); } else show(openUrl,false); }
+  copyBtn.textContent=L.copy;
+  show(result,true);
+}
+function stopTracks(){ try{ if(stream){ stream.getTracks().forEach(function(tr){ try{ tr.stop(); }catch(e){} }); } }catch(e){} stream=null; }
+function stopLoop(){ stopped=true; if(timer!==null){ clearTimeout(timer); timer=null; } }
+function stopAll(){ stopLoop(); stopTracks(); detector=null; }
+function onDecoded(text){ stopAll(); openBtn.textContent=L.again; render(classify(text)); }
+function loop(){ if(stopped) return; timer=setTimeout(function(){ tick(); },400); }
+async function tick(){
+  if(stopped) return;
+  if(detector){
+    try{
+      var w=video.videoWidth,h=video.videoHeight;
+      if(w&&h&&canvas){
+        canvas.width=w; canvas.height=h;
+        var ctx=canvas.getContext('2d');
+        if(ctx){
+          ctx.drawImage(video,0,0,w,h);
+          var found=await detector.detect(canvas);
+          var raw=found&&found[0]?found[0].rawValue:'';
+          if(raw){ onDecoded(String(raw)); return; }
+        }
+      }
+    }catch(e){}
+  }
+  loop();
+}
+async function start(){
+  stopAll(); setErr(''); show(result,false); show(nonative,false);
+  stopped=false; openBtn.textContent=L.close;
+  var md=(typeof navigator!=='undefined'&&navigator.mediaDevices)?navigator.mediaDevices:null;
+  if(!md||!md.getUserMedia){ setErr(L.noCam); stopped=true; return; }
+  try{ stream=await md.getUserMedia({video:{facingMode:'environment'},audio:false}); }
+  catch(e){ setErr(L.noCam); stopped=true; stream=null; return; }
+  try{
+    video.srcObject=stream; video.playsInline=true;
+    var p=video.play(); if(p&&typeof p.catch==='function') p.catch(function(){});
+  }catch(e){}
+  var det=null;
+  try{
+    var BD=window.BarcodeDetector;
+    if(typeof BD!=='undefined'){
+      var ok=true;
+      if(typeof BD.getSupportedFormats==='function'){
+        try{ var f=await BD.getSupportedFormats(); if(Array.isArray(f)&&f.indexOf('qr_code')<0) ok=false; }catch(e2){ ok=true; }
+      }
+      if(ok){ try{ det=new BD({formats:['qr_code']}); }catch(e3){ det=null; } }
+    }
+  }catch(e4){ det=null; }
+  detector=det;
+  if(!det) show(nonative,true);
+  loop();
+}
+openBtn.addEventListener('click',function(){
+  if(panel.hidden){ panel.hidden=false; start(); }
+  else { stopAll(); panel.hidden=true; openBtn.textContent=L.open; }
+});
+validateBtn.addEventListener('click',function(){
+  if(!paste) return;
+  var v=trim(paste.value);
+  if(v) onDecoded(v);
+});
+copyBtn.addEventListener('click',function(){
+  var txt=(textEl&&textEl.textContent)||'';
+  function ok(){ var o=copyBtn.textContent; copyBtn.textContent=L.copied; setTimeout(function(){ copyBtn.textContent=o; },1500); }
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(ok,ok); }
+  else{ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta); ok(); }
+});
+})();
 </script>
 </body>
 </html>`;

@@ -2,6 +2,13 @@ import { ref } from 'vue'
 import { ev, evb, intp, usedVarNames, type LookLike } from './useExpressions'
 import { getVar, setVarValue, toggleVar, vars, getEnv, displayTick, varsVersion } from './useVars'
 import type { ButtonEntity } from '../types/streamdeck'
+import {
+  TAP_WINDOW_MS,
+  getActionsForKind,
+  hasKindContent,
+  hasMultiTapContent,
+  type PressKind,
+} from './usePressActions'
 
 /** Acciones locales (grupo «Lógica»): se ejecutan en el cliente, nunca en el daemon. */
 export const LOCAL_ACTIONS = [
@@ -10,7 +17,7 @@ export const LOCAL_ACTIONS = [
   { type: 'local.toast', icon: 'MessageSquare', nameKey: 'bd.varToast', defaults: { text: '' } }
 ] as const
 
-export type Trigger = 'press' | 'long' | 'load' | 'timer' | 'var'
+export type Trigger = 'press' | 'long' | 'double' | 'triple' | 'load' | 'timer' | 'var'
 
 export interface EngineDeps {
   getButton: (pos: number) => ButtonEntity | undefined
@@ -124,18 +131,26 @@ export function createKeyEngine(deps: EngineDeps) {
   async function execKey(pos: number, trigger: Trigger = 'press'): Promise<void> {
     const K = deps.getExecData(pos)
     if (!K) return
+    // Un long consume el tap pendiente (no debe caer después un click).
+    if (trigger === 'long') cancelTap(pos)
     const rules = Array.isArray(K.rules) ? K.rules : []
-    const acts = Array.isArray(K.actions) ? K.actions : []
-    if (trigger === 'press' && !acts.length && !rules.some((r: any) => r?.on && r?.when === 'press')) {
+    const kind: PressKind =
+      trigger === 'double' ? 'double' : trigger === 'triple' ? 'triple' : trigger === 'long' ? 'long' : 'click'
+    const acts = getActionsForKind(K, kind)
+    if (kind === 'click' && !acts.length && !rules.some((r: any) => r?.on && r?.when === 'press')) {
       deps.noActionsToast()
+      return
+    }
+    if ((kind === 'double' || kind === 'triple' || kind === 'long') && !hasKindContent(K, kind)) {
       return
     }
     if (!deps.executing.value.includes(pos)) deps.executing.value.push(pos)
     try {
       const ctx = ctxFor(pos)
-      if (trigger === 'press' && acts.length) {
+      if (acts.length) {
         if ((K.mode ?? 'seq') === 'par') await runList(acts, true, ctx)
-        else if ((K.mode ?? 'seq') === 'alt') {
+        // `alt` (rotar) solo aplica al click, igual que el daemon.
+        else if (kind === 'click' && (K.mode ?? 'seq') === 'alt') {
           const key = `${deps.pageId()}:${pos}`
           const i = altIndex.get(key) ?? 0
           const o = acts[i % acts.length]
@@ -143,8 +158,9 @@ export function createKeyEngine(deps: EngineDeps) {
           if (o) await perform(o, ctx)
         } else await runList(acts, false, ctx)
       }
+      const when = trigger === 'press' ? 'press' : trigger
       for (const r of rules) {
-        if (r?.on && r?.when === trigger) await runRule(K, r, ctx)
+        if (r?.on && r?.when === when) await runRule(K, r, ctx)
       }
     } finally {
       setTimeout(() => {
@@ -152,6 +168,55 @@ export function createKeyEngine(deps: EngineDeps) {
         if (i > -1) deps.executing.value.splice(i, 1)
       }, 400)
     }
+  }
+
+  // ---- Multi-tap con debounce (Fase B) ----
+  // El click simple espera TAP_WINDOW_MS solo si la tecla tiene contenido
+  // double/triple; sin él se ejecuta al instante (sin penalizar latencia).
+  // Documentado: el single-click tarda ~340 ms en teclas multi-tap.
+  const tapState = new Map<number, { n: number; t: ReturnType<typeof setTimeout> | null }>()
+
+  function fireTap(pos: number): void {
+    const st = tapState.get(pos)
+    tapState.delete(pos)
+    if (!st) return
+    const kind: PressKind = st.n >= 3 ? 'triple' : st.n === 2 ? 'double' : 'click'
+    const trigger: Trigger = kind === 'click' ? 'press' : kind
+    void execKey(pos, trigger)
+  }
+
+  /** Un toque corto: debounce a click/double/triple según la tecla. */
+  function tapKey(pos: number): void {
+    const K = deps.getExecData(pos)
+    if (!K) return
+    if (!hasMultiTapContent(K)) {
+      void execKey(pos, 'press')
+      return
+    }
+    const prev = tapState.get(pos)
+    if (prev?.t) clearTimeout(prev.t)
+    const n = Math.min(3, (prev?.n ?? 0) + 1)
+    tapState.set(pos, {
+      n,
+      t: setTimeout(() => fireTap(pos), TAP_WINDOW_MS),
+    })
+  }
+
+  /** Cancela el tap pendiente (el long lo consume; también al desmontar). */
+  function cancelTap(pos?: number): void {
+    if (pos === undefined) {
+      for (const [, st] of tapState) if (st.t) clearTimeout(st.t)
+      tapState.clear()
+      return
+    }
+    const st = tapState.get(pos)
+    if (st?.t) clearTimeout(st.t)
+    tapState.delete(pos)
+  }
+
+  /** Solo para tests: nº de toques acumulados pendientes. */
+  function pendingTaps(pos: number): number {
+    return tapState.get(pos)?.n ?? 0
   }
 
   /** Reglas «load» de la página actual (tras abrirla). */
@@ -312,7 +377,7 @@ export function createKeyEngine(deps: EngineDeps) {
     dispCache.clear()
   }
 
-  return { execKey, runLoad, onTick, onVarChange, resolveDisplay, clearDisplayCache, uid }
+  return { execKey, tapKey, cancelTap, pendingTaps, runLoad, onTick, onVarChange, resolveDisplay, clearDisplayCache, uid }
 }
 
 export const COLORS = ['#e8e9eb', '#e8b04e', '#86cba5', '#82b4ea', '#ec8e7f', '#c7a6e0']
@@ -326,6 +391,9 @@ export function keyUsedVars(key: any, pages: Array<{ buttons: Array<{ data: any 
     if (typeof a?.waitMs === 'number') parts.push('')
   }
   for (const a of key?.actions ?? []) push(a)
+  for (const pa of Object.values(key?.pressActions ?? {})) {
+    if (Array.isArray(pa)) for (const a of pa) push(a)
+  }
   for (const r of key?.rules ?? []) {
     parts.push(String(r?.cond ?? ''), String(r?.vn ?? ''))
     for (const a of r?.then ?? []) push(a)

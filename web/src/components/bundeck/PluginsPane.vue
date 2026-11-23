@@ -155,6 +155,7 @@
 import { ref, computed, watch } from 'vue'
 import { Upload, RefreshCw, Package } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
+import { simpleIcon } from '../../composables/useSimpleIcons'
 import { useI18nStore } from '../../composables/useI18n'
 import PluginCatalog from './PluginCatalog.vue'
 
@@ -214,7 +215,7 @@ const installed = computed(() =>
     sourceType: p.sourceType ?? null,
     previousVersion: p.previousVersion ?? null,
     privileged: !!p.privileged,
-    icon: icons[p.manifest?.icon] ?? Package
+    icon: icons[p.manifest?.icon] ?? simpleIcon(p.manifest?.icon) ?? Package
   }))
 )
 

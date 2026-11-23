@@ -96,6 +96,7 @@
 import { ref, computed } from 'vue'
 import { X, Copy, Upload, Puzzle, Variable, Settings } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
+import { simpleIcon } from '../../composables/useSimpleIcons'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -154,7 +155,7 @@ const importArea = ref<HTMLTextAreaElement | null>(null)
 const title = computed(() => props.mode === 'export' ? t('bd.exportKeyTitle') : t('bd.importKeyTitle'))
 const summaryIcon = computed(() => {
   const n = props.summary?.key?.icon
-  return (n && icons[n]) ?? Settings
+  return (n && (icons[n] ?? simpleIcon(n))) ?? Settings
 })
 const summaryMeta = computed(() => {
   const s = props.summary
@@ -167,7 +168,7 @@ const summaryMeta = computed(() => {
 const varsText = computed(() =>
   props.varsInfo.map((v) => `${v.n}${v.exists ? ` (${t('bd.varExistsShort')})` : ` (${t('bd.varNewShort')})`}`).join(', ') + '.'
 )
-const pluginIcon = (p: { icon?: string }) => (p.icon && icons[p.icon]) ?? Puzzle
+const pluginIcon = (p: { icon?: string }) => (p.icon && (icons[p.icon] ?? simpleIcon(p.icon))) ?? Puzzle
 
 function onFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]

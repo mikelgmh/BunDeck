@@ -20,6 +20,11 @@ import {
   approveUiPending, denyUiPending, listUiSessions, revokeUiSessionByPrefix,
   notifyTunnelUiUnbind,
 } from '../remote/ui-policy';
+import {
+  createLanInvite, getLanInviteMeta, revokeLanInvite, redeemLanInvite,
+  listLanSessions, revokeLanSessionByPrefix,
+} from '../remote/lan-invites';
+import { allowLanRedeem, getLanContext } from '../http/lan-guard';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
 import { resolveRelayUrl } from '../remote/public-relay';
@@ -288,6 +293,80 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     if (!r) return jsonResponse({ error: 'Sesión desconocida' }, 404);
     try { services.wsManager?.broadcast('remote.ui-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
     notifyTunnelUiUnbind(r.token);
+    return jsonResponse({ ok: true, revoked: prefix });
+  }
+
+  // ---------- Invitaciones LAN (QR/enlace solo-por-invitación) ----------
+  // Gestión (invite/sessions): SOLO el anfitrión (loopback). El guard HTTP
+  // ya denegó a no-invitados (401) e invitados sin rango (403); aquí se
+  // refuerza por si el dispatcher se reutiliza sin guard.
+  // Canje (lan-redeem): público + rate-limit (el código de 128 bits es la
+  // única credencial necesaria; el éxito devuelve la sesión UNA vez).
+  const lanHostOnly = () =>
+    jsonResponse(
+      { error: 'Solo el anfitrión (localhost) puede gestionar invitaciones.', code: 'LAN_HOST_ONLY' },
+      403,
+    );
+  const isLanHost = () => getLanContext(req)?.via === 'loopback';
+
+  if (path === '/api/v1/remote/lan-invite' && method === 'POST') {
+    if (!isLanHost()) return lanHostOnly();
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const invite = createLanInvite(db, typeof body?.label === 'string' ? body.label : '');
+    return jsonResponse({ code: invite.code, expiresAt: invite.expiresAt, createdAt: invite.createdAt, label: invite.label });
+  }
+
+  if (path === '/api/v1/remote/lan-invite' && method === 'GET') {
+    if (!isLanHost()) return lanHostOnly();
+    return jsonResponse(getLanInviteMeta(db));
+  }
+
+  if (path === '/api/v1/remote/lan-invite' && method === 'DELETE') {
+    if (!isLanHost()) return lanHostOnly();
+    const revoked = revokeLanInvite(db);
+    try { services.wsManager?.broadcast('remote.lan-revoked', { scope: 'invite', ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true, revoked });
+  }
+
+  if (path === '/api/v1/remote/lan-redeem' && method === 'POST') {
+    const ctx = getLanContext(req);
+    const ip = ctx?.peerIp ?? 'unknown';
+    if (!allowLanRedeem(ip)) {
+      return jsonResponse({ error: 'Demasiados intentos: espera un minuto.', code: 'LAN_RATE_LIMITED' }, 429);
+    }
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const r = redeemLanInvite(db, String(body?.code ?? ''), {
+      ua: req.headers.get('user-agent') ?? '',
+      ip: ctx?.peerIp ?? '',
+      label: typeof body?.label === 'string' ? body.label : '',
+    });
+    if (!r.ok) return jsonResponse({ error: r.error ?? 'Código denegado', code: 'LAN_INVITE_REQUIRED' }, 401);
+    try { services.wsManager?.broadcast('remote.lan-allowed', { tokenPrefix: r.token!.slice(0, 8), ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    const res = jsonResponse({ ok: true, sessionToken: r.token, exp: r.exp });
+    // Cookie de sesión para que la UI (assets/WS del navegador) viaje
+    // autenticada sin que el JS tenga que reenviar el token.
+    try {
+      const { buildLanSessionCookie } = await import('../http/lan-guard');
+      res.headers.append('Set-Cookie', buildLanSessionCookie(r.token!, r.exp!));
+    } catch { /* sin cookie: el token del body basta */ }
+    return res;
+  }
+
+  if (path === '/api/v1/remote/lan-sessions' && method === 'GET') {
+    if (!isLanHost()) return lanHostOnly();
+    // Solo prefijos: el token completo jamás sale del servidor salvo al canjear.
+    return jsonResponse({ sessions: listLanSessions(db) });
+  }
+
+  const lanSessDel = path.match(/^\/api\/v1\/remote\/lan-sessions\/([^/]+)$/);
+  if (lanSessDel && method === 'DELETE') {
+    if (!isLanHost()) return lanHostOnly();
+    const prefix = decodeURIComponent(lanSessDel[1]);
+    const ok = revokeLanSessionByPrefix(db, prefix);
+    if (!ok) return jsonResponse({ error: 'Sesión desconocida' }, 404);
+    try { services.wsManager?.broadcast('remote.lan-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
     return jsonResponse({ ok: true, revoked: prefix });
   }
 

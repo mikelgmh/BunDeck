@@ -53,6 +53,13 @@ export interface SharedButtonData {
   longPress?: string
   confirm?: boolean
   actions: SharedAction[]
+  /** Listas por tipo de pulsación (Fase B). `actions` = click (legacy). */
+  pressActions?: {
+    click?: SharedAction[]
+    double?: SharedAction[]
+    triple?: SharedAction[]
+    long?: SharedAction[]
+  }
   rules?: SharedRule[]
   looks?: SharedLook[]
   [k: string]: any
@@ -124,7 +131,7 @@ const num = (v: any, lo: number, hi: number, fb: number) => {
 
 const MODES = ['seq', 'par', 'alt']
 const LONGPRESS = ['none', 'folder', 'repeat', 'mute']
-const WHEN = ['press', 'long', 'load', 'timer', 'var']
+const WHEN = ['press', 'double', 'triple', 'long', 'load', 'timer', 'var']
 const VARTYPES = ['num', 'txt', 'bool']
 
 export function cleanAction(a: any): SharedAction {
@@ -180,6 +187,16 @@ export function cleanVar(v: any): SharedVar | null {
 }
 
 export function cleanKey(k: any): SharedButtonData {
+  const rawPa = k?.pressActions && typeof k.pressActions === 'object' ? k.pressActions : {}
+  const cleanPa = {
+    click: cleanActions(rawPa.click),
+    double: cleanActions(rawPa.double),
+    triple: cleanActions(rawPa.triple),
+    long: cleanActions(rawPa.long),
+  }
+  const actions = cleanActions(k?.actions)
+  // Espejo click legacy: el que tenga contenido manda; si no, vacío.
+  const click = cleanPa.click.length ? cleanPa.click : actions
   return {
     label: str(k?.label, 40),
     textTop: str(k?.textTop, 40),
@@ -194,7 +211,8 @@ export function cleanKey(k: any): SharedButtonData {
     mode: MODES.includes(k?.mode) ? k.mode : 'seq',
     longPress: LONGPRESS.includes(k?.longPress) ? k.longPress : 'none',
     confirm: !!k?.confirm,
-    actions: cleanActions(k?.actions),
+    actions: click.length ? click : actions,
+    pressActions: cleanPa,
     rules: (Array.isArray(k?.rules) ? k.rules : []).slice(0, 16).map(cleanRule),
     looks: (Array.isArray(k?.looks) ? k.looks : []).slice(0, 16).map(cleanLook)
   }
@@ -202,6 +220,9 @@ export function cleanKey(k: any): SharedButtonData {
 
 const eachKeyAction = (key: SharedButtonData, fn: (a: SharedAction) => void) => {
   for (const a of key.actions ?? []) fn(a)
+  for (const l of Object.values(key.pressActions ?? {})) {
+    if (Array.isArray(l)) for (const a of l) fn(a)
+  }
   for (const r of key.rules ?? []) {
     for (const a of r.then ?? []) fn(a)
     for (const a of r.else ?? []) fn(a)

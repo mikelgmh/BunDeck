@@ -4,16 +4,19 @@
  *
  * Formato cliente (`button.data`):
  * - `actions`: lista de acciones base con `waitMs` opcional y `mode`:
- *   'seq' | 'par' | 'alt'.
- * - `rules`: [{ on, when: 'press'|'long'|'load'|'timer'|'var', cond, then,
- *   else, every, vn }]
+ *   'seq' | 'par' | 'alt'. Es el espejo de `pressActions.click` (compat).
+ * - `pressActions`: { click, double, triple, long } — listas por tipo de
+ *   pulsación (Fase B). `click` equivale a `actions[]`.
+ * - `rules`: [{ on, when: 'press'|'double'|'triple'|'long'|'load'|'timer'|'var',
+ *   cond, then, else, every, vn }]
  * - Acciones locales `local.set-var` / `local.toggle-var` / `local.toast`.
  *
  * Reglas de equivalencia:
- * - press → pressType 'short'; long → 'long'. `double`/`touch-start`/
- *   `touch-end` son nuevos (sin equivalente heredado: solo reglas con ese
- *   `when` escrito a mano o creadas por la API).
- * - `mode: 'par'` → nodo parallel; `'alt'` → rotación persistente por tecla.
+ * - press/click → pressType 'short'; long → 'long'; double/triple → igual.
+ *   `touch-start`/`touch-end` son nuevos (sin equivalente heredado: solo
+ *   reglas con ese `when` escrito a mano o creadas por la API).
+ * - `mode: 'par'` → nodo parallel; `'alt'` → rotación persistente por tecla
+ *   (solo 'short'; double/triple/long siempre seq/par).
  * - `local.toast` → nodo log (el daemon no tiene toasts).
  * - `load`/`timer`/`var` no se ejecutan en el press: van a automatizaciones
  *   con scope de botón (ver `syncButtonAutomations` en action-runner).
@@ -77,23 +80,34 @@ function ruleToNode(r: LegacyRule): FlowNode | null {
 /**
  * Construye los nodos de flujo para una pulsación concreta.
  * Devuelve también si la tecla tiene contenido ejecutable.
+ *
+ * Las listas directas salen de `pressActions[click|double|triple|long]`
+ * (`actions[]` legacy = click); las reglas `when` del pressType se añaden
+ * después, igual que en el cliente (useKeyEngine).
  */
 export function buttonDataToNodes(data: any, pressType: PressType): { nodes: FlowNode[]; hasContent: boolean; mode: string } {
-  const actions: LegacyAction[] = Array.isArray(data?.actions) ? data.actions : [];
+  const rawPa = data?.pressActions && typeof data.pressActions === 'object' ? data.pressActions : {};
+  const shortActs: LegacyAction[] = Array.isArray(rawPa.click) && rawPa.click.length
+    ? rawPa.click
+    : (Array.isArray(data?.actions) ? data.actions : []);
+  const kindActs: LegacyAction[] = pressType === 'short' ? shortActs
+    : pressType === 'double' && Array.isArray(rawPa.double) ? rawPa.double
+    : pressType === 'triple' && Array.isArray(rawPa.triple) ? rawPa.triple
+    : pressType === 'long' && Array.isArray(rawPa.long) ? rawPa.long
+    : [];
   const rules: LegacyRule[] = Array.isArray(data?.rules) ? data.rules : [];
   const mode = data?.mode ?? 'seq';
   const nodes: FlowNode[] = [];
 
-  // Acciones base: solo pertenecen al press corto (igual que el cliente:
-  // `execKey(pos,'press')` ejecuta `actions`; los demás triggers solo reglas).
-  if (pressType === 'short' && actions.length) {
+  // Acciones base: solo pertenecen a su pressType (igual que el cliente).
+  if (kindActs.length) {
     if (mode === 'par') {
-      nodes.push({ kind: 'parallel', branches: actions.map((a) => [legacyActionToNode(a)]) });
-    } else if (mode !== 'alt') {
-      for (const a of actions) nodes.push(legacyActionToNode(a));
+      nodes.push({ kind: 'parallel', branches: kindActs.map((a) => [legacyActionToNode(a)]) });
+    } else if (mode !== 'alt' || pressType !== 'short') {
+      for (const a of kindActs) nodes.push(legacyActionToNode(a));
     }
-    // mode 'alt': lo resuelve el runner (rotación persistente). Aquí no se
-    // expande; ver executeButtonFlow.
+    // mode 'alt': lo resuelve el runner (rotación persistente) solo en
+    // 'short'. Aquí no se expande; ver executeButtonFlow.
   }
 
   // Reglas cuyo `when` corresponde a este pressType.
@@ -108,7 +122,7 @@ export function buttonDataToNodes(data: any, pressType: PressType): { nodes: Flo
     if (n) nodes.push(n);
   }
 
-  const hasContent = nodes.length > 0 || (mode === 'alt' && pressType === 'short' && actions.length > 0);
+  const hasContent = nodes.length > 0 || (mode === 'alt' && pressType === 'short' && shortActs.length > 0);
   return { nodes, hasContent, mode };
 }
 

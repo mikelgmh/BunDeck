@@ -44,7 +44,12 @@ export const handleMcp: ApiHandler = async (_req, { method, path, db, services }
           ws: services.wsManager,
           repaint: (pageId: string) => {
             if (streamDeckDriver.isConnected()) {
-              streamDeckDriver.scheduleUpdateFromPage(pageId);
+              // Como las rutas REST: solo refrescar si el HW ya muestra esa
+              // página. Un repintado incondicional (scheduleUpdateFromPage)
+              // SECUESTRABA la sesión del deck físico: editar por MCP una
+              // página de otro tamaño (p.ej. XL 8×4) la pintaba en un HW de
+              // 5×3 y dejaba la sesión clavada en ella.
+              streamDeckDriver.scheduleRefreshIfVisible(pageId);
             }
           },
         });

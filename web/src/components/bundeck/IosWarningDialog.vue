@@ -1,5 +1,5 @@
 <template>
-  <dialog ref="dialog" class="bd-dlg" :aria-label="t('bd.iosTitle')" data-cy="ios-fullscreen-warning" style="width: min(420px, 94vw); height: auto">
+  <dialog ref="dialog" class="bd-dlg bd-ios" :aria-label="t('bd.iosTitle')" data-cy="ios-fullscreen-warning">
     <div class="bd-pb" style="align-items: center; text-align: center">
       <div class="bd-warn-ic" aria-hidden="true">
         <TriangleAlert :size="28" stroke-width="1.75" />

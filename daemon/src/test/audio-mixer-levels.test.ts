@@ -21,17 +21,27 @@ describe('audio-mixer get-levels', () => {    test('devuelve forma {master, mute
         expect(out).toHaveProperty('simulated')
     })
 
-    test('windows: parsea el entero de winmm (último token)', async () => {
+    test('windows: parsea el volumen y el mute de Core Audio', async () => {
         if (process.platform !== 'win32') return // rama win32 solo en Windows
         const plugin = new FakeMixer((cmd) => {
             expect(cmd[0]).toBe('powershell.exe')
-            return { stdout: '73', stderr: '', exitCode: 0 }
+            return { stdout: '73\nmute:0', stderr: '', exitCode: 0 }
         })
         const h = plugin.getActionHandlers()
         const out = (await h.get('get-levels')!({}, {})) as any
         expect(out.master).toBe(73)
+        expect(out.muted).toBe(false)
         expect(out.simulated).toBe(false)
-        expect(out.source).toBe('winmm')
+        expect(out.source).toBe('coreaudio')
+    })
+
+    test('windows: lee mute:1 como silenciado', async () => {
+        if (process.platform !== 'win32') return
+        const plugin = new FakeMixer(() => ({ stdout: '30\nmute:1', stderr: '', exitCode: 0 }))
+        const h = plugin.getActionHandlers()
+        const out = (await h.get('get-levels')!({}, {})) as any
+        expect(out.master).toBe(30)
+        expect(out.muted).toBe(true)
     })
 
     test('windows: fallo de powershell degrada a simulado', async () => {

@@ -7,6 +7,7 @@ import { DatabaseService } from './db';
 import { streamDeckDriver } from './hw-driver/streamdeck-driver';
 import { API_PORT as PORT, WS_PORT, FRONTEND_PORT, DEV_MODE, BIND_HOST } from './config';
 import { buildCorsHeaders, isPreflight, preflightResponse } from './http/cors';
+import { evaluateLanAccess, lanDeniedResponse, withLanCookie, getPeerIp } from './http/lan-guard';
 import { createDaemonFetch } from './http/handler';
 import {
   getContentType,
@@ -173,47 +174,14 @@ class LibreDeckDaemon {
 
   private async initializeDefaultProfile() {
     try {
+      const { ensureDefaultProfile } = await import('./default-profile');
       const db = new DatabaseService();
-      const profiles = db.getProfiles();
-
-      // Si no hay perfiles, crear uno por defecto
-      if (profiles.length === 0) {
-        console.log('📝 Creating default profile...');
-
-        const { v4: uuidv4 } = await import('uuid');
-
-        // Crear perfil por defecto
-        const defaultProfile = {
-          id: uuidv4(),
-          name: 'Perfil Principal',
-          data: {
-            isDefault: true,
-            gridCols: 5,
-            gridRows: 3,
-          },
-        };
-
-        db.createProfile(defaultProfile);
-        console.log('✅ Default profile created:', defaultProfile.id);
-
-        // Crear página por defecto
-        const defaultPage = {
-          id: uuidv4(),
-          profile_id: defaultProfile.id,
-          name: 'Página Principal',
-          order_idx: 0,
-          is_folder: 0,
-          data: {
-            gridCols: 5,
-            gridRows: 3,
-          },
-        };
-
-        db.createPage(defaultPage);
-        console.log('✅ Default page created:', defaultPage.id);
-      } else {
-        console.log('ℹ️ Profiles already exist, skipping default profile creation');
+      const r = ensureDefaultProfile(db);
+      if (!r) {
+        console.log('ℹ️ Default profile dismissed by user, skipping');
+        return;
       }
+      console.log(`✅ Default profile ready: ${r.profileId} (deck=${r.deckPageId}, mini=${r.miniPageId}, neo=${r.neoPageId}, xl=${r.xlPageId}, libre=${r.freePageId}${r.seeded ? ', seeded' : ''})`);
     } catch (error) {
       console.error('❌ Failed to initialize default profile:', error);
     }
@@ -252,7 +220,7 @@ class LibreDeckDaemon {
       this.frontendServer = Bun.serve({
         hostname: BIND_HOST,
         port: FRONTEND_PORT,
-        fetch: async (req: Request) => {
+        fetch: async (req: Request, server?: any) => {
           const url = new URL(req.url);
           const origin = req.headers.get('origin');
           const corsHeaders = buildCorsHeaders(origin);
@@ -262,6 +230,27 @@ class LibreDeckDaemon {
             return preflightResponse(req);
           }
 
+          // Guardia LAN solo-por-invitación (misma que la API): sin
+          // invitación la UI embebida responde "Sin permiso".
+          const peerIp = getPeerIp(req, server);
+          let verdict;
+          try {
+            verdict = evaluateLanAccess(new DatabaseService(), req, peerIp);
+          } catch {
+            verdict = { ok: false as const, status: 401 as const, code: 'LAN_INVITE_REQUIRED', message: 'Sin permiso' };
+            if (peerIp === null) verdict = { ok: true as const, via: 'tunnel' as const };
+          }
+          if (!verdict.ok) {
+            const denied = lanDeniedResponse(req, verdict);
+            return new Response(denied.body, { status: denied.status, headers: { ...corsHeaders, ...Object.fromEntries(denied.headers) } });
+          }
+          const finish = (res: Response): Response => {
+            const withCookie = withLanCookie(res, verdict);
+            const headers = new Headers(withCookie.headers);
+            for (const [key, value] of Object.entries(corsHeaders)) headers.set(key, value);
+            return new Response(withCookie.body, { status: withCookie.status, headers });
+          };
+
           // Servir config
           if (url.pathname === '/config') {
             const config: any = {
@@ -269,12 +258,12 @@ class LibreDeckDaemon {
               apiPort: PORT,
             };
 
-            return new Response(JSON.stringify(config), {
+            return finish(new Response(JSON.stringify(config), {
               headers: {
                 ...corsHeaders,
                 'Content-Type': 'application/json',
               },
-            });
+            }));
           }
 
           // Servir web-dist (UI embebida) — candidatos centralizados en http/static.
@@ -282,12 +271,12 @@ class LibreDeckDaemon {
             const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
             const found = await findWebDistFile(filePath);
             if (found) {
-              return new Response(Bun.file(found), {
+              return finish(new Response(Bun.file(found), {
                 headers: {
                   ...corsHeaders,
                   'Content-Type': getContentType(filePath),
                 },
-              });
+              }));
             }
           } catch (error) {
             console.error('Error serving web file:', error);
@@ -296,19 +285,19 @@ class LibreDeckDaemon {
           // Fallback a index.html para SPA
           const indexPath = await findWebDistIndex();
           if (indexPath) {
-            return new Response(Bun.file(indexPath), {
+            return finish(new Response(Bun.file(indexPath), {
               headers: {
                 ...corsHeaders,
                 'Content-Type': 'text/html',
               },
-            });
+            }));
           }
 
           // Debug info si no se encuentra nada
           const debugInfo = resolveWebDistIndexCandidates()
             .map((p) => `${p}: ${fs.existsSync(p)}`)
             .join('<br>');
-          return new Response(
+          return finish(new Response(
             `LibreDeck Frontend Server<br>CWD: ${process.cwd()}<br>execPath: ${process.execPath}<br>execDir: ${require('path').dirname(process.execPath)}<br><br>Checked paths:<br>${debugInfo}`,
             {
               headers: {

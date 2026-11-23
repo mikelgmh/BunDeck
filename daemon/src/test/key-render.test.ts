@@ -88,4 +88,35 @@ describe('generateButtonImage', () => {
     const buf = await d.generateButtonImage({ label: 'XL', icon: 'Zap' }, 96);
     expect(buf.length).toBe(96 * 96 * 3);
   });
+
+  it('marcas simple-icons: `si:<slug>` pinta el glifo (no texto)', async () => {
+    const d = new StreamDeckDriver();
+    const buf = await d.generateButtonImage(
+      { icon: 'si:youtube', backgroundColor: '#101010', textColor: '#ffffff', showTitle: false },
+      72,
+    );
+    // Sin label ni textos: si el glifo se dibuja hay tinta en el centro;
+    // si cayera al fallback de texto no habría nada que pintar.
+    expect(countNonBg(buf, 72, 72, [16, 16, 16], 14, 14, 58, 58)).toBeGreaterThan(20);
+  });
+
+  it('marcas heredadas de Lucide (Youtube/Twitch/Github) ya no caen a texto en el HW', async () => {
+    const d = new StreamDeckDriver();
+    for (const icon of ['Youtube', 'Twitch', 'Github']) {
+      const buf = await d.generateButtonImage(
+        { icon, backgroundColor: '#101010', textColor: '#ffffff', showTitle: false },
+        72,
+      );
+      expect(countNonBg(buf, 72, 72, [16, 16, 16], 14, 14, 58, 58)).toBeGreaterThan(20);
+    }
+  });
+
+  it('icono desconocido sin label: sin tinta (no inventa nada)', async () => {
+    const d = new StreamDeckDriver();
+    const buf = await d.generateButtonImage(
+      { icon: 'DefinitivamenteNoExiste', backgroundColor: '#101010', textColor: '#ffffff', showTitle: false },
+      72,
+    );
+    expect(countNonBg(buf, 72, 72, [16, 16, 16])).toBe(0);
+  });
 });

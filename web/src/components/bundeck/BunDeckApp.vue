@@ -3,17 +3,27 @@
     class="bundeck"
     :data-bd-pal="bdResolvedPalette"
     :data-anim="bdAnimations ? 1 : 0"
-    :class="{ 'bd-dragging': false }"
+    :class="{ 'bd-dragging': false, 'bd-kiosk': kiosk }"
     :style="{
-      '--bd-ks': bdKeySize + 'px',
+      '--bd-ks': (kiosk ? Math.max(bdKeySize, 96) : bdKeySize) + 'px',
       '--bd-rk': bdRadius + 'px',
       '--bd-br': (0.5 + 0.5 * bdBrightness / 100).toFixed(2),
       '--bd-lw': bdShowLeft ? '320px' : '52px',
       '--bd-rw': bdShowRight ? '400px' : '52px'
     }"
   >
-    <TitleBar />
-    <header class="bd-top">
+    <!-- Sin permiso (LAN directa sin invitación): tapa la app para no
+      mostrar ni operar nada; el anfitrión en localhost nunca la ve. -->
+    <div v-if="lanDenied" class="bd-noperm" role="alert" data-cy="lan-denied">
+      <div class="bd-noperm__card">
+        <h1>🔒 {{ t('bd.lanDeniedTitle') }}</h1>
+        <p>{{ t('bd.lanDeniedMsg') }}</p>
+        <p class="bd-hint">{{ t('bd.lanDeniedHint') }}</p>
+      </div>
+    </div>
+    <template v-if="!lanDenied">
+    <TitleBar v-if="!kiosk" />
+    <header v-if="!kiosk" class="bd-top">
       <div class="bd-brand">
         <svg class="bd-mark" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="bdg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d9a8"/><stop offset=".6" stop-color="#e3b77a"/><stop offset="1" stop-color="#c98f52"/></linearGradient></defs><ellipse cx="32" cy="55" rx="21" ry="4" opacity=".2"/><path d="M7 40c0-18 10-29 25-29s25 11 25 29c0 9-7 14-25 14S7 49 7 40" fill="url(#bdg)"/><path d="M14 27c3-8 9-12 16-13" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/><ellipse cx="19" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><ellipse cx="45" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><circle cx="24" cy="37" r="2.6" fill="#33200f"/><circle cx="40" cy="37" r="2.6" fill="#33200f"/><path d="M28 42c2 3 6 3 8 0" fill="none" stroke="#33200f" stroke-width="2" stroke-linecap="round"/></svg>
         <span>{{ t('bd.brand') }}</span>
@@ -140,7 +150,7 @@
     </header>
 
     <main class="bd-main">
-      <aside id="bd-drw" class="bd-side" :class="{ 'bd-collapsed': !bdShowLeft }" :aria-label="t('bd.libraryLabel')">
+      <aside v-if="!kiosk" id="bd-drw" class="bd-side" :class="{ 'bd-collapsed': !bdShowLeft }" :aria-label="t('bd.libraryLabel')">
         <div v-if="bdShowLeft">
           <ActionsPanel
             ref="actionsPanel"
@@ -178,6 +188,7 @@
         :get-button-data="getButtonData"
         :display-data="(pos: number) => engine.resolveDisplay(pos)"
         :mode="mode"
+        :kiosk="kiosk"
         :api-base="API_BASE"
         :label-mode="bdLabelMode"
         :current-pages="currentPages"
@@ -189,9 +200,11 @@
         :assignments="devStore.assignments.value"
         :preview-device-id="previewDeviceId"
         :busy="pageBusy"
+        :long-press-ms="bdLongPressMs"
         @button-click="(pos) => selectButton(pos)"
         @button-execute="(pos) => onExecute(pos)"
         @button-long-press="(pos) => engine.execKey(pos, 'long')"
+        @button-tap="(pos) => engine.tapKey(pos)"
         @button-delete="(pos) => onDeleteButton(pos)"
         @swap="handleSwap"
         @grid-size-change="onGridSizeChange"
@@ -213,7 +226,7 @@
         @manage-devices="() => settingsDialog?.show('devices')"
       />
 
-      <aside id="bd-ins" class="bd-side" :class="{ 'bd-collapsed': !bdShowRight }" :aria-label="t('bd.inspectorLabel')">
+      <aside v-if="!kiosk" id="bd-ins" class="bd-side" :class="{ 'bd-collapsed': !bdShowRight }" :aria-label="t('bd.inspectorLabel')">
         <div v-if="bdShowRight">
           <KeyInspector
             :mode="mode"
@@ -259,6 +272,37 @@
         </button>
       </aside>
     </main>
+
+    <!-- Modo kiosco: solo grid. Salida discreta (botón flotante + triple-tap
+         en la esquina superior derecha + Escape), con confirmación. -->
+    <template v-if="kiosk">
+      <div
+        class="bd-kiosk-corner"
+        data-cy="bd-kiosk-corner"
+        :title="t('bd.kioskHint')"
+        aria-hidden="true"
+        @click="onKioskCornerTap"
+      ></div>
+      <div class="bd-kiosk-exit" role="group" :aria-label="t('bd.kioskExit')">
+        <button
+          class="bd-ibtn"
+          :title="t('bd.kioskFullscreen')"
+          :aria-label="t('bd.kioskFullscreen')"
+          data-cy="bd-kiosk-fullscreen"
+          @click="onKioskFullscreen"
+        >
+          <Minimize2 v-if="isFullscreen" :size="20" stroke-width="1.75" aria-hidden="true" />
+          <Maximize2 v-else :size="20" stroke-width="1.75" aria-hidden="true" />
+        </button>
+        <button
+          class="bd-btn bd-kiosk-exit-btn"
+          data-cy="bd-kiosk-exit"
+          @click="() => requestKioskExit('button')"
+        >
+          {{ t('bd.kioskExit') }}
+        </button>
+      </div>
+    </template>
 
     <SettingsDialog
       ref="settingsDialog"
@@ -409,6 +453,7 @@
       <span>{{ bdToast.message }}</span>
       <button v-if="bdToast.undo" @click="doUndo">{{ t('bd.undo') }}</button>
     </div>
+    </template>
   </div>
 </template>
 
@@ -418,15 +463,29 @@ import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLef
 import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {
-  bdResolvedPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations,
+  bdResolvedPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs,
   bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
-import { planFreeCell, clampDropCell } from '../../composables/useDeckLayouts'
+import { planFreeCell, clampDropCell, gridResizeFits } from '../../composables/useDeckLayouts'
 import {
   actionTypeSurfaceKind, findActionAdata, findControlAction, isControlAction
 } from '../../composables/useActionPresentation'
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
+import {
+  parseKioskFromLocation,
+  withoutKioskParam,
+  guardModeChange,
+  isTripleTap,
+  requestFullscreen,
+  type KioskExitReason,
+} from '../../composables/useKiosk'
+import { getTunnelToken } from '../../composables/useTunnel'
+import {
+  getActionsForKind,
+  setActionsForKind,
+  type PressKind,
+} from '../../composables/usePressActions'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
 import {
   useDevices, checkPageCompatibility, resolvePageSize, resolveDeckSize,
@@ -455,9 +514,52 @@ loadSavedLocale()
 const switchLanguage = (newLocale: string) => setLocale(newLocale)
 
 const mode = ref<'edit' | 'use'>('edit')
+// Modo kiosco: entra por URL (?kiosk=1 / ?mode=kiosk / #kiosk). Mientras dura,
+// el modo `edit` queda bloqueado y no se renderizan header/drawers/toolbars.
+const kiosk = ref(false)
+let kioskCornerTaps: number[] = []
 const setMode = (m: 'edit' | 'use') => {
-  mode.value = m
+  mode.value = guardModeChange(kiosk.value, m)
   selectedButton.value = null
+}
+
+/** Pide salir del kiosco (con confirmación) y limpia el param de la URL. */
+const exitKiosk = () => {
+  kiosk.value = false
+  kioskCornerTaps = []
+  try {
+    const clean = withoutKioskParam(window.location.href)
+    window.history.replaceState(null, '', clean)
+  } catch {
+    /* sin history: el estado interno ya salió del kiosco */
+  }
+  if (mode.value !== 'use') mode.value = 'use'
+  // Al volver a la UI completa, llevar el foco al primer tab de perfil.
+  nextTick(() => {
+    try {
+      ;(document.querySelector('header.bd-top .bd-tab') as HTMLElement | null)?.focus()
+    } catch {
+      /* sin header visible: nada que enfocar */
+    }
+  })
+}
+const requestKioskExit = async (_reason: KioskExitReason) => {
+  if (!kiosk.value) return
+  const ok = await askConfirm(t('bd.kioskExitTitle'), t('bd.kioskExitMsg'), t('bd.kioskExit'))
+  if (ok) exitKiosk()
+}
+/** Triple-tap en la esquina superior derecha = pedir salida del kiosco. */
+const onKioskCornerTap = () => {
+  const now = Date.now()
+  kioskCornerTaps = [...kioskCornerTaps, now].slice(-5)
+  if (isTripleTap(kioskCornerTaps, now)) {
+    kioskCornerTaps = []
+    void requestKioskExit('corner')
+  }
+}
+/** Pantalla completa bajo demanda (gesto del usuario; si falla, se sigue sin ella). */
+const onKioskFullscreen = () => {
+  void requestFullscreen()
 }
 
 const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null)
@@ -490,6 +592,7 @@ const {
   setPluginEnabled, removePlugin, reloadPlugin, rollbackPlugin, updatePlugin,
   uploadPluginFile, installPluginFromUrl,
   mcpTokens, mcpScopes, loadMcpTokens, loadMcpScopes, createMcpToken, updateMcpToken, revokeMcpToken,
+  lanDenied, redeemLanInviteFromUrl,
   installProgress, clearInstallProgress
 } = useStreamDeck()
 
@@ -590,6 +693,8 @@ const canExportSelected = computed(() => {
 })
 
 const openPalette = (path = 'acts') => {
+  // En kiosco no hay paleta ni edición: se ignora en silencio.
+  if (kiosk.value) return
   if (mode.value === 'use') {
     bdShowToast(t('bd.switchToEdit'))
     return
@@ -607,14 +712,15 @@ const onPalettePick = async (type: string) => {
   try {
     const path = palettePath.value
     palettePath.value = 'acts'
-    if (!path || path === 'acts') {
-      addAction(type)
+    const mPress = /^(?:press:)?(click|double|triple|long)$/.exec(path)
+    if (mPress || !path || path === 'acts') {
+      await addActionToKind(type, (mPress?.[1] ?? 'click') as PressKind)
     } else {
       const m = /^r(\d+)\.(then|else)$/.exec(path)
       const rules = [...(buttonConfig.value.rules ?? [])]
       const ri = m ? +m[1] : -1
       if (!m || !rules[ri]) {
-        addAction(type)
+        await addActionToKind(type, 'click')
       } else {
         const side = m[2] as 'then' | 'else'
         rules[ri] = { ...rules[ri], [side]: [...(rules[ri][side] ?? []), createAction(type)] }
@@ -946,6 +1052,8 @@ const handleProfileDuplicate = async (profileId: string) => {
         name: pg.name,
         order_idx: pg.order_idx,
         is_folder: pg.is_folder,
+        grid_cols: (pg as any).grid_cols ?? null,
+        grid_rows: (pg as any).grid_rows ?? null,
         data: asPageData(pg.data)
       })
       pageIdMap.set(pg.id, np.id)
@@ -1340,6 +1448,19 @@ const ensureControlSlot = async (type: string): Promise<boolean> => {
   }
   return true
 }
+/** Añade una acción a la lista del tipo de pulsación indicado. */
+const addActionToKind = async (type: string, kind: PressKind): Promise<boolean> => {
+  if (kind === 'click') return addActionGuarded(type)
+  if (!(await ensureControlSlot(type))) return false
+  const next = setActionsForKind(buttonConfig.value, kind, [
+    ...getActionsForKind(buttonConfig.value, kind),
+    createAction(type),
+  ])
+  buttonConfig.value = next
+  bumpConfigVersion()
+  await saveButtonConfig()
+  return true
+}
 /** Añade una acción al borrador con guarda de superficie y guardado inmediato. */
 const addActionGuarded = async (type: string): Promise<boolean> => {
   if (!(await ensureControlSlot(type))) return false
@@ -1366,10 +1487,10 @@ const onActionDrop = async (position: number, type: string) => {
     bdShowToast(String((e as Error)?.message ?? e))
   }
 }
-const onActionDropSelected = async (type: string) => {
+const onActionDropSelected = async (type: string, kind?: PressKind) => {
   if (!ensureEditableTarget()) return
   try {
-    await addActionGuarded(type)
+    await addActionToKind(type, kind ?? 'click')
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -1502,6 +1623,23 @@ const onLayoutModeChange = async (mode: 'classic' | 'gridstack') => {
 const onGridSizeChange = async (dx: number, dy: number) => {
   const nextCols = gridCols.value + dx
   const nextRows = gridRows.value + dy
+  // Guarda de contenido (los steppers ya la aplican en la UI): reducir no
+  // puede dejar teclas fuera del grid. En libre el stepper antes no hacía
+  // nada visible (GridStack manda) y la config quedaba inconsistente.
+  if ((dx < 0 || dy < 0) && currentPage.value) {
+    const positions = (currentButtons.value ?? []).map((b: any) => b.position)
+    const fits = gridResizeFits(
+      pageLayoutMode.value,
+      positions,
+      (currentButtons.value ?? []) as any[],
+      nextCols,
+      nextRows,
+    )
+    if (!fits) {
+      bdShowToast(t('bd.gridShrinkBlocked'))
+      return
+    }
+  }
   const hw = (currentPage.value ? decksOfCurrentChain.value.filter((d) =>
     devStore.assignments.value[d.id] === (currentPage.value as any).id
   ) : []).filter((d) => {
@@ -2237,10 +2375,38 @@ const onKeyDown = (event: KeyboardEvent) => {
       onDeleteButton(selectedButton.value)
     }
   }
-  if (event.key === 'Escape' && mode.value === 'use') setMode('edit')
+  if (event.key === 'Escape' && mode.value === 'use') {
+    // En kiosco, Escape pide salir del kiosco (con confirmación); fuera de
+    // él, vuelve al modo edición como antes.
+    if (kiosk.value) void requestKioskExit('escape')
+    else setMode('edit')
+  }
 }
 
 onMounted(async () => {
+  // Entrada por invitación LAN (?invite= del QR/enlace): canjear ANTES de
+  // cargar nada; sin invitación válida el daemon responde 401/403 y se
+  // muestra la pantalla "Sin permiso".
+  try {
+    await redeemLanInviteFromUrl()
+  } catch {
+    /* el canje fallido deja lanDenied según la sonda */
+  }
+  // Entrada por QR: ?kiosk=1/?mode=kiosk/#kiosk → kiosco directo en modo uso.
+  // Entrada por túnel del relay (/t/<token>/) sin param → modo uso (nunca editar);
+  // el kiosco pleno lo pide el param (los QR/links lo propagan).
+  try {
+    if (parseKioskFromLocation()) {
+      kiosk.value = true
+      mode.value = 'use'
+      selectedButton.value = null
+    } else if (getTunnelToken()) {
+      mode.value = 'use'
+      selectedButton.value = null
+    }
+  } catch {
+    /* sin location (SSR/tests): se queda en edición como antes */
+  }
   loadProfiles().then(async () => {
     // Reglas «load» de la página inicial.
     try { engine.runLoad(allPositions) } catch { /* noop */ }
