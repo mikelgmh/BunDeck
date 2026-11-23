@@ -1,3 +1,10 @@
+## [1.10.5](https://github.com/mikelgmh/libredeck/compare/v1.10.4...v1.10.5) (2026-11-23)
+
+
+### Bug Fixes
+
+* **qa:** tormenta assignments, undo sin botones, duplicado forward, race resize, rename ES, icono autosave, resize acotado, búsqueda unificada ([11a6520](https://github.com/mikelgmh/libredeck/commit/11a6520f4b002f8534beef21ddece9627d88a4bb))
+
 ## [1.10.4](https://github.com/mikelgmh/libredeck/compare/v1.10.3...v1.10.4) (2026-11-23)
 
 
