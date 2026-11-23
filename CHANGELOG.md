@@ -1,3 +1,15 @@
+# [1.8.0](https://github.com/mikelgmh/libredeck/compare/v1.7.2...v1.8.0) (2026-11-23)
+
+
+### Features
+
+* add flows, device sessions and mobile deck ([5e8c116](https://github.com/mikelgmh/libredeck/commit/5e8c11600f54774928d22a79d471805d05232d3e))
+
+
+### Performance Improvements
+
+* memoiza render de teclas, indexa botones, batch WS, code-splitting y batch backend ([fd984b3](https://github.com/mikelgmh/libredeck/commit/fd984b3bef524fe2e92d5198a12fe956e461c9a1))
+
 ## [1.7.2](https://github.com/mikelgmh/libredeck/compare/v1.7.1...v1.7.2) (2026-11-22)
 
 
