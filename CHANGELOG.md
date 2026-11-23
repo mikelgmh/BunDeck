@@ -1,3 +1,10 @@
+## [1.10.1](https://github.com/mikelgmh/libredeck/compare/v1.10.0...v1.10.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **daemon:** hide PowerShell/terminal windows and cache system metrics ([8181370](https://github.com/mikelgmh/libredeck/commit/818137041dc5d71c9d71fb96fa18e71b2cdd7185))
+
 # [1.10.0](https://github.com/mikelgmh/libredeck/compare/v1.9.0...v1.10.0) (2026-11-23)
 
 
