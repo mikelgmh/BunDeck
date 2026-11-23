@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/mikelgmh/libredeck/compare/v1.8.0...v1.8.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **launcher:** update a TEMP con error accionable sin admin, ventana con scroll 440x860 y aviso sin host Electrobun ([802fd0d](https://github.com/mikelgmh/libredeck/commit/802fd0d9065ee25fbde8445e626f01e21b48b568))
+
 # [1.8.0](https://github.com/mikelgmh/libredeck/compare/v1.7.2...v1.8.0) (2026-11-23)
 
 
