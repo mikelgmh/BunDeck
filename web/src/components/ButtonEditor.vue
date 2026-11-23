@@ -309,64 +309,47 @@ const initSwapy = async () => {
       isSwapping = true
       // Guardar el orden ANTES del swap
       orderBeforeSwap = props.buttonConfig.actions.map(a => a.id)
-      console.log('🎬 Swap started, order before:', orderBeforeSwap)
     })
-    
+
     swapyInstance.onSwapEnd(async (event: any) => {
-      console.log('🔄 Swapy swap ended', event)
-      
       // Usar el slotItemMap de Swapy que contiene el nuevo orden
       if (!event.slotItemMap) {
-        console.log('❌ No slotItemMap found')
         isSwapping = false
         return
       }
-      
-      console.log('🗺️ SlotItemMap:', event.slotItemMap)
-      
+
       // Usar asObject que es un objeto {slotId: itemId}
       let newOrder: string[] = []
-      
+
       if (event.slotItemMap.asObject) {
         // asObject es un objeto donde las keys son slotIds y los valores son itemIds
         // Como usamos action.id para ambos (slot e item), simplemente tomamos los valores
         newOrder = Object.values(event.slotItemMap.asObject).filter((id: any) => id)
-        console.log('📋 Using asObject, newOrder:', newOrder)
       } else if (event.slotItemMap.asArray && Array.isArray(event.slotItemMap.asArray)) {
         // asArray es un array de objetos {slotId, itemId}
         newOrder = event.slotItemMap.asArray
           .filter((item: any) => item && item.itemId)
           .map((item: any) => item.itemId)
-        console.log('📋 Using asArray, newOrder:', newOrder)
       }
-      
-      console.log('📋 Order before swap:', orderBeforeSwap)
-      
+
       // Crear array de acciones en el nuevo orden
       const reorderedActions = newOrder
         .map(id => props.buttonConfig.actions.find(a => a.id === id))
         .filter(a => a !== undefined)
-      
-      console.log('🔢 Reordered actions count:', reorderedActions.length)
-      console.log('🔢 Actions:', reorderedActions.map(a => a.type))
-      
+
       // Verificar si el orden cambió comparando con el orden ANTES del swap
       const hasChanged = newOrder.length > 0 && newOrder.some((id, index) => id !== orderBeforeSwap[index])
-      
-      console.log('🔍 Has changed?', hasChanged)
-      
+
       if (hasChanged && reorderedActions.length === props.buttonConfig.actions.length) {
-        console.log('✅ Emitting reorder-actions event')
         // NO actualizamos el estado local, solo guardamos
         // Swapy mantiene el orden visual correcto
         emit('reorder-actions', reorderedActions)
       }
-      
+
       // Marcar como no-swapping DESPUÉS de un delay para permitir que se guarde
       setTimeout(() => {
         isSwapping = false
         orderBeforeSwap = []
-        console.log('🔄 Swap complete')
       }, 100)
     })
   }
@@ -375,7 +358,6 @@ const initSwapy = async () => {
 // Watch for actions length changes ONLY (not order changes)
 watch(() => props.buttonConfig.actions.length, async (newLength, oldLength) => {
   if (!isSwapping && newLength !== oldLength) {
-    console.log('📏 Actions length changed:', oldLength, '->', newLength)
     await nextTick()
     initSwapy()
   }

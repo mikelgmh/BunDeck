@@ -636,12 +636,12 @@ export class WebSocketManager {
     const client = this.clients.get(clientId);
     if (!client) return;
 
-    console.log('📋 Client', clientId, 'subscribing to topics:', topics)
+    // Sin console.log por suscripción (ruta caliente: cada reconexión del
+    // panel spameaba el log). Solo se conserva el error ante formato inválido.
     topics.forEach(topic => {
       client.subscriptions.add(topic);
     });
 
-    console.log('✅ Client', clientId, 'subscriptions:', Array.from(client.subscriptions))
     this.sendToClient(clientId, {
       type: 'subscribed',
       payload: { topics, subscriptions: Array.from(client.subscriptions) }
@@ -666,13 +666,17 @@ export class WebSocketManager {
     const client = this.clients.get(clientId);
     const { buttonId, pageId, profileId, pressType = 'short' } = payload;
 
-    // Log del evento
-    this.db.addLog({
-      level: 'info',
-      message: `Button pressed: ${buttonId}`,
-      meta: { clientId, deviceId: client?.deviceId, pageId, profileId, pressType },
-      ts: Date.now()
-    });
+    // Ruta caliente: un addLog por pulsación (INSERT + broadcast log.created
+    // a todos los suscritos a 'logs') convertía cada press en tormenta IO/WS.
+    // Solo se registra si se pide explícito (diagnóstico); errores se loguean siempre.
+    if (process.env.LIBREDECK_LOG_PRESSES === '1') {
+      this.db.addLog({
+        level: 'info',
+        message: `Button pressed: ${buttonId}`,
+        meta: { clientId, deviceId: client?.deviceId, pageId, profileId, pressType },
+        ts: Date.now()
+      });
+    }
 
     // Emitir evento a clientes suscritos
     this.broadcast('button.pressed', {
@@ -747,15 +751,47 @@ export class WebSocketManager {
   }
 
   public broadcastButtonUpdate(buttonId: string, button: any, mutationId?: string): void {
-    this.broadcast('button.updated', { buttonId, button, mutationId }, 'buttons');
+    // pageId+mutationId+timestamp siempre: el cliente filtra ecos sin
+    // cambiar el protocolo (solo campos aditivos).
+    const pageId = (button as any)?.page_id ?? (button as any)?.pageId ?? null;
+    if (this.dropExactDuplicate(`button.updated:${buttonId}`, { buttonId, pageId, button, mutationId })) return;
+    this.broadcast('button.updated', { buttonId, button, pageId, mutationId, timestamp: Date.now() }, 'buttons');
   }
 
-  public broadcastButtonDeleted(buttonId: string, mutationId?: string): void {
-    this.broadcast('button.deleted', { buttonId, mutationId }, 'buttons');
+  public broadcastButtonDeleted(buttonId: string, mutationId?: string, pageId?: string | null): void {
+    if (this.dropExactDuplicate(`button.deleted:${buttonId}`, { buttonId, pageId: pageId ?? null, mutationId })) return;
+    this.broadcast('button.deleted', { buttonId, pageId: pageId ?? null, mutationId, timestamp: Date.now() }, 'buttons');
   }
 
-  public broadcastButtonsReordered(pageId: string, buttons: any, mutationId?: string): void {
-    this.broadcast('buttons.reordered', { pageId, buttons, mutationId }, 'buttons');
+  public broadcastButtonsReordered(pageId: string, buttons: any, mutationId?: string, pageVersion?: number): void {
+    if (this.dropExactDuplicate(`buttons.reordered:${pageId}`, { pageId, buttons, mutationId })) return;
+    this.broadcast('buttons.reordered', { pageId, buttons, mutationId, pageVersion: pageVersion ?? Date.now(), timestamp: Date.now() }, 'buttons');
+  }
+
+  /**
+   * Coalescencia de ráfagas (Fase C+D): si el MISMO payload se repite en
+   * <250ms (ecos button.updated/created/deleted/reordered), se descarta el
+   * duplicado. Nunca retrasa la primera entrega; solo poda duplicados
+   * exactos. Ventana acotada y mapa con tope para no crecer sin límite.
+   */
+  private lastBroadcast = new Map<string, { json: string; at: number }>();
+  private static readonly DEDUPE_WINDOW_MS = 250;
+  private static readonly DEDUPE_MAX_KEYS = 500;
+
+  private dropExactDuplicate(key: string, payload: unknown): boolean {
+    try {
+      const json = JSON.stringify(payload);
+      const now = Date.now();
+      const prev = this.lastBroadcast.get(key);
+      if (prev && now - prev.at < WebSocketManager.DEDUPE_WINDOW_MS && prev.json === json) {
+        return true;
+      }
+      if (this.lastBroadcast.size >= WebSocketManager.DEDUPE_MAX_KEYS) this.lastBroadcast.clear();
+      this.lastBroadcast.set(key, { json, at: now });
+      return false;
+    } catch {
+      return false; // ante cualquier duda, emitir
+    }
   }
 
   public broadcastActionStarted(actionId: string, context: any): void {

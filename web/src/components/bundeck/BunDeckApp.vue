@@ -348,7 +348,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
 import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown } from 'lucide-vue-next'
 import { useStreamDeck } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
@@ -367,14 +367,16 @@ import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
-import ActionCommandPalette from './ActionCommandPalette.vue'
-import KeyIoDialog from './KeyIoDialog.vue'
-import PluginSettingsDialog from './PluginSettingsDialog.vue'
-import SettingsDialog from './SettingsDialog.vue'
-import IconPickerDialog from './IconPickerDialog.vue'
-import QrDialog from './QrDialog.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
-import UpdateModal from '../UpdateModal.vue'
+// Diálogos pesados: chunks diferidos (solo cliente; BunDeckApp es
+// client:load, así que no hay SSR que romper). Se cargan al abrirse.
+const ActionCommandPalette = defineAsyncComponent(() => import('./ActionCommandPalette.vue'))
+const KeyIoDialog = defineAsyncComponent(() => import('./KeyIoDialog.vue'))
+const PluginSettingsDialog = defineAsyncComponent(() => import('./PluginSettingsDialog.vue'))
+const SettingsDialog = defineAsyncComponent(() => import('./SettingsDialog.vue'))
+const IconPickerDialog = defineAsyncComponent(() => import('./IconPickerDialog.vue'))
+const QrDialog = defineAsyncComponent(() => import('./QrDialog.vue'))
+const UpdateModal = defineAsyncComponent(() => import('../UpdateModal.vue'))
 import type { PageData } from '../../types/streamdeck'
 
 const { t, currentLocale, setLocale, loadSavedLocale } = useI18nStore()
@@ -402,7 +404,7 @@ const openPluginSettings = (pluginId: string, tab: 'settings' | 'instructions') 
 const {
   connectionStatus, connectionText, profiles, selectedProfile, currentProfile,
   currentPage, currentPages, currentButtons, plugins, gridCols, gridRows,
-  selectedButton, executingButtons, buttonConfig, API_BASE,
+  selectedButton, executingButtons, buttonConfig, buttonConfigVersion, bumpConfigVersion, API_BASE,
   getButtonData, getButton, selectProfile, loadProfiles, loadProfile,
   selectButton, executeButton, deleteButton, saveButtonConfig, addAction, createAction, executeSingleAction,
   removeAction, reorderActions, updateActionParameter, createProfile, updateProfile, deleteProfile,
@@ -542,6 +544,7 @@ const onPalettePick = async (type: string) => {
         const side = m[2] as 'then' | 'else'
         rules[ri] = { ...rules[ri], [side]: [...(rules[ri][side] ?? []), createAction(type)] }
         buttonConfig.value = { ...buttonConfig.value, rules }
+        bumpConfigVersion()
       }
     }
     await saveButtonConfig()
@@ -567,6 +570,7 @@ const onIconPick = async (name: string) => {
       if (looks[li]) {
         looks[li] = { ...looks[li], i: name }
         buttonConfig.value = { ...buttonConfig.value, looks }
+        bumpConfigVersion()
         await saveButtonConfig()
         return
       }
@@ -1006,11 +1010,13 @@ const onDeleteButton = async (position: number) => {
 }
 const onUpdateField = (key: string, value: any) => {
   buttonConfig.value = { ...buttonConfig.value, [key]: value }
+  bumpConfigVersion()
 }
 const onUpdateAction = (index: number, patch: Record<string, any>) => {
   const actions = [...(buttonConfig.value.actions ?? [])]
   actions[index] = { ...actions[index], ...patch }
   buttonConfig.value = { ...buttonConfig.value, actions }
+  bumpConfigVersion()
 }
 const onMoveAction = (index: number, dir: -1 | 1) => {
   const actions = [...(buttonConfig.value.actions ?? [])]
@@ -1018,6 +1024,7 @@ const onMoveAction = (index: number, dir: -1 | 1) => {
   if (j < 0 || j >= actions.length) return
   ;[actions[index], actions[j]] = [actions[j], actions[index]]
   buttonConfig.value = { ...buttonConfig.value, actions }
+  bumpConfigVersion()
 }
 const onTest = () => {
   if (selectedButton.value === null) return
@@ -1876,17 +1883,22 @@ watch(selectedButton, (newVal, oldVal) => {
   })
   void oldVal
 })
+// Autoguardado (igual que antes): el watcher observa el contador de
+// ediciones en vez de comparar JSON.stringify del config en cada tecla.
+// Cada mutación local (onUpdateField/onUpdateAction/onMoveAction,
+// add/remove/reorder/param en el composable) incrementa el contador; los
+// sets programáticos (selectButton/selectPage) no lo tocan y por tanto no
+// disparan guardados. El debounce de 800 ms se mantiene en debouncedSave.
 watch(
-  buttonConfig,
-  (newConfig, oldConfig) => {
+  buttonConfigVersion,
+  () => {
     // No bloquear por isSaving: si se está guardando, saveButtonConfig
     // reprograma el cambio en vez de perderlo (ver debouncedSave).
     if (isChangingButton.value) return
     if (selectedButton.value === null) return
-    if (oldConfig && JSON.stringify(newConfig) === JSON.stringify(oldConfig)) return
     debouncedSave()
   },
-  { deep: true, flush: 'post' }
+  { flush: 'post' }
 )
 
 const onKeyDown = (event: KeyboardEvent) => {

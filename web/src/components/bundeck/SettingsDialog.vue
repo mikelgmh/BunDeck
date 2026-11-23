@@ -465,14 +465,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
 import {
   SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
-import McpPane from './McpPane.vue'
-import RemotePane from './RemotePane.vue'
-import AutoProfileDialog from './AutoProfileDialog.vue'
+// Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
+// show('plugins') necesita setTab de forma síncrona tras nextTick.
+const McpPane = defineAsyncComponent(() => import('./McpPane.vue'))
+const RemotePane = defineAsyncComponent(() => import('./RemotePane.vue'))
+const AutoProfileDialog = defineAsyncComponent(() => import('./AutoProfileDialog.vue'))
 import { useI18nStore } from '../../composables/useI18n'
 import {
   bdPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations,
@@ -627,7 +629,17 @@ const ruleCountLabel = (profileId: string) => {
 }
 const autoDialog = ref<InstanceType<typeof AutoProfileDialog> | null>(null)
 const openAuto = (focusProfileId?: string) => {
-  autoDialog.value?.show(focusProfileId)
+  // AutoProfileDialog es async: si su chunk aún está cargando, reintentar
+  // unos ticks antes de rendirse (evita el clic "muerto" en arranque frío).
+  let tries = 5
+  const attempt = () => {
+    if (autoDialog.value?.show) {
+      autoDialog.value.show(focusProfileId)
+      return
+    }
+    if (--tries > 0) nextTick(attempt)
+  }
+  attempt()
 }
 
 // Variables globales (intérprete propio; persisten en localStorage)

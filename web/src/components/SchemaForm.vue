@@ -254,8 +254,6 @@ const openFileDialog = async (propKey: string) => {
       ? `${tunnelApiBase(tunnelToken)}/files/select`
       : `${protocol}//${hostname}:3001/api/v1/files/select`
 
-    console.log('🔍 Abriendo diálogo de selección de archivos...')
-
     // Llamar al endpoint que abre el diálogo nativo
     const response = await fetch(apiUrl)
 
@@ -263,15 +261,12 @@ const openFileDialog = async (propKey: string) => {
       const result = await response.json()
 
       if (result.success && result.path) {
-        console.log('✅ Archivo seleccionado:', result.path)
         // Actualizar el campo con la ruta completa
         updateValue(propKey, result.path)
 
         alert(`Archivo seleccionado exitosamente:\n\n${result.filename}\n\nRuta: ${result.path}`)
-      } else {
-        console.log('❌ Usuario canceló la selección')
-        // No mostrar mensaje de error si el usuario canceló
       }
+      // Si el usuario canceló, no se muestra ningún mensaje de error
     } else {
       const errorText = await response.text()
       console.error('❌ Error en selección de archivos:', errorText)

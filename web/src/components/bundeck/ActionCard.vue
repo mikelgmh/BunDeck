@@ -155,8 +155,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { X, Settings } from 'lucide-vue-next'
-import * as LucideIcons from 'lucide-vue-next'
+import { X, Settings, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-next'
+import { dynamicIcon } from '../../composables/useDynamicIcon'
 import SchemaForm from '../SchemaForm.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { vars } from '../../composables/useVars'
@@ -181,7 +181,12 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const varList = computed(() => vars.value)
-const icons = LucideIcons as Record<string, any>
+/** Locales: sincrónicos (tree-shaken). Plugins: diferidos por nombre. */
+const localActionIcons: Record<string, any> = {
+  'local.set-var': Variable,
+  'local.toggle-var': ToggleLeft,
+  'local.toast': MessageSquare,
+}
 
 function findPluginAction(type: string): any | null {
   for (const entry of props.plugins ?? []) {
@@ -213,12 +218,10 @@ const actionName = (type: string) => {
   return names[base] ?? base.toUpperCase()
 }
 const actionIcon = (type: string) => {
-  if (type === 'local.set-var') return icons['Variable'] ?? Settings
-  if (type === 'local.toggle-var') return icons['ToggleLeft'] ?? Settings
-  if (type === 'local.toast') return icons['MessageSquare'] ?? Settings
+  if (localActionIcons[type]) return localActionIcons[type]
   const found = findPluginAction(type)
   const name = found?.icon ?? 'Settings'
-  return icons[name] ?? Settings
+  return dynamicIcon(name) ?? Settings
 }
 const actionSchema = (type: string) => findPluginAction(type)?.schema ?? null
 

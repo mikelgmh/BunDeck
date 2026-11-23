@@ -73,8 +73,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Search, Settings, Ellipsis, BookOpen, TriangleAlert } from 'lucide-vue-next'
-import * as LucideIcons from 'lucide-vue-next'
+import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-next'
+import { dynamicIcon } from '../../composables/useDynamicIcon'
 import { useI18nStore } from '../../composables/useI18n'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
@@ -98,7 +98,11 @@ const query = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 const openMenuFor = ref<string | null>(null)
 
-const icons = LucideIcons as Record<string, any>
+/** Iconos locales: imports nombrados (tree-shaken). Los de plugins llegan
+ *  por nombre dinámico y se resuelven diferidos (ver useDynamicIcon). */
+const localIcons: Record<string, any> = { Variable, ToggleLeft, MessageSquare }
+const resolveIcon = (name: unknown, fallback: any = Settings) =>
+  (typeof name === 'string' && localIcons[name]) || dynamicIcon(name) || fallback
 
 const manifestOf = (pid: string) => {
   const det = (props.detailed ?? []).find((p: any) => p.id === pid)
@@ -134,7 +138,7 @@ const flat = computed(() => {
   const list: Array<{ type: string; name: string; group: string; pid: string; icon: any }> = []
   const logicGroup = t('bd.logicGroup')
   for (const l of LOCAL_ACTIONS) {
-    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: icons[l.icon] ?? Settings })
+    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: resolveIcon(l.icon) })
   }
   for (const entry of props.plugins ?? []) {
     const [pid, pdata] = entry
@@ -145,7 +149,7 @@ const flat = computed(() => {
         name: adata?.name ?? aid,
         group,
         pid,
-        icon: icons[adata?.icon] ?? Settings
+        icon: resolveIcon(adata?.icon)
       })
     }
   }

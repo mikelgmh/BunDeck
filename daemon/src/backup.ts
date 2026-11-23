@@ -16,6 +16,10 @@ import { DatabaseService } from './db';
 import { checkPageCompatibility } from './devices';
 import { getAssetsDir } from './paths';
 import { getVersion } from './version';
+// Solo para invalidar la caché del store tras un restore (escribe a BD
+// directamente y el store memoiza por versión; sin esto, resolved() seguiría
+// devolviendo valores pre-restore hasta la próxima escritura).
+import { getVariableStore } from './variables/store';
 
 export const BACKUP_FORMAT = 'libredeck-backup';
 export const BACKUP_VERSION = 1;
@@ -536,6 +540,7 @@ export function restoreBackup(
         }
       }
       restored.variables = n;
+      try { getVariableStore().clearCache(); } catch { /* mejor esfuerzo */ }
       prog('progress', doneCount(order, 'variables'), `${n} variables`);
     }
     if (data.plugins && order.includes('plugins')) {

@@ -41,7 +41,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
             parent_widget_id: body.parent_widget_id ?? null,
             data: body.data || {},
           });
-          services.wsManager.broadcast('button.created', { buttonId: created.id, button: created, mutationId: (body as any)?.mutationId }, 'buttons');
+          services.wsManager.broadcast('button.created', { buttonId: created.id, button: created, pageId: created.page_id, mutationId: (body as any)?.mutationId, timestamp: Date.now() }, 'buttons');
           try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
           if (streamDeckDriver.isConnected()) {
             streamDeckDriver.scheduleUpdateFromPage(created.page_id);
@@ -69,7 +69,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
         }
         throw error;
       }
-      services.wsManager.broadcast('button.created', { buttonId: button.id, button, mutationId: (body as any)?.mutationId }, 'buttons');
+      services.wsManager.broadcast('button.created', { buttonId: button.id, button, pageId: button.page_id, mutationId: (body as any)?.mutationId, timestamp: Date.now() }, 'buttons');
 
       // Las reglas load/timer/var de la tecla funcionan con la UI cerrada:
       // re-sincronizar automatizaciones (best-effort, no bloquea).
@@ -98,7 +98,12 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
         }
 
         const updated = db.reorderButtons(page_id, order);
-        services.wsManager.broadcastButtonsReordered(page_id, updated, (raw as any)?.mutationId);
+        // pageVersion monotónico emitido por el servidor para que el
+        // frontend descarte respuestas stale sin timestamp de cliente:
+        // solo acepta si pageVersion avanza. Campo aditivo; el contrato
+        // {success, buttons} no cambia.
+        const pageVersion = Date.now();
+        services.wsManager.broadcastButtonsReordered(page_id, updated, (raw as any)?.mutationId, pageVersion);
         try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 
         // Repintado diferido y coalescado (no bloquea la respuesta).
@@ -106,7 +111,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
           streamDeckDriver.scheduleUpdateFromPage(page_id);
         }
 
-        return jsonResponse({ success: true, buttons: updated });
+        return jsonResponse({ success: true, buttons: updated, pageVersion, mutationId: (raw as any)?.mutationId ?? null });
       } catch (error) {
         if (error instanceof Error && /no encontrado|no pertenece|duplicada|inválido|vacío/.test(error.message)) {
           return jsonResponse({ error: error.message }, 400);
@@ -189,7 +194,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       const pageId = button.page_id;
       db.deleteButton(buttonId);
       const deleteBody = await _req.json().catch(() => ({}));
-      services.wsManager.broadcastButtonDeleted(buttonId, (deleteBody as any)?.mutationId);
+      services.wsManager.broadcastButtonDeleted(buttonId, (deleteBody as any)?.mutationId, pageId);
 
       try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 

@@ -468,6 +468,11 @@ const SQL_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_assignments_profile ON profile_assignments(profile_id);
   CREATE INDEX IF NOT EXISTS idx_assignments_device ON profile_assignments(device_id);
+  -- NOTA Fase C+D: los índices extra (pages.parent_id, variables.scope,
+  -- flow_runs.started_at...) NO van aquí sino en la migración 8, uno por uno
+  -- con try/catch: en DBs antiguas la tabla puede existir sin esa columna
+  -- (o con otro shape) y un CREATE INDEX fallido abortaría todo el exec del
+  -- schema e impediría arrancar (ver phase1-model.test.ts).
 `;
 
 export async function initDatabase() {
@@ -874,6 +879,40 @@ function runMigrations(db: Database) {
     console.log('✅ Migration 7 completed: devices + profile_assignments');
   } catch (error) {
     console.error('❌ Migration 7 failed:', error);
+  }
+
+  // Migration 8 (Fase C+D): índices para rutas calientes sin tocar datos.
+  // - loadButtons: buttons(page_id) + UNIQUE(page_id, position) ya existen;
+  //   se redeclaran como IF NOT EXISTS por si una DB intermedia los perdió.
+  // - loadProfile/paralelo: pages(profile_id, parent_id) para getChildPages.
+  // - assignments: idx existentes + cobertura por si faltan.
+  // - variables: (scope, scope_id) prefijo del PK (listVariableRows filtra por ambos).
+  // - flow_runs(last_seen/started): historial ordenado por fecha.
+  // Todo CREATE INDEX IF NOT EXISTS = idempotente, nunca rompe reset.
+  // OJO: cada índice en su propio exec con try/catch. En DBs antiguas una
+  // tabla puede existir con otro shape (p.ej. variables sin scope, pages sin
+  // parent_id si la migración 5 no aplicó): un fallo no debe impedir el
+  // resto ni abortar el arranque (ver phase1-model.test.ts).
+  try {
+    const idx = [
+      'CREATE INDEX IF NOT EXISTS idx_pages_profile_id ON pages(profile_id)',
+      'CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_pages_profile_parent ON pages(profile_id, parent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_buttons_page_id ON buttons(page_id)',
+      'CREATE INDEX IF NOT EXISTS idx_assignments_profile ON profile_assignments(profile_id)',
+      'CREATE INDEX IF NOT EXISTS idx_assignments_device ON profile_assignments(device_id)',
+      'CREATE INDEX IF NOT EXISTS idx_variables_scope ON variables(scope, scope_id)',
+      'CREATE INDEX IF NOT EXISTS idx_flow_runs_started_at ON flow_runs(started_at)',
+      'CREATE INDEX IF NOT EXISTS idx_client_sessions_seen ON client_sessions(last_seen_at)',
+      'CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)',
+    ];
+    for (const ddl of idx) {
+      try { db.exec(ddl); }
+      catch (e) { console.warn(`⚠️ Migration 8: omitido (${ddl}):`, (e as Error)?.message ?? e); }
+    }
+    console.log('✅ Migration 8 completed: índices calientes');
+  } catch (error) {
+    console.error('❌ Migration 8 failed:', error);
   }
 
   console.log('✅ Database migrations completed');

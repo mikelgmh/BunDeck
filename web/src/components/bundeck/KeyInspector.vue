@@ -36,7 +36,7 @@
         <span class="bd-pvov" aria-hidden="true"><ImagePlus :size="20" stroke-width="1.75" /></span>
       </button>
       <div class="bd-it">
-        <p class="bd-mono bd-cap">F{{ row + 1 }} · C{{ col + 1 }}</p>
+        <p class="bd-mono bd-cap">F{{ row + 1 }} Â· C{{ col + 1 }}</p>
         <label class="bd-sr" for="bd-ft">{{ t('bd.keyTitle') }}</label>
         <input
           type="text"
@@ -425,7 +425,7 @@
               @input="setLook(li, { t: ($event.target as HTMLInputElement).value })"
             />
             <button class="bd-btn" @click="emit('open-look-icon', li)">
-              <component :is="lookIcon(li)" :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.icon') }}…
+              <component :is="lookIcon(li)" :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.icon') }}â€¦
             </button>
           </div>
           <div class="bd-cols" style="margin-bottom: 12px" role="group" :aria-label="t('bd.iconColor')">
@@ -524,13 +524,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { ChevronUp, ChevronDown, Plus, Settings, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2, ImagePlus } from 'lucide-vue-next'
-import * as LucideIcons from 'lucide-vue-next'
-import { createSwapy, type Swapy } from 'swapy'
+import { ChevronUp, ChevronDown, Plus, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2, ImagePlus, Zap } from 'lucide-vue-next'
+import type { Swapy } from 'swapy'
+import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ActionCard from './ActionCard.vue'
 import { useI18nStore } from '../../composables/useI18n'
-import { ev, fmt, intp } from '../../composables/useExpressions'
-import { vars, getEnv, displayTick } from '../../composables/useVars'
+import { ev, fmt, intp, usedVarNames } from '../../composables/useExpressions'
+import { vars, getVar, getEnv, displayTick } from '../../composables/useVars'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
@@ -550,7 +550,7 @@ interface Props {
   availablePages: Array<{ id: string; name: string }>
   profileName?: string
   pageName?: string
-  /** Base de la API (puerto 3001): los assets `/assets/…` cuelgan de ahí. */
+  /** Base de la API (puerto 3001): los assets `/assets/â€¦` cuelgan de ahÃ­. */
   apiBase?: string
 }
 
@@ -578,7 +578,7 @@ const emit = defineEmits<Emits>()
 
 const tab = ref<'actions' | 'rules' | 'appearance' | 'behavior'>('actions')
 // Sin tecla no hay reglas/aspecto que mostrar: volver a acciones evita
-// que las pestañas parezcan "no clicables" (mismo empty-state en todas).
+// que las pestaÃ±as parezcan "no clicables" (mismo empty-state en todas).
 watch(
   () => props.hasButton,
   (v) => {
@@ -606,19 +606,36 @@ const lookList = computed<any[]>(() => {
   return Array.isArray(l) ? l.filter((x) => x && typeof x === 'object') : []
 })
 const varList = computed(() => vars.value)
-const envNow = () => {
-  void displayTick.value
-  return getEnv(props.profileName, props.pageName)
+/** Incorporadas de tiempo: solo entonces el badge depende del tick de 1 s. */
+const BADGE_TIME_RE = /(^|[^\p{L}\p{N}_])(hora|minuto|segundo|dia)(?![\p{L}\p{N}_])/u
+/** Badge "condiciÃ³n ahora: â€¦" memoizado por (cond + valores de vars usadas + tick si usa tiempo).
+ *  Sin cachÃ©, cada render reevaluaba ev() por cada regla y look, y el tick
+ *  suscribÃ­a todo el inspector al temporizador aunque nada fuese dinÃ¡mico. */
+const badgeCache = new Map<string, string>()
+const badgeKeyOf = (s: string): string => {
+  const used = usedVarNames(s, vars.value.map((v) => v.n))
+  // Leer el tick solo si hace falta: si no, este render no se suscribe al
+  // temporizador y el v-html no se recalcula cada segundo.
+  let key = BADGE_TIME_RE.test(s) ? `${s}\n#${displayTick.value}\n` : `${s}\n#\n`
+  for (const n of used) key += `${n}=${String(getVar(n)?.v ?? '')};`
+  return key
 }
 
 const condBadge = (src: unknown): string => {
   const s = String(src ?? '')
   if (!s.trim()) return esc(t('bd.condAlways'))
+  const key = badgeKeyOf(s)
+  const hit = badgeCache.get(key)
+  if (hit !== undefined) return hit
+  let out: string
   try {
-    return `${esc(t('bd.condNow'))}: <b>${esc(fmt(ev(s, envNow())))}<\/b>`
+    out = `${esc(t('bd.condNow'))}: <b>${esc(fmt(ev(s, getEnv(props.profileName, props.pageName))))}<\/b>`
   } catch (e: any) {
-    return `<span class="bd-err">${esc(e?.message ?? String(e))}<\/span>`
+    out = `<span class="bd-err">${esc(e?.message ?? String(e))}<\/span>`
   }
+  badgeCache.set(key, out)
+  if (badgeCache.size > 200) badgeCache.clear()
+  return out
 }
 const esc = (s: string) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
 
@@ -632,40 +649,50 @@ const initSwapy = async () => {
   destroySwapy()
   if (tab.value !== 'actions') return
   if (!actionsList.value || !(props.buttonConfig?.actions?.length > 0)) return
-  swapyInstance = createSwapy(actionsList.value, { animation: 'dynamic' })
-  swapyInstance.onSwapStart(() => {
-    swapping = true
-    orderBeforeSwap = (props.buttonConfig.actions ?? []).map(actionKey)
-  })
-  swapyInstance.onSwapEnd((event: any) => {
-    const map = event.slotItemMap
-    if (!map) {
-      swapping = false
-      return
-    }
-    let itemIds: string[] = []
-    if (map.asObject) {
-      itemIds = (Object.values(map.asObject).filter(Boolean) as string[]).map((s) =>
-        String(s).replace(/^item-/, '')
-      )
-    } else if (Array.isArray(map.asArray)) {
-      itemIds = map.asArray
-        .filter((x: any) => x?.itemId)
-        .map((x: any) => String(x.itemId).replace(/^item-/, ''))
-    }
-    const actions = props.buttonConfig.actions ?? []
-    const reordered = itemIds
-      .map((k) => actions.find((a: any, i: number) => actionKey(a, i) === k))
-      .filter(Boolean)
-    const changed =
-      reordered.length === actions.length &&
-      itemIds.some((k, index) => k !== orderBeforeSwap[index])
-    if (changed) emit('reorder-actions', reordered)
+  // Import dinÃ¡mico: fuera del chunk inicial (ver StageBoard).
+  try {
+    const { createSwapy } = await import('swapy')
+    // La pestaÃ±a o la lista pueden haber cambiado mientras se cargaba.
+    if (tab.value !== 'actions' || !actionsList.value) return
+    if (!(props.buttonConfig?.actions?.length > 0)) return
+    swapyInstance = createSwapy(actionsList.value, { animation: 'dynamic' })
+    swapyInstance.onSwapStart(() => {
+      swapping = true
+      orderBeforeSwap = (props.buttonConfig.actions ?? []).map(actionKey)
+    })
+    swapyInstance.onSwapEnd((event: any) => {
+      const map = event.slotItemMap
+      if (!map) {
+        swapping = false
+        return
+      }
+      let itemIds: string[] = []
+      if (map.asObject) {
+        itemIds = (Object.values(map.asObject).filter(Boolean) as string[]).map((s) =>
+          String(s).replace(/^item-/, '')
+        )
+      } else if (Array.isArray(map.asArray)) {
+        itemIds = map.asArray
+          .filter((x: any) => x?.itemId)
+          .map((x: any) => String(x.itemId).replace(/^item-/, ''))
+      }
+      const actions = props.buttonConfig.actions ?? []
+      const reordered = itemIds
+        .map((k) => actions.find((a: any, i: number) => actionKey(a, i) === k))
+        .filter(Boolean)
+      const changed =
+        reordered.length === actions.length &&
+        itemIds.some((k, index) => k !== orderBeforeSwap[index])
+      if (changed) emit('reorder-actions', reordered)
     setTimeout(() => {
       swapping = false
       orderBeforeSwap = []
     }, 100)
-  })
+    })
+  } catch (e) {
+    console.error('[swapy] initSwapy failed:', e)
+    swapyInstance = null
+  }
 }
 
 const onGlobalDragStart = (event: DragEvent) => {
@@ -728,10 +755,9 @@ const toColorInput = (v: any) => {
   return '#374151'
 }
 
-const icons = LucideIcons as Record<string, any>
 const iconComponent = computed(() => {
   const name = props.buttonConfig?.icon
-  return typeof name === 'string' && name ? icons[name] ?? null : null
+  return typeof name === 'string' && name ? dynamicIcon(name) : null
 })
 const iconKebab = computed(() => {
   const name: string = String(props.buttonConfig?.icon ?? '')
@@ -740,9 +766,16 @@ const iconKebab = computed(() => {
 
 /** Vista previa con apariencia condicional aplicada. */
 const preview = computed(() => {
+  const rawStatic = props.buttonConfig ?? {}
+  const rawLooks = Array.isArray(rawStatic.looks) ? rawStatic.looks : []
+  const previewStatic =
+    !rawLooks.some((l: any) => String(l?.cond ?? '').trim()) &&
+    !/\{\{/.test(String(rawStatic.label ?? ''))
   try {
-    void displayTick.value
-    const E = envNow()
+    // Solo suscribirse al tick si hay looks con condiciÃ³n o {{}} en el tÃ­tulo;
+    // si no, la vista previa estÃ¡tica no se recalcula cada segundo.
+    if (!previewStatic) void displayTick.value
+    const E = getEnv(props.profileName, props.pageName)
     const raw = props.buttonConfig ?? {}
     const looks = Array.isArray(raw.looks) ? raw.looks : []
     const L = looks.find((l: any) => {
@@ -775,7 +808,7 @@ const previewImage = computed(() => {
 const hasKeyImage = computed(() => previewImage.value !== '')
 const previewIcon = computed(() => {
   const n = (preview.value as any).iconName
-  return n ? icons[n] ?? null : null
+  return n ? dynamicIcon(n) : null
 })
 
 const setRules = (next: any[]) => emit('update-field', 'rules', next)
@@ -823,7 +856,7 @@ const lookIcon = (li: number) => {
   const n = typeof lookList.value[li]?.i === 'string' && lookList.value[li].i
     ? lookList.value[li].i
     : (typeof props.buttonConfig?.icon === 'string' ? props.buttonConfig.icon : '')
-  return (n && (icons as Record<string, any>)[n]) ?? icons['Zap'] ?? Settings
+  return (n ? dynamicIcon(n) : null) ?? Zap
 }
 
 const onDrop = (event: DragEvent) => {
@@ -838,7 +871,7 @@ const onDrop = (event: DragEvent) => {
   }
 }
 
-/** Flechas del teclado sobre el asa: reordena sin ratón ni táctil. */
+/** Flechas del teclado sobre el asa: reordena sin ratÃ³n ni tÃ¡ctil. */
 const onGripKey = (e: KeyboardEvent, i: number) => {
   if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
   const j = i + (e.key === 'ArrowUp' ? -1 : 1)

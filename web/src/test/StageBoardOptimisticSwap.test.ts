@@ -73,7 +73,10 @@ describe('StageBoard optimistic DOM reconciliation', () => {
       { id: 'B', position: 1, label: 'HTTP' },
     ])
     const wrapper = mountBoard(buttons)
-    expect(createSwapyMock).toHaveBeenCalledTimes(1)
+    // initializeSwapy es async (import dinámico de swapy): esperar al bind.
+    await vi.waitFor(() => {
+      expect(createSwapyMock).toHaveBeenCalledTimes(1)
+    })
 
     const plate = wrapper.element.querySelector('[data-swapy-container]')!
     const slots = plate.querySelectorAll<HTMLElement>('[data-swapy-slot]')
@@ -101,7 +104,9 @@ describe('StageBoard optimistic DOM reconciliation', () => {
     expect(rebuiltSlots[1].textContent).toContain('Shell')
 
     // Una sola re-vinculación (la del watcher): el usuario no recarga.
-    expect(createSwapyMock).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => {
+      expect(createSwapyMock).toHaveBeenCalledTimes(2)
+    })
     wrapper.unmount()
   })
 
@@ -111,15 +116,19 @@ describe('StageBoard optimistic DOM reconciliation', () => {
     // el primer drag operaría sobre ese mapa rancio (la tecla "vuelve").
     const buttons = reactive<MiniBtn[]>([])
     const wrapper = mountBoard(buttons)
-    expect(createSwapyMock).toHaveBeenCalledTimes(1)
+    // initializeSwapy es async (import dinámico de swapy): esperar al bind.
+    await vi.waitFor(() => {
+      expect(createSwapyMock).toHaveBeenCalledTimes(1)
+    })
 
     buttons.push(
       { id: 'A', position: 0, label: 'Shell' },
       { id: 'B', position: 1, label: 'HTTP' },
     )
     await flush()
-
-    expect(createSwapyMock).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => {
+      expect(createSwapyMock).toHaveBeenCalledTimes(2)
+    })
     const plate = wrapper.element.querySelector('[data-swapy-container]')!
     const slots = plate.querySelectorAll<HTMLElement>('[data-swapy-slot]')
     expect(slots[0].querySelector('[data-swapy-item]')?.getAttribute('data-swapy-item')).toBe('item-A')

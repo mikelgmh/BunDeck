@@ -3,6 +3,27 @@ import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './u
 import { getOrCreateDeviceId, isNavigationForMe } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
+// Fallback compartido (congelado) para teclas vacías: evita reconstruir el
+// objeto literal en cada llamada a getButtonData. Solo lectura.
+const EMPTY_BUTTON_DATA = Object.freeze({
+  label: '',
+  textTop: '',
+  textBottom: '',
+  fontSize: 14,
+  icon: '',
+  iconImage: '',
+  emoji: '',
+  backgroundColor: '',
+  textColor: '#e8e9eb',
+  showTitle: true,
+  mode: 'seq',
+  longPress: 'none',
+  confirm: false,
+  actions: [],
+  rules: [],
+  looks: []
+})
+
 export function useStreamDeck() {
   // Connection State
   const connectionStatus = ref('bg-error')
@@ -42,8 +63,14 @@ export function useStreamDeck() {
   // Dynamic button values for real-time updates (any plugin with dynamic actions)
   const dynamicButtonValues = ref(new Map<number, any>())
 
-  // Update intervals for dynamic buttons
-  const updateIntervals = ref(new Map<number, number>())
+  // Polling centralizado de botones dinámicos: un solo temporizador recorre
+  // los botones dinámicos respetando su updateInterval individual, con
+  // concurrencia limitada (evita N setInterval y ráfagas de N POST).
+  const DYNAMIC_TICK_MS = 500
+  const DYNAMIC_MAX_IN_FLIGHT = 4
+  let dynamicTimer: ReturnType<typeof setInterval> | null = null
+  let dynamicInFlight = 0
+  const dynamicLastRun = new Map<number, number>()
 
   // Button Config
   const buttonConfig = ref<ButtonData>({
@@ -64,6 +91,15 @@ export function useStreamDeck() {
     rules: [],
     looks: []
   })
+
+  // Contador ligero de ediciones locales del borrador (autosave): cada
+  // mutación local lo incrementa y la UI observa el contador en vez de
+  // comparar JSON.stringify del config en cada tecla. Los sets
+  // programáticos (selectButton/selectPage) no lo tocan.
+  const buttonConfigVersion = ref(0)
+  const bumpConfigVersion = () => {
+    buttonConfigVersion.value += 1
+  }
 
   // WebSocket
   let ws: WebSocket | null = null
@@ -200,55 +236,65 @@ export function useStreamDeck() {
     buttonsEpoch += 1
   }
 
+  // Recargas WS con debounce + coalescencia: una ráfaga de N broadcasts
+  // seguidos (p. ej. 5 button.updated) produce una sola recarga por kind.
+  // No cambia el protocolo WS, solo agrupa el trabajo local.
+  const RELOAD_DEBOUNCE_MS = 200
+  const reloadPending = new Set<'buttons' | 'plugins' | 'profiles' | 'pages'>()
+  let reloadTimer: ReturnType<typeof setTimeout> | null = null
+  const flushReloads = () => {
+    reloadTimer = null
+    if (reloadPending.size === 0) return
+    // Durante swaps la UI optimista manda: se descarta (como antes).
+    if (isSwapping.value) {
+      reloadPending.clear()
+      return
+    }
+    const kinds = [...reloadPending]
+    reloadPending.clear()
+    // loadProfiles ya recarga perfil + páginas + botones + plugins: absorbe
+    // al resto de kinds pendientes en esta ventana.
+    if (kinds.includes('profiles')) {
+      void loadProfiles()
+      return
+    }
+    if (kinds.includes('plugins')) void loadPlugins()
+    if (kinds.includes('pages')) void reloadPages()
+    if (kinds.includes('buttons') && currentPage.value) void loadButtons()
+  }
+  const scheduleReload = (kind: 'buttons' | 'plugins' | 'profiles' | 'pages') => {
+    if (isSwapping.value) return
+    reloadPending.add(kind)
+    if (reloadTimer) return
+    reloadTimer = setTimeout(flushReloads, RELOAD_DEBOUNCE_MS)
+  }
+
   // Computed properties
   const getButtonData = computed(() => (position: number) => {
     const button = getButton(position)
     // If this is the selected button, always use current config for real-time updates
     if (selectedButton.value === position) {
-      const config = {
-        ...buttonConfig.value,
-        // Force reactivity by accessing reactive values
-        _forceUpdate: selectedButton.value
-      }
-
       // Check for dynamic values even for selected button (any plugin with dynamic actions)
       const dynamicValue = dynamicButtonValues.value.get(position)
-      if (dynamicValue && hasDynamicAction(button!)) {
-        console.log(`📊 Applying dynamic value for selected button at position ${position}:`, dynamicValue)
+      if (dynamicValue && hasDynamicAction(button)) {
         return {
-          ...config,
+          ...buttonConfig.value,
           dynamicValue: dynamicValue.value !== undefined && dynamicValue.unit ?
             `${dynamicValue.value}${dynamicValue.unit}` :
             (dynamicValue.description || 'N/A'),
         }
       }
-
-      return config
+      // Sin copia: el objeto reactivo ya actualiza la vista; crear un spread
+      // por llamada invalidaba memoizaciones y re-renderizaba el grid.
+      return buttonConfig.value
     }
-    // Otherwise return saved data or empty object
-    const savedData = button?.data || {
-      label: '',
-      textTop: '',
-      textBottom: '',
-      fontSize: 14,
-      icon: '',
-      iconImage: '',
-      emoji: '',
-      backgroundColor: '',
-      textColor: '#e8e9eb',
-      showTitle: true,
-      mode: 'seq',
-      longPress: 'none',
-      confirm: false,
-      actions: [],
-      rules: [],
-      looks: []
-    }
+    // Otherwise return saved data or shared empty fallback (no copies unless
+    // a dynamic value must be merged in).
+    const savedData = button?.data ?? EMPTY_BUTTON_DATA
 
     // Check for dynamic values (any plugin with dynamic actions)
     const dynamicValue = dynamicButtonValues.value.get(position)
-    if (dynamicValue && hasDynamicAction(button!)) {
-      console.log(`📊 Applying dynamic value for position ${position}:`, dynamicValue)
+    if (dynamicValue && hasDynamicAction(button)) {
       // For dynamic actions, show dynamic value instead of static label
       return {
         ...savedData,
@@ -363,91 +409,44 @@ export function useStreamDeck() {
         console.log('✅ WebSocket subscribed to topics:', message.payload)
         break
       case 'profile.updated':
-        loadProfiles()
+        scheduleReload('profiles')
         break
       case 'page.updated':
-        // Reload pages when a page is updated (renamed) on another device
-        if (selectedProfile.value) {
-          const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
-          currentPages.value = pages
-        }
+        // Recarga de páginas con debounce (renombrada en otro dispositivo).
+        scheduleReload('pages')
         break
       case 'page.created':
-        // Reload pages when a page is created on another device
-        if (selectedProfile.value) {
-          const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
-          currentPages.value = pages
-        }
+        // Recarga de páginas con debounce (creada en otro dispositivo).
+        scheduleReload('pages')
         break
       case 'page.deleted':
-        // Reload pages when a page is deleted on another device
-        if (selectedProfile.value) {
-          const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
-          currentPages.value = pages
-
-          // If current page was deleted, select another one
-          if (currentPage.value && !pages.find(p => p.id === currentPage.value?.id)) {
-            const remainingPages = pages.filter(p => p.is_folder === 0)
-            if (remainingPages.length > 0) {
-              await selectPage(remainingPages[0].id)
-            } else {
-              currentPage.value = null
-              currentButtons.value = []
-              selectedButton.value = null
-              selectedButtonId.value = null
-            }
-          }
-        }
+        // Recarga de páginas con debounce; reloadPages reubica la actual
+        // si fue la borrada.
+        scheduleReload('pages')
         break
       case 'button.created':
-        if (isOwnEcho(message.payload)) {
-          console.log('🔇 Ignoring own button.created echo (optimistic state already synced)')
-          break
-        }
-        if (currentPage.value && !isSwapping.value) {
-          console.log('🔌 Button created via WebSocket, reloading...')
-          loadButtons()
-        }
+        if (isOwnEcho(message.payload)) break
+        if (currentPage.value) scheduleReload('buttons')
         break
       case 'button.updated':
-        if (isOwnEcho(message.payload)) {
-          console.log('🔇 Ignoring own button.updated echo (optimistic state already synced)')
-          break
-        }
-        if (currentPage.value && !isSwapping.value) {
-          console.log('🔌 Button updated via WebSocket, checking if should reload...')
-          // Only reload if not currently swapping
-          loadButtons()
-        } else if (isSwapping.value) {
-          console.log('🚫 Ignoring WebSocket button update during swap')
-        }
+        if (isOwnEcho(message.payload)) break
+        if (currentPage.value) scheduleReload('buttons')
         break
       case 'buttons.reordered': {
         // Reordenado atómico: si es el eco de nuestro propio swap (mutationId
         // pendiente) se ignora — el estado local optimista ya está al día y
         // recargar aquí es lo que hacía "rebotar" la tecla a su sitio viejo.
-        // Si viene de otro cliente, recargar la página actual.
-        if (isOwnEcho(message.payload)) {
-          console.log('🔇 Ignoring own buttons.reordered echo (optimistic state already synced)')
-          break
-        }
+        // Si viene de otro cliente, recarga la página actual (con debounce).
+        if (isOwnEcho(message.payload)) break
         const reorderedPageId = (message.payload as any)?.pageId
-        if (currentPage.value && reorderedPageId === currentPage.value.id && !isSwapping.value) {
-          console.log('🔌 Buttons reordered via WebSocket, reloading...')
-          loadButtons()
-        } else if (isSwapping.value) {
-          console.log('🚫 Ignoring WebSocket buttons reorder during swap (local state already synced)')
+        if (currentPage.value && reorderedPageId === currentPage.value.id) {
+          scheduleReload('buttons')
         }
         break
       }
       case 'button.deleted':
-        if (isOwnEcho(message.payload)) {
-          console.log('🔇 Ignoring own button.deleted echo (optimistic state already synced)')
-          break
-        }
-        if (currentPage.value && !isSwapping.value) {
-          loadButtons()
-        }
+        if (isOwnEcho(message.payload)) break
+        if (currentPage.value) scheduleReload('buttons')
         break
       case 'page.navigate':
         // Dirigida: solo aplica si es para este dispositivo; los broadcasts
@@ -554,15 +553,15 @@ export function useStreamDeck() {
             installProgressTimer = setTimeout(() => { installProgress.value = null }, 6000)
           }
         }
-        loadPlugins()
+        loadPlugins().catch(() => {})
         break
       }
       case 'plugin.installed':
       case 'plugin.uninstalled':
       case 'plugin.enabled':
       case 'plugin.settings':
-        // Algo cambió en los plugins: recarga listas y acciones
-        loadPlugins()
+        // Algo cambió en los plugins: recarga listas y acciones (con debounce).
+        scheduleReload('plugins')
         break
       case 'device.created':
       case 'device.updated':
@@ -942,10 +941,85 @@ export function useStreamDeck() {
     }
   }
 
-  // Button management functions
-  const getButton = (position: number): ButtonEntity | undefined => {
-    return currentButtons.value.find((btn) => btn.position === position)
+  // Recarga la lista de páginas del perfil (para eventos WS con debounce).
+  // Si la página actual desapareció (borrada en otro cliente), reubica a
+  // otra página como hacía el handler inline de page.deleted.
+  const reloadPages = async () => {
+    if (!selectedProfile.value) return
+    try {
+      const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
+      currentPages.value = pages
+      if (currentPage.value && !pages.find((p: PageData) => p.id === currentPage.value?.id)) {
+        const remainingPages = pages.filter((p: PageData) => p.is_folder === 0)
+        if (remainingPages.length > 0) {
+          await selectPage(remainingPages[0].id)
+        } else {
+          currentPage.value = null
+          currentButtons.value = []
+          selectedButton.value = null
+          selectedButtonId.value = null
+        }
+      }
+    } catch (error) {
+      console.error('Failed to reload pages:', error)
+    }
   }
+
+  // Button management functions
+  // La vista consulta varias propiedades por tecla en cada render. Indexar una
+  // vez evita recorrer el array de botones desde cada helper del tablero.
+  const buttonsByPosition = computed(() => {
+    const index = new Map<number, ButtonEntity>()
+    for (const button of currentButtons.value) index.set(button.position, button)
+    return index
+  })
+  const getButton = (position: number): ButtonEntity | undefined =>
+    buttonsByPosition.value.get(position)
+
+  // Índice de TODAS las acciones por tipo completo `${pluginId}.${actionId}`.
+  // Se reconstruye solo cuando plugins.value cambia (computed), no en cada
+  // tick/selección/render. Las consultas dinámicas son O(1).
+  const actionTypeIndex = computed(() => {
+    const index = new Map<string, { pluginId: string; dynamic: boolean }>()
+    for (const plugin of plugins.value) {
+      const [pid, pluginData] = plugin as [string, any]
+      const actions = pluginData?.actions
+      if (!Array.isArray(actions)) continue
+      for (const entry of actions) {
+        const actionId = entry?.[0]
+        if (typeof actionId !== 'string') continue
+        index.set(`${pid}.${actionId}`, {
+          pluginId: pid,
+          dynamic: entry?.[1]?.dynamic === true
+        })
+      }
+    }
+    return index
+  })
+
+  // ¿Es dinámico este objeto de acción? O(1) vía índice.
+  const isDynamicActionType = (action: any): boolean => {
+    if (!action || typeof action.type !== 'string') return false
+    const type: string = action.type
+    if (type.includes('.')) return actionTypeIndex.value.get(type)?.dynamic === true
+    // Tipo simple sin prefijo: resuelve con pluginId explícito si lo hay.
+    if (action.pluginId && typeof action.pluginId === 'string') {
+      return actionTypeIndex.value.get(`${action.pluginId}.${type}`)?.dynamic === true
+    }
+    // Sin pluginId ni prefijo (legacy): barrido solo sobre el índice, no
+    // sobre plugins×acciones. El índice dinámico es pequeño.
+    for (const [full, meta] of actionTypeIndex.value) {
+      if (meta.dynamic && full.endsWith(`.${type}`)) return true
+    }
+    return false
+  }
+
+  // ¿Pertenece este botón al borrador en edición? Solo entonces el draft
+  // (buttonConfig) cuenta para él. Antes el draft contaminaba a TODOS los
+  // botones (bastaba con tener algo seleccionado).
+  const isSelectedButton = (button: ButtonEntity | null | undefined): boolean =>
+    !!button && (button.position === selectedButton.value ||
+      (!!selectedButtonId.value && button.id === selectedButtonId.value))
 
   const selectButton = async (position: number) => {
     // Stop dynamic updates for previously selected button if it doesn't have saved dynamic action
@@ -981,8 +1055,6 @@ export function useStreamDeck() {
     const button = getButton(position)
     selectedButton.value = position
     selectedButtonId.value = button?.id ?? null
-    console.log('Selected button at position:', position, 'Found button:', button)
-
     if (button) {
       let buttonData = {
         label: button.data?.label || '',
@@ -1255,7 +1327,7 @@ export function useStreamDeck() {
       ...buttonConfig.value,
       actions: [...buttonConfig.value.actions, newAction]
     }
-    console.log('➕ Added action:', newAction, 'pluginId found:', newAction.pluginId)
+    bumpConfigVersion()
   }
 
   const removeAction = (index: number) => {
@@ -1264,7 +1336,7 @@ export function useStreamDeck() {
       ...buttonConfig.value,
       actions: buttonConfig.value.actions.filter((_, i) => i !== index)
     }
-    console.log('🗑️ Removed action at index:', index)
+    bumpConfigVersion()
   }
 
   const reorderActions = async (newOrderedActions: any[]) => {
@@ -1309,6 +1381,7 @@ export function useStreamDeck() {
       // acciones ya muestra newOrderedActions, así que no hay re-render
       // disruptivo. El PUT posterior del autosave llevará lo mismo.
       buttonConfig.value = { ...updatedConfig }
+      bumpConfigVersion()
       const localBtn = currentButtons.value.find((b) => b.id === button.id)
       if (localBtn) localBtn.data = { ...updatedConfig }
       bumpButtonsEpoch()
@@ -1343,7 +1416,7 @@ export function useStreamDeck() {
       ...buttonConfig.value,
       actions
     }
-    console.log(`✏️ Updated action ${actionIndex} parameter ${paramKey}:`, value)
+    bumpConfigVersion()
   }
 
   const getDefaultActionParameters = (type: string) => {
@@ -1375,22 +1448,31 @@ export function useStreamDeck() {
 
   /** Construye un objeto de acción con parámetros por defecto (para teclas y reglas). */
   const createAction = (type: string) => {
-    // Find the plugin that has this action type
-    let pluginId = null
-    for (const plugin of plugins.value) {
-      const [pid, pluginData] = plugin
-      // For full action types like 'pc-vitals.monitor', check if the plugin ID matches the prefix
-      if (type.includes('.')) {
-        const [pluginPrefix, actionId] = type.split('.')
-        if (pid === pluginPrefix && pluginData.actions && pluginData.actions.some((action: any) => action[0] === actionId)) {
-          pluginId = pid
+    // Resolución O(1) vía índice (con fallback legacy si el plugin no lista
+    // la acción pero el prefijo coincide con un plugin conocido).
+    let pluginId: string | null = null
+    if (type.includes('.')) {
+      pluginId = actionTypeIndex.value.get(type)?.pluginId ?? null
+      if (!pluginId) {
+        const prefix = type.slice(0, type.indexOf('.'))
+        if ((plugins.value as Array<[string, any]>).some(([pid]) => pid === prefix)) {
+          pluginId = prefix
+        }
+      }
+    } else {
+      for (const [full, meta] of actionTypeIndex.value) {
+        if (full.endsWith(`.${type}`)) {
+          pluginId = meta.pluginId
           break
         }
-      } else {
-        // For simple action types, check direct match
-        if (pluginData.actions && pluginData.actions.some((action: any) => action[0] === type)) {
-          pluginId = pid
-          break
+      }
+      if (!pluginId) {
+        for (const plugin of plugins.value) {
+          const [pid, pluginData] = plugin as [string, any]
+          if (pluginData.actions && pluginData.actions.some((action: any) => action[0] === type)) {
+            pluginId = pid
+            break
+          }
         }
       }
     }
@@ -1927,15 +2009,12 @@ export function useStreamDeck() {
   let swapChain: Promise<void> = Promise.resolve()
 
   const handleSwap = (event: any) => {
-    console.log('🔄 Swap event received:', event)
-
     // Get the new mapping after swap - onSwapEnd usa slotItemMap
     const newMap = event.slotItemMap?.asObject || event.newSlotItemMap?.asObject || event.map
 
     // Validate that newMap exists and is an object
     if (!newMap || typeof newMap !== 'object') {
       console.warn('❌ Invalid or missing map in swap event:', event)
-      console.log('🔍 Event structure:', JSON.stringify(event, null, 2))
       // El DOM de Swapy puede haber quedado movido visualmente: recargar
       // desde BD (fuente de verdad) y re-vincular Swapy. Sin bloquear.
       // force: venimos de un estado desconocido, la BD manda.
@@ -1947,29 +2026,20 @@ export function useStreamDeck() {
       return
     }
 
-    console.log('📍 Current buttons before swap:', currentButtons.value.map(b => ({ id: b.id, position: b.position })))
-    console.log('🗺️ New map:', newMap)
-
     // Find all buttons that need position updates
     const positionUpdates: Array<{ button: ButtonEntity, newPosition: number }> = []
-
-    for (const button of currentButtons.value) {
-      // Find which slot this button is now in
-      const newSlot = Object.keys(newMap).find(slot =>
-        newMap[slot] === `item-${button.id}`
-      )
-
-      if (newSlot) {
-        const newPosition = parseInt(newSlot.replace('slot-', ''))
-
-        if (!Number.isInteger(newPosition)) continue
-        if (button.position !== newPosition) {
-          positionUpdates.push({ button, newPosition })
-        }
-      }
+    const positionByItem = new Map<string, number>()
+    for (const [slot, itemId] of Object.entries(newMap as Record<string, unknown>)) {
+      if (typeof itemId !== 'string') continue
+      const position = Number.parseInt(slot.replace(/^slot-/, ''), 10)
+      if (Number.isInteger(position)) positionByItem.set(itemId, position)
     }
 
-    console.log(`📦 Position updates to save: ${positionUpdates.length}`)
+    for (const button of currentButtons.value) {
+      const newPosition = positionByItem.get(`item-${button.id}`)
+      if (newPosition === undefined || button.position === newPosition) continue
+      positionUpdates.push({ button, newPosition })
+    }
 
     if (positionUpdates.length === 0) {
       return
@@ -1996,7 +2066,6 @@ export function useStreamDeck() {
       const sel = currentButtons.value.find((b) => b.id === selectedButtonId.value)
       if (sel) selectedButton.value = sel.position
     }
-    console.log('✅ Swap applied locally (optimistic):', positionUpdates.map(u => ({ id: u.button.id, pos: u.newPosition })))
     // Sin resync explícito aquí: el watcher de firma del grid en StageBoard
     // detecta el cambio de posiciones y re-vincula Swapy una sola vez.
 
@@ -2015,7 +2084,6 @@ export function useStreamDeck() {
           method: 'POST',
           body: JSON.stringify({ page_id: pageId, order, mutationId })
         })
-        console.log('✅ Swap persisted:', order)
       })
       .catch(async (error) => {
         console.error('❌ Failed to save swap, reconciling with database:', error)
@@ -2049,7 +2117,6 @@ export function useStreamDeck() {
 
     saveTimeout.value = setTimeout(() => {
       saveTimeout.value = null
-      console.log('💾 Auto-saving button config...')
       saveButtonConfig()
     }, 800) // 800ms para dar tiempo a escribir pero sentir rapidez
   }
@@ -2058,95 +2125,42 @@ export function useStreamDeck() {
   const cleanup = () => {
     ws?.close()
     if (saveTimeout.value) clearTimeout(saveTimeout.value)
+    if (reloadTimer) {
+      clearTimeout(reloadTimer)
+      reloadTimer = null
+    }
+    reloadPending.clear()
     stopDynamicUpdates()
   }
 
-  // Dynamic button functions (generic for any plugin)
-  const hasDynamicAction = (button: ButtonEntity | null) => {
+  // Dynamic button functions (generic for any plugin). Todas las consultas
+  // son O(1) vía actionTypeIndex; sin loops sobre plugins ni console.log.
+  const savedActionsHaveDynamic = (actions: any): boolean =>
+    Array.isArray(actions) && actions.some(isDynamicActionType)
+
+  const hasDynamicAction = (button: ButtonEntity | null | undefined) => {
     // Check saved button data
-    if (button?.data?.actions) {
-      const hasAction = button.data.actions.some((action: any) => {
-        // Check if this action type is marked as dynamic in any plugin
-        for (const plugin of plugins.value) {
-          const [pluginId, pluginData] = plugin
-          if (pluginData.actions) {
-            // If action.pluginId is null, infer it from action.type
-            const actionPluginId = action.pluginId || action.type.split('.')[0]
-            const found = pluginData.actions.some((pluginAction: any) => {
-              const actionId = action.type.split('.')[1]
-              return pluginAction[0] === actionId && pluginAction[1]?.dynamic === true && actionPluginId === pluginId
-            })
-            if (found) return true
-          }
-        }
-        return false
-      })
-      return hasAction
+    if (savedActionsHaveDynamic(button?.data?.actions)) return true
+    // Check current button config, pero solo si el botón consultado es el
+    // que se está editando (o no hay botón: pregunta por el borrador actual).
+    if ((!button && selectedButton.value !== null) || isSelectedButton(button)) {
+      return savedActionsHaveDynamic(buttonConfig.value.actions)
     }
-
-    // Check current button config (for selected/unsaved buttons)
-    if (selectedButton.value !== null && buttonConfig.value.actions) {
-      const hasAction = buttonConfig.value.actions.some((action: any) => {
-        // Check if this action type is marked as dynamic in any plugin
-        for (const plugin of plugins.value) {
-          const [pluginId, pluginData] = plugin
-          if (pluginData.actions) {
-            // If action.pluginId is null, infer it from action.type
-            const actionPluginId = action.pluginId || action.type.split('.')[0]
-            const found = pluginData.actions.some((pluginAction: any) => {
-              const actionId = action.type.split('.')[1]
-              return pluginAction[0] === actionId && pluginAction[1]?.dynamic === true && actionPluginId === pluginId
-            })
-            if (found) return true
-          }
-        }
-        return false
-      })
-      return hasAction
-    }
-
     return false
   }
 
-  const getDynamicAction = (button: ButtonEntity | null) => {
+  const getDynamicAction = (button: ButtonEntity | null | undefined) => {
     // Check saved button data
-    if (button?.data?.actions) {
-      return button.data.actions.find((action: any) => {
-        // Check if this action type is marked as dynamic in any plugin
-        for (const plugin of plugins.value) {
-          const [pluginId, pluginData] = plugin
-          if (pluginData.actions && pluginData.actions.some((pluginAction: any) => {
-            // If action.pluginId is null, infer it from action.type
-            const actionPluginId = action.pluginId || action.type.split('.')[0]
-            const actionId = action.type.split('.')[1]
-            return pluginAction[0] === actionId && pluginAction[1]?.dynamic === true && actionPluginId === pluginId
-          })) {
-            return true
-          }
-        }
-        return false
-      })
+    const saved = button?.data?.actions
+    if (Array.isArray(saved)) {
+      const found = saved.find(isDynamicActionType)
+      if (found) return found
     }
-
-    // Check current button config (for selected/unsaved buttons)
-    if (selectedButton.value !== null && buttonConfig.value.actions) {
-      return buttonConfig.value.actions.find((action: any) => {
-        // Check if this action type is marked as dynamic in any plugin
-        for (const plugin of plugins.value) {
-          const [pluginId, pluginData] = plugin
-          if (pluginData.actions && pluginData.actions.some((pluginAction: any) => {
-            // If action.pluginId is null, infer it from action.type
-            const actionPluginId = action.pluginId || action.type.split('.')[0]
-            const actionId = action.type.split('.')[1]
-            return pluginAction[0] === actionId && pluginAction[1]?.dynamic === true && actionPluginId === pluginId
-          })) {
-            return true
-          }
-        }
-        return false
-      })
+    // Check current button config (solo para el botón en edición).
+    if ((!button && selectedButton.value !== null) || isSelectedButton(button)) {
+      const draft = buttonConfig.value.actions
+      if (Array.isArray(draft)) return draft.find(isDynamicActionType) ?? null
     }
-
     return null
   }
 
@@ -2154,9 +2168,11 @@ export function useStreamDeck() {
     const dynamicAction = getDynamicAction(button)
     if (!dynamicAction) return
 
+    // Concurrencia limitada: el tick central ya la regula, pero el contador
+    // también cubre llamadas directas sin saturar el daemon.
+    if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) return
+    dynamicInFlight += 1
     try {
-      console.log(`🔄 Updating dynamic action for button at position ${position}`)
-
       const response = await apiRequest('/actions/execute', {
         method: 'POST',
         body: JSON.stringify({
@@ -2171,91 +2187,79 @@ export function useStreamDeck() {
       })
 
       if (response.result) {
-        console.log(`✅ Dynamic action updated for position ${position}:`, response.result)
         dynamicButtonValues.value.set(position, response.result)
-      } else {
-        console.warn(`⚠️ No result in dynamic action response for position ${position}`)
       }
-    } catch (error) {
-      console.error(`❌ Failed to update dynamic button value for position ${position}:`, error)
+    } catch {
+      // Silencioso a propósito: el polling no debe spamear la consola en
+      // cada tick si el daemon o el plugin fallan puntualmente.
+    } finally {
+      dynamicInFlight -= 1
+    }
+  }
+
+  // Botones con polling activo ahora mismo (guardados con acción dinámica,
+  // incluyendo el seleccionado si es dinámico). Sin botón guardado no hay
+  // contexto de ejecución (buttonId/page_id), así que el borrador sin
+  // guardar no se sondea hasta su primer saveButtonConfig.
+  const dynamicTargets = (): Array<{ position: number; button: ButtonEntity }> => {
+    const out: Array<{ position: number; button: ButtonEntity }> = []
+    for (const button of currentButtons.value) {
+      if (typeof button.position !== 'number') continue
+      if (hasDynamicAction(button)) out.push({ position: button.position, button })
+    }
+    return out
+  }
+
+  // Un solo tick para todos los botones dinámicos: respeta el
+  // updateInterval individual de cada acción (vía lastRun) y nunca supera
+  // DYNAMIC_MAX_IN_FLIGHT peticiones en vuelo.
+  const dynamicTick = () => {
+    const now = Date.now()
+    for (const { position, button } of dynamicTargets()) {
+      if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) break
+      const dynamicAction = getDynamicAction(button)
+      const interval = Number(dynamicAction?.parameters?.updateInterval) || 1000
+      const last = dynamicLastRun.get(position) ?? 0
+      if (now - last < interval) continue
+      dynamicLastRun.set(position, now)
+      void updateDynamicButtonValue(position, button)
+    }
+  }
+
+  const stopDynamicTimer = () => {
+    if (dynamicTimer) {
+      clearInterval(dynamicTimer)
+      dynamicTimer = null
     }
   }
 
   const startDynamicUpdates = async () => {
     // Wait for plugins to be loaded
     if (plugins.value.length === 0) {
-      console.log('⏳ Waiting for plugins to load...')
       await loadPlugins()
     }
 
-    // Clear existing intervals
-    updateIntervals.value.forEach(interval => clearInterval(interval))
-    updateIntervals.value.clear()
+    stopDynamicTimer()
+    dynamicLastRun.clear()
 
-    console.log('🔄 Starting dynamic updates for buttons:', currentButtons.value.length)
-
-    // Start new intervals for buttons with dynamic actions (only saved buttons)
-    currentButtons.value.forEach((button: ButtonEntity) => {
-      if (hasDynamicAction(button) && button.position !== selectedButton.value) {
-        const dynamicAction = getDynamicAction(button)
-        const updateInterval = dynamicAction?.parameters?.updateInterval || 1000
-
-        console.log(`📊 Setting up dynamic monitoring for saved button at position ${button.position}:`, {
-          actionType: dynamicAction?.type,
-          updateInterval
-        })
-
-        const interval = setInterval(() => {
-          updateDynamicButtonValue(button.position, button)
-        }, updateInterval)
-
-        updateIntervals.value.set(button.position, interval)
-
-        // Initial update
-        updateDynamicButtonValue(button.position, button)
-      }
-    })
-
-    // Also handle the currently selected button if it has dynamic action
-    if (selectedButton.value !== null) {
-      const selectedBtn = getButton(selectedButton.value)
-      if (hasDynamicAction(selectedBtn)) {
-        const dynamicAction = getDynamicAction(selectedBtn)
-        const updateInterval = dynamicAction?.parameters?.updateInterval || 1000
-
-        console.log(`📊 Setting up dynamic monitoring for selected button at position ${selectedButton.value}:`, {
-          actionType: dynamicAction?.type,
-          updateInterval
-        })
-
-        const interval = setInterval(() => {
-          updateDynamicButtonValue(selectedButton.value, selectedBtn!)
-        }, updateInterval)
-
-        updateIntervals.value.set(selectedButton.value, interval)
-
-        // Initial update
-        updateDynamicButtonValue(selectedButton.value, selectedBtn!)
-      }
+    // Primera pasada inmediata (escalonada por concurrencia); el resto lo
+    // cubre el temporizador central.
+    dynamicTick()
+    if (dynamicTargets().length === 0) return
+    if (!dynamicTimer) {
+      dynamicTimer = setInterval(dynamicTick, DYNAMIC_TICK_MS)
     }
-
-    console.log(`✅ Dynamic updates started for ${updateIntervals.value.size} buttons`)
   }
 
   const stopDynamicUpdates = () => {
-    updateIntervals.value.forEach(interval => clearInterval(interval))
-    updateIntervals.value.clear()
+    stopDynamicTimer()
+    dynamicLastRun.clear()
     dynamicButtonValues.value.clear()
   }
 
   const stopDynamicUpdateForButton = (position: number) => {
-    const interval = updateIntervals.value.get(position)
-    if (interval) {
-      clearInterval(interval)
-      updateIntervals.value.delete(position)
-      dynamicButtonValues.value.delete(position)
-      console.log(`🛑 Stopped dynamic updates for button at position ${position}`)
-    }
+    dynamicLastRun.delete(position)
+    dynamicButtonValues.value.delete(position)
   }
 
   const testStreamDeck = async () => {
@@ -2357,6 +2361,8 @@ export function useStreamDeck() {
     getEditingButton,
     executingButtons,
     buttonConfig,
+    buttonConfigVersion,
+    bumpConfigVersion,
 
     // Computed
     getButtonData,

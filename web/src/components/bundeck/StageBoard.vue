@@ -335,14 +335,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { createSwapy, type Swapy } from 'swapy'
+import type { Swapy } from 'swapy'
 import 'gridstack/dist/gridstack.min.css'
-// GridStack se importa en dinámico dentro de initGs: el import estático
-// rompe el SSR de Astro (gridstack-engine sin extensión).
+// GridStack y Swapy se importan en dinámico (initGs/initializeSwapy): los
+// imports estáticos engordan el chunk inicial y gridstack rompe el SSR
+// de Astro (gridstack-engine sin extensión).
 import {
   Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone
 } from 'lucide-vue-next'
-import * as LucideIcons from 'lucide-vue-next'
+import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { checkPageCompatibility, parseLayoutMode, resolvePageSize, resolveDeckSize, type LogicalDevice, type CompatView } from '../../composables/useDevices'
@@ -715,13 +716,63 @@ const countUsed = computed(() => {
   return n
 })
 
-const getLucideIcon = (iconName: string) => {
-  const icons = LucideIcons as Record<string, any>
-  return icons[iconName] ?? null
+const getLucideIcon = (iconName: string) => dynamicIcon(iconName)
+
+/**
+ * Resolver la apariencia es relativamente caro (entorno + expresiones + texto).
+ * El template consulta varias propiedades por tecla; cachear por posición evita
+ * reevaluar las mismas reglas repetidamente en un único render. La computed
+ * conserva la reactividad de displayData/getButtonData (incluido displayTick).
+ * Garantía: displayData se llama como máximo 1 vez por posición ocupada por
+ * evaluación del computed; los helpers (disp/bdata) solo leen los Maps.
+ */
+const displayDataByPosition = computed(() => {
+  const positions = new Set<number>()
+  const total = Math.max(0, props.gridCols * props.gridRows)
+  for (let position = 0; position < total; position++) {
+    if (props.getButton(position)) positions.add(position)
+  }
+  for (const button of props.allButtons ?? []) {
+    if (Number.isInteger(button.position) && button.position >= 0) positions.add(button.position)
+  }
+
+  const result = new Map<number, any>()
+  for (const position of positions) {
+    result.set(
+      position,
+      props.displayData ? props.displayData(position) : props.getButtonData(position)
+    )
+  }
+  return result
+})
+const disp = (position: number) => {
+  // Solo lectura del Map: displayData se evalúa una vez por posición en el
+  // computed de arriba. Nunca llamar a props.displayData aquí (cada helper
+  // del template pasaría por displayData -> getEnv + ev/intp de nuevo).
+  const hit = displayDataByPosition.value.get(position)
+  if (hit !== undefined) return hit
+  return buttonDataByPosition.value.get(position) ?? props.getButtonData(position) ?? undefined
 }
 
-/** Datos con apariencia condicional aplicada si el padre la resuelve. */
-const disp = (position: number) => props.displayData ? props.displayData(position) : props.getButtonData(position)
+/** getButtonData también se lee ~3 veces por tecla: cachearlo por posición. */
+const buttonDataByPosition = computed(() => {
+  const positions = new Set<number>()
+  const total = Math.max(0, props.gridCols * props.gridRows)
+  for (let position = 0; position < total; position++) {
+    if (props.getButton(position)) positions.add(position)
+  }
+  for (const button of props.allButtons ?? []) {
+    if (Number.isInteger(button.position) && button.position >= 0) positions.add(button.position)
+  }
+
+  const result = new Map<number, any>()
+  for (const position of positions) {
+    result.set(position, props.getButtonData(position))
+  }
+  return result
+})
+const bdata = (position: number) =>
+  buttonDataByPosition.value.get(position) ?? props.getButtonData(position) ?? undefined
 
 const keyIcon = (position: number) => {
   const icon = disp(position)?.icon
@@ -735,7 +786,7 @@ const keyImage = (position: number) => {
 const keyEmoji = (position: number) => disp(position)?.emoji ?? ''
 const keyTop = (position: number) => disp(position)?.textTop ?? ''
 const keyBottom = (position: number) => disp(position)?.textBottom ?? ''
-const keyDyn = (position: number) => props.getButtonData(position)?.dynamicValue ?? ''
+const keyDyn = (position: number) => disp(position)?.dynamicValue ?? bdata(position)?.dynamicValue ?? ''
 const keyFont = (position: number) => {
   const fs = disp(position)?.fontSize
   return fs ? { fontSize: `${fs}px` } : undefined
@@ -782,7 +833,7 @@ let longTimer: ReturnType<typeof setTimeout> | null = null
 let longFired = false
 const LONG_MS = 600
 const hasLongRules = (position: number) =>
-  !!props.getButtonData(position)?.rules?.some((r: any) => r?.on && r?.when === 'long')
+  !!bdata(position)?.rules?.some((r: any) => r?.on && r?.when === 'long')
 const onPressStart = (event: PointerEvent, position: number) => {
   if (props.mode !== 'use' || (event.button !== undefined && event.button !== 0)) return
   if (!hasLongRules(position)) return
@@ -809,7 +860,7 @@ const onPressCancel = () => {
 }
 
 const actionCount = (position: number) => {
-  const d = props.getButtonData(position)
+  const d = bdata(position)
   return (d?.actions?.length ?? 0) + (d?.rules?.length ?? 0)
 }
 
@@ -893,10 +944,16 @@ const handleContextMenuItem = (item: any) => {
 }
 
 // Swapy — solo rejilla clásica; GridStack gestiona el modo redimensionable.
-const initializeSwapy = () => {
+// Import dinámico: fuera del chunk inicial; el mock `vi.mock('swapy')`
+// de los tests sigue interceptando este import.
+const initializeSwapy = async () => {
   if ((props.layoutMode ?? 'classic') !== 'classic') return
   if (container.value && !swapy.value && props.mode === 'edit') {
     try {
+      const { createSwapy } = await import('swapy')
+      // El modo o el contenedor pueden haber cambiado mientras se cargaba.
+      if (!container.value || swapy.value || props.mode !== 'edit') return
+      if ((props.layoutMode ?? 'classic') !== 'classic') return
       swapy.value = createSwapy(container.value, { animation: 'dynamic' })
       swapy.value.onSwapEnd((event) => emit('swap', event))
     } catch (e) {
@@ -916,10 +973,13 @@ const resyncSwapy = () => {
   domVersion.value += 1
   // El ref apunta al nodo nuevo solo tras el patch: si aún no está,
   // reintentar en el siguiente tick en vez de dejar el grid sin Swapy.
-  const bind = (retries: number) => {
-    initializeSwapy()
+  // (initializeSwapy es async por el import dinámico: se espera antes
+  // de decidir si reintentar.)
+  const bind = async (retries: number) => {
+    await initializeSwapy()
     if (!swapy.value && retries > 0 && props.mode === 'edit') {
-      void nextTick().then(() => bind(retries - 1))
+      await nextTick()
+      await bind(retries - 1)
     }
   }
   void nextTick().then(() => bind(3))
@@ -928,7 +988,7 @@ watch(
   () => props.mode,
   (mode) => {
     menuPageId.value = null
-    if (mode === 'edit') initializeSwapy()
+    if (mode === 'edit') void initializeSwapy()
     else {
       swapy.value?.destroy()
       swapy.value = null
@@ -956,7 +1016,7 @@ watch(gridSignature, () => {
 })
 
 onMounted(() => {
-  initializeSwapy()
+  void initializeSwapy()
   void nextTick().then(initGs)
   document.addEventListener('keydown', onEsc)
   document.addEventListener('click', onDocClick)

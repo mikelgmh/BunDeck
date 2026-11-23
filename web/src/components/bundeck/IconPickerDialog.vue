@@ -82,7 +82,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { X, Search, ImagePlus, Trash2 } from 'lucide-vue-next'
-import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 import { assetUrl, isAssetRef, normalizeApiBase } from '../../composables/useKeyShare'
 
@@ -119,17 +118,28 @@ const currentImageUrl = computed(() => {
   return isAssetRef(rel) ? assetUrl(props.apiBase, rel) : ''
 })
 
-const all = computed(() => {
-  const out: Record<string, any> = {}
-  for (const [key, value] of Object.entries(LucideIcons)) {
-    if (key === 'default' || key === 'icons' || key === 'Icon' || key === 'Lucide') continue
-    if (!/^[A-Z]/.test(key)) continue
-    if (/Icon$/.test(key)) continue
-    if (typeof value !== 'object' && typeof value !== 'function') continue
-    out[key] = value
-  }
-  return out
-})
+const all = ref<Record<string, any>>({})
+let lucideLoading: Promise<void> | null = null
+/** Catálogo completo bajo demanda: evita traer todo lucide al chunk inicial
+ *  (y al chunk del diálogo hasta que se abre). Comparte el chunk diferido
+ *  de `lucide-vue-next` con useDynamicIcon. */
+const ensureLucide = () => {
+  if (Object.keys(all.value).length || lucideLoading) return lucideLoading ?? Promise.resolve()
+  lucideLoading = import('lucide-vue-next').then((mod) => {
+    const out: Record<string, any> = {}
+    for (const [key, value] of Object.entries(mod)) {
+      if (key === 'default' || key === 'icons' || key === 'Icon' || key === 'Lucide') continue
+      if (!/^[A-Z]/.test(key)) continue
+      if (/Icon$/.test(key)) continue
+      if (typeof value !== 'object' && typeof value !== 'function') continue
+      out[key] = value
+    }
+    all.value = out
+  }).catch(() => {
+    lucideLoading = null
+  })
+  return lucideLoading
+}
 
 const kebab = (name: string) => name.replace(/([a-z])([A-Z0-9])/g, '$1-$2').toLowerCase()
 
@@ -197,6 +207,7 @@ const show = (tab: 'icons' | 'image' = 'icons') => {
   imgTab.value = tab === 'image'
   uploadError.value = ''
   dragImg.value = false
+  if (tab === 'icons') void ensureLucide()
   dialog.value?.showModal()
 }
 const close = () => dialog.value?.close()

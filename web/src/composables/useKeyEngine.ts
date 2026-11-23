@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { ev, evb, intp, usedVarNames, type LookLike } from './useExpressions'
-import { getVar, setVarValue, toggleVar, vars, getEnv, displayTick } from './useVars'
+import { getVar, setVarValue, toggleVar, vars, getEnv, displayTick, varsVersion } from './useVars'
 import type { ButtonEntity } from '../types/streamdeck'
 
 /** Acciones locales (grupo «Lógica»): se ejecutan en el cliente, nunca en el daemon. */
@@ -33,7 +33,17 @@ export function createKeyEngine(deps: EngineDeps) {
   const altIndex = new Map<string, number>()
   let depth = 0
 
-  const env = () => getEnv(deps.profileName(), deps.pageName())
+  /** Un solo Date por tick para todo el barrido de teclas (antes: uno por tecla). */
+  let envTickSeen = -1
+  let envSharedNow: Date | null = null
+  const env = () => {
+    const tick = displayTick.value
+    if (tick !== envTickSeen || !envSharedNow) {
+      envTickSeen = tick
+      envSharedNow = new Date()
+    }
+    return getEnv(deps.profileName(), deps.pageName(), envSharedNow)
+  }
 
   const interpParams = (params: Record<string, any>, E: Record<string, any>) => {
     const out: Record<string, any> = { ...params }
@@ -193,26 +203,116 @@ export function createKeyEngine(deps: EngineDeps) {
     }
   }
 
-  /** Apariencia efectiva de una tecla (looks + {{vars}} en el título). */
-  function resolveDisplay(pos: number): any {
-    const raw = deps.getExecData(pos)
-    if (!raw) return raw
-    // Leer tick para reevaluar cada segundo (hora, temporizadores).
-    void displayTick.value
-    const E = env()
-    const looks = Array.isArray(raw.looks) ? raw.looks : []
-    const L = looks.find((l: any) => l?.cond && evb(l.cond, E))
-    if (!L) return { ...raw, label: intp(raw.label ?? '', E) }
-    return {
-      ...raw,
-      label: intp(L.t || raw.label || '', E),
-      icon: L.i || raw.icon || 'zap',
-      textColor: L.c != null ? (COLORS[L.c] ?? raw.textColor) : raw.textColor,
-      backgroundColor: L.bg ? (BGS[L.bg] ?? raw.backgroundColor) : raw.backgroundColor
+  /** Apariencia efectiva de una tecla (looks + {{vars}} en el título).
+   *
+   *  Memoización por tecla: el template lee ~10 props por tecla y el tick
+   *  global re-dispara el render cada segundo. Para teclas estáticas (sin
+   *  conds en looks ni {{}} en textos) se reutiliza el último resultado sin
+   *  reevaluar nada. Para teclas dinámicas, la caché se invalida solo si
+   *  cambia el contenido, los valores de las vars que usa, o el tick cuando
+   *  usa incorporadas de tiempo (hora/minuto/segundo/dia).
+   */
+  interface DispEntry {
+    sig: string
+    result: any
+    usedVars: string[]
+    timeDep: boolean
+    envSig: string
+  }
+  const dispCache = new Map<string, DispEntry>()
+  /** Incorporadas que cambian con el tiempo: solo entonces el tick invalida. */
+  const TIME_RE = /(^|[^\p{L}\p{N}_])(hora|minuto|segundo|dia)(?![\p{L}\p{N}_])/u
+  /** perfil/pagina también van al env: si cambian, la caché debe invalidar. */
+  const SCOPE_RE = /(^|[^\p{L}\p{N}_])(perfil|pagina)(?![\p{L}\p{N}_])/u
+
+  const dispTextOf = (raw: any): string => {
+    const parts: string[] = []
+    for (const l of (Array.isArray(raw?.looks) ? raw.looks : [])) {
+      parts.push(String(l?.cond ?? ''), String(l?.t ?? ''))
+    }
+    parts.push(
+      String(raw?.label ?? ''), String(raw?.textTop ?? ''),
+      String(raw?.textBottom ?? ''), String(raw?.title ?? '')
+    )
+    return parts.join('\n')
+  }
+  const rawSigOf = (raw: any): string => {
+    try {
+      return JSON.stringify([
+        raw?.label, raw?.textTop, raw?.textBottom, raw?.title,
+        raw?.icon, raw?.iconImage, raw?.emoji, raw?.textColor,
+        raw?.backgroundColor, raw?.fontSize, raw?.showTitle,
+        raw?.dynamicValue,
+        (Array.isArray(raw?.looks) ? raw.looks : []).map((l: any) => [l?.cond, l?.t, l?.i, l?.c, l?.bg]),
+      ])
+    } catch {
+      return String((raw?.label ?? '') + (raw?.icon ?? '') + (raw?.looks?.length ?? 0))
     }
   }
 
-  return { execKey, runLoad, onTick, onVarChange, resolveDisplay, uid }
+  function resolveDisplay(pos: number): any {
+    const raw = deps.getExecData(pos)
+    if (!raw) return raw
+    const btn = deps.getButton(pos)
+    const key = btn?.id ? `id:${btn.id}` : `pos:${pos}`
+    const sig = rawSigOf(raw)
+    const cached = dispCache.get(key)
+    // Suscribirse al tick y a la versión de vars: sin estas lecturas el
+    // computed padre no re-renderiza al pasar un segundo o cambiar una var.
+    const tick = displayTick.value
+    void varsVersion.value
+
+    let usedVars: string[]
+    let timeDep: boolean
+    if (cached && cached.sig === sig) {
+      usedVars = cached.usedVars
+      timeDep = cached.timeDep
+      // Sin cambios relevantes: reutilizar sin reevaluar.
+      let envSig = timeDep ? `t${tick}\u0000` : ''
+      for (const n of usedVars) envSig += String(getVar(n)?.v ?? '') + '\u0000'
+      if (envSig === cached.envSig) return cached.result
+    } else {
+      const text = dispTextOf(raw)
+      const names = vars.value.map((v) => v.n)
+      usedVars = usedVarNames(text, names)
+      timeDep = TIME_RE.test(text) || SCOPE_RE.test(text)
+    }
+
+    const E = env()
+    const looks = Array.isArray(raw.looks) ? raw.looks : []
+    const L = looks.find((l: any) => l?.cond && evb(l.cond, E))
+    let result: any
+    if (!L) {
+      const hasTpl = /\{\{/.test(String(raw.label ?? '') + String(raw.textTop ?? '') + String(raw.textBottom ?? ''))
+      result = hasTpl || usedVars.length || timeDep
+        ? { ...raw, label: intp(raw.label ?? '', E) }
+        : { ...raw }
+    } else {
+      result = {
+        ...raw,
+        label: intp(L.t || raw.label || '', E),
+        icon: L.i || raw.icon || 'zap',
+        textColor: L.c != null ? (COLORS[L.c] ?? raw.textColor) : raw.textColor,
+        backgroundColor: L.bg ? (BGS[L.bg] ?? raw.backgroundColor) : raw.backgroundColor
+      }
+    }
+    let envSig = timeDep ? `t${tick}\u0000` : ''
+    for (const n of usedVars) envSig += String(getVar(n)?.v ?? '') + '\u0000'
+    const entry: DispEntry = { sig, result, usedVars, timeDep, envSig }
+    dispCache.set(key, entry)
+    if (dispCache.size > 500) {
+      const first = dispCache.keys().next()
+      if (!first.done) dispCache.delete(first.value)
+    }
+    return result
+  }
+
+  /** Solo para tests: vacía la caché de apariencia. */
+  function clearDisplayCache(): void {
+    dispCache.clear()
+  }
+
+  return { execKey, runLoad, onTick, onVarChange, resolveDisplay, clearDisplayCache, uid }
 }
 
 export const COLORS = ['#e8e9eb', '#e8b04e', '#86cba5', '#82b4ea', '#ec8e7f', '#c7a6e0']

@@ -50,7 +50,6 @@ describe('KeyInspector', () => {
     const wrapper = mount(KeyInspector, {
       props: { ...baseProps, selectedPosition: 3, hasButton: true },
     })
-    console.log('FULL HTML:', wrapper.html().slice(0, 2000))
     expect(wrapper.html()).toContain('bd-itabs')
     expect(wrapper.html()).toContain('bd-ifoot')
   })

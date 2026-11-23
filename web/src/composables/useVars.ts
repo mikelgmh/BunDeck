@@ -7,6 +7,10 @@ const LS_KEY = 'libredeck:vars'
 export const vars = ref<VarDef[]>(load())
 /** Tick de visualización: lo incrementa el motor cada segundo para reevaluar condiciones. */
 export const displayTick = ref(0)
+/** Versión de variables: se incrementa con cada mutación (para invalidar cachés). */
+export const varsVersion = ref(0)
+
+const bumpVars = () => { varsVersion.value++ }
 
 type Listener = (name: string) => void
 const listeners = new Set<Listener>()
@@ -63,6 +67,7 @@ export function setVarValue(name: string, val: any): boolean {
   if (nv === v.v) return false
   v.v = nv as any
   persist()
+  bumpVars()
   listeners.forEach((cb) => { try { cb(name) } catch { /* noop */ } })
   return true
 }
@@ -84,6 +89,7 @@ export function addVar(n?: string): VarDef {
   const v: VarDef = { n: name.slice(0, 40), t: 'num', v: 0 }
   vars.value.push(v)
   persist()
+  bumpVars()
   return v
 }
 
@@ -92,6 +98,7 @@ export function removeVar(name: string): VarDef | null {
   if (i < 0) return null
   const [v] = vars.value.splice(i, 1)
   persist()
+  bumpVars()
   return v
 }
 
@@ -100,10 +107,12 @@ export function importVar(def: { n: string; t: VarDef['t']; v: any }): boolean {
   if (!IDRE.test(def.n) || RES.includes(def.n.toLowerCase())) return false
   vars.value.push({ n: def.n.slice(0, 40), t: def.t === 'bool' ? 'bool' : def.t === 'txt' ? 'txt' : 'num', v: coerceVal(def.t, def.v) })
   persist()
+  bumpVars()
   return true
 }
 
-/** Entorno de evaluación: variables + incorporadas. */
-export function getEnv(perfil = '', pagina = ''): Record<string, any> {
-  return baseEnv(vars.value, perfil, pagina)
+/** Entorno de evaluación: variables + incorporadas. `now` reutiliza un Date
+ *  ya creado (el motor crea uno por tick en vez de uno por tecla). */
+export function getEnv(perfil = '', pagina = '', now?: Date): Record<string, any> {
+  return baseEnv(vars.value, perfil, pagina, now)
 }

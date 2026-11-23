@@ -157,8 +157,8 @@ export const evb = (src: string, E: Env): boolean => {
   try { return !!ev(src, E) } catch { return false }
 }
 
-export function baseEnv(vars: Array<{ n: string; v: any }>, perfil: string, pagina: string): Env {
-  const d = new Date()
+export function baseEnv(vars: Array<{ n: string; v: any }>, perfil: string, pagina: string, now?: Date): Env {
+  const d = now ?? new Date()
   const e: Env = {}
   vars.forEach((x) => { e[x.n] = x.v })
   return { ...e, hora: d.getHours(), minuto: d.getMinutes(), segundo: d.getSeconds(), dia: (d.getDay() + 6) % 7 + 1, perfil, pagina }

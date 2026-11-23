@@ -40,6 +40,25 @@ export const handlePages: ApiHandler = async (_req, { url, method, path, db, ser
     }
   }
 
+  // Endpoint compuesto (Fase C+D): evita N llamadas serie en loadProfile.
+  // GET /api/v1/pages/:id/context → { page, buttons, assignments, pageVersion }
+  // Solo aditivo: no altera las rutas existentes. Debe evaluarse ANTES que
+  // el genérico /api/v1/pages/:id.
+  const contextMatch = path.match(/^\/api\/v1\/pages\/([^/]+)\/context$/);
+  if (contextMatch && method === 'GET') {
+    const pageId = contextMatch[1];
+    const page = db.getPage(pageId);
+    if (!page) {
+      return jsonResponse({ error: 'Page not found' }, 404);
+    }
+    const buttons = db.getButtonsByPage(pageId);
+    let assignments: Record<string, string> = {};
+    try {
+      assignments = db.getAssignments(page.profile_id);
+    } catch { /* mejor esfuerzo */ }
+    return jsonResponse({ page, buttons, assignments, pageVersion: Date.now() });
+  }
+
   if (path.startsWith('/api/v1/pages/')) {
     const pageId = path.split('/')[4];
 

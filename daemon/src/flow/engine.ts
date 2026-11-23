@@ -74,6 +74,8 @@ const DEFAULT_TIMEOUT = 30000;
 export class FlowEngine {
   private deps: EngineDeps;
   private runs = new Map<string, RunState>();
+  /** Snapshot de vars globales por run activo (Fase C+D, ver execute()). */
+  private snaps = new Map<string, Map<string, any>>();
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
@@ -110,6 +112,17 @@ export class FlowEngine {
     const label = opts.runLabel ?? 'flow';
     const timeoutMs = opts.timeout ?? DEFAULT_TIMEOUT;
     const scope: Record<string, any> = { ...(opts.parentScope ?? {}) };
+    // Fase C+D: snapshot de variables globales UNA vez por ejecución.
+    // Antes cada env() hacía listVars() (SELECT * FROM flow_vars) → N nodos
+    // × M evaluaciones de DB. El snapshot se mantiene coherente dentro del
+    // run con write-through en writeVar(); escrituras externas concurrentes
+    // no se ven a mitad de run (semántica de snapshot, más consistente).
+    const varsSnap = new Map<string, any>();
+    try {
+      const listVars = this.deps.listVars?.();
+      if (Array.isArray(listVars)) for (const v of listVars) varsSnap.set(v.name, v.value);
+    } catch { /* solo scope */ }
+    this.snaps.set(runId, varsSnap);
 
     this.deps.log('info', `Flow started: ${label}`, { runId, ctx });
     this.deps.emit('flow.started', { runId, label, context: ctx, timestamp: start });
@@ -124,7 +137,7 @@ export class FlowEngine {
 
     const execPromise = (async (): Promise<FlowExecResult['results']> => {
       const results: FlowExecResult['results'] = [];
-      const env = () => this.buildEnv(ctx, scope, opts.extraEnv);
+      const env = () => this.buildEnv(ctx, scope, varsSnap, opts.extraEnv);
       let idx = 0;
       for (const node of list) {
         checkCancel();
@@ -161,6 +174,7 @@ export class FlowEngine {
       for (const t of state.timers) clearTimeout(t);
       state.timers.clear();
       this.runs.delete(runId);
+      this.snaps.delete(runId);
     }
   }
 
@@ -175,15 +189,17 @@ export class FlowEngine {
     switch (node.kind) {
       case 'action': return this.execAction(node, ctx, env, state, runId);
       case 'wait': {
-        const ms = Math.min(Math.max(0, resolveNum((node as any).ms, env(), 0)), 120000);
+        const E = env();
+        const ms = Math.min(Math.max(0, resolveNum((node as any).ms, E, 0)), 120000);
         await this.sleep(ms, state);
         checkCancel();
         return { kind: 'wait', success: true, result: { waitedMs: ms } };
       }
       case 'if': {
         const condSrc = (node.cond ?? '').trim();
+        const E = env();
         let ok = true;
-        try { ok = !condSrc || !!ev(condSrc, env()); }
+        try { ok = !condSrc || !!ev(condSrc, E); }
         catch (e) { throw new Error(`Condición inválida «${node.cond}»: ${(e as Error).message}`); }
         const branch = ok ? node.then : (node.else ?? []);
         const sub: Array<FlowExecResult['results'][number]> = [];
@@ -198,14 +214,15 @@ export class FlowEngine {
         return { kind: 'if', success, result: { cond: node.cond, taken: ok ? 'then' : 'else', results: sub } };
       }
       case 'switch': {
+        const E = env();
         let key: any;
-        try { key = ev(node.expr ?? '', env()); }
+        try { key = ev(node.expr ?? '', E); }
         catch (e) { throw new Error(`Expresión switch inválida «${node.expr}»: ${(e as Error).message}`); }
         let branch: FlowNode[] | null = null;
         for (const c of node.cases ?? []) {
           if (c.cond !== undefined && String(c.cond).trim() !== '') {
             let hit = false;
-            try { hit = !!ev(String(c.cond), env()); } catch { hit = false; }
+            try { hit = !!ev(String(c.cond), E); } catch { hit = false; }
             if (hit) { branch = normalizeNodes(c.nodes); break; }
           } else if (c.value !== undefined) {
             // eslint-disable-next-line eqeqeq
@@ -224,12 +241,13 @@ export class FlowEngine {
         return { kind: 'switch', success: sub.every((r) => r.success), result: { expr: node.expr, key, results: sub } };
       }
       case 'repeat': {
-        const delayMs = Math.min(Math.max(0, resolveNum((node as any).delayMs ?? 0, env(), 0)), 60000);
+        const E0 = env();
+        const delayMs = Math.min(Math.max(0, resolveNum((node as any).delayMs ?? 0, E0, 0)), 60000);
         const inner = normalizeNodes(node.nodes);
         const sub: Array<FlowExecResult['results'][number]> = [];
         let i = 0;
         if (node.count !== undefined) {
-          const count = Math.min(Math.max(0, Math.floor(resolveNum(node.count, env(), 0))), MAX_REPEAT);
+          const count = Math.min(Math.max(0, Math.floor(resolveNum(node.count, E0, 0))), MAX_REPEAT);
           for (let k = 0; k < count; k++) {
             checkCancel();
             scope.iteration = k;
@@ -285,15 +303,15 @@ export class FlowEngine {
         let value: any;
         try { value = ev(String(node.expr ?? ''), env()); }
         catch (e) { throw new Error(`Expresión set-var inválida: ${(e as Error).message}`); }
-        this.writeVar(name, value, scope, false, isTop);
+        this.writeVar(name, value, scope, false, isTop, runId);
         return { kind: 'set-var', success: true, result: { name, value } };
       }
       case 'toggle-var': {
         const name = String(node.name ?? '').trim();
         if (!name) throw new Error('toggle-var sin nombre de variable');
-        const cur = this.readVar(name, scope);
+        const cur = this.readVar(name, scope, runId);
         const next = typeof cur === 'boolean' ? !cur : typeof cur === 'number' ? (cur ? 0 : 1) : cur ? '' : 'sí';
-        this.writeVar(name, next, scope, false, isTop);
+        this.writeVar(name, next, scope, false, isTop, runId);
         return { kind: 'toggle-var', success: true, result: { name, value: next } };
       }
       case 'log': {
@@ -312,7 +330,7 @@ export class FlowEngine {
         for (const [k, v] of Object.entries(inputs)) {
           if (!(k in childScope)) childScope[k] = typeof v === 'string' ? intp(v, env()) : v;
         }
-        const childEnv = () => this.buildEnv(ctx, { ...opts_extraEnv(env), ...childScope });
+        const childEnv = () => this.buildEnv(ctx, { ...opts_extraEnv(env), ...childScope }, this.snaps.get(runId));
         const sub: Array<FlowExecResult['results'][number]> = [];
         let i = 0;
         for (const n of normalizeNodes(script.nodes)) {
@@ -325,7 +343,7 @@ export class FlowEngine {
         if (node.outputVar) {
           const out = node.outputVar in childScope ? childScope[node.outputVar] : (sub.length ? sub[sub.length - 1].result : undefined);
           // outputVar siempre vuelve al global: es el valor de retorno.
-          this.writeVar(node.outputVar, out, scope, true);
+          this.writeVar(node.outputVar, out, scope, true, isTop, runId);
         }
         return { kind: 'script', type: node.scriptId, success, result: { scriptId: node.scriptId, results: sub } };
       }
@@ -388,11 +406,15 @@ export class FlowEngine {
 
   // ---- Ámbito / variables ----
 
-  private buildEnv(ctx: FlowContext, scope: Record<string, any>, extra?: Record<string, any>): Env {
+  private buildEnv(ctx: FlowContext, scope: Record<string, any>, snap?: Map<string, any> | null, extra?: Record<string, any>): Env {
     const globals: Array<{ n: string; v: any }> = [];
     try {
-      const list = this.deps.listVars?.();
-      if (Array.isArray(list)) for (const v of list) globals.push({ n: v.name, v: v.value });
+      if (snap) {
+        for (const [n, v] of snap) globals.push({ n, v });
+      } else {
+        const list = this.deps.listVars?.();
+        if (Array.isArray(list)) for (const v of list) globals.push({ n: v.name, v: v.value });
+      }
     } catch { /* solo scope */ }
     const base = baseEnv(globals, String((ctx as any).profileName ?? ctx.profileId ?? ''), String((ctx as any).pageName ?? ctx.pageId ?? ''));
     return {
@@ -408,17 +430,23 @@ export class FlowEngine {
     };
   }
 
-  private readVar(name: string, scope: Record<string, any>): any {
+  private readVar(name: string, scope: Record<string, any>, runId?: string): any {
     if (name in scope) return scope[name];
+    if (runId) {
+      const snap = this.snaps.get(runId);
+      if (snap?.has(name)) return snap.get(name);
+    }
     return this.deps.getVar(name)?.value;
   }
 
-  private writeVar(name: string, value: any, scope: Record<string, any>, forceGlobal = false, isTop = false): void {
+  private writeVar(name: string, value: any, scope: Record<string, any>, forceGlobal = false, isTop = false, runId?: string): void {
     // En el nivel superior (flujo/automatización) un nombre nuevo crea la
     // global (coherente con la UI); dentro de un script queda en el ámbito
     // local (variables propias). outputVar siempre vuelve al global.
     if (forceGlobal || isTop || this.deps.getVar(name) !== undefined) {
       this.deps.setVar(name, value);
+      // Write-through al snapshot: el resto del run ve el valor sin otra query.
+      if (runId) this.snaps.get(runId)?.set(name, value);
     } else {
       scope[name] = value;
     }

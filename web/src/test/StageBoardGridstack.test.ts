@@ -62,6 +62,18 @@ describe('StageBoard GridStack por página', () => {
     wrapper.unmount()
   })
 
+  it('resuelve la apariencia una sola vez por posición y reutiliza el resultado en el render', async () => {
+    const displayData = vi.fn((position: number) => ({ label: `Key ${position}` }))
+    const wrapper = mount(StageBoard, {
+      props: { ...baseProps, displayData, layoutMode: 'classic' }
+    })
+
+    expect(displayData).toHaveBeenCalledTimes(buttons.length)
+    await wrapper.setProps({ selectedButton: 0 })
+    expect(displayData).toHaveBeenCalledTimes(buttons.length)
+    wrapper.unmount()
+  })
+
   it('modo gridstack pinta las mismas teclas con span (1×1 por defecto)', async () => {
     const wrapper = mount(StageBoard, { props: { ...baseProps, layoutMode: 'gridstack' } })
     const plate = wrapper.find('[data-cy=bd-gs-plate]')
