@@ -42,7 +42,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
             data: body.data || {},
           });
           services.wsManager.broadcast('button.created', { buttonId: created.id, button: created, pageId: created.page_id, mutationId: (body as any)?.mutationId, timestamp: Date.now() }, 'buttons');
-          try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+          // Reglas load/timer/var fuera del camino crítico (ver scheduleResyncButtonAutomations).
+          try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
           if (streamDeckDriver.isConnected()) {
             streamDeckDriver.scheduleUpdateFromPage(created.page_id);
           }
@@ -72,8 +73,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       services.wsManager.broadcast('button.created', { buttonId: button.id, button, pageId: button.page_id, mutationId: (body as any)?.mutationId, timestamp: Date.now() }, 'buttons');
 
       // Las reglas load/timer/var de la tecla funcionan con la UI cerrada:
-      // re-sincronizar automatizaciones (best-effort, no bloquea).
-      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+      // re-sincronizar automatizaciones fuera del camino crítico (best-effort, no bloquea).
+      try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta): el vaciado/creación
       // respondía tras un repintado completo y parecía "pillado".
@@ -104,7 +105,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
         // {success, buttons} no cambia.
         const pageVersion = Date.now();
         services.wsManager.broadcastButtonsReordered(page_id, updated, (raw as any)?.mutationId, pageVersion);
-        try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+        // Fuera del camino crítico (ver scheduleResyncButtonAutomations).
+        try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
 
         // Repintado diferido y coalescado (no bloquea la respuesta).
         if (streamDeckDriver.isConnected()) {
@@ -175,7 +177,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       const updatedButton = db.getButton(buttonId);
       services.wsManager.broadcastButtonUpdate(buttonId, updatedButton, (body as any)?.mutationId);
 
-      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+      // Fuera del camino crítico (ver scheduleResyncButtonAutomations).
+      try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta).
       if (streamDeckDriver.isConnected() && updatedButton) {
@@ -196,7 +199,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       const deleteBody = await _req.json().catch(() => ({}));
       services.wsManager.broadcastButtonDeleted(buttonId, (deleteBody as any)?.mutationId, pageId);
 
-      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+      // Fuera del camino crítico (ver scheduleResyncButtonAutomations).
+      try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta): vaciar respondía
       // tras el repintado completo y la UI parecía congelada.

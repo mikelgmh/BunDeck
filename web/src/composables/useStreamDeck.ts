@@ -42,6 +42,8 @@ export function useStreamDeck() {
   const marketplace = ref<any[]>([])
   const marketplaceRegistry = ref<string | null>(null)
   const pluginsLoading = ref(false)
+  // Vuelo en curso de loadPlugins (dedupe entre arranque y dynamic polling).
+  let pluginsInFlight: Promise<void> | null = null
 
   // Progreso de instalación en vivo (lo emite el daemon por WS)
   const installProgress = ref<{ key: string; stage: string; message: string } | null>(null)
@@ -580,7 +582,9 @@ export function useStreamDeck() {
             installProgressTimer = setTimeout(() => { installProgress.value = null }, 6000)
           }
         }
-        loadPlugins().catch(() => {})
+        // Con debounce como el resto de eventos de plugins (una ráfaga de
+        // status seguidos producía N recargas completas en serie).
+        scheduleReload('plugins')
         break
       }
       case 'plugin.installed':
@@ -614,8 +618,23 @@ export function useStreamDeck() {
     // Load config first
     await loadConfig();
 
+    // Las acciones no dependen del perfil/página: se cargan en segundo plano
+    // desde ya (antes eran el ÚLTIMO paso serie de la cascada). Con dedupe
+    // interno no hay doble fetch aunque otro camino las pida a la vez.
+    const pluginsPromise = loadPlugins().catch((e) => {
+      console.error('Background plugins load failed:', e)
+    })
+
     try {
-      profiles.value = await apiRequest('/profiles')
+      // Perfiles y perfil guardado son independientes: en paralelo.
+      const [profilesRes, profileSettingRes] = await Promise.all([
+        apiRequest('/profiles'),
+        apiRequest('/settings?key=current.profile_id').catch((error) => {
+          console.log('⚠️ Could not load profile from database settings:', error)
+          return null
+        }),
+      ])
+      profiles.value = profilesRes
 
       // Check if we have at least one profile
       if (profiles.value.length === 0) {
@@ -668,18 +687,16 @@ export function useStreamDeck() {
       }
 
       // Try to restore saved profile first from database settings, then localStorage
-      let savedProfileId = null;
-      try {
-        const settingsResponse = await apiRequest('/settings?key=current.profile_id');
-        savedProfileId = settingsResponse.value;
+      let savedProfileId = profileSettingRes?.value ?? null;
+      if (savedProfileId) {
         console.log('📂 Loaded profile from database settings:', savedProfileId);
-        
+
         // Handle the case where "null" was saved as a string
         if (savedProfileId === 'null' || savedProfileId === null || savedProfileId === '') {
           savedProfileId = null;
           console.log('⚠️ Invalid profile_id found in settings, ignoring...');
         }
-      } catch (error) {
+      } else {
         console.log('⚠️ Could not load profile from database settings, trying localStorage...');
         savedProfileId = getSelectedProfile();
         console.log('📂 Loaded profile from localStorage:', savedProfileId);
@@ -696,19 +713,20 @@ export function useStreamDeck() {
       // Load the selected profile
       if (selectedProfile.value) {
         await loadProfile()
-        
+
         // After loading profile and page, update StreamDeck if connected
         console.log('🔌 Profile loaded, checking if we need to update StreamDeck...');
         setTimeout(async () => {
           await updateStreamDeckButtons();
         }, 1000); // Small delay to ensure everything is loaded
       }
-
-      // Load plugins
-      await loadPlugins()
     } catch (error) {
       console.error('Failed to load profiles:', error)
     }
+
+    // Las acciones ya vienen en vuelo desde el inicio; aquí solo se espera
+    // su fin (no bloqueó el perfil/página/botones, que ya están visibles).
+    await pluginsPromise
   }
 
   const loadProfile = async () => {
@@ -726,10 +744,11 @@ export function useStreamDeck() {
     saveSelectedProfile(selectedProfile.value)
 
     try {
-      // Perfil y lista de páginas son independientes: en paralelo.
-      const [profile, pages] = await Promise.all([
+      // Perfil, lista de páginas y página guardada son independientes: en paralelo.
+      const [profile, pages, pageSettingRes] = await Promise.all([
         apiRequest(`/profiles/${selectedProfile.value}`),
-        apiRequest(`/pages?profileId=${selectedProfile.value}`)
+        apiRequest(`/pages?profileId=${selectedProfile.value}`),
+        apiRequest('/settings?key=current.page_id').catch(() => null),
       ])
       currentProfile.value = profile
 
@@ -767,10 +786,9 @@ export function useStreamDeck() {
 
       // Try to load saved page from database settings, fallback to first non-folder page
       let targetPage = null;
-      try {
-        const pageSettingsResponse = await apiRequest('/settings?key=current.page_id');
-        const savedPageId = pageSettingsResponse.value;
-        
+      {
+        const savedPageId = (pageSettingRes as any)?.value;
+
         // Handle the case where invalid values were saved
         if (savedPageId && savedPageId !== 'null' && savedPageId !== null && savedPageId !== '') {
           targetPage = pages.find(p => p.id === savedPageId && p.is_folder === 0);
@@ -778,8 +796,6 @@ export function useStreamDeck() {
         } else {
           console.log('⚠️ Invalid or missing page_id in settings');
         }
-      } catch (error) {
-        console.log('⚠️ Could not load page from database settings');
       }
 
       // If no saved page or saved page not found, use first non-folder page
@@ -815,21 +831,35 @@ export function useStreamDeck() {
   }
 
   const loadPlugins = async () => {
-    try {
-      pluginsLoading.value = true
-      const pluginData = await apiRequest('/plugins/actions')
-      plugins.value = pluginData
-      console.log('🔌 Loaded plugins:', plugins.value)
+    // Dedupe de cargas concurrentes: loadProfiles la lanza en segundo plano
+    // y startDynamicUpdates la pide si el índice sigue vacío; sin esto habría
+    // dos GET /plugins/actions + /plugins en vuelo a la vez.
+    if (pluginsInFlight) {
+      await pluginsInFlight
+      return
+    }
+    pluginsInFlight = (async () => {
       try {
-        const mgr = await apiRequest('/plugins')
-        pluginsDetailed.value = mgr.detailed ?? []
-      } catch (e) {
-        console.warn('Plugin manager detail unavailable:', e)
+        pluginsLoading.value = true
+        const pluginData = await apiRequest('/plugins/actions')
+        plugins.value = pluginData
+        console.log('🔌 Loaded plugins:', plugins.value)
+        try {
+          const mgr = await apiRequest('/plugins')
+          pluginsDetailed.value = mgr.detailed ?? []
+        } catch (e) {
+          console.warn('Plugin manager detail unavailable:', e)
+        }
+      } catch (error) {
+        console.error('Failed to load plugins:', error)
+      } finally {
+        pluginsLoading.value = false
       }
-    } catch (error) {
-      console.error('Failed to load plugins:', error)
+    })()
+    try {
+      await pluginsInFlight
     } finally {
-      pluginsLoading.value = false
+      pluginsInFlight = null
     }
   }
 

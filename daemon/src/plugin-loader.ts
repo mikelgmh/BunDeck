@@ -30,8 +30,34 @@ export const BUILT_IN_IDS = new Set([
   'obs', 'homeassistant', 'spotify', 'weather', 'email',
 ]);
 
+/**
+ * IDs de todos los plugins nativos (los 42 de `plugins/index.ts`).
+ * La lista estática de arriba se quedó en 15 y dejaba a 27 nativos
+ * (discord, timer, flow, ...) fuera: `loadPlugin` los trataba como
+ * externos, fallaba ("registrado pero sin carpeta") y sus acciones no
+ * aparecían en `/api/v1/plugins/actions`. Se completa en perezoso desde
+ * los manifiestos nativos para no desincronizarse al añadir plugins.
+ */
+let nativeIdsCache: Set<string> | null = null;
+function nativePluginIds(): Set<string> {
+  if (nativeIdsCache) return nativeIdsCache;
+  try {
+    const ids = getNativeManifests()
+      .map((m: any) => m?.id)
+      .filter((id: any) => typeof id === 'string' && id.length > 0);
+    if (ids.length > 0) {
+      nativeIdsCache = new Set(ids);
+      for (const id of ids) BUILT_IN_IDS.add(id);
+      return nativeIdsCache;
+    }
+  } catch { /* fallback a la lista estática */ }
+  nativeIdsCache = new Set(BUILT_IN_IDS);
+  return nativeIdsCache;
+}
+
 export function isBuiltIn(id: string): boolean {
-  return BUILT_IN_IDS.has(id);
+  if (BUILT_IN_IDS.has(id)) return true;
+  return nativePluginIds().has(id);
 }
 
 /** Carpeta en disco para un id (los scoped usan __ en vez de /). */

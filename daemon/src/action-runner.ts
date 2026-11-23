@@ -455,11 +455,18 @@ export class ActionRunner {
     promise: Promise<T>,
     timeoutMs: number
   ): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Action timeout')), timeoutMs);
-    });
-
-    return Promise.race([promise, timeoutPromise]);
+    // El timer se limpia al resolver: antes sobrevivía 30 s por CADA
+    // ejecución (también el polling silencioso cada 500 ms) y acumulaba
+    // decenas de miles de handles en daemons de larga vida.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Action timeout')), timeoutMs);
+      });
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   private isOnCooldown(actionId: string, cooldownMs: number): boolean {
@@ -805,6 +812,26 @@ export class ActionRunner {
     } catch { /* mejor esfuerzo */ }
   }
 
+  private resyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Versión diferida de `resyncButtonAutomations` para el camino caliente
+   * (POST/PUT/DELETE/reorder de botones): una ráfaga de ediciones seguidas
+   * (arrastrar una acción, mover/resize en libre, swaps) colapsa en UN solo
+   * reescaneo en vez de uno síncrono por escritura que retrase la respuesta
+   * HTTP. El estado persistido ya está al día; el resync solo reconstruye
+   * timers de reglas en memoria, así que diferirlo es seguro.
+   */
+  public scheduleResyncButtonAutomations(delayMs: number = 250): void {
+    if (this.resyncTimer) return; // ya hay una programada: coalesca
+    this.resyncTimer = setTimeout(() => {
+      this.resyncTimer = null;
+      try {
+        this.resyncButtonAutomations();
+      } catch { /* mejor esfuerzo */ }
+    }, Math.max(0, delayMs));
+  }
+
   /** Releer todas las teclas y sincronizar reglas load/timer/var. */
   public resyncButtonAutomations(): void {
     const buttons: Array<{ id: string; page_id: string; position: number; data: any }> = [];
@@ -822,6 +849,11 @@ export class ActionRunner {
 
   public dispose(): void {
     console.log('🧹 Cleaning up ActionRunner...');
+
+    if (this.resyncTimer) {
+      clearTimeout(this.resyncTimer);
+      this.resyncTimer = null;
+    }
 
     try {
       this.automationManager.stopAll();

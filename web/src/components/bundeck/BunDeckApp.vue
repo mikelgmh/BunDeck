@@ -1339,17 +1339,20 @@ const ioParseErrorKey = ref('')
 const ioBusy = ref(false)
 
 const apiBase = API_BASE
+// Ningún fetch cuelga para siempre: sin timeout, un daemon ocupado dejaba
+// pageBusy activo y toda la UI "pillada" (failed to fetch al abortar el navegador).
+const FETCH_TIMEOUT_MS = 15000
 const apiGet = async (path: string) => {
-  const res = await fetch(`${apiBase.value}${path}`)
+  const res = await fetch(`${apiBase.value}${path}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
   return res.json()
 }
-const apiPost = async (path: string, body: any, timeoutMs?: number) => {
+const apiPost = async (path: string, body: any, timeoutMs: number = FETCH_TIMEOUT_MS) => {
   const res = await fetch(`${apiBase.value}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    signal: AbortSignal.timeout(timeoutMs),
   })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
@@ -1358,7 +1361,7 @@ const apiPost = async (path: string, body: any, timeoutMs?: number) => {
   return res.json().catch(() => ({}))
 }
 const apiDel = async (path: string) => {
-  const res = await fetch(`${apiBase.value}${path}`, { method: 'DELETE' })
+  const res = await fetch(`${apiBase.value}${path}`, { method: 'DELETE', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
     throw new Error(txt || `DELETE ${path}: ${res.status}`)
@@ -1369,7 +1372,8 @@ const apiPut = async (path: string, body: any) => {
   const res = await fetch(`${apiBase.value}${path}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
@@ -1479,20 +1483,28 @@ const onGridSizeChange = async (dx: number, dy: number) => {
     }
   }
 }
-/** Persistir geometría GridStack al mover/redimensionar (misma tecla, mismos drawers). */
+/** Persistir geometría GridStack al mover/redimensionar (misma tecla, mismos drawers).
+ *  Los PUT van en paralelo y el estado local se fusiona con las filas que
+ *  devuelve el daemon: antes eran N PUTs en serie + un GET completo, y en
+ *  modo libre con varias teclas la UI se quedaba "pillada". */
 const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number; w: number; h: number }>) => {
-  if (!items.length) return
+  const targets = (items ?? []).filter((it) => it?.id)
+  if (!targets.length) return
   try {
-    for (const it of items) {
-      if (!it.id) continue
-      await apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x: it.x, y: it.y, w: it.w, h: it.h })
+    const updated = await Promise.all(targets.map((it) =>
+      apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x: it.x, y: it.y, w: it.w, h: it.h })
+    ))
+    const byId = new Map<string, any>()
+    for (const b of updated ?? []) {
+      if (b && typeof b.id === 'string') byId.set(b.id, b)
     }
-    if (currentPage.value) {
-      const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
-      currentButtons.value = fresh
+    if (byId.size > 0) {
+      currentButtons.value = currentButtons.value.map((b: any) => byId.get(b?.id) ?? b)
     }
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
+    // Reconciliar en segundo plano sin bloquear: la BD manda.
+    loadProfile().catch(() => {})
   }
 }
 
