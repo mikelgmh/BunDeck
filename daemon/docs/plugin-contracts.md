@@ -74,6 +74,39 @@ Un campo `select` se rellena ejecutando otra acción **del mismo plugin**
 
 ## 5. Estados de botón e iconos dinámicos
 
+## 5b. Presentación de la tecla: dato dinámico vs control
+
+Cada acción pertenece a una de tres clases (ver `web/src/composables/useActionPresentation.ts`):
+
+- **Ejecución** (por defecto): hace algo al pulsar, no cambia lo que se ve.
+  Varias pueden convivir en la misma tecla.
+- **Dato dinámico** (`dynamic: true` + `pollMs`): su valor se muestra
+  DENTRO de la tecla estándar (icono/texto/imagen se conservan). Pueden
+  coexistir varias; gana la primera (igual que el polling actual).
+  Ejemplos: `pc-vitals.monitor`, `weather.now`, `spotify.now-playing`.
+- **Control** (`surface: 'control'` + `component` + `freeModeOnly?`):
+  POSEE la superficie y la reemplaza por un componente propio. **Solo cabe
+  un control por tecla**; añadir otro pide reemplazar. Ejemplo real:
+  `audio-mixer.volume-control` → `volume-range`.
+
+```json
+{ "id": "volume-control", "surface": "control", "component": "volume-range", "freeModeOnly": true }
+```
+
+Reglas del contrato (`validator.ts`):
+
+- `surface` solo admite `'control'`.
+- `component` requiere `surface: 'control'` y debe ser no vacío.
+- `freeModeOnly` debe ser booleano. Con `true`, la UI solo representa el
+  control en modo libre; en rejilla fija la tecla se ve normal (pulsar es
+  inocuo: el handler no tiene efectos).
+- Componente desconocido → la UI lo degrada a ejecución (nunca rompe).
+
+Seguridad: el daemon **nunca envía HTML/JS a renderizar**. El componente se
+elige de una lista cerrada del lado UI (`CONTROL_ACTION_COMPONENTS`); el
+manifest solo lo declara. Pulsar una tecla con control ejecuta sus acciones
+con normalidad; el control lee/escribe por sus propias acciones.
+
 ```json
 { "id": "stream", "states": [
   { "value": "live", "label": "En directo", "icon": "Radio" },

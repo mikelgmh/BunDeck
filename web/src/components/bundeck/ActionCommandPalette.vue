@@ -41,6 +41,18 @@
           >
             <component :is="a.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
             <span>{{ a.name }}</span>
+            <span
+              v-if="a.surface === 'control'"
+              class="bd-tag bd-tag-ctl"
+              :title="a.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
+              data-cy="bd-palette-badge-control"
+            >{{ t('bd.actControl') }}</span>
+            <span
+              v-else-if="a.surface === 'data'"
+              class="bd-tag"
+              :title="t('bd.actDataHint')"
+              data-cy="bd-palette-badge-data"
+            >{{ t('bd.actData') }}</span>
           </button>
         </template>
       </template>
@@ -54,6 +66,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Search, X, Settings } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
+import { actionSurfaceKind } from '../../composables/useActionPresentation'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
 const { t } = useI18nStore()
@@ -96,10 +109,10 @@ const manifestOf = (pid: string) => {
 }
 
 const flat = computed(() => {
-  const list: Array<{ type: string; name: string; group: string; pid: string; icon: any }> = []
+  const list: Array<{ type: string; name: string; group: string; pid: string; icon: any; surface: string; freeModeOnly: boolean }> = []
   const logicGroup = t('bd.logicGroup')
   for (const l of LOCAL_ACTIONS) {
-    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: icons[l.icon] ?? Settings })
+    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: icons[l.icon] ?? Settings, surface: 'plain', freeModeOnly: false })
   }
   for (const entry of props.plugins ?? []) {
     const [pid, pdata] = entry
@@ -110,7 +123,9 @@ const flat = computed(() => {
         name: adata?.name ?? aid,
         group,
         pid,
-        icon: icons[adata?.icon] ?? Settings
+        icon: icons[adata?.icon] ?? Settings,
+        surface: actionSurfaceKind(adata),
+        freeModeOnly: (adata as any)?.freeModeOnly === true
       })
     }
   }

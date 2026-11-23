@@ -4,31 +4,39 @@
 [![Release](https://img.shields.io/github/v/release/mikelgmh/libredeck)](https://github.com/mikelgmh/libredeck/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Automate your PC with physical or virtual buttons: open apps, run scripts, control OBS, Spotify, Home Assistant, media and more. **No cloud, no account, fully local.**
+Automate your computer with physical or virtual buttons. Launch apps, run scripts, control OBS, Spotify, Home Assistant, media, and more—all locally, with no cloud account required.
 
-- 🖥️ **For users:** install, open the status window, click “Open panel”, done.
-- 🧩 **For developers:** Bun daemon + Astro/Vue panel + CLI + native Rust launcher. Everything documented below.
+**For users:** install BunDeck, open the status window, and select **Open panel**.
 
-> Current version: **1.5.0** (single source: root `package.json`).
+**For developers:** Bun daemon, Astro/Vue control panel, CLI, and native Rust launcher.
 
----
+## Download BunDeck
+
+Choose your platform. These links always resolve to the latest release.
+
+| Windows | macOS | Linux |
+|---|---|---|
+| **Windows installer**<br>Daemon, CLI, launcher, and panel<br>[**Download BunDeck-Setup.exe**](https://github.com/mikelgmh/libredeck/releases/latest/download/BunDeck-Setup.exe) | **Managed bundle · x64**<br>Install with `scripts/install-macos.sh`<br>[**View latest macOS download**](https://github.com/mikelgmh/libredeck/releases/latest) | **Managed bundle · x64**<br>Install with `scripts/install-linux.sh`<br>[**View latest Linux download**](https://github.com/mikelgmh/libredeck/releases/latest) |
+
+> macOS and Linux downloads are managed bundles rather than native installers. See [installation notes](#installation) for setup details and [the latest release](https://github.com/mikelgmh/libredeck/releases/latest) for the platform bundles.
 
 ## Contents
 
-1. [In 60 seconds](#in-60-seconds)
-2. [Architecture: why each piece](#architecture-why-each-piece)
-3. [Measured footprint + comparison](#measured-footprint--comparison)
-4. [Installation](#installation)
-5. [Daily use](#daily-use)
-6. [Ports, bind and data](#ports-bind-and-data)
-7. [CLI `libredeck-cli`](#cli-libredeck-cli)
-8. [API and WebSocket](#api-and-websocket)
-9. [Plugins](#plugins)
-10. [Development](#development)
-11. [Build and release](#build-and-release)
-12. [Environment variables](#environment-variables)
-13. [Troubleshooting](#troubleshooting)
-14. [FAQ: why not Electron](#faq-why-not-electron)
+1. [Downloads](#download-bundeck)
+2. [In 60 seconds](#in-60-seconds)
+3. [Architecture](#architecture-why-each-piece)
+4. [Measured footprint](#measured-footprint--comparison)
+5. [Installation](#installation)
+6. [Daily use](#daily-use)
+7. [Ports, bind and data](#ports-bind-and-data)
+8. [CLI](#cli-libredeck-cli)
+9. [API and WebSocket](#api-and-websocket)
+10. [Plugins](#plugins)
+11. [Development](#development)
+12. [Build and release](#build-and-release)
+13. [Environment variables](#environment-variables)
+14. [Troubleshooting](#troubleshooting)
+15. [FAQ](#faq-why-not-electron)
 
 ---
 
@@ -113,23 +121,13 @@ What about Electrobun? It uses the OS WebView (WebView2 on Windows, WebKit on ma
 
 BunDeck is cross-platform: **Windows, macOS and Linux** are first-class citizens. Pick your OS below — every link always points at the latest release.
 
-### Download (latest)
-
-| OS | What to download | Direct link |
-|---|---|---|
-| Windows | `BunDeck-Setup.exe` (installer: daemon + CLI + launcher + panel) | [BunDeck-Setup.exe](https://github.com/mikelgmh/libredeck/releases/latest/download/BunDeck-Setup.exe) |
-| Windows (portable) | Daemon + CLI standalone | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-windows-x64.exe) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-windows-x64.exe) |
-| macOS | Managed bundle (daemon + CLI + launcher + panel) | [bundeck-v*-darwin-x64.zip](https://github.com/mikelgmh/libredeck/releases/latest) — install with `scripts/install-macos.sh` |
-| Linux | Managed bundle (daemon + CLI + launcher + panel) | [bundeck-v*-linux-x64.zip](https://github.com/mikelgmh/libredeck/releases/latest) — install with `scripts/install-linux.sh` |
-| macOS/Linux (manual) | Daemon + CLI + web panel | [daemon](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-daemon-darwin-x64) · [CLI](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-cli-darwin-x64) · [web panel](https://github.com/mikelgmh/libredeck/releases/latest/download/libredeck-web-dist-darwin-x64.tar.gz) |
-
-All files for a version (including versioned filenames for pinning): [latest release page](https://github.com/mikelgmh/libredeck/releases/latest).
+The latest platform downloads are at the top of this README. The [latest release](https://github.com/mikelgmh/libredeck/releases/latest) contains the installers, managed bundles, and update manifest.
 
 ### Per-OS notes
 
 - **Windows:** run the installer, open **BunDeck** → **Open panel**. The installer sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
-- **macOS:** download the managed bundle and run `bash scripts/install-macos.sh` (from the repo), or install manually: download the three files, make daemon/CLI executable (`chmod +x`), run the daemon (`./libredeck-daemon-darwin-x64`), unpack the web panel next to it as `web-dist/`, then open `http://localhost:3002`.
-- **Linux:** download the managed bundle and run `bash scripts/install-linux.sh`, or same manual layout as macOS (`tar -xzf libredeck-web-dist-linux-x64.tar.gz`).
+- **macOS:** run the installer script from Terminal: `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-macos.sh && bash install-macos.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
+- **Linux:** run `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-linux.sh && bash install-linux.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
 
 ### Updates
 

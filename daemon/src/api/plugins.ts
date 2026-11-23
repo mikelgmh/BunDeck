@@ -367,6 +367,59 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
     }
   }
 
+  if (path === '/api/v1/plugins/action-options') {
+    if (method === 'POST') {
+      // Resuelve el `optionsFrom` de una acción: ejecuta la sourceAction del
+      // MISMO plugin y devuelve `{ options: [{value,label,...}] }`.
+      // Solo lectura pensada para rellenar selects (ej. entidades de HA).
+      try {
+        const body = await _req.json().catch(() => ({}));
+        const { pluginId, actionId, field, params } = body ?? {};
+        if (!pluginId || !actionId) {
+          return jsonResponse({ error: 'pluginId y actionId son obligatorios' }, 400);
+        }
+        const plugin = services.pluginLoader.getPlugin(pluginId);
+        if (!plugin || !plugin.enabled) {
+          return jsonResponse({ error: `Plugin no disponible: ${pluginId}` }, 404);
+        }
+        const action = (plugin.manifest.actions ?? []).find((a: any) => a.id === actionId);
+        const optionsFrom = (action as any)?.optionsFrom;
+        if (!optionsFrom?.sourceAction || !optionsFrom?.field) {
+          return jsonResponse({ error: `La acción ${pluginId}.${actionId} no declara opciones dinámicas` }, 400);
+        }
+        if (field && field !== optionsFrom.field) {
+          return jsonResponse({ error: `Campo no válido: ${field} (se esperaba ${optionsFrom.field})` }, 400);
+        }
+        // Solo se ejecuta la sourceAction declarada, nunca una arbitraria.
+        const forward: Record<string, any> = {};
+        const src = String(optionsFrom.sourceAction);
+        if (Array.isArray(optionsFrom.forwardParams)) {
+          for (const k of optionsFrom.forwardParams) {
+            const v = (params ?? {})[k];
+            if (v !== undefined && v !== null && v !== '') forward[k] = v;
+          }
+        } else {
+          Object.assign(forward, params ?? {});
+        }
+        const res = await services.actionRunner.executeAction(
+          { type: `${plugin.manifest.id}.${src}`, parameters: forward, timeout: 20000 },
+          { timestamp: Date.now(), pressType: 'short', quiet: true } as any
+        );
+        if (!res.success) {
+          // 200 con success:false: la UI muestra el mensaje y deja escribir a mano.
+          return jsonResponse({ success: false, pluginId, actionId, field: optionsFrom.field, error: res.error ?? 'No se pudieron obtener las opciones' });
+        }
+        const raw = (res.result as any)?.options;
+        const options = (Array.isArray(raw) ? raw : [])
+          .filter((o: any) => o && o.value !== undefined)
+          .map((o: any) => ({ ...o, value: String(o.value), label: String(o.label ?? o.value) }));
+        return jsonResponse({ success: true, pluginId, actionId, field: optionsFrom.field, options, count: options.length });
+      } catch (e) {
+        return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
+      }
+    }
+  }
+
   if (path === '/api/v1/plugins/actions') {
     if (method === 'GET') {
       const loadedPlugins = Array.from(services.pluginLoader.getLoadedPlugins().entries());

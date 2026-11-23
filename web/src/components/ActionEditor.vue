@@ -28,6 +28,9 @@
       :schema="actionSchema"
       :model-value="action.parameters"
       :available-pages="availablePages"
+      :plugin-id="actionMeta.pluginId"
+      :action-id="actionMeta.actionId"
+      :dynamic-options="actionMeta.dynamicOptions"
       @update:model-value="updateParameters"
       data-swapy-no-drag
     />
@@ -107,6 +110,34 @@ const actionSchema = computed(() => {
   }
 
   return null
+})
+
+// Plugin/acción que se edita + declaración optionsFrom (listas remotas).
+const actionMeta = computed(() => {
+  let pluginId: string | null = null
+  let actionId: string | null = null
+  let dynamicOptions: any = null
+  const type: string = props.action.type ?? ''
+  if (type.includes('.')) {
+    const [pid, ...rest] = type.split('.')
+    pluginId = pid
+    actionId = rest.join('.')
+  }
+  if (props.plugins && pluginId && actionId) {
+    for (const pluginEntry of props.plugins) {
+      const [pid, pluginData] = pluginEntry
+      if (pid !== pluginId) continue
+      if (pluginData.actions) {
+        for (const [aid, actionData] of pluginData.actions) {
+          if (aid === actionId) {
+            dynamicOptions = actionData.optionsFrom ?? null
+            break
+          }
+        }
+      }
+    }
+  }
+  return { pluginId, actionId, dynamicOptions }
 })
 
 // Helper functions for action types

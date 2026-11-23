@@ -58,13 +58,30 @@
           :class="{ 'is-disabled': isUnconfigured(action.pid) }"
           :draggable="!isUnconfigured(action.pid)"
           :aria-disabled="isUnconfigured(action.pid)"
-          :title="isUnconfigured(action.pid) ? t('bd.pluginNotConfigured') : undefined"
+          :title="isUnconfigured(action.pid) ? t('bd.pluginNotConfigured') : action.name"
           data-cy="bd-action-item"
           @dragstart="onDragStart($event, action)"
           @click="onPick(action)"
         >
           <component :is="action.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
           <span>{{ action.name }}</span>
+          <span
+            v-if="action.surface === 'control'"
+            class="bd-tag bd-tag-ctl"
+            :title="action.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
+            data-cy="bd-action-badge-control"
+          >{{ t('bd.actControl') }}</span>
+          <span
+            v-else-if="action.surface === 'data'"
+            class="bd-tag"
+            :title="t('bd.actDataHint')"
+            data-cy="bd-action-badge-data"
+          >{{ t('bd.actData') }}</span>
+          <span
+            v-if="action.surface === 'control' && action.freeModeOnly"
+            class="bd-tag"
+            data-cy="bd-action-badge-free"
+          >{{ t('bd.actFreeOnly') }}</span>
         </button>
       </template>
       <p v-if="!flat.length" class="bd-hint">{{ t('bd.noActionMatch') }}</p>
@@ -77,6 +94,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-next'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import { useI18nStore } from '../../composables/useI18n'
+import { actionSurfaceKind } from '../../composables/useActionPresentation'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
 const { t } = useI18nStore()
@@ -144,21 +162,26 @@ const isUnconfigured = (pid: string) => {
 }
 
 const flat = computed(() => {
-  const list: Array<{ type: string; name: string; group: string; pid: string; icon: any }> = []
+  const list: Array<{ type: string; name: string; group: string; pid: string; icon: any; surface: string; freeModeOnly: boolean }> = []
   const logicGroup = t('bd.logicGroup')
   for (const l of LOCAL_ACTIONS) {
-    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: resolveIcon(l.icon) })
+    list.push({ type: l.type, name: t(l.nameKey), group: logicGroup, pid: 'local', icon: resolveIcon(l.icon), surface: 'plain', freeModeOnly: false })
   }
   for (const entry of props.plugins ?? []) {
     const [pid, pdata] = entry
     const group = pdata?.manifest?.name ?? pid
     for (const [aid, adata] of pdata?.actions ?? []) {
+      // Las acciones ocultas (alias heredados) siguen funcionando pero no se listan
+      if ((adata as any)?.hidden === true) continue
       list.push({
         type: `${pid}.${aid}`,
         name: adata?.name ?? aid,
         group,
         pid,
-        icon: resolveIcon(adata?.icon)
+        icon: resolveIcon(adata?.icon),
+        // Clase de presentación: ejecución | dato dinámico | control.
+        surface: actionSurfaceKind(adata),
+        freeModeOnly: (adata as any)?.freeModeOnly === true
       })
     }
   }

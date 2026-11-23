@@ -60,7 +60,7 @@ describe('manifiestos de sistema', () => {
             new UtilityPlugin(memContext()),
         ]
         const expected: Record<string, string[]> = {
-            'audio-mixer': ['app-volume', 'output-switch', 'mic-mute', 'get-levels'],
+            'audio-mixer': ['app-volume', 'output-switch', 'mic-mute', 'get-levels', 'volume-control'],
             'window-manager': ['window-action', 'layout-save', 'layout-restore', 'layout-list'],
             'meetings': ['control', 'join'],
             'slack': ['open-channel', 'open-dm', 'unread-count', 'send-message'],

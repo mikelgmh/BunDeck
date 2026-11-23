@@ -92,6 +92,8 @@ const availableActions = computed(() => {
     if (pluginData.actions) {
       // Process each action in the plugin
       pluginData.actions.forEach(([actionId, actionData]: [string, any]) => {
+        // Las acciones ocultas (alias heredados) siguen funcionando pero no se listan
+        if (actionData?.hidden === true) return
         // Get icon from action data or use a default
         let iconName = actionData.icon || 'Settings'
 

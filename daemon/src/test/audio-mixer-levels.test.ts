@@ -12,8 +12,7 @@ class FakeMixer extends AudioMixerPlugin {
     }
 }
 
-describe('audio-mixer get-levels', () => {
-    test('devuelve forma {master, muted, simulated} sin romper', async () => {
+describe('audio-mixer get-levels', () => {    test('devuelve forma {master, muted, simulated} sin romper', async () => {
         const plugin = new FakeMixer(() => ({ stdout: '42', stderr: '', exitCode: 0 }))
         const h = plugin.getActionHandlers()
         const out = (await h.get('get-levels')!({}, {})) as any
@@ -44,5 +43,17 @@ describe('audio-mixer get-levels', () => {
         const out = (await h.get('get-levels')!({}, {})) as any
         expect(out.simulated).toBe(true)
         expect(out.master).toBe(50)
+    })
+
+    test('volume-control: declara superficie y no tiene efectos al pulsar', async () => {
+        const plugin = new FakeMixer(() => ({ stdout: '61', stderr: '', exitCode: 0 }))
+        const manifest = plugin.getManifest()
+        const def = (manifest.actions as any[]).find((a) => a.id === 'volume-control')
+        expect(def).toMatchObject({ surface: 'control', component: 'volume-range', freeModeOnly: true })
+        const h = plugin.getActionHandlers()
+        expect(h.has('volume-control')).toBe(true)
+        const out = (await h.get('volume-control')!({}, {})) as any
+        expect(out.control).toBe('volume-range')
+        expect(out).toHaveProperty('master')
     })
 })

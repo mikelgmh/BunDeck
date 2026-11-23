@@ -94,6 +94,20 @@ export function validateManifest(manifest: any): ValidationResult {
       if (a.cooldownMs !== undefined && (typeof a.cooldownMs !== 'number' || a.cooldownMs < 0 || a.cooldownMs > 3600000)) {
         errors.push(`action ${a.id} cooldownMs 0-3600000`);
       }
+      // Presentación de la tecla: 'control' posee la superficie (un solo
+      // control por tecla). `dynamic` (dato en tecla estándar) no es excluyente.
+      if (a.surface !== undefined && a.surface !== 'control') {
+        errors.push(`action ${a.id} surface debe ser 'control'`);
+      }
+      if (a.component !== undefined && (typeof a.component !== 'string' || a.component.length === 0)) {
+        errors.push(`action ${a.id} component debe ser el nombre del componente visual`);
+      }
+      if (a.component !== undefined && a.surface !== 'control') {
+        errors.push(`action ${a.id} component requiere surface 'control'`);
+      }
+      if (a.freeModeOnly !== undefined && typeof a.freeModeOnly !== 'boolean') {
+        errors.push(`action ${a.id} freeModeOnly debe ser booleano`);
+      }
       if (a.pollMs !== undefined && (typeof a.pollMs !== 'number' || a.pollMs < 250 || a.pollMs > 3600000)) {
         errors.push(`action ${a.id} pollMs 250-3600000`);
       }

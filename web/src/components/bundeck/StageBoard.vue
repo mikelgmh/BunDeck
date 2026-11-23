@@ -44,17 +44,6 @@
         >
           <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.gsAddKey') }}
         </button>
-        <button
-          v-if="isGsMode && mode === 'edit'"
-          type="button"
-          class="bd-btn bd-gs-add-tool"
-          data-cy="bd-gs-add-vol"
-          :disabled="!currentPage || busy"
-          :title="t('bd.gsAddVolHint')"
-          @click="$emit('gs-add-volume')"
-        >
-          <Volume2 :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.gsAddVol') }}
-        </button>
         <label v-if="mode === 'use'" class="bd-usel" data-cy="bd-preview-dev"><span>{{ t('bd.previewAs') }}</span><select :value="previewDeviceId ?? ''" :aria-label="t('bd.previewAs')" @change="$emit('preview-device-change', ($event.target as HTMLSelectElement).value || null)"><option value="">{{ t('bd.deviceNoScreen') }}…</option><option v-for="d in devices" :key="d.id" :value="d.id">{{ d.name }}</option></select></label>
       </div>
 
@@ -374,9 +363,10 @@ import 'gridstack/dist/gridstack.min.css'
 // imports estáticos engordan el chunk inicial y gridstack rompe el SSR
 // de Astro (gridstack-engine sin extensión).
 import {
-  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, Volume2
+  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone
 } from 'lucide-vue-next'
 import VolumeRange from './VolumeRange.vue'
+import { findControlAction } from '../../composables/useActionPresentation'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
@@ -435,8 +425,6 @@ interface Emits {
   (e: 'layout-change', items: Array<{ id: string; x: number; y: number; w: number; h: number }>): void
   /** GridStack: pedir una tecla nueva 1×1 en la primera celda libre. */
   (e: 'gs-add'): void
-  /** GridStack: pedir un control de volumen 1×1 en la primera celda libre (solo modo libre). */
-  (e: 'gs-add-volume'): void
   (e: 'page-select', pageId: string): void
   (e: 'page-create'): void
   (e: 'page-delete', page: PageData | null): void
@@ -900,19 +888,27 @@ const actionCount = (position: number) => {
   return (d?.actions?.length ?? 0) + (d?.rules?.length ?? 0)
 }
 
-/** Componente volumen: solo existe en modo libre (widget_type 'volume'). */
-const isVolume = (position: number) => {
+/** Control interactivo de la tecla (hoy: volumen). La presencia de la ACCIÓN
+ *  en `data.actions` decide el render, no un tipo de botón aparte: una tecla
+ *  con `audio-mixer.volume-control` se pinta como slider; sin ella, normal.
+ *  Se acepta también el legado `widget_type: 'volume'` (sin acción). */
+const controlActionOf = (position: number): any | undefined => {
   const btn = props.getButton(position) as any
-  if (!btn) return false
-  if (btn.widget_type === 'volume') return true
-  const d = bdata(position) as any
-  return d?.component === 'volume' || d?.widget === 'volume'
+  if (!btn) return undefined
+  const found = findControlAction((bdata(position) as any)?.actions)
+  if (found) return found
+  if (btn.widget_type === 'volume') return { type: 'audio-mixer.volume-control', parameters: {} }
+  return undefined
 }
+const isVolume = (position: number) => !!controlActionOf(position)
 /** App objetivo del control de volumen (vacío = maestro). */
 const volumeAppOf = (position: number): string | null => {
+  const params = controlActionOf(position)?.parameters as any
+  const app = params?.app
+  if (typeof app === 'string' && app.trim()) return app.trim()
   const d = bdata(position) as any
-  const app = d?.volumeApp ?? d?.app
-  return typeof app === 'string' && app.trim() ? app.trim() : null
+  const legacy = d?.volumeApp ?? d?.app
+  return typeof legacy === 'string' && legacy.trim() ? legacy.trim() : null
 }
 
 // Arrastrar acción de la biblioteca sobre una tecla

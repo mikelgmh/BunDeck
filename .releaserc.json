@@ -28,92 +28,24 @@
       {
         "assets": [
           {
-            "path": "libredeck-cli-v*-linux-x64",
-            "label": "CLI Linux x64"
-          },
-          {
-            "path": "libredeck-cli-v*-windows-x64.exe",
-            "label": "CLI Windows x64"
-          },
-          {
-            "path": "libredeck-cli-v*-darwin-x64",
-            "label": "CLI macOS x64"
-          },
-          {
-            "path": "libredeck-daemon-v*-linux-x64",
-            "label": "Daemon Linux x64"
-          },
-          {
-            "path": "libredeck-daemon-v*-windows-x64.exe",
-            "label": "Daemon Windows x64"
-          },
-          {
-            "path": "libredeck-daemon-v*-darwin-x64",
-            "label": "Daemon macOS x64"
-          },
-          {
-            "path": "libredeck-web-dist-v*-linux-x64.tar.gz",
-            "label": "Web panel Linux x64"
-          },
-          {
-            "path": "libredeck-web-dist-v*-darwin-x64.tar.gz",
-            "label": "Web panel macOS x64"
-          },
-          {
-            "path": "BunDeck-Setup-v*.exe",
+            "path": "BunDeck-Setup.exe",
             "label": "Windows Installer"
           },
           {
             "path": "bundeck-v*-windows-x64.zip",
-            "label": "Managed bundle Windows x64"
+            "label": "Managed bundle Windows x64 (updater)"
           },
           {
             "path": "bundeck-v*-linux-x64.zip",
-            "label": "Managed bundle Linux x64"
+            "label": "Managed bundle Linux x64 (updater)"
           },
           {
             "path": "bundeck-v*-darwin-x64.zip",
-            "label": "Managed bundle macOS x64"
+            "label": "Managed bundle macOS x64 (updater)"
           },
           {
             "path": "bundeck-update-manifest.json",
             "label": "Update manifest (auto-update)"
-          },
-          {
-            "path": "libredeck-cli-linux-x64",
-            "label": "CLI Linux x64 (latest)"
-          },
-          {
-            "path": "libredeck-cli-windows-x64.exe",
-            "label": "CLI Windows x64 (latest)"
-          },
-          {
-            "path": "libredeck-cli-darwin-x64",
-            "label": "CLI macOS x64 (latest)"
-          },
-          {
-            "path": "libredeck-daemon-linux-x64",
-            "label": "Daemon Linux x64 (latest)"
-          },
-          {
-            "path": "libredeck-daemon-windows-x64.exe",
-            "label": "Daemon Windows x64 (latest)"
-          },
-          {
-            "path": "libredeck-daemon-darwin-x64",
-            "label": "Daemon macOS x64 (latest)"
-          },
-          {
-            "path": "libredeck-web-dist-linux-x64.tar.gz",
-            "label": "Web panel Linux x64 (latest)"
-          },
-          {
-            "path": "libredeck-web-dist-darwin-x64.tar.gz",
-            "label": "Web panel macOS x64 (latest)"
-          },
-          {
-            "path": "BunDeck-Setup.exe",
-            "label": "Windows Installer (latest)"
           }
         ]
       }

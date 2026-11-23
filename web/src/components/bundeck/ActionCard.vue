@@ -5,6 +5,18 @@
     </slot>
     <component :is="actionIcon(action.type)" :size="16" stroke-width="1.75" aria-hidden="true" />
     <b :title="actionName(action.type)">{{ actionName(action.type) }}</b>
+    <span
+      v-if="actionSurface(action.type) === 'control'"
+      class="bd-tag bd-tag-ctl"
+      :title="t('bd.actControlHint')"
+      data-cy="bd-action-badge-control"
+    >{{ t('bd.actControl') }}</span>
+    <span
+      v-else-if="actionSurface(action.type) === 'data'"
+      class="bd-tag"
+      :title="t('bd.actDataHint')"
+      data-cy="bd-action-badge-data"
+    >{{ t('bd.actData') }}</span>
     <slot name="extra-buttons"></slot>
     <button :aria-label="'Quitar'" title="Quitar" @click="emit('remove', index)">
       <X :size="16" stroke-width="1.75" aria-hidden="true" />
@@ -68,6 +80,9 @@
     :schema="actionSchema(action.type)"
     :model-value="action.parameters ?? {}"
     :available-pages="availablePages"
+    :plugin-id="actionMeta(action.type).pluginId"
+    :action-id="actionMeta(action.type).actionId"
+    :dynamic-options="actionMeta(action.type).dynamicOptions"
     @update:model-value="(params: any) => emitParams(params)"
   />
   <div v-else class="bd-fld" style="margin: 8px 4px 0 0">
@@ -159,6 +174,7 @@ import { X, Settings, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-nex
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import SchemaForm from '../SchemaForm.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { actionSurfaceKind } from '../../composables/useActionPresentation'
 import { vars } from '../../composables/useVars'
 
 const { t } = useI18nStore()
@@ -224,6 +240,15 @@ const actionIcon = (type: string) => {
   return dynamicIcon(name) ?? Settings
 }
 const actionSchema = (type: string) => findPluginAction(type)?.schema ?? null
+/** pluginId/actionId + optionsFrom para listas remotas en SchemaForm. */
+const actionMeta = (type: string) => {
+  const found = findPluginAction(type)
+  if (!found || !type.includes('.')) return { pluginId: null, actionId: null, dynamicOptions: null }
+  const [pid, ...rest] = type.split('.')
+  return { pluginId: pid, actionId: rest.join('.'), dynamicOptions: found.optionsFrom ?? null }
+}
+/** Clase de presentación (ejecución | dato | control) para el badge. */
+const actionSurface = (type: string) => actionSurfaceKind(findPluginAction(type))
 
 function actionParts(type: string): [string, string] {
   const parts = type.split('.')

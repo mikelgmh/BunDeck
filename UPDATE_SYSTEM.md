@@ -72,7 +72,9 @@ primer update. Los datos del usuario (`db.sqlite`, `plugins/`, `assets/`,
   `dist/` → `scripts/make-bundle.sh` → `bundeck-v<ver>-<target>.zip`.
 - `release`: junta artefactos, `scripts/build-update-manifest.mjs`
   (firma si existe el secret `LIBREDECK_UPDATE_PRIVKEY`) y
-  `semantic-release` publica bundle + manifiesto + binarios sueltos legacy.
+  `semantic-release` publica el instalador Windows, los tres bundles
+  gestionados y el manifiesto. Los binarios sueltos se distribuyen dentro
+  de los bundles, no como assets duplicados.
 - Secret requerido: `LIBREDECK_UPDATE_PRIVKEY` (seed hex).
   Opcional en build: `LIBREDECK_UPDATE_PUBKEY` (si no, `UPDATE_PUBKEY`).
 - macOS necesita firma/notarización para no pedir Gatekeeper en cada

@@ -199,7 +199,6 @@
         @layout-mode-change="onLayoutModeChange"
         @layout-change="onGsLayoutChange"
         @gs-add="onGsAdd"
-        @gs-add-volume="onGsAddVolume"
         @page-select="onPageSelectGuard"
         @page-create="onPageCreate"
         @page-delete="onPageDelete"
@@ -227,9 +226,6 @@
             :profile-name="currentProfile?.name ?? ''"
             :page-name="currentPage?.name ?? ''"
              :api-base="API_BASE"
-            :is-free-mode="pageLayoutMode === 'gridstack'"
-            :widget-type="editingWidgetType"
-            @convert-widget="onConvertWidget"
             @update-field="onUpdateField"
             @update-action="onUpdateAction"
             @update-action-param="(i, k, v) => updateActionParameter(i, k, v)"
@@ -426,6 +422,9 @@ import {
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
 import { planFreeCell } from '../../composables/useDeckLayouts'
+import {
+  actionTypeSurfaceKind, findActionAdata, findControlAction, isControlAction
+} from '../../composables/useActionPresentation'
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
 import {
@@ -1250,13 +1249,57 @@ const ensureEditableTarget = (): boolean => {
   }
   return true
 }
+/** Nombre legible de un control (para el diálogo de reemplazo). */
+const controlLabelOf = (type: string): string => {
+  const ad = findActionAdata(plugins.value as any, type)
+  return (typeof ad?.name === 'string' && ad.name) || type
+}
+/**
+ * Guarda de superficie: una tecla admite UN solo control interactivo.
+ * - Otro control distinto → pide reemplazarlo (lo quita del borrador).
+ * - El mismo control → avisa y no duplica.
+ * Además, un control añadido en modo Fija avisa de que solo se representa
+ * en modo Libre (se añade igual: en Fija la tecla se ve normal).
+ * Devuelve false si no hay que continuar (cancelado o duplicado).
+ */
+const ensureControlSlot = async (type: string): Promise<boolean> => {
+  if (actionTypeSurfaceKind(plugins.value as any, type) !== 'control') return true
+  const draft = buttonConfig.value.actions ?? []
+  const existing = findControlAction(draft)
+  if (existing && existing.type !== type) {
+    const ok = await askConfirm(
+      t('bd.controlReplaceTitle'),
+      t('bd.controlReplaceMsg', { old: controlLabelOf(existing.type), new: controlLabelOf(type) }),
+      t('bd.controlReplaceOk')
+    )
+    if (!ok) return false
+    buttonConfig.value = {
+      ...buttonConfig.value,
+      actions: draft.filter((a: any) => !isControlAction(a))
+    }
+    bumpConfigVersion()
+  } else if (existing) {
+    bdShowToast(t('bd.controlExists'))
+    return false
+  }
+  if (pageLayoutMode.value !== 'gridstack') {
+    bdShowToast(t('bd.controlNeedsFree'))
+  }
+  return true
+}
+/** Añade una acción al borrador con guarda de superficie y guardado inmediato. */
+const addActionGuarded = async (type: string): Promise<boolean> => {
+  if (!(await ensureControlSlot(type))) return false
+  addAction(type)
+  // Guardado inmediato: sin esto la tecla vacía depende del autoguardado
+  // (800 ms) y el usuario no ve nada al pulsar.
+  await saveButtonConfig()
+  return true
+}
 const onActionPick = async (type: string) => {
   if (!ensureEditableTarget()) return
   try {
-    addAction(type)
-    // Guardado inmediato: sin esto la tecla vacía depende del autoguardado
-    // (800 ms) y el usuario no ve nada al pulsar.
-    await saveButtonConfig()
+    await addActionGuarded(type)
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -1265,8 +1308,7 @@ const onActionDrop = async (position: number, type: string) => {
   if (mode.value !== 'edit') return
   try {
     await selectButton(position)
-    addAction(type)
-    await saveButtonConfig()
+    await addActionGuarded(type)
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -1274,8 +1316,7 @@ const onActionDrop = async (position: number, type: string) => {
 const onActionDropSelected = async (type: string) => {
   if (!ensureEditableTarget()) return
   try {
-    addAction(type)
-    await saveButtonConfig()
+    await addActionGuarded(type)
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -1456,24 +1497,6 @@ const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number;
 /** Crear tecla 1×1 en la primera celda libre (modo Libre).
  *  GridStack la adopta vía makeWidget sin re-crear la instancia. */
 const onGsAdd = async () => {
-  await gsAddWidget('action_button', { w: 1, h: 1, data: {} })
-}
-
-/** Crear control de volumen 1×1 (arco) en la primera celda libre.
- *  Solo disponible en modo libre: el render adapta arco/slider-h/slider-v
- *  con container queries según el aspecto de la tecla. */
-const onGsAddVolume = async () => {
-  await gsAddWidget('volume', {
-    w: 1,
-    h: 1,
-    data: { label: 'Volumen', component: 'volume', backgroundColor: '', textColor: '' }
-  })
-}
-
-const gsAddWidget = async (
-  widgetType: string,
-  opts: { w: number; h: number; data: Record<string, any> }
-) => {
   if (!currentPage.value) return
   // Si hay una operación de página en curso (p. ej. cambio de página recién
   // pulsado), esperar a que termine en vez de ignorar el clic en silencio:
@@ -1501,12 +1524,11 @@ const gsAddWidget = async (
     const created = await apiPost('/buttons', {
       page_id: currentPage.value.id,
       position: spot.position,
-      widget_type: widgetType,
       x: spot.x,
       y: spot.y,
-      w: opts.w,
-      h: opts.h,
-      data: opts.data,
+      w: 1,
+      h: 1,
+      data: {},
     })
     const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
     currentButtons.value = fresh
@@ -1516,33 +1538,6 @@ const gsAddWidget = async (
     bdShowToast(String((e as Error)?.message ?? e))
   } finally {
     pageBusy.value = false
-  }
-}
-
-/** widget_type de la tecla en edición (solo relevante en modo libre). */
-const editingWidgetType = computed<string | null>(() => {
-  if (selectedButton.value === null) return null
-  const btn = getButton(selectedButton.value) as any
-  return (btn?.widget_type as string | undefined) ?? null
-})
-
-/** Convertir la tecla seleccionada entre acción estándar y volumen (solo libre). */
-const onConvertWidget = async (widgetType: string) => {
-  if (selectedButton.value === null || !currentPage.value) return
-  if (pageLayoutMode.value !== 'gridstack') return
-  const btn = getButton(selectedButton.value)
-  if (!btn) return
-  try {
-    await apiPut(`/buttons/${encodeURIComponent(btn.id)}`, {
-      widget_type: widgetType,
-      ...(widgetType === 'volume'
-        ? { data: { ...(btn.data ?? {}), label: (btn.data as any)?.label || 'Volumen', component: 'volume' } }
-        : {})
-    })
-    const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
-    currentButtons.value = fresh
-  } catch (e) {
-    bdShowToast(String((e as Error)?.message ?? e))
   }
 }
 

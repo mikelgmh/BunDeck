@@ -10,6 +10,8 @@ vi.mock('../components/bundeck/VolumeRange.vue', () => ({
   }
 }))
 
+const volActions = [{ id: 'a1', type: 'audio-mixer.volume-control', parameters: {} }]
+
 const baseProps = (overrides: any = {}) => ({
   gridCols: 4,
   gridRows: 3,
@@ -20,12 +22,13 @@ const baseProps = (overrides: any = {}) => ({
   buttonConfig: {},
   getButton: (position: number) =>
     position === 0
-      ? { id: 'b-vol', page_id: 'p1', position: 0, widget_type: 'volume', data: { label: 'Volumen', component: 'volume' } }
+      ? { id: 'b-vol', page_id: 'p1', position: 0, data: { label: 'Volumen', actions: volActions } }
       : undefined,
   allButtons: [
-    { id: 'b-vol', page_id: 'p1', position: 0, widget_type: 'volume', x: 0, y: 0, w: 1, h: 1, data: { label: 'Volumen' } }
+    { id: 'b-vol', page_id: 'p1', position: 0, x: 0, y: 0, w: 1, h: 1, data: { label: 'Volumen', actions: volActions } }
   ],
-  getButtonData: () => ({}),
+  getButtonData: (position: number) =>
+    position === 0 ? { label: 'Volumen', actions: volActions } : {},
   mode: 'use',
   labelMode: 'a',
   currentPages: [],
@@ -37,41 +40,51 @@ const baseProps = (overrides: any = {}) => ({
   ...overrides
 })
 
-describe('StageBoard modo libre: volumen', () => {
-  it('renderiza VolumeRange solo en modo libre y solo para widget_type volume', async () => {
+describe('StageBoard modo libre: control por acción', () => {
+  it('renderiza el control cuando la tecla tiene la acción volume-control', async () => {
     const free = mount(StageBoard, { props: baseProps() as any })
     expect(free.find('[data-cy="bd-key-vol"]').exists()).toBe(true)
     expect(free.find('[data-cy="vol-range-stub"]').exists()).toBe(true)
-    // La tecla normal no aparece para esa posición.
+    // La tecla normal no aparece para esa posición: solo HTML del control.
     expect(free.findAll('[data-cy="bd-key"]').length).toBe(0)
     free.unmount()
+  })
 
-    // En modo clásico el volumen no existe: rejilla fija estándar.
+  it('acepta el legado widget_type volume sin acción', async () => {
+    const legacy = mount(StageBoard, {
+      props: baseProps({
+        getButton: () => ({ id: 'b-vol', page_id: 'p1', position: 0, widget_type: 'volume', data: { label: 'Volumen', actions: [] } }),
+        getButtonData: () => ({ label: 'Volumen', actions: [] })
+      }) as any
+    })
+    expect(legacy.find('[data-cy="bd-key-vol"]').exists()).toBe(true)
+    legacy.unmount()
+  })
+
+  it('en modo clásico el control no se representa (tecla estándar)', async () => {
     const classic = mount(StageBoard, {
-      props: baseProps({ layoutMode: 'classic', allButtons: [], getButton: () => undefined }) as any
+      props: baseProps({ layoutMode: 'classic' }) as any
     })
     expect(classic.find('[data-cy="bd-key-vol"]').exists()).toBe(false)
     classic.unmount()
   })
 
-  it('muestra el botón Añadir volumen solo en modo libre + edición', () => {
-    const freeEdit = mount(StageBoard, { props: baseProps({ mode: 'edit' }) as any })
-    expect(freeEdit.find('[data-cy="bd-gs-add-vol"]').exists()).toBe(true)
-    freeEdit.unmount()
-    const freeUse = mount(StageBoard, { props: baseProps({ mode: 'use' }) as any })
-    expect(freeUse.find('[data-cy="bd-gs-add-vol"]').exists()).toBe(false)
-    freeUse.unmount()
-    const classicEdit = mount(StageBoard, {
-      props: baseProps({ mode: 'edit', layoutMode: 'classic', getButton: () => undefined, allButtons: [] }) as any
+  it('sin acción de control pinta tecla estándar con icono/texto', async () => {
+    const plain = mount(StageBoard, {
+      props: baseProps({
+        getButton: () => ({ id: 'b1', page_id: 'p1', position: 0, data: { label: 'Play', actions: [{ id: 'x', type: 'multimedia.multimedia', parameters: { action: 'play' } }] } }),
+        getButtonData: () => ({ label: 'Play', actions: [] })
+      }) as any
     })
-    expect(classicEdit.find('[data-cy="bd-gs-add-vol"]').exists()).toBe(false)
-    classicEdit.unmount()
+    expect(plain.find('[data-cy="bd-key-vol"]').exists()).toBe(false)
+    plain.unmount()
   })
 
-  it('emite gs-add-volume al pulsar Añadir volumen', async () => {
-    const wrapper = mount(StageBoard, { props: baseProps({ mode: 'edit' }) as any })
-    await wrapper.find('[data-cy="bd-gs-add-vol"]').trigger('click')
-    expect(wrapper.emitted('gs-add-volume')).toBeTruthy()
-    wrapper.unmount()
+  it('no hay botón especial de volumen: se añade desde la biblioteca como acción', async () => {
+    const freeEdit = mount(StageBoard, { props: baseProps({ mode: 'edit' }) as any })
+    expect(freeEdit.find('[data-cy="bd-gs-add-tool"]').exists()).toBe(true)
+    expect(freeEdit.find('[data-cy="bd-gs-add-vol"]').exists()).toBe(false)
+    expect(freeEdit.emitted('gs-add-volume')).toBeUndefined()
+    freeEdit.unmount()
   })
 })

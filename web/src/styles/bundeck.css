@@ -326,10 +326,9 @@
 .bundeck .bd-itabs { display: flex; padding: 0 12px; border-bottom: 1px solid var(--bd-ln); gap: 4px; flex: none; }
 .bundeck .bd-itabs button { padding: 8px 12px; color: var(--bd-mu); font-weight: 500; margin-bottom: -1px; border-bottom: 2px solid transparent; min-height: 40px; display: flex; gap: 8px; align-items: center; }
 .bundeck .bd-itabs button[aria-selected='true'] { color: var(--bd-ink); border-color: var(--bd-ac); }
-/* Selector de componente (solo modo libre): tecla estándar o volumen. */
-.bundeck .bd-comp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px 0; }
-.bundeck .bd-comp .bd-lb { font-size: 12px; font-weight: 600; color: var(--bd-mu); }
-.bundeck .bd-comp .bd-hint { flex-basis: 100%; margin: 0; }
+/* Etiquetas de presentación en biblioteca y tarjetas (Control / Dato / Solo libre). */
+.bundeck .bd-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--bd-ln); color: var(--bd-mu); background: var(--bd-bg); white-space: nowrap; }
+.bundeck .bd-tag-ctl { color: var(--bd-ac); border-color: color-mix(in srgb, var(--bd-ac) 55%, var(--bd-ln)); }
 .bundeck .bd-ibody { flex: 1; min-height: 0; overflow: auto; padding: 20px; overscroll-behavior: contain; }
 .bundeck .bd-ifoot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--bd-ln); flex: none; background: inherit; }
 .bundeck .bd-ifoot .bd-pri { flex: 1; }

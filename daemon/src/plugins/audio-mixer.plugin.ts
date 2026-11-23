@@ -131,6 +131,16 @@ export class AudioMixerPlugin {
                     description: 'Devuelve los niveles actuales (reales si el sistema lo permite)',
                     icon: 'Activity',
                     schema: { type: 'object', properties: {} }
+                },
+                {
+                    id: 'volume-control',
+                    name: 'Control de volumen',
+                    description: 'Muestra un control de volumen en la tecla (arco en 1×1, sliders al redimensionar). Solo se representa en modo libre; en modo Fija la tecla se ve normal.',
+                    icon: 'SlidersHorizontal',
+                    surface: 'control',
+                    component: 'volume-range',
+                    freeModeOnly: true,
+                    schema: { type: 'object', properties: {} }
                 }
             ]
         }
@@ -142,6 +152,7 @@ export class AudioMixerPlugin {
         handlers.set('output-switch', this.executeOutputSwitch.bind(this))
         handlers.set('mic-mute', this.executeMicMute.bind(this))
         handlers.set('get-levels', this.executeGetLevels.bind(this))
+        handlers.set('volume-control', this.executeVolumeControl.bind(this))
         return handlers
     }
 
@@ -386,9 +397,24 @@ export class AudioMixerPlugin {
         }
     }
 
-    // ---------- get-levels ----------
+    // ---------- get-levels / volume-control ----------
 
     private async executeGetLevels(_params: any, _context: any): Promise<any> {
+        return this.readLevels()
+    }
+
+    /**
+     * La acción de control NO cambia nada al pulsar: solo devuelve los niveles
+     * para que reglas/automatizaciones puedan leerlos. El slider de la UI
+     * escribe con `app-volume` y lee con `get-levels` por su cuenta.
+     * En modo Fija (sin representación de control) pulsar la tecla es inocuo.
+     */
+    private async executeVolumeControl(_params: any, _context: any): Promise<any> {
+        const levels = await this.readLevels()
+        return { ...levels, control: 'volume-range' }
+    }
+
+    private async readLevels(): Promise<any> {
         if (process.platform === 'linux') {
             try {
                 const v = await this.run(['pactl', 'get-sink-volume', '@DEFAULT_SINK@'])

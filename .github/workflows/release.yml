@@ -219,11 +219,6 @@ jobs:
         echo "{\"version\":\"${{ steps.version.outputs.version }}\"}" > dist/active.json
         bash scripts/make-bundle.sh "${{ steps.version.outputs.version }}" "${{ matrix.target }}"
 
-    - name: Package Web dist (non-Windows, legacy standalone layout)
-      if: matrix.installer == false
-      run: tar -czf libredeck-web-dist-v${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz -C web dist
-      shell: bash
-
     - name: Setup Inno Setup (Windows only)
       if: matrix.installer == true
       shell: bash
@@ -245,9 +240,6 @@ jobs:
       with:
         name: libredeck-${{ matrix.os }}
         path: |
-          libredeck-cli-v*-${{ matrix.target }}${{ matrix.ext }}
-          libredeck-daemon-v*-${{ matrix.target }}${{ matrix.ext }}
-          libredeck-web-dist-v*-${{ matrix.target }}.tar.gz
           bundeck-v*-${{ matrix.target }}.zip
           bundeck-v*-${{ matrix.target }}.zip.sha256
           installer/BunDeck-Setup-v*.exe
@@ -285,9 +277,6 @@ jobs:
 
     - name: Move artifacts to root
       run: |
-        find artifacts -name "libredeck-cli-v*-*" -exec mv {} . \;
-        find artifacts -name "libredeck-daemon-v*-*" -exec mv {} . \;
-        find artifacts -name "libredeck-web-dist-v*.tar.gz" -exec mv {} . \; || true
         find artifacts -name "bundeck-v*.zip" -exec mv {} . \; || true
         find artifacts -name "bundeck-v*.zip.sha256" -exec mv {} . \; || true
         find artifacts -name "BunDeck-Setup-v*.exe" -exec mv {} . \; || true
@@ -322,19 +311,11 @@ jobs:
         }
         NODE
 
-    - name: Create stable latest aliases (unversioned, for direct /latest/download links)
+    - name: Create stable Windows installer link
       run: |
         shopt -s nullglob
-        for f in libredeck-cli-v*-windows-x64.exe; do cp "$f" libredeck-cli-windows-x64.exe; done
-        for f in libredeck-cli-v*-linux-x64; do cp "$f" libredeck-cli-linux-x64; done
-        for f in libredeck-cli-v*-darwin-x64; do cp "$f" libredeck-cli-darwin-x64; done
-        for f in libredeck-daemon-v*-windows-x64.exe; do cp "$f" libredeck-daemon-windows-x64.exe; done
-        for f in libredeck-daemon-v*-linux-x64; do cp "$f" libredeck-daemon-linux-x64; done
-        for f in libredeck-daemon-v*-darwin-x64; do cp "$f" libredeck-daemon-darwin-x64; done
-        for f in libredeck-web-dist-v*-linux-x64.tar.gz; do cp "$f" libredeck-web-dist-linux-x64.tar.gz; done
-        for f in libredeck-web-dist-v*-darwin-x64.tar.gz; do cp "$f" libredeck-web-dist-darwin-x64.tar.gz; done
         for f in BunDeck-Setup-v*.exe; do cp "$f" BunDeck-Setup.exe; done
-        ls -la libredeck-* BunDeck-*.exe 2>/dev/null || true
+        test -f BunDeck-Setup.exe
 
     - name: Release
       run: bunx semantic-release

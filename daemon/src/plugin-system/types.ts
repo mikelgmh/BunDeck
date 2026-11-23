@@ -42,6 +42,24 @@ export interface PluginActionV2 {
   schema?: PluginActionSchema;
   // Para acciones dinámicas (pc-vitals) que hacen polling
   dynamic?: boolean;
+  /**
+   * Presentación que la acción aporta a la tecla.
+   * - Ausente = acción de ejecución: hace algo al pulsar, no cambia la tecla.
+   * - `dynamic: true` = dato dinámico: su valor se muestra DENTRO de la
+   *   tecla estándar (icono/texto/imagen se conservan).
+   * - `surface: 'control'` = control interactivo: POSEE la superficie de la
+   *   tecla y la reemplaza por un componente propio (ej. volumen). Solo puede
+   *   haber un control por tecla; añadir otro pide reemplazar.
+   */
+  surface?: 'control';
+  /**
+   * Componente visual que renderiza el control. Lista cerrada del lado UI
+   * (el daemon nunca envía HTML/JS a renderizar, por seguridad).
+   * Valores conocidos: 'volume-range'.
+   */
+  component?: string;
+  /** El control solo se representa en modo libre; en rejilla fija la tecla se ve normal. */
+  freeModeOnly?: boolean;
   /** Intervalo de polling sugerido para botones dinámicos (ms). */
   pollMs?: number;
   // Timeout y cooldown opcionales
