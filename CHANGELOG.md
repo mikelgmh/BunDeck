@@ -1,3 +1,10 @@
+## [1.10.3](https://github.com/mikelgmh/libredeck/compare/v1.10.2...v1.10.3) (2026-11-23)
+
+
+### Bug Fixes
+
+* **perf:** carga inicial en paralelo, plugins nativos completos y resync diferido de botones ([19653fc](https://github.com/mikelgmh/libredeck/commit/19653fc3f4734ee223ed3b9c671d174a7c062ed9))
+
 ## [1.10.2](https://github.com/mikelgmh/libredeck/compare/v1.10.1...v1.10.2) (2026-11-23)
 
 
