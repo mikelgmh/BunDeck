@@ -1147,21 +1147,30 @@ const onPageBlockedMsg = (e: Event) => {
 
 const onPageDelete = async (page: PageData | null) => {
   if (!page || currentPages.value.length < 2) return
+  // Snapshot desde la API (no solo del estado local): si se borra justo
+  // después de crear teclas y el refetch por WS aún no llegó, el Deshacer
+  // perdería botones.
+  const toSnap = (b: any) => ({
+    position: b.position,
+    x: b.x ?? null,
+    y: b.y ?? null,
+    w: b.w ?? 1,
+    h: b.h ?? 1,
+    parent_widget_id: b.parent_widget_id ?? null,
+    widget_type: b.widget_type ?? null,
+    data: JSON.parse(JSON.stringify(b.data ?? {})),
+  })
+  let snapButtons: ReturnType<typeof toSnap>[]
+  try {
+    const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(page.id)}`)
+    snapButtons = (fresh ?? []).map(toSnap)
+  } catch {
+    snapButtons = currentButtons.value.filter((b) => b.page_id === page.id).map(toSnap)
+  }
   const snapshot = {
     name: page.name,
     isFolder: page.is_folder === 1,
-    buttons: currentButtons.value
-      .filter((b) => b.page_id === page.id)
-      .map((b: any) => ({
-        position: b.position,
-        x: b.x ?? null,
-        y: b.y ?? null,
-        w: b.w ?? 1,
-        h: b.h ?? 1,
-        parent_widget_id: b.parent_widget_id ?? null,
-        widget_type: b.widget_type ?? null,
-        data: JSON.parse(JSON.stringify(b.data)),
-      }))
+    buttons: snapButtons,
   }
   const ok = await withPageOp(async () => {
     await deletePage(page.id)

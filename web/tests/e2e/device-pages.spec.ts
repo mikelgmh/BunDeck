@@ -163,6 +163,11 @@ test('borrar una página se puede deshacer desde el toast', async ({ page, reque
     });
     expect(res.status()).toBe(201);
   }
+  // Esperar a que la UI las pinte: el snapshot de Deshacer sale de
+  // currentButtons, y borrar antes del refetch (WS + debounce) dejaría
+  // fuera a la segunda.
+  await expect(page.getByText('E2E Undo A')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('E2E Undo B')).toBeVisible({ timeout: 10000 });
 
   const chip = page.locator('.bd-page .bd-chip', { hasText: created.name }).first();
   await expect(chip).toBeVisible({ timeout: 10000 });
