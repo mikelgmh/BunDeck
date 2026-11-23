@@ -37,11 +37,12 @@ Dos pestañas:
   o `:4321` en dev) con sondeo cada 2 s; Iniciar (reintenta hasta que la API
   sube), Detener (`POST /api/v1/admin/shutdown`) y Reiniciar del daemon;
   versión instalada (`GET /api/v1/version`) vs última (manifiesto
-  versionado `bundeck-update-manifest.json`, botón Buscar); si hay más nueva,
-  **Descargar** baja el bundle con barra de progreso y verificación
-  (sha256 + firma ed25519), y **Aplicar ahora** lo activa con backup de la
-  DB, health-check y rollback; si el launcher también cambia, el ayudante
-  `libredeck-updater` lo reemplaza al salir; Abrir panel web (auto-cierra si
+  versionado `bundeck-update-manifest.json`); las versiones nuevas se
+  descargan automáticamente en segundo plano con barra de progreso y
+  verificación (sha256 + firma ed25519). Al completar, **Reiniciar para
+  actualizar** activa la versión con backup, health-check y rollback; si se
+  deja pendiente, se aplica en la próxima apertura. El helper
+  `libredeck-updater` reemplaza el launcher al salir; Abrir panel web (auto-cierra si
   todo está en línea) y ventana Electrobun (handoff con cierre, solo dev); Salir.
 - **Registro**: historial amplio (200 líneas, muestra las 30 últimas) con
   Limpiar. Los sondeos ya no ensucian la vista de Estado.

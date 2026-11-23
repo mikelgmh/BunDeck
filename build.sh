@@ -8,7 +8,7 @@ set -e
 echo "🚀 Building BunDeck for production..."
 
 # Versión única desde package.json (temprano: la usan daemon/CLI/launcher/bundle).
-APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+APP_VERSION="${LIBREDECK_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")}"
 echo "📌 App version: $APP_VERSION"
 export LIBREDECK_VERSION="$APP_VERSION"
 

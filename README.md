@@ -125,15 +125,17 @@ The latest platform downloads are at the top of this README. The [latest release
 
 ### Per-OS notes
 
-- **Windows:** run the installer, open **BunDeck** → **Open panel**. The installer sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
+- **Windows:** run the installer, open **BunDeck** → **Open panel**. It installs in your user profile (no administrator permission needed) and sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
 - **macOS:** run the installer script from Terminal: `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-macos.sh && bash install-macos.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
 - **Linux:** run `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-linux.sh && bash install-linux.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
 
 ### Updates
 
 Managed installs (installer or install script) update from the launcher:
-**ACTUALIZACIÓN → Buscar → Descargar → Aplicar ahora**, with progress,
-integrity + signature verification, database backup and automatic rollback.
+the launcher checks automatically at startup and periodically, then downloads
+and verifies updates in the background. When ready, **Reiniciar para actualizar**
+installs the staged version; if left pending, it is applied on the next launch.
+Updates include database backup and automatic rollback.
 Standalone binaries: `libredeck-cli update` (see `UPDATE_SYSTEM.md`).
 
 ### From source

@@ -302,6 +302,20 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
     (log, false)
 }
 
+/// Pide un checkpoint WAL antes de hacer el backup. Best-effort.
+pub fn prepare_update() -> bool {
+    let url = format!(
+        "http://127.0.0.1:{}/api/v1/admin/prepare-update",
+        api_port()
+    );
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(1500))
+        .timeout_read(Duration::from_millis(1500))
+        .timeout_write(Duration::from_millis(1500))
+        .build();
+    agent.post(&url).call().is_ok()
+}
+
 /// Pide al daemon que se apague (POST /api/v1/admin/shutdown: responde al
 /// instante y el proceso muere en ~2s). true si el daemon aceptó la orden.
 pub fn shutdown_daemon() -> bool {

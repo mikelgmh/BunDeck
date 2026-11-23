@@ -254,10 +254,104 @@ struct ActiveDoc {
     version: String,
 }
 
+const PENDING_UPDATE_FILE: &str = "pending-update.json";
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct PendingUpdateDoc {
+    version: String,
+}
+
 /// Versión activa según `active.json` (None si instalación legacy sin migrar).
 pub fn active_version(root: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(active_file(root)).ok()?;
     serde_json::from_str::<ActiveDoc>(&raw).ok().map(|d| d.version)
+}
+
+fn pending_update_path(root: &Path) -> PathBuf {
+    root.join(PENDING_UPDATE_FILE)
+}
+
+fn valid_version_name(version: &str) -> bool {
+    !version.is_empty()
+        && !version.starts_with('.')
+        && !version.ends_with('.')
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
+pub fn staged_update_is_complete(root: &Path, version: &str) -> bool {
+    if !valid_version_name(version) {
+        return false;
+    }
+    let stage = versions_dir(root).join(version);
+    [
+        daemon_file_name(),
+        format!("libredeck-cli{}", exe_suffix()),
+        format!("libredeck-launcher{}", exe_suffix()),
+        format!("libredeck-updater{}", exe_suffix()),
+    ]
+    .iter()
+    .all(|name| stage.join(name).is_file())
+        && stage.join("web-dist").join("index.html").is_file()
+}
+
+fn pending_update_version_at(root: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(pending_update_path(root)).ok()?;
+    let pending = serde_json::from_str::<PendingUpdateDoc>(&raw).ok()?;
+    staged_update_is_complete(root, &pending.version).then_some(pending.version)
+}
+
+/// Actualización íntegra descargada, pendiente de instalar al reiniciar.
+pub fn pending_update_version() -> Option<String> {
+    pending_update_version_at(&install_root())
+}
+
+fn write_pending_update(root: &Path, version: &str) -> Result<(), String> {
+    if !valid_version_name(version) {
+        return Err("versión inválida para actualización pendiente".to_string());
+    }
+    let tmp = root.join("pending-update.json.tmp");
+    let dest = pending_update_path(root);
+    let contents = serde_json::to_vec(&PendingUpdateDoc {
+        version: version.to_string(),
+    })
+    .map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, contents).map_err(|e| format!("guardar actualización pendiente: {e}"))?;
+    if dest.exists() {
+        let previous = std::fs::read_to_string(&dest)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<PendingUpdateDoc>(&raw).ok());
+        if let Some(previous) = previous {
+            if previous.version != version
+                && active_version(root).as_deref() != Some(previous.version.as_str())
+            {
+                let _ = std::fs::remove_dir_all(versions_dir(root).join(previous.version));
+            }
+        }
+        std::fs::remove_file(&dest)
+            .map_err(|e| format!("reemplazar actualización pendiente: {e}"))?;
+    }
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("guardar actualización pendiente: {e}"))
+}
+
+pub fn mark_staged_update_pending(root: &Path, version: &str) -> Result<(), String> {
+    if !staged_update_is_complete(root, version) {
+        return Err(format!("el stage de BunDeck {version} está incompleto"));
+    }
+    write_pending_update(root, version)
+}
+
+pub fn clear_pending_update(root: &Path, version: &str) {
+    let pending = std::fs::read_to_string(pending_update_path(root))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<PendingUpdateDoc>(&raw).ok());
+    if pending.as_ref().is_some_and(|p| p.version == version) {
+        let _ = std::fs::remove_file(pending_update_path(root));
+        if active_version(root).as_deref() != Some(version) {
+            let _ = std::fs::remove_dir_all(versions_dir(root).join(version));
+        }
+    }
 }
 
 fn write_active(root: &Path, version: &str) -> Result<(), String> {
@@ -271,39 +365,17 @@ fn write_active(root: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Error de E/S con pista accionable en Windows: el caso típico es
-/// `C:\Program Files\BunDeck` (instalación con Inno en `{commonpf}`),
-/// donde un launcher sin elevar no puede escribir y sale
-/// `os error 5 (Acceso denegado)`. Se traduce a instrucciones en vez
-/// de dejar el escueto "crear tmp: Acceso denegado".
+/// Error de E/S con una pista accionable si la instalación se encuentra en
+/// una carpeta protegida. El instalador oficial usa una ruta por usuario.
 fn friendly_fs_error(root: &Path, ctx: &str, e: std::io::Error) -> String {
     if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(5) {
         return format!(
-            "{ctx}: sin permiso de escritura en {}. Ejecuta el launcher como administrador \
-             (clic derecho → Ejecutar como administrador) y reintenta la descarga",
+            "{ctx}: sin permiso de escritura en {}. Instala BunDeck en la carpeta recomendada \
+             del perfil de usuario para actualizar sin permisos de administrador",
             root.display()
         );
     }
     format!("{ctx}: {e}")
-}
-
-/// Comprueba que `<install>/versions` sea escribible antes de descargar.
-/// Crea el directorio si falta; si falla por permisos devuelve el mensaje
-/// accionable de `friendly_fs_error` en vez de descargar para luego fallar.
-fn ensure_install_writable(root: &Path) -> Result<(), String> {
-    if let Err(e) = std::fs::create_dir_all(versions_dir(root)) {
-        return Err(friendly_fs_error(root, "preparar carpeta de versiones", e));
-    }
-    // Prueba de escritura real (create_dir_all triunfa aunque el dir ya
-    // exista sin permiso de escritura). Se borra al instante.
-    let probe = versions_dir(root).join(".write-test.tmp");
-    match std::fs::write(&probe, b"ok") {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&probe);
-            Ok(())
-        }
-        Err(e) => Err(friendly_fs_error(root, "preparar carpeta de versiones", e)),
-    }
 }
 
 fn daemon_file_name() -> String {
@@ -457,16 +529,9 @@ fn verify_signature(version: &str, target: &str, sha256: &str, sig_hex: &str) ->
     Ok(())
 }
 
-/// Descarga el bundle a un temporal de usuario (siempre escribible) con
-/// progreso, verifica sha256 (+ firma si hay clave) y lo extrae a
-/// `versions/<ver>/`.
-///
-/// Nota Windows: `<install>` suele ser `C:\Program Files\BunDeck` y exige
-/// admin para escribir. El `.zip` se baja a `%TEMP%` para no fallar con
-/// `crear tmp: Acceso denegado (os error 5)` antes siquiera de descargar;
-/// si el stage/activación tampoco tiene permiso se devuelve un error
-/// accionable (re-ejecutar como administrador) en vez del escueto os error 5.
-///
+/// Descarga el bundle a un temporal de usuario, verifica integridad y extrae
+/// la versión en el directorio de instalación, que es escribible porque el
+/// instalador usa un destino por usuario.
 pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgress>>) -> Result<PathBuf, String> {
     let set = |stage: &str| {
         if let Ok(mut p) = progress.lock() {
@@ -474,13 +539,7 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
         }
     };
     set(&format!("Descargando {}…", check.asset.bundle));
-    let root = install_root();
-    // Falla rápido con mensaje claro si el destino final no es escribible,
-    // antes de descargar decenas de MB que luego no se podrían instalar.
-    ensure_install_writable(&root)?;
-
-    // Temporal de usuario, no `<install>/versions/.tmp` (protegido en
-    // Program Files). Nombre único por versión+pid para no chocar entre
+    // Temporal de usuario. Nombre único por versión+pid para no chocar entre
     // reintentos o procesos concurrentes.
     let tmp_file = std::env::temp_dir().join(format!(
         "bundeck-{}-{}-{}.zip",
@@ -551,39 +610,25 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
     }
 
     set("Extrayendo archivos…");
+    let root = install_root();
     let dest = versions_dir(&root).join(&check.latest);
+    clear_pending_update(&root, &check.latest);
     if dest.is_dir() {
-        std::fs::remove_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "limpiar stage previo", e))?;
+        std::fs::remove_dir_all(&dest)
+            .map_err(|e| friendly_fs_error(&root, "limpiar stage previo", e))?;
     }
-    std::fs::create_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "crear stage", e))?;
+    std::fs::create_dir_all(&dest)
+        .map_err(|e| friendly_fs_error(&root, "crear stage", e))?;
     extract_bundle(&tmp_file, &dest)?;
     let _ = std::fs::remove_file(&tmp_file);
 
-    // Sanity: el stage debe traer daemon o web-dist.
     let has_daemon = dest.join(daemon_file_name()).is_file();
     let has_web = dest.join("web-dist").is_dir();
     if !has_daemon && !has_web {
         return Err("el bundle no trae ni daemon ni web-dist".to_string());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        for name in [
-            daemon_file_name(),
-            "libredeck-cli".to_string(),
-            "libredeck-launcher".to_string(),
-            "libredeck-updater".to_string(),
-        ] {
-            let p = dest.join(&name);
-            if p.is_file() {
-                let mut perms = std::fs::metadata(&p)
-                    .map_err(|e| e.to_string())?
-                    .permissions();
-                perms.set_mode(0o755);
-                std::fs::set_permissions(&p, perms).map_err(|e| e.to_string())?;
-            }
-        }
-    }
+    set_executable_permissions(&dest)?;
+    mark_staged_update_pending(&root, &check.latest)?;
     if let Ok(mut p) = progress.lock() {
         p.done = true;
         p.stage = format!("Lista la versión {}", check.latest);
@@ -639,8 +684,33 @@ fn strip_single_top_level(name: &Path) -> Option<PathBuf> {
 // Apply + rollback
 // ---------------------------------------------------------------------------
 
-/// Copia `db.sqlite*` a `backups/db-<ver>-<ts>/`. Best-effort: si no hay
-/// DB (instalación fresca) no falla.
+fn set_executable_permissions(stage: &Path) -> Result<(), String> {
+    #[cfg(not(unix))]
+    let _ = stage;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in [
+            daemon_file_name(),
+            "libredeck-cli".to_string(),
+            "libredeck-launcher".to_string(),
+            "libredeck-updater".to_string(),
+        ] {
+            let path = stage.join(name);
+            if path.is_file() {
+                let mut permissions = std::fs::metadata(&path)
+                    .map_err(|e| e.to_string())?
+                    .permissions();
+                permissions.set_mode(0o755);
+                std::fs::set_permissions(path, permissions).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Copia `db.sqlite*` a la carpeta de datos del usuario para que el backup
+/// sobreviva a una desinstalación y no requiera permisos especiales.
 pub fn backup_database() -> Result<Option<PathBuf>, String> {
     let data = user_data_dir();
     let db = data.join("db.sqlite");
@@ -651,11 +721,10 @@ pub fn backup_database() -> Result<Option<PathBuf>, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let dest = install_root()
+    let dest = data
         .join("backups")
         .join(format!("db-{ts}"));
-    let root = install_root();
-    std::fs::create_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "crear backup", e))?;
+    std::fs::create_dir_all(&dest).map_err(|e| format!("crear backup: {e}"))?;
     for suffix in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm", "db.sqlite-journal"] {
         let src = data.join(suffix);
         if src.is_file() {
@@ -675,6 +744,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
         return Err(format!("versión {version} no descargada"));
     }
     let mut previous = active_version(&root);
+    super::monitor::prepare_update();
     log(format!("Backup de la base de datos…"));
     match backup_database() {
         Ok(Some(p)) => log(format!("Backup en {}", p.display())),
@@ -713,6 +783,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
         Ok(()) => {
             log(format!("BunDeck {version} en línea."));
             prune_old_versions(&root, version);
+            clear_pending_update(&root, version);
             Ok(())
         }
         Err(reason) => {
@@ -721,6 +792,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
             ));
             if let Some(prev) = previous {
                 write_active(&root, &prev)?;
+                clear_pending_update(&root, version);
                 let _ = super::monitor::ensure_daemon_spawned();
                 return match wait_for_api_version(&prev) {
                     Ok(()) => Err(format!(
@@ -731,6 +803,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
                     )),
                 };
             }
+            clear_pending_update(&root, version);
             Err(format!(
                 "update a {version} falló ({reason}) y no había versión anterior para rollback"
             ))
@@ -970,21 +1043,49 @@ mod tests {
     }
 
     #[test]
-    fn permission_error_suggests_admin() {
-        let root = PathBuf::from(r"C:\Program Files\BunDeck");
-        let e = std::io::Error::from_raw_os_error(5);
-        let msg = friendly_fs_error(&root, "preparar carpeta de versiones", e);
-        assert!(msg.contains("administrador"), " debe sugerir elevar: {msg}");
-        assert!(msg.contains("Program Files"), " debe mostrar la ruta: {msg}");
+    fn pending_update_is_persisted_only_for_a_complete_stage() {
+        let dir = std::env::temp_dir().join(format!(
+            "bundeck-pending-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let stage = versions_dir(&dir).join("9.9.9");
+        std::fs::create_dir_all(stage.join("web-dist")).unwrap();
+        for file in [
+            daemon_file_name(),
+            format!("libredeck-cli{}", exe_suffix()),
+            format!("libredeck-launcher{}", exe_suffix()),
+            format!("libredeck-updater{}", exe_suffix()),
+        ] {
+            std::fs::write(stage.join(file), b"test").unwrap();
+        }
+        std::fs::write(stage.join("web-dist").join("index.html"), b"<html/>").unwrap();
+
+        assert!(mark_staged_update_pending(&dir, "9.9.9").is_ok());
+        assert_eq!(pending_update_version_at(&dir).as_deref(), Some("9.9.9"));
+        clear_pending_update(&dir, "9.9.9");
+        assert!(pending_update_version_at(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn install_writable_ok_in_temp() {
-        let dir = std::env::temp_dir().join(format!("bundeck-writable-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        assert!(ensure_install_writable(&dir).is_ok());
-        assert!(versions_dir(&dir).is_dir());
-        let _ = std::fs::remove_dir_all(&dir);
+    fn pending_update_rejects_path_like_versions() {
+        assert!(!valid_version_name("../1.2.3"));
+        assert!(!valid_version_name("1..3"));
+        assert!(valid_version_name("1.2.3"));
+    }
+
+    #[test]
+    fn permission_error_recommends_user_install() {
+        let root = PathBuf::from(r"C:\Program Files\BunDeck");
+        let e = std::io::Error::from_raw_os_error(5);
+        let msg = friendly_fs_error(&root, "preparar carpeta de versiones", e);
+        assert!(msg.contains("perfil de usuario"), " debe sugerir instalación por usuario: {msg}");
+        assert!(msg.contains("Program Files"), " debe mostrar la ruta: {msg}");
     }
 
     #[test]

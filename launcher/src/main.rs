@@ -38,9 +38,7 @@ use gpui::{AnyWindowHandle, MouseButton, Window, WindowKind};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-#[cfg(windows)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::{cell::RefCell, rc::Rc};
 
@@ -105,6 +103,9 @@ struct LauncherView {
     background_rx: Receiver<BackgroundEvent>,
     monitor_tx: Sender<MonitorCommand>,
     update_checking: bool,
+    auto_update_initialized: bool,
+    next_auto_update_check: Instant,
+    restart_after_update: bool,
     /// Último clic en la barra de título (doble clic = maximizar/restaurar).
     #[cfg(windows)]
     last_chrome_click: Option<Instant>,
@@ -130,7 +131,6 @@ enum BackgroundEvent {
         installed: Option<String>,
         result: Result<Option<updater::UpdateCheck>, String>,
         latest_fallback: Option<LatestRelease>,
-        auto_download: bool,
     },
 }
 
@@ -139,18 +139,33 @@ impl LauncherView {
         let (background_tx, background_rx) = mpsc::channel();
         let (monitor_tx, monitor_rx) = mpsc::channel();
         start_monitor_thread(monitor_rx, background_tx.clone());
+        let update_progress = Arc::new(Mutex::new(updater::UpdateProgress::default()));
+        let pending_version = updater::pending_update_version();
+        if let Some(version) = pending_version.as_deref() {
+            if let Ok(mut progress) = update_progress.lock() {
+                progress.done = true;
+                progress.stage = format!("Lista la versión {version}");
+                progress.staged_version = Some(version.to_string());
+            }
+        }
         let mut view = Self {
             snapshot: Snapshot::initial(),
             log: vec!["Launcher iniciado.".to_string()],
             polls: 1,
             tab: Tab::Status,
             installed: None,
-            latest: None,
+            latest: pending_version.as_ref().map(|version| LatestRelease {
+                tag: format!("v{version}"),
+                url: format!("https://github.com/{}/releases/tag/v{version}", updater::GITHUB_REPO),
+            }),
             update_check: None,
-            update_progress: Arc::new(Mutex::new(updater::UpdateProgress::default())),
+            update_progress,
             update_busy: false,
             update_applying: false,
             update_checking: false,
+            auto_update_initialized: false,
+            next_auto_update_check: Instant::now(),
+            restart_after_update: false,
             last_applied: None,
             launcher_pending_restart: false,
             pending_start: false,
@@ -186,6 +201,7 @@ impl LauncherView {
                             // El hilo de descarga escribe en update_progress;
                             // el sondeo lo vuelca al registro y libera busy.
                             let mut finished_msg: Option<String> = None;
+                            let mut download_failed = false;
                             if view.update_busy {
                                 if let Ok(p) = view.update_progress.lock() {
                                     if p.done {
@@ -197,12 +213,17 @@ impl LauncherView {
                                                 .unwrap_or_default()
                                         ));
                                     } else if let Some(e) = p.error.clone() {
+                                        download_failed = true;
                                         finished_msg = Some(format!("Update falló: {e}"));
                                     }
                                 }
                                 if let Some(msg) = finished_msg {
                                     view.update_busy = false;
                                     view.log.push(msg);
+                                    if download_failed {
+                                        view.next_auto_update_check =
+                                            Instant::now() + Duration::from_secs(15 * 60);
+                                    }
                                 }
                             }
                             // El hilo de apply termina igual: recoge resultado.
@@ -226,24 +247,45 @@ impl LauncherView {
                                         view.log.push(format!("BunDeck {v} activo."));
                                         view.installed = Some(v.clone());
                                         view.last_applied = Some(v);
+                                        view.update_check = None;
                                         if changed {
                                             view.launcher_pending_restart = true;
                                             view.log.push(
-                                                "El launcher también cambió: reinicia para completar."
+                                                "La actualización está activa; reiniciando el launcher."
                                                     .to_string(),
                                             );
+                                            if view.restart_after_update {
+                                                let should_quit = view.restart_for_self_update();
+                                                view.restart_after_update = false;
+                                                if should_quit {
+                                                    quit_app(cx);
+                                                }
+                                            }
                                         } else {
-                                            view.update_check = None;
+                                            view.restart_after_update = false;
                                         }
                                         *view.update_progress.lock().unwrap() =
                                             updater::UpdateProgress::default();
                                     } else if let Some(e) = apply_err {
-                                        view.log
-                                            .push(format!("No se pudo aplicar: {e}"));
+                                        view.restart_after_update = false;
+                                        view.log.push(format!("No se pudo aplicar: {e}"));
                                         *view.update_progress.lock().unwrap() =
-                                            updater::UpdateProgress::default();
+                                            updater::UpdateProgress {
+                                                stage: "No se pudo instalar la actualización."
+                                                    .to_string(),
+                                                error: Some(e),
+                                                ..Default::default()
+                                            };
                                     }
                                 }
+                            }
+                            if view.auto_update_initialized
+                                && !view.update_checking
+                                && !view.update_busy
+                                && !view.update_applying
+                                && Instant::now() >= view.next_auto_update_check
+                            {
+                                view.check_updates();
                             }
                             view.truncate_log();
                             cx.notify();
@@ -290,6 +332,7 @@ impl LauncherView {
                 } => {
                     self.polls += 1;
                     self.snapshot = snapshot;
+                    let daemon_is_up = installed.is_some();
                     if let Some(version) = installed {
                         if self.installed.as_deref() != Some(version.as_str()) {
                             self.log.push(format!("Daemon instalado: v{version}."));
@@ -299,6 +342,10 @@ impl LauncherView {
                     self.host = host;
                     self.pending_start = pending_start;
                     self.log.extend(boot);
+                    if daemon_is_up && !self.auto_update_initialized {
+                        self.auto_update_initialized = true;
+                        self.check_updates();
+                    }
                 }
                 BackgroundEvent::Latest(latest) => {
                     match &latest {
@@ -317,8 +364,7 @@ impl LauncherView {
                     installed,
                     result,
                     latest_fallback,
-                    auto_download,
-                } => self.finish_update_check(installed, result, latest_fallback, auto_download),
+                } => self.finish_update_check(installed, result, latest_fallback),
             }
         }
         self.truncate_log();
@@ -370,13 +416,13 @@ impl LauncherView {
         self.truncate_log();
     }
 
-    /// Botón Buscar: re-consulta instalada + manifiesto de update.
-    /// Usa el manifiesto versionado; si no existe (release antigua),
-    /// recurre a la API de GitHub para al menos informar.
-    fn check_updates(&mut self, auto_download: bool) {
+    /// Revisa el manifiesto oficial; al encontrar algo nuevo, descarga
+    /// automáticamente sin bloquear el hilo de la interfaz.
+    fn check_updates(&mut self) {
         if self.update_checking {
             return;
         }
+        self.next_auto_update_check = Instant::now() + Duration::from_secs(6 * 60 * 60);
         self.update_checking = true;
         self.update_check = None;
         self.log.push("Buscando actualizaciones…".to_string());
@@ -393,7 +439,6 @@ impl LauncherView {
                 installed,
                 result,
                 latest_fallback,
-                auto_download,
             });
         });
         self.truncate_log();
@@ -404,7 +449,6 @@ impl LauncherView {
         installed: Option<String>,
         result: Result<Option<updater::UpdateCheck>, String>,
         latest_fallback: Option<LatestRelease>,
-        auto_download: bool,
     ) {
         self.update_checking = false;
         if installed.is_some() {
@@ -443,6 +487,10 @@ impl LauncherView {
                 let current = self.installed.as_deref().unwrap_or("dev");
                 self.log.push(format!("Estás al día (v{current})."));
                 self.update_check = None;
+                if self.update_staged_version().is_none() {
+                    *self.update_progress.lock().unwrap() =
+                        updater::UpdateProgress::default();
+                }
                 self.latest = Some(LatestRelease {
                     tag: format!("v{current}"),
                     url: format!(
@@ -452,8 +500,14 @@ impl LauncherView {
                 });
             }
             Err(e) => {
+                self.next_auto_update_check = Instant::now() + Duration::from_secs(15 * 60);
                 // Fallback informativo a latest_release clásico.
                 self.latest = latest_fallback;
+                if self.update_staged_version().is_none() {
+                    let mut progress = self.update_progress.lock().unwrap();
+                    progress.stage = "No se pudo verificar la actualización.".to_string();
+                    progress.error = Some(format!("No se pudo comprobar el manifiesto: {e}"));
+                }
                 match (&self.installed, &self.latest) {
                     (Some(i), Some(l)) if monitor::is_newer(i, &l.tag) => {
                         self.log.push(format!(
@@ -469,11 +523,27 @@ impl LauncherView {
                 }
             }
         }
-        if auto_download {
-            if let Some(check) = self.update_check.clone() {
-                self.start_download(check);
+        if let Some(check) = self.update_check.clone() {
+            if updater::staged_update_is_complete(&updater::install_root(), &check.latest) {
+                match updater::mark_staged_update_pending(
+                    &updater::install_root(),
+                    &check.latest,
+                ) {
+                    Ok(()) => {
+                        *self.update_progress.lock().unwrap() = updater::UpdateProgress {
+                            done: true,
+                            stage: format!("Lista la versión {}", check.latest),
+                            staged_version: Some(check.latest),
+                            ..Default::default()
+                        };
+                    }
+                    Err(e) => {
+                        let mut progress = self.update_progress.lock().unwrap();
+                        progress.error = Some(e);
+                    }
+                }
             } else {
-                self.log.push("No hay actualización descargable.".to_string());
+                self.start_download(check);
             }
         }
         self.truncate_log();
@@ -482,6 +552,9 @@ impl LauncherView {
     /// ¿Hay actualización pendiente de aplicar?
     fn update_available(&self) -> bool {
         if self.launcher_pending_restart {
+            return true;
+        }
+        if self.update_staged_version().is_some() {
             return true;
         }
         if let Some(c) = &self.update_check {
@@ -501,10 +574,8 @@ impl LauncherView {
             .and_then(|p| p.staged_version.clone().filter(|_| p.done && p.error.is_none()))
     }
 
-    /// Botón Actualizar: flujo gestionado (descarga en 2º plano con
-    /// progreso) y aplicación con backup + rollback. Si el launcher
-    /// también cambió, tras aplicar se ofrece reiniciar vía helper
-    /// `libredeck-updater` (reemplaza el exe tras salir: handoff).
+    /// Acción de reinicio: activa la versión descargada con backup +
+    /// rollback y luego cambia el launcher vía `libredeck-updater`.
     /// Devuelve true si hay que cerrar la ventanita.
     fn apply_update(&mut self) -> bool {
         // 0) Reinicio pendiente para completar el self-update del launcher.
@@ -516,6 +587,7 @@ impl LauncherView {
         }
         // 1) Si ya hay stage listo: aplicar ahora (en fondo).
         if let Some(ver) = self.update_staged_version() {
+            self.restart_after_update = true;
             self.finish_apply(&ver);
             return false;
         }
@@ -529,7 +601,7 @@ impl LauncherView {
         let check = match self.update_check.clone() {
             Some(c) => c,
             None => {
-                self.check_updates(true);
+                self.check_updates();
                 return false;
             }
         };
@@ -606,8 +678,8 @@ impl LauncherView {
         });
     }
 
-    /// Reinicia el launcher para completar su self-update vía helper
-    /// (reemplaza el exe tras salir). Devuelve true: hay que cerrar.
+    /// Reinicia el launcher vía helper (reemplaza el exe tras salir).
+    /// Devuelve true cuando el proceso debe cerrarse.
     fn restart_for_self_update(&mut self) -> bool {
         let Some(ver) = self.last_applied.clone() else {
             return false;
@@ -626,7 +698,6 @@ impl LauncherView {
                     format!("https://github.com/{}", updater::GITHUB_REPO)
                 ));
                 self.truncate_log();
-                self.launcher_pending_restart = false;
                 false
             }
         }
@@ -839,16 +910,15 @@ impl Render for LauncherView {
         let update_checking = self.update_checking;
         let update_applying = self.update_applying;
         let launcher_pending_restart = self.launcher_pending_restart;
+        let update_ready = staged_ver.is_some() || launcher_pending_restart;
         let update_btn_label = if launcher_pending_restart {
             "Reiniciar launcher"
         } else if update_applying {
-            "Aplicando…"
+            "Instalando…"
         } else if staged_ver.is_some() {
-            "Aplicar ahora"
-        } else if update_busy {
-            "Descargando…"
+            "Reiniciar para actualizar"
         } else {
-            "Descargar"
+            ""
         };
         #[cfg(windows)]
         let maximized = is_maximized(window);
@@ -1108,27 +1178,33 @@ impl Render for LauncherView {
                             .text_color(theme::primary_text())
                             .child(format!("Instalada {installed_label} · Última {latest_label}")),
                     )
-                    .child(if update_available {
+                    .child(
                         div()
                             .text_xs()
-                            .text_color(theme::secondary_text())
-                            .child(if launcher_pending_restart {
-                                "Launcher actualizado: reinicia para completar.".to_string()
-                            } else if staged_ver.is_some() {
-                                "Descarga verificada: lista para aplicar.".to_string()
+                            .text_color(if update_err.is_some() {
+                                theme::danger()
                             } else {
-                                "Hay una versión nueva lista para descargar.".to_string()
+                                theme::secondary_text()
                             })
-                            .into_any_element()
-                    } else {
-                        div()
-                            .text_xs()
-                            .text_color(theme::muted_text())
-                            .child("Pulsa Buscar para comprobar si hay novedades.".to_string())
-                            .into_any_element()
-                    })
+                            .child(if launcher_pending_restart {
+                                "La actualización está instalada; reinicia para cargar el launcher nuevo.".to_string()
+                            } else if let Some(version) = staged_ver.as_deref() {
+                                format!("v{version} descargada. Se instalará al reiniciar BunDeck.")
+                            } else if update_busy {
+                                "Descargando la actualización en segundo plano…".to_string()
+                            } else if update_checking {
+                                "Comprobando actualizaciones automáticamente…".to_string()
+                            } else if update_err.is_some() {
+                                update_err.clone().unwrap_or_default()
+                            } else if update_available {
+                                "Nueva versión detectada; descarga automática en curso.".to_string()
+                            } else {
+                                "Las actualizaciones se buscan automáticamente.".to_string()
+                            })
+                            .into_any_element(),
+                    )
                     // Etapa / progreso de la actualización en curso.
-                    .child(if update_busy || update_err.is_some() || staged_ver.is_some() || !update_stage.is_empty() {
+                    .child(if update_busy {
                         div()
                             .flex()
                             .flex_col()
@@ -1137,15 +1213,7 @@ impl Render for LauncherView {
                                 div()
                                     .text_xs()
                                     .text_color(theme::secondary_text())
-                                    .child(if update_err.is_some() {
-                                        update_err.clone().unwrap_or_default()
-                                    } else if staged_ver.is_some() {
-                                        format!("Lista: v{} — pulsa Aplicar ahora.", staged_ver.clone().unwrap_or_default())
-                                    } else if update_stage.is_empty() {
-                                        "".to_string()
-                                    } else {
-                                        update_stage.clone()
-                                    }),
+                                    .child(update_stage.clone()),
                             )
                             .child(if let Some(f) = update_frac {
                                 div()
@@ -1170,68 +1238,32 @@ impl Render for LauncherView {
                         div().hidden().into_any_element()
                     })
                     .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .id("check-update")
-                                    .text_sm()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(theme::ground())
-                                    .border_1()
-                                    .border_color(theme::line())
-                                    .text_color(theme::primary_text())
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(theme::secondary_text()))
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.check_updates(false);
-                                        cx.notify();
-                                    }))
-                                    .child(if update_checking {
-                                        "Buscando…".to_string()
+                        if update_ready {
+                            div()
+                                .id("restart-update")
+                                .flex_1()
+                                .text_center()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .px_3()
+                                .py_2()
+                                .rounded_lg()
+                                .bg(theme::primary_btn_bg())
+                                .text_color(theme::primary_btn_text())
+                                .cursor_pointer()
+                                .hover(|s| s.bg(theme::primary_btn_hover()))
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    if view.apply_update() {
+                                        quit_app(cx);
                                     } else {
-                                        "Buscar".to_string()
-                                    }),
-                            )
-                            .child(if update_available {
-                                div()
-                                    .id("apply-update")
-                                    .flex_1()
-                                    .text_center()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(theme::primary_btn_bg())
-                                    .text_color(theme::primary_btn_text())
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme::primary_btn_hover()))
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        if view.apply_update() {
-                                            cx.quit();
-                                        } else {
-                                            cx.notify();
-                                        }
-                                    }))
-                                    .child(update_btn_label.to_string())
-                                    .into_any_element()
-                            } else {
-                                div()
-                                    .flex_1()
-                                    .text_center()
-                                    .text_sm()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .text_color(theme::muted_text())
-                                    .child("Estás al día".to_string())
-                                    .into_any_element()
-                            }),
+                                        cx.notify();
+                                    }
+                                }))
+                                .child(update_btn_label.to_string())
+                                .into_any_element()
+                        } else {
+                            div().hidden().into_any_element()
+                        }
                     )
                     .into_any_element()
             } else {
@@ -1888,7 +1920,53 @@ fn title_chrome(
     div().hidden()
 }
 
+fn pending_update_for_startup() -> Option<String> {
+    let root = updater::install_root();
+    let pending = updater::pending_update_version()?;
+    let current = monitor::installed_version()
+        .or_else(|| updater::active_version(&root))
+        .unwrap_or_else(|| "0.0.0".to_string());
+
+    if !updater::is_newer(&current, &pending) {
+        updater::clear_pending_update(&root, &pending);
+        return None;
+    }
+
+    // Si hay red y se publicó algo posterior mientras BunDeck estaba cerrado,
+    // no aplicamos el stage viejo: la comprobación automática bajará el último.
+    match updater::check_for_update(&current) {
+        Ok(Some(latest)) if latest.latest != pending => {
+            updater::clear_pending_update(&root, &pending);
+            return None;
+        }
+        Ok(None) => {
+            updater::clear_pending_update(&root, &pending);
+            return None;
+        }
+        _ => {}
+    }
+    Some(pending)
+}
+
 fn main() {
+    // Las actualizaciones se descargan mientras la app está abierta, pero se
+    // activan al reiniciar. Si el usuario cerró BunDeck sin reiniciarlo,
+    // aplica aquí el stage antes de abrir la ventana o arrancar el daemon.
+    if let Some(version) = pending_update_for_startup() {
+        let mut lines = Vec::new();
+        match updater::apply_staged(&mut |line| lines.push(line), &version) {
+            Ok(()) if updater::staged_has_launcher(&updater::install_root(), &version) => {
+                if let Err(e) = updater::handoff_self_update(&version) {
+                    eprintln!("[launcher] no se pudo actualizar el launcher: {e}");
+                } else {
+                    return;
+                }
+            }
+            Ok(()) => {}
+            Err(e) => eprintln!("[launcher] no se pudo aplicar la actualización pendiente: {e}"),
+        }
+    }
+
     Application::new().run(|cx: &mut App| {
         #[cfg(windows)]
         {

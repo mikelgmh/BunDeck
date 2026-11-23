@@ -24,29 +24,34 @@ launcher — ver `scripts/gen-update-keys.mjs`).
   libredeck-updater(.exe)     # reemplaza al launcher (fichero bloqueado en Windows)
   versions/<ver>/             # daemon, cli, launcher, updater, web-dist/
   active.json                 # {"version":"1.6.0"}
-  backups/db-<ts>/db.sqlite* # copia antes de cada update
 ```
 
-Instalaciones planas legacy (Windows installer antiguo) se migran solas al
-primer update. Los datos del usuario (`db.sqlite`, `plugins/`, `assets/`,
-`logs/`) nunca se tocan salvo el backup previo.
+El instalador de Windows es por usuario: `{localappdata}\Programs\BunDeck`.
+Por eso el launcher puede escribir versiones nuevas sin elevación. Los datos
+siguen en `%APPDATA%\LibreDeck\data`; los backups de `db.sqlite*` se guardan
+en `<data>/backups/db-<ts>/`. Ninguno de esos datos se elimina al actualizar.
 
 ## Flujo
 
 1. **Buscar**: el launcher descarga el manifiesto
-   (`.../releases/latest/download/bundeck-update-manifest.json`) y compara
-   con `GET /api/v1/version`. Sin manifiesto (release antigua) informa con
-   la API de GitHub y sugiere descarga manual.
+    (`.../releases/latest/download/bundeck-update-manifest.json`) y compara
+    con `GET /api/v1/version` al abrirse y cada seis horas (reintenta a los
+    15 minutos si falla la red). Si no hay manifiesto, informa con la API de
+    GitHub y no instala paquetes no verificables.
 2. **Descargar**: hilo de fondo con progreso en la tarjeta ACTUALIZACIÓN
-   de GPUI (porcentaje real por `Content-Length`, etapas legibles para el
-   resto: verificar, extraer, aplicar…).
+   de GPUI (porcentaje real por `Content-Length`); comienza automáticamente
+   al detectar una versión nueva y se descarga a `%TEMP%`.
 3. **Verificar**: sha256 obligatorio; firma ed25519 si hay pubkey compilada
    (sin pubkey: aviso, no bloqueo — solo en builds dev).
-4. **Stage**: extracción a `versions/<ver>/` + `chmod +x` (unix).
-5. **Aplicar**: `POST /api/v1/admin/prepare-update` (checkpoint WAL),
-   backup DB, `POST /api/v1/admin/shutdown`, cambio atómico de
-   `active.json`, arranque y health-check; si el nuevo daemon no responde,
-   **rollback** a la versión anterior. Se conservan activa + 2 anteriores.
+4. **Stage**: extracción a `versions/<ver>/` + `chmod +x` (Unix); escribe
+   `pending-update.json` para conservar el aviso entre aperturas.
+5. **Aplicar**: al pulsar **Reiniciar para actualizar**, o automáticamente
+   en el siguiente inicio, `POST /api/v1/admin/prepare-update` (checkpoint
+   WAL), backup DB, apagado, cambio de `active.json`, arranque y health-check.
+   Si el nuevo daemon no responde, **rollback** a la versión anterior. Se
+   conservan activa + 2 anteriores. El launcher se reemplaza al salir y
+   relanza la nueva versión. En Windows, al instalar por usuario, no requiere
+   UAC.
 6. **Self-update del launcher**: `libredeck-updater --wait-pid …` copia el
    nuevo launcher tras salir este proceso y lo relanza.
 
