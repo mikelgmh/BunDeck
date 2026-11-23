@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/mikelgmh/libredeck/compare/v1.8.1...v1.9.0) (2026-11-23)
+
+
+### Features
+
+* improve action configuration and deck experience ([ee8ed32](https://github.com/mikelgmh/libredeck/commit/ee8ed32015b45e88cc34138d10063c65c2be607c))
+
 ## [1.8.1](https://github.com/mikelgmh/libredeck/compare/v1.8.0...v1.8.1) (2026-11-23)
 
 
