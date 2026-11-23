@@ -157,7 +157,7 @@ export class SoundboardPlugin {
         try {
             if (platform === 'darwin') {
                 const args = volume >= 100 ? [file] : ['-v', String(volume / 100), file]
-                this.currentProc = Bun.spawn({ cmd: ['afplay', ...args], stdio: ['ignore', 'pipe', 'pipe'] })
+                this.currentProc = Bun.spawn({ windowsHide: true,  cmd: ['afplay', ...args], stdio: ['ignore', 'pipe', 'pipe'] })
                 this.currentFile = file
                 await this.currentProc.exited
                 if (this.currentProc.exitCode !== 0) throw new Error(`afplay terminó con código ${this.currentProc.exitCode}`)
@@ -170,7 +170,7 @@ export class SoundboardPlugin {
                 let lastErr = ''
                 for (const p of players) {
                     try {
-                        this.currentProc = Bun.spawn({ cmd: p.cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+                        this.currentProc = Bun.spawn({ windowsHide: true,  cmd: p.cmd, stdio: ['ignore', 'pipe', 'pipe'] })
                         this.currentFile = file
                         await this.currentProc.exited
                         if (this.currentProc.exitCode === 0) return { action: 'play', file, volume, platform: 'linux', player: p.label, finished: true }
@@ -184,7 +184,7 @@ export class SoundboardPlugin {
             if (platform === 'win32') {
                 if (ext === '.wav') {
                     const ps = `(New-Object Media.SoundPlayer '${file.replace(/'/g, "''")}').PlaySync()`
-                    const proc = Bun.spawn({ cmd: ['powershell.exe', '-NoProfile', '-Command', ps], stdio: ['ignore', 'pipe', 'pipe'] })
+                    const proc = Bun.spawn({ windowsHide: true,  cmd: ['powershell.exe', '-NoProfile', '-Command', ps], stdio: ['ignore', 'pipe', 'pipe'] })
                     this.currentProc = proc
                     this.currentFile = file
                     const stderr = await new Response(proc.stderr).text()
@@ -193,7 +193,7 @@ export class SoundboardPlugin {
                     return { action: 'play', file, volume: 100, platform: 'windows', player: 'SoundPlayer', finished: true }
                 }
                 // .mp3/.ogg en Windows: abrir con la app predeterminada (no bloqueante).
-                const proc = Bun.spawn({ cmd: ['cmd', '/c', 'start', '""', file], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['cmd', '/c', 'start', '""', file], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
                 return { action: 'play', file, platform: 'windows', player: 'default-app', finished: false, note: 'En Windows los .mp3/.ogg se abren con tu reproductor predeterminado (para reproducción interna usa .wav).' }
             }
@@ -225,7 +225,7 @@ export class SoundboardPlugin {
         const platform = process.platform
         const run = async (cmd: string[]): Promise<string | null> => {
             try {
-                const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
                 const out = await new Response(proc.stdout).text()
                 await proc.exited
                 return proc.exitCode === 0 ? out.trim() : null

@@ -204,7 +204,7 @@ export async function spawnJob(
 ): Promise<SpawnResult> {
   let proc: any;
   try {
-    proc = Bun.spawn(argv, {
+    proc = Bun.spawn(argv, { windowsHide: true, 
       cwd: opts.cwd,
       env: opts.env as any,
       stdout: 'pipe',

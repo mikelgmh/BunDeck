@@ -26,7 +26,7 @@ export async function runCommand(cmd: string[], opts: RunOptions = {}): Promise<
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     let proc: any
     try {
-        proc = Bun.spawn(cmd as any, {
+        proc = Bun.spawn(cmd as any, { windowsHide: true, 
             stdio: ['pipe', 'pipe', 'pipe'],
         } as any)
     } catch (error) {

@@ -80,7 +80,7 @@ function macKeyCode(key: string): number {
 async function runCmd(cmd: string[], label: string): Promise<{ stdout: string; stderr: string }> {
     let proc: any
     try {
-        proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+        proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch (err) {
         throw new Error(`No se pudo lanzar la herramienta del sistema para "${label}": ${err instanceof Error ? err.message : String(err)}`)
     }

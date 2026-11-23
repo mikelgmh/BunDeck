@@ -38,7 +38,7 @@ async function sendHotkeyWindows(hotkey: string): Promise<void> {
     const press = (v: number, up: boolean) => `[K]::keybd_event(${v}, 0, ${up ? '2' : '0'}, [UIntPtr]::Zero)`
     const script = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class K { [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo); }'; ` +
         [...downs.map((v) => press(v, false)), press(vk, false), press(vk, true), ...downs.reverse().map((v) => press(v, true))].join('; ')
-    const proc = Bun.spawn({ cmd: ['powershell.exe', '-NoProfile', '-Command', script], stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = Bun.spawn({ windowsHide: true,  cmd: ['powershell.exe', '-NoProfile', '-Command', script], stdio: ['ignore', 'pipe', 'pipe'] })
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
     if (proc.exitCode !== 0) throw new Error(`No se pudo enviar el atajo "${hotkey}": ${stderr.trim() || `código ${proc.exitCode}`}`)
@@ -46,7 +46,7 @@ async function sendHotkeyWindows(hotkey: string): Promise<void> {
 
 async function nvidiaShareRunning(): Promise<boolean> {
     try {
-        const proc = Bun.spawn({ cmd: ['tasklist', '/FI', 'IMAGENAME eq NVIDIA Share.exe', '/FO', 'CSV', '/NH'], stdio: ['ignore', 'pipe', 'pipe'] })
+        const proc = Bun.spawn({ windowsHide: true,  cmd: ['tasklist', '/FI', 'IMAGENAME eq NVIDIA Share.exe', '/FO', 'CSV', '/NH'], stdio: ['ignore', 'pipe', 'pipe'] })
         const out = await new Response(proc.stdout).text()
         await proc.exited
         return proc.exitCode === 0 && /nvidia share/i.test(out)

@@ -134,6 +134,7 @@ async function spawnDaemon(): Promise<void> {
         stdio: "inherit",
         shell: false,
         detached: false,
+        windowsHide: true,
       });
     } else {
       daemonProcess = spawn(hostBun, ["run", "daemon/src/server.ts"], {
@@ -142,6 +143,7 @@ async function spawnDaemon(): Promise<void> {
         stdio: "inherit",
         shell: false,
         detached: false,
+        windowsHide: true,
       });
     }
     daemonProcess.on("error", (e) => console.error("[electrobun] spawn error", e));
@@ -192,6 +194,7 @@ async function spawnFrontend(): Promise<void> {
       stdio: "inherit",
       shell: process.platform === "win32",
       detached: false,
+      windowsHide: true,
     });
     frontendProcess.on("error", (e) => console.error("[electrobun] spawn front error", e));
     frontendProcess.on("exit", (code) => console.log(`[electrobun] front exit code=${code}`));
@@ -217,7 +220,7 @@ function killTree(child: ChildProcess | null, label: string) {
   // taskkill /T mata el árbol completo.
   if (process.platform === "win32" && typeof child.pid === "number") {
     try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true } as any);
     } catch {}
   }
   log(`[electrobun] ${label} detenido`);

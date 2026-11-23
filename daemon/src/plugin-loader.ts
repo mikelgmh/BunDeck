@@ -1257,7 +1257,7 @@ export class PluginLoader {
         const zip = new AdmZip(zipPath);
         zip.extractAllTo(stage, true);
       } else {
-        const proc = Bun.spawn(['tar', '-xf', zipPath, '-C', stage], { stdout: 'pipe', stderr: 'pipe' });
+        const proc = Bun.spawn(['tar', '-xf', zipPath, '-C', stage], { windowsHide: true,  stdout: 'pipe', stderr: 'pipe' });
         await proc.exited;
         if (proc.exitCode !== 0) {
           const err = await new Response(proc.stderr).text();
@@ -1317,7 +1317,7 @@ export class PluginLoader {
     if (!wantsRange) args.push(url, stage);
     let proc: any;
     try {
-      proc = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'pipe' });
+      proc = Bun.spawn(['git', ...args], { windowsHide: true,  stdout: 'pipe', stderr: 'pipe' });
       await proc.exited;
     } catch (e) {
       const msg = `No se pudo ejecutar git: ${e instanceof Error ? e.message : String(e)}`;
@@ -1334,13 +1334,13 @@ export class PluginLoader {
     // Checkout del mejor tag cuando se pidió un rango de versión.
     if (wantsRange) {
       try {
-        const tagProc = Bun.spawn(['git', '-C', stage, 'tag', '--list'], { stdout: 'pipe', stderr: 'pipe' });
+        const tagProc = Bun.spawn(['git', '-C', stage, 'tag', '--list'], { windowsHide: true,  stdout: 'pipe', stderr: 'pipe' });
         await tagProc.exited;
         const tags = tagProc.exitCode === 0 ? (await new Response(tagProc.stdout).text()).split('\n').map((t) => t.trim()).filter(Boolean) : [];
         const best = pickBestTag(tags, opts.ref!);
         if (best) {
           this.emitProgress(url, 'clone', `Fijando versión ${best} (rango ${opts.ref})…`, opts.onProgress);
-          const coProc = Bun.spawn(['git', '-C', stage, 'checkout', '--quiet', best], { stdout: 'pipe', stderr: 'pipe' });
+          const coProc = Bun.spawn(['git', '-C', stage, 'checkout', '--quiet', best], { windowsHide: true,  stdout: 'pipe', stderr: 'pipe' });
           await coProc.exited;
           if (coProc.exitCode !== 0) {
             const err = await new Response(coProc.stderr).text();
@@ -1356,7 +1356,7 @@ export class PluginLoader {
     }
     let commit: string | null = null;
     try {
-      const p2 = Bun.spawn(['git', '-C', stage, 'rev-parse', 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
+      const p2 = Bun.spawn(['git', '-C', stage, 'rev-parse', 'HEAD'], { windowsHide: true,  stdout: 'pipe', stderr: 'pipe' });
       await p2.exited;
       if (p2.exitCode === 0) commit = (await new Response(p2.stdout).text()).trim() || null;
     } catch {}

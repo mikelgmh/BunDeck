@@ -199,6 +199,7 @@
         @layout-mode-change="onLayoutModeChange"
         @layout-change="onGsLayoutChange"
         @gs-add="onGsAdd"
+        @action-drop-empty="onGsActionDrop"
         @page-select="onPageSelectGuard"
         @page-create="onPageCreate"
         @page-delete="onPageDelete"
@@ -1343,11 +1344,12 @@ const apiGet = async (path: string) => {
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
   return res.json()
 }
-const apiPost = async (path: string, body: any) => {
+const apiPost = async (path: string, body: any, timeoutMs?: number) => {
   const res = await fetch(`${apiBase.value}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
@@ -1494,33 +1496,49 @@ const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number;
   }
 }
 
-/** Crear tecla 1×1 en la primera celda libre (modo Libre).
- *  GridStack la adopta vía makeWidget sin re-crear la instancia. */
-const onGsAdd = async () => {
-  if (!currentPage.value) return
-  // Si hay una operación de página en curso (p. ej. cambio de página recién
-  // pulsado), esperar a que termine en vez de ignorar el clic en silencio:
-  // era la causa de "le doy a Añadir y no ocurre nada".
-  if (pageBusy.value) {
-    const t0 = Date.now()
-    while (pageBusy.value && Date.now() - t0 < 8000) {
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    if (pageBusy.value || !currentPage.value) {
-      bdShowToast(t('bd.pageBusyRetry'))
-      return
-    }
+/** Crear tecla libre. Una petición acotada + finally evita dejar Añadir
+ *  deshabilitado indefinidamente si el daemon no responde. */
+const createFreeKey = async (opts: { x?: number; y?: number; actionType?: string } = {}) => {
+  if (!currentPage.value || pageBusy.value) {
+    if (pageBusy.value) bdShowToast(t('bd.pageBusyRetry'))
+    return
   }
   try {
     pageBusy.value = true
     const cols = Math.max(1, gridCols.value)
     const rows = Math.max(1, gridRows.value)
-    // planFreeCell solo mira ocupación geométrica: en libre `position` queda
-    // stale al arrastrar (mover solo persiste x/y/w/h) y antes bloqueaba
-    // huecos visibles — la tecla caía debajo de la cuadrícula o el POST
-    // chocaba con 409. La position devuelta siempre es única.
-    const spot = planFreeCell((currentButtons.value ?? []) as any[], cols, rows)
+    const buttons = (currentButtons.value ?? []) as any[]
+    // Un drop en una celda libre conserva el punto donde se soltó. Si está
+    // ocupada (o no hay coordenadas), usar el mismo primer hueco que Añadir.
+    const wantedX = opts.x === undefined ? -1 : Math.min(cols - 1, Math.max(0, Math.floor(opts.x)))
+    const wantedY = opts.y === undefined ? -1 : Math.max(0, Math.floor(opts.y))
+    const overlaps = (x: number, y: number) => buttons.some((b) => {
+      const w = Math.min(cols, Math.max(1, Math.round(Number(b.w) || 1)))
+      const h = Math.max(1, Math.round(Number(b.h) || 1))
+      const rawX = Number.isFinite(b.x) ? Number(b.x) : (Number(b.position) || 0) % cols
+      const rawY = Number.isFinite(b.y) ? Number(b.y) : Math.floor((Number(b.position) || 0) / cols)
+      const bx = Math.min(Math.max(0, Math.floor(rawX)), cols - w)
+      const by = Math.max(0, Math.floor(rawY))
+      return x < bx + w && bx < x + 1 && y < by + h && by < y + 1
+    })
+    let spot: { x: number; y: number; position: number } | null = null
+    if (wantedX >= 0 && wantedY >= 0 && !overlaps(wantedX, wantedY)) {
+      const cell = wantedY * cols + wantedX
+      const taken = new Set(buttons.map((b) => b.position))
+      const maxPosition = buttons.reduce(
+        (max, b) => Number.isInteger(b.position) ? Math.max(max, b.position) : max,
+        -1
+      )
+      spot = { x: wantedX, y: wantedY, position: taken.has(cell) ? maxPosition + 1 : cell }
+    } else {
+      // planFreeCell solo mira ocupación geométrica: `position` puede quedar
+      // stale al mover widgets en modo libre, pero su valor devuelto es único.
+      spot = planFreeCell(buttons, cols, rows)
+    }
     if (!spot) throw new Error(t('bd.gsNoRoom'))
+    const data = opts.actionType
+      ? { actions: [createAction(opts.actionType)] }
+      : {}
     const created = await apiPost('/buttons', {
       page_id: currentPage.value.id,
       position: spot.position,
@@ -1528,10 +1546,11 @@ const onGsAdd = async () => {
       y: spot.y,
       w: 1,
       h: 1,
-      data: {},
-    })
-    const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
-    currentButtons.value = fresh
+      data,
+    }, 15000)
+    // POST devuelve la fila creada; no hace falta un segundo GET que también
+    // podría quedarse pendiente y mantener bloqueado el control.
+    currentButtons.value.push(created)
     const pos = created?.position ?? spot.position
     await selectButton(pos)
   } catch (e) {
@@ -1539,6 +1558,13 @@ const onGsAdd = async () => {
   } finally {
     pageBusy.value = false
   }
+}
+/** Añadir tecla vacía en el primer hueco libre. */
+const onGsAdd = async () => createFreeKey()
+/** Soltar acción en espacio vacío del grid crea y configura la tecla en un POST. */
+const onGsActionDrop = async (x: number, y: number, type: string) => {
+  if (mode.value !== 'edit' || pageLayoutMode.value !== 'gridstack') return
+  await createFreeKey({ x, y, actionType: type })
 }
 
 const manifestOf = (pid: string) => {

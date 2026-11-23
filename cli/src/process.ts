@@ -24,6 +24,7 @@ export async function runCommand(
   const proc = bunSpawn({
     cmd: [command, ...args],
     stdio: ['inherit', 'inherit', 'inherit'],
+    windowsHide: true,
     ...options,
   });
   await proc.exited;
@@ -169,6 +170,7 @@ export async function runForeground(
     env,
     stdio: ['inherit', 'inherit', 'inherit'],
     cwd: process.cwd(),
+    windowsHide: true,
   });
   const onSigint = () => {
     try {

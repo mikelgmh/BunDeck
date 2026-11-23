@@ -90,7 +90,7 @@ export class ShellPlugin {
         // TODO: Implement command whitelist based on permissions
 
         try {
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: [command, ...args],
                 cwd: cwd || process.cwd(),
                 stdio: ['ignore', 'pipe', 'pipe']

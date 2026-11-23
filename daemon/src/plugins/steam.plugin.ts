@@ -35,7 +35,7 @@ async function openExternal(target: string, context: PluginContext, label: strin
         : ['xdg-open', target]
     context.log('info', `Steam: abriendo ${label}: ${target}`, { platform })
     try {
-        const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+        const proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
         const stderr = await new Response(proc.stderr).text()
         await proc.exited
         if (proc.exitCode === 0) return { launched: true, method: cmd[0] }

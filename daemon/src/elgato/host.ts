@@ -447,7 +447,7 @@ export class ElgatoHost {
             '-registerEvent', REGISTER_EVENT,
             '-info', JSON.stringify(info),
           ],
-          { cwd, stdio: ['ignore', 'pipe', 'pipe'] }
+          { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
         );
       } catch (e) {
         session.registerSettled = null;
@@ -586,10 +586,10 @@ export class ElgatoHost {
       const plat = process.platform;
       const child =
         plat === 'win32'
-          ? spawn('cmd', ['/c', 'start', '""', url], { detached: true, stdio: 'ignore' })
+          ? spawn('cmd', ['/c', 'start', '""', url], { detached: true, stdio: 'ignore', windowsHide: true })
           : plat === 'darwin'
-            ? spawn('open', [url], { detached: true, stdio: 'ignore' })
-            : spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+            ? spawn('open', [url], { detached: true, stdio: 'ignore', windowsHide: true })
+            : spawn('xdg-open', [url], { detached: true, stdio: 'ignore', windowsHide: true });
       child.unref?.();
     } catch {}
   }

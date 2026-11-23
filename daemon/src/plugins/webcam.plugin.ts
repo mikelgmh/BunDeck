@@ -17,7 +17,7 @@ export interface ActionHandler {
 async function runCmd(cmd: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     let proc: any
     try {
-        proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+        proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch (err) {
         throw new Error(`No se pudo ejecutar "${cmd[0]}": ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -197,19 +197,19 @@ export class WebcamPlugin {
         this.context.log('info', 'Webcam: abriendo ajustes de cámara')
         try {
             if (platform === 'win32') {
-                const proc = Bun.spawn({ cmd: ['cmd', '/c', 'start', '""', 'ms-settings:privacy-webcam'], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['cmd', '/c', 'start', '""', 'ms-settings:privacy-webcam'], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
                 return { action: 'open-settings', opened: true, target: 'ms-settings:privacy-webcam' }
             }
             if (platform === 'darwin') {
-                const proc = Bun.spawn({ cmd: ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera'], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera'], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
                 return { action: 'open-settings', opened: true, target: 'Privacidad → Cámara' }
             }
             if (platform === 'linux') {
                 for (const app of [['guvcview'], ['cheese']]) {
                     try {
-                        const proc = Bun.spawn({ cmd: [...app], stdio: ['ignore', 'pipe', 'pipe'] })
+                        const proc = Bun.spawn({ windowsHide: true,  cmd: [...app], stdio: ['ignore', 'pipe', 'pipe'] })
                         await proc.exited
                         if (proc.exitCode === 0) return { action: 'open-settings', opened: true, target: app[0] }
                     } catch { /* prueba el siguiente */ }

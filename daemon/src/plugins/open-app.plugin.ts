@@ -70,7 +70,7 @@ export class OpenAppPlugin {
 
         try {
             // On Windows, use 'start' command to open files/applications
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['cmd', '/c', 'start', '""', path],
                 stdio: ['ignore', 'pipe', 'pipe']
             })

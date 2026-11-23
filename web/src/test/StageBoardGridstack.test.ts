@@ -25,6 +25,7 @@ vi.mock('gridstack', () => ({
       compact: vi.fn(),
       column: vi.fn(),
       updateOptions: vi.fn(),
+      getCellFromPixel: vi.fn(() => ({ x: 3, y: 2 })),
     })),
   },
 }))
@@ -105,6 +106,28 @@ describe('StageBoard GridStack por página', () => {
     expect(wrapper.find('[data-cy=bd-gs-empty-add]').exists()).toBe(false)
     await wrapper.find('[data-cy=bd-gs-add-tool]').trigger('click')
     expect(wrapper.emitted('gs-add')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('soltar una acción en el espacio vacío emite la celda y el tipo de acción', async () => {
+    const wrapper = mount(StageBoard, {
+      props: {
+        ...baseProps,
+        allButtons: [],
+        getButton: () => undefined,
+        getButtonData: () => null,
+        layoutMode: 'gridstack'
+      }
+    })
+    await vi.waitFor(() => expect(GridStack.init).toHaveBeenCalled())
+    await nextTick()
+    const getData = vi.fn(() => JSON.stringify({ type: 'utility.delay', name: 'Delay' }))
+    await wrapper.find('[data-cy=bd-gs-plate]').trigger('drop', {
+      clientX: 180,
+      clientY: 140,
+      dataTransfer: { getData, types: ['application/json'] }
+    })
+    expect(wrapper.emitted('action-drop-empty')).toEqual([[3, 2, 'utility.delay']])
     wrapper.unmount()
   })
 

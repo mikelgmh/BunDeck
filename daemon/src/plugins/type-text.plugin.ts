@@ -120,7 +120,7 @@ export class TypeTextPlugin {
 
                     const psCommand = `(New-Object -ComObject WScript.Shell).SendKeys('${escapedChar}')`
 
-                    const proc = Bun.spawn({
+                    const proc = Bun.spawn({ windowsHide: true, 
                         cmd: ['powershell.exe', '-Command', psCommand],
                         stdio: ['ignore', 'pipe', 'pipe']
                     })
@@ -135,7 +135,7 @@ export class TypeTextPlugin {
                 // Sin delay, escribir todo de una vez
                 const psCommand = `(New-Object -ComObject WScript.Shell).SendKeys('${escapedText}')`
 
-                const proc = Bun.spawn({
+                const proc = Bun.spawn({ windowsHide: true, 
                     cmd: ['powershell.exe', '-Command', psCommand],
                     stdio: ['ignore', 'pipe', 'pipe']
                 })
@@ -181,7 +181,7 @@ export class TypeTextPlugin {
                     const escapedChar = char.replace(/"/g, '\\"').replace(/\\/g, '\\\\')
                     const appleScript = `tell application "System Events" to keystroke "${escapedChar}"`
 
-                    const proc = Bun.spawn({
+                    const proc = Bun.spawn({ windowsHide: true, 
                         cmd: ['osascript', '-e', appleScript],
                         stdio: ['ignore', 'pipe', 'pipe']
                     })
@@ -196,7 +196,7 @@ export class TypeTextPlugin {
                 // Sin delay, escribir todo de una vez
                 const appleScript = `tell application "System Events" to keystroke "${escapedText}"`
 
-                const proc = Bun.spawn({
+                const proc = Bun.spawn({ windowsHide: true, 
                     cmd: ['osascript', '-e', appleScript],
                     stdio: ['ignore', 'pipe', 'pipe']
                 })
@@ -236,7 +236,7 @@ export class TypeTextPlugin {
                 // Con delay, escribir carácter por carácter
                 const chars = text.split('')
                 for (const char of chars) {
-                    const proc = Bun.spawn({
+                    const proc = Bun.spawn({ windowsHide: true, 
                         cmd: ['xdotool', 'type', '--', char],
                         stdio: ['ignore', 'pipe', 'pipe']
                     })
@@ -249,7 +249,7 @@ export class TypeTextPlugin {
                 }
             } else {
                 // Sin delay, escribir todo de una vez
-                const proc = Bun.spawn({
+                const proc = Bun.spawn({ windowsHide: true, 
                     cmd: ['xdotool', 'type', '--', text],
                     stdio: ['ignore', 'pipe', 'pipe']
                 })
@@ -260,7 +260,7 @@ export class TypeTextPlugin {
                 if (proc.exitCode !== 0) {
                     // Intentar con ydotool como alternativa
                     try {
-                        const proc2 = Bun.spawn({
+                        const proc2 = Bun.spawn({ windowsHide: true, 
                             cmd: ['ydotool', 'type', text],
                             stdio: ['ignore', 'pipe', 'pipe']
                         })

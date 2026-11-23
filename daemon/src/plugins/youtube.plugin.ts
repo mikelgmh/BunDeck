@@ -272,13 +272,13 @@ export class YoutubePlugin {
         const platform = process.platform
         try {
             if (platform === 'win32') {
-                const proc = Bun.spawn({ cmd: ['cmd', '/c', 'start', '""', url], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['cmd', '/c', 'start', '""', url], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
             } else if (platform === 'darwin') {
-                const proc = Bun.spawn({ cmd: ['open', url], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['open', url], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
             } else if (platform === 'linux') {
-                const proc = Bun.spawn({ cmd: ['xdg-open', url], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: ['xdg-open', url], stdio: ['ignore', 'pipe', 'pipe'] })
                 await proc.exited
             } else {
                 throw new Error(`No se puede abrir el navegador en la plataforma: ${platform}`)

@@ -25,7 +25,7 @@ function honestDegraded(reason: string) {
 
 async function runCmd(cmd: string[]): Promise<{ exitCode: number; stdout: string }> {
   try {
-    const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] });
     const stdout = await new Response(proc.stdout).text();
     await proc.exited;
     return { exitCode: proc.exitCode, stdout };
@@ -239,6 +239,15 @@ async function enrichWithLhmRemote(base: any): Promise<any> {
   return base;
 }
 
+/** Caché del endpoint /system/metrics: el script PowerShell tarda ~1s
+ * (Get-Counter con SampleInterval 1) y cada widget dinámico lo sondea cada
+ * 2-5s. Sin caché, N botones = N powershell.exe solapados "a lo loco".
+ * Con caché de 3s + deduplicación in-flight, como máximo hay 1
+ * powershell vivo cada 3s, y además con windowsHide no flashea ventana. */
+let metricsCache: { ts: number; data: any; status: number } | null = null;
+let metricsInFlight: Promise<{ data: any; status: number }> | null = null;
+const METRICS_TTL_MS = 3000;
+
 export const handleSystem: ApiHandler = async (_req, { url, method, path, db, services }) => {
   // Test endpoint for connectivity
   if (path === '/api/v1/test') {
@@ -366,7 +375,7 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           }
         `.trim();
 
-      const proc = Bun.spawn({
+      const proc = Bun.spawn({ windowsHide: true, 
         cmd: ['powershell.exe', '-Command', powershellScript],
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -484,7 +493,7 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           }
         `.trim();
 
-      const proc = Bun.spawn({
+      const proc = Bun.spawn({ windowsHide: true, 
         cmd: ['powershell.exe', '-Command', powershellScript],
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -580,6 +589,19 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
 
   if (path === '/api/v1/system/metrics') {
     if (method === 'GET') {
+      // Deduplicación: si hay caché fresca, servirla sin spawnear nada.
+      if (metricsCache && Date.now() - metricsCache.ts < METRICS_TTL_MS) {
+        return jsonResponse(metricsCache.data, metricsCache.status);
+      }
+      if (metricsInFlight) {
+        try {
+          const r = await metricsInFlight;
+          return jsonResponse(r.data, r.status);
+        } catch {
+          // cae al recolector de abajo
+        }
+      }
+      const collect = (async (): Promise<{ data: any; status: number }> => {
       try {
         // Linux/macOS: recolector nativo (el .ps1 es solo Windows).
         if (process.platform !== 'win32') {
@@ -587,12 +609,12 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           // Enriquecer con LHM Remote Web Server si el usuario lo tiene
           // (http://localhost:8085/data.json) — igual que el plugin LHM de Macro-Deck.
           const enriched = await enrichWithLhmRemote(native);
-          return jsonResponse(enriched);
+          return { data: enriched, status: 200 };
         }
         const powershellScript = getSystemMetricsScript();
 
-        const proc = Bun.spawn({
-          cmd: ['powershell.exe', '-Command', powershellScript],
+        const proc = Bun.spawn({ windowsHide: true,
+          cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', powershellScript],
           stdio: ['ignore', 'pipe', 'pipe'],
         });
 
@@ -614,25 +636,33 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
             // El script ya devuelve nulls honestos cuando no hay sensor;
             // nunca inventar datos aleatorios (antes se devolvía mock).
             if (metrics.error && metrics.cpu?.usage == null && metrics.ram?.usage == null) {
-              return jsonResponse(
-                {
-                  ...honestDegraded('No se pudieron leer métricas del sistema: ' + String(metrics.error).slice(0, 200)),
-                },
-                503
-              );
+              return {
+                data: { ...honestDegraded('No se pudieron leer métricas del sistema: ' + String(metrics.error).slice(0, 200)) },
+                status: 503,
+              };
             }
 
             const enriched = await enrichWithLhmRemote(metrics);
-            return jsonResponse(enriched);
+            return { data: enriched, status: 200 };
           } catch (parseError) {
-            return jsonResponse({ error: 'Failed to parse system metrics' }, 500);
+            return { data: { error: 'Failed to parse system metrics' }, status: 500 };
           }
         } else {
           // Fallo de PowerShell: degradado honesto, sin datos inventados.
-          return jsonResponse({ ...honestDegraded('PowerShell no devolvió métricas' + (error ? ': ' + String(error).slice(0, 200) : '')) }, 503);
+          return { data: { ...honestDegraded('PowerShell no devolvió métricas' + (error ? ': ' + String(error).slice(0, 200) : '')) }, status: 503 };
         }
       } catch (error) {
-        return jsonResponse({ ...honestDegraded(String((error as Error)?.message ?? error).slice(0, 200)) }, 503);
+        return { data: { ...honestDegraded(String((error as Error)?.message ?? error).slice(0, 200)) }, status: 503 };
+      }
+      })();
+      metricsInFlight = collect;
+      try {
+        const result = await collect;
+        // Solo cachear éxitos (200): los 503 con nulls no deben congelarse 3s.
+        if (result.status === 200) metricsCache = { ts: Date.now(), data: result.data, status: result.status };
+        return jsonResponse(result.data, result.status);
+      } finally {
+        if (metricsInFlight === collect) metricsInFlight = null;
       }
     }
   }

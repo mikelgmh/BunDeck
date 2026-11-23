@@ -159,7 +159,7 @@ export class HotkeyPlugin {
             // Usar PowerShell con SendKeys
             const psCommand = `(New-Object -ComObject WScript.Shell).SendKeys('${keySequence}')`
 
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['powershell.exe', '-Command', psCommand],
                 stdio: ['ignore', 'pipe', 'pipe']
             })
@@ -258,7 +258,7 @@ WScript.Sleep 100
             const modifierString = modifierFlags.length > 0 ? `using {${modifierFlags.join(', ')}}` : ''
             const appleScript = `tell application "System Events" to key code ${keyCode} ${modifierString}`
 
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['osascript', '-e', appleScript],
                 stdio: ['ignore', 'pipe', 'pipe']
             })
@@ -339,7 +339,7 @@ WScript.Sleep 100
 
         // Intentar con xdotool primero
         try {
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['xdotool', 'key', keyCombo],
                 stdio: ['ignore', 'pipe', 'pipe']
             })
@@ -369,7 +369,7 @@ WScript.Sleep 100
 
             // Intentar con ydotool como alternativa (para Wayland)
             try {
-                const proc = Bun.spawn({
+                const proc = Bun.spawn({ windowsHide: true, 
                     cmd: ['ydotool', 'key', keyCombo],
                     stdio: ['ignore', 'pipe', 'pipe']
                 })

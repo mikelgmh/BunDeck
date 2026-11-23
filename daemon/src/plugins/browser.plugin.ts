@@ -88,7 +88,7 @@ export class BrowserPlugin {
         }
 
         try {
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: [command, ...args],
                 stdio: ['ignore', 'pipe', 'pipe']
             })

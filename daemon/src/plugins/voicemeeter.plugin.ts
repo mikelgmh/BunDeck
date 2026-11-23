@@ -36,7 +36,7 @@ function findVoicemeeter(): string | null {
 }
 
 async function runCmd(cmd: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
     const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
     await proc.exited
     return { stdout, stderr, exitCode: proc.exitCode ?? -1 }
@@ -66,7 +66,7 @@ async function sendHotkeyWindows(hotkey: string): Promise<void> {
     const press = (v: number, up: boolean) => `[K]::keybd_event(${v}, 0, ${up ? '2' : '0'}, [UIntPtr]::Zero)`
     const script = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class K { [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo); }'; ` +
         [...downs.map((v) => press(v, false)), press(vk, false), press(vk, true), ...downs.reverse().map((v) => press(v, true))].join('; ')
-    const proc = Bun.spawn({ cmd: ['powershell.exe', '-NoProfile', '-Command', script], stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = Bun.spawn({ windowsHide: true,  cmd: ['powershell.exe', '-NoProfile', '-Command', script], stdio: ['ignore', 'pipe', 'pipe'] })
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
     if (proc.exitCode !== 0) throw new Error(`No se pudo enviar el atajo "${hotkey}": ${stderr.trim() || `código ${proc.exitCode}`}`)
@@ -212,7 +212,7 @@ export class VoicemeeterPlugin {
         const exe = findVoicemeeter()
         if (!exe) throw new Error('VoiceMeeter no está instalado (descárgalo en vb-audio.com).')
         this.context.log('info', `VoiceMeeter: abriendo ${exe}`)
-        const proc = Bun.spawn({ cmd: ['cmd', '/c', 'start', '""', exe], stdio: ['ignore', 'pipe', 'pipe'] })
+        const proc = Bun.spawn({ windowsHide: true,  cmd: ['cmd', '/c', 'start', '""', exe], stdio: ['ignore', 'pipe', 'pipe'] })
         await proc.exited
         return { action: 'open-voicemeeter', path: exe, opened: true }
     }

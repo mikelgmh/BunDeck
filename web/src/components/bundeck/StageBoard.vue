@@ -184,6 +184,8 @@
             :class="{ 'bd-gs--ready': gsReady }"
             data-cy="bd-gs-plate"
             @keydown="onKeyNav"
+            @dragover.prevent="onGsDragOver"
+            @drop.prevent="onGsDrop"
           >
             <div
               v-for="b in gsItems"
@@ -425,6 +427,8 @@ interface Emits {
   (e: 'layout-change', items: Array<{ id: string; x: number; y: number; w: number; h: number }>): void
   /** GridStack: pedir una tecla nueva 1×1 en la primera celda libre. */
   (e: 'gs-add'): void
+  /** GridStack: soltar una acción en una celda vacía crea allí una tecla. */
+  (e: 'action-drop-empty', x: number, y: number, actionType: string): void
   (e: 'page-select', pageId: string): void
   (e: 'page-create'): void
   (e: 'page-delete', page: PageData | null): void
@@ -921,6 +925,7 @@ const onDragLeave = (event: DragEvent) => {
   ;(event.currentTarget as HTMLElement).classList.remove('bd-over')
 }
 const onDrop = (event: DragEvent, position: number) => {
+  event.stopPropagation()
   ;(event.currentTarget as HTMLElement).classList.remove('bd-over')
   if (props.mode !== 'edit') return
   try {
@@ -928,6 +933,50 @@ const onDrop = (event: DragEvent, position: number) => {
     if (!raw) return
     const data = JSON.parse(raw)
     if (data?.type) emit('action-drop', position, data.type)
+  } catch {
+    /* noop */
+  }
+}
+
+const onGsDragOver = (event: DragEvent) => {
+  if (props.mode === 'edit' && event.dataTransfer?.types.includes('application/json')) {
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const onGsDrop = (event: DragEvent) => {
+  if (props.mode !== 'edit') return
+  // Los drops sobre teclas existentes los procesa onDrop; no crear una segunda.
+  if ((event.target as HTMLElement).closest?.('.grid-stack-item')) return
+  try {
+    const raw = event.dataTransfer?.getData('application/json')
+    if (!raw) return
+    const data = JSON.parse(raw)
+    if (!data?.type) return
+
+    // GridStack convierte el punto del puntero a coordenadas de celda,
+    // incluyendo márgenes y scroll del área.
+    const cell = gs?.getCellFromPixel?.(
+      { left: event.clientX, top: event.clientY },
+      true
+    )
+    const rect = gsContainer.value?.getBoundingClientRect()
+    const x = cell?.x ?? (
+      rect?.width
+        ? Math.floor((event.clientX - rect.left) / (rect.width / Math.max(1, props.gridCols)))
+        : 0
+    )
+    const y = cell?.y ?? (
+      rect?.height
+        ? Math.floor((event.clientY - rect.top) / gsCellSize.value)
+        : 0
+    )
+    emit(
+      'action-drop-empty',
+      Math.max(0, Math.floor(Number(x) || 0)),
+      Math.max(0, Math.floor(Number(y) || 0)),
+      data.type
+    )
   } catch {
     /* noop */
   }

@@ -16,7 +16,7 @@ export interface ActionHandler {
 import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 async function runCommand(cmd: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = Bun.spawn({ windowsHide: true,  cmd, stdio: ['ignore', 'pipe', 'pipe'] })
     const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -388,7 +388,7 @@ export class PCVitalsPlugin {
                 `$f = @($s | Where-Object { $_.SensorType -eq 'Fan' } | Select-Object -First 4 Name, Value); ` +
                 `$v = @($s | Where-Object { $_.SensorType -eq 'Voltage' } | Select-Object -First 4 Name, Value); ` +
                 `@{ temps = $t; fans = @($f | ForEach-Object { @{ name = $_.Name; value = $_.Value } }); volts = @($v | ForEach-Object { @{ name = $_.Name; value = $_.Value } }); ns = $nsUsed } | ConvertTo-Json -Compress -Depth 4`
-            const out = await runCommand(['powershell.exe', '-Command', ps])
+            const out = await runCommand(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps])
             if (out.exitCode !== 0 || !out.stdout.trim().startsWith('{')) return empty
             const data = JSON.parse(out.stdout.trim())
             const temps = (Array.isArray(data.temps) ? data.temps : []).map(Number).filter((n) => Number.isFinite(n))

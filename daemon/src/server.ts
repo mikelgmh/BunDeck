@@ -352,7 +352,7 @@ class LibreDeckDaemon {
       }
       const frontendPort = process.env.PORT_FRONTEND || FRONTEND_PORT;
       try {
-        spawn('cmd', ['/c', 'start', '', `http://${localIP}:${frontendPort}`], { detached: true, stdio: 'ignore' });
+        spawn('cmd', ['/c', 'start', '', `http://${localIP}:${frontendPort}`], { detached: true, stdio: 'ignore', windowsHide: true } as any).unref?.();
       } catch (error) {
         console.error('Failed to open browser:', error);
       }

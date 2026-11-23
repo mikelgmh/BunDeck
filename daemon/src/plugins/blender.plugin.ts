@@ -279,7 +279,7 @@ export class BlenderPlugin {
         seq += WIN_KEY_MAP[key] ?? key.toUpperCase()
         const escaped = seq.replace(/'/g, "''")
         try {
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['powershell.exe', '-Command', `(New-Object -ComObject WScript.Shell).SendKeys('${escaped}')`],
                 stdio: ['ignore', 'pipe', 'pipe'],
             })
@@ -304,7 +304,7 @@ export class BlenderPlugin {
         const modStr = flags.length > 0 ? ` using {${flags.join(', ')}}` : ''
         const keyExpr = /^numpad\d$/.test(key) ? `key "${key.replace('numpad', '')}"${modStr}` : `key code ${code}${modStr}`
         try {
-            const proc = Bun.spawn({
+            const proc = Bun.spawn({ windowsHide: true, 
                 cmd: ['osascript', '-e', `tell application "System Events" to ${keyExpr}`],
                 stdio: ['ignore', 'pipe', 'pipe'],
             })
@@ -330,7 +330,7 @@ export class BlenderPlugin {
         const combo = [...mapped, normalizedKey].join('+')
         for (const tool of ['xdotool', 'ydotool']) {
             try {
-                const proc = Bun.spawn({ cmd: [tool, 'key', combo], stdio: ['ignore', 'pipe', 'pipe'] })
+                const proc = Bun.spawn({ windowsHide: true,  cmd: [tool, 'key', combo], stdio: ['ignore', 'pipe', 'pipe'] })
                 const stderr = await new Response(proc.stderr).text()
                 await proc.exited
                 if (proc.exitCode === 0) return { hotkey, simulated: true, platform: 'linux', method: tool }

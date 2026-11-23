@@ -85,7 +85,7 @@ export class ClipboardPlugin {
             return
         }
         if (platform === 'darwin') {
-            const proc = Bun.spawn(['pbcopy'], { stdin: 'pipe', stdout: 'ignore', stderr: 'pipe' } as any)
+            const proc = Bun.spawn(['pbcopy'], { windowsHide: true,  stdin: 'pipe', stdout: 'ignore', stderr: 'pipe' } as any)
             try {
                 await new Response(proc.stdin as any).text().catch(() => {})
             } catch { /* pbcopy lee de stdin de otra forma */ }
