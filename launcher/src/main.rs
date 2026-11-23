@@ -57,6 +57,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_RESTORE, WM_NCLBUTTONDOWN, WM_SETICON,
 };
 
+fn auto_updates_enabled() -> bool {
+    std::env::var("DEV_MODE").as_deref() != Ok("true")
+}
+
 /// Canal hacia el bucle de eventos del tray (Windows): "Salir" pasa por
 /// aquí para limpiar el icono antes de terminar el proceso.
 #[cfg(windows)]
@@ -280,6 +284,7 @@ impl LauncherView {
                                 }
                             }
                             if view.auto_update_initialized
+                                && auto_updates_enabled()
                                 && !view.update_checking
                                 && !view.update_busy
                                 && !view.update_applying
@@ -344,7 +349,9 @@ impl LauncherView {
                     self.log.extend(boot);
                     if daemon_is_up && !self.auto_update_initialized {
                         self.auto_update_initialized = true;
-                        self.check_updates();
+                        if auto_updates_enabled() {
+                            self.check_updates();
+                        }
                     }
                 }
                 BackgroundEvent::Latest(latest) => {
@@ -1952,18 +1959,22 @@ fn main() {
     // Las actualizaciones se descargan mientras la app está abierta, pero se
     // activan al reiniciar. Si el usuario cerró BunDeck sin reiniciarlo,
     // aplica aquí el stage antes de abrir la ventana o arrancar el daemon.
-    if let Some(version) = pending_update_for_startup() {
-        let mut lines = Vec::new();
-        match updater::apply_staged(&mut |line| lines.push(line), &version) {
-            Ok(()) if updater::staged_has_launcher(&updater::install_root(), &version) => {
-                if let Err(e) = updater::handoff_self_update(&version) {
-                    eprintln!("[launcher] no se pudo actualizar el launcher: {e}");
-                } else {
-                    return;
+    if auto_updates_enabled() {
+        if let Some(version) = pending_update_for_startup() {
+            let mut lines = Vec::new();
+            match updater::apply_staged(&mut |line| lines.push(line), &version) {
+                Ok(()) if updater::staged_has_launcher(&updater::install_root(), &version) => {
+                    if let Err(e) = updater::handoff_self_update(&version) {
+                        eprintln!("[launcher] no se pudo actualizar el launcher: {e}");
+                    } else {
+                        return;
+                    }
+                }
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("[launcher] no se pudo aplicar la actualización pendiente: {e}")
                 }
             }
-            Ok(()) => {}
-            Err(e) => eprintln!("[launcher] no se pudo aplicar la actualización pendiente: {e}"),
         }
     }
 
