@@ -104,6 +104,24 @@ export function firstFreeSpot(widgets: DeckWidget[], cols: number, rows: number,
  */
 export interface FreeCellPlan { x: number; y: number; position: number }
 
+/** Recorta una celda de drop a la cuadrícula visible.
+ *
+ *  Un drop debajo/fuera de la placa (o coordenadas flotantes) daba `y`
+ *  enormes que se persistían y el grid libre crecía a decenas de filas con
+ *  el stepper marcando 3: los drops apuntan a celdas visibles, así que se
+ *  acotan a [0, cols-1] × [0, rows-1]. La extensión bajo el grid sigue
+ *  siendo cosa de planFreeCell, no de un drop suelto. */
+export function clampDropCell(x: unknown, y: unknown, cols: number, rows: number): { x: number; y: number } {
+  const c = Math.max(1, Math.floor(Number(cols)) || 1)
+  const r = Math.max(1, Math.floor(Number(rows)) || 1)
+  const nx = Number(x)
+  const ny = Number(y)
+  return {
+    x: Math.min(c - 1, Math.max(0, Number.isFinite(nx) ? Math.floor(nx) : 0)),
+    y: Math.min(r - 1, Math.max(0, Number.isFinite(ny) ? Math.floor(ny) : 0)),
+  }
+}
+
 export function planFreeCell(
   buttons: Array<{ position?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>,
   cols: number,

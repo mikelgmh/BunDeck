@@ -3,6 +3,25 @@ import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './u
 import { getOrCreateDeviceId, isNavigationForMe } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
+/** Icono Lucide por defecto para teclas recién creadas (nombre PascalCase,
+ *  como los que guarda el inspector: 'Zap', 'Play'...). */
+export const DEFAULT_KEY_ICON = 'Zap'
+
+/**
+ * Garantiza icono visual al CREAR una tecla: si no hay icon ni iconImage ni
+ * emoji, pone el predeterminado. Solo para creación (no para updates: un
+ * vaciado explícito con icon:'' debe conservarse).
+ */
+export function ensureDefaultIcon<T extends Record<string, any>>(data: T): T {
+  const d: any = data && typeof data === 'object' ? { ...data } : {}
+  const hasVisual =
+    (typeof d.icon === 'string' && d.icon.trim().length > 0) ||
+    (typeof d.iconImage === 'string' && d.iconImage.trim().length > 0) ||
+    (typeof d.emoji === 'string' && d.emoji.trim().length > 0)
+  if (!hasVisual) d.icon = DEFAULT_KEY_ICON
+  return d as T
+}
+
 // Fallback compartido (congelado) para teclas vacías: evita reconstruir el
 // objeto literal en cada llamada a getButtonData. Solo lectura.
 const EMPTY_BUTTON_DATA = Object.freeze({
@@ -1352,7 +1371,8 @@ export function useStreamDeck() {
           console.log('✅ Button deleted successfully')
         }
       } else if (hasContent) {
-        // Create new button only if there's content
+        // Create new button only if there's content (con icono por defecto
+        // si el usuario no eligió visual).
         console.log('➕ Creating new button at position', position, 'with data:', buttonConfig.value)
         const mutationId = trackMutation(newMutationId())
         const newButton = await apiRequest('/buttons', {
@@ -1360,7 +1380,7 @@ export function useStreamDeck() {
           body: JSON.stringify({
             page_id: currentPage.value.id,
             position,
-            data: buttonConfig.value,
+            data: ensureDefaultIcon(buttonConfig.value),
             mutationId
           })
         })

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { collapseLeftPanel } from './helpers';
+import { collapseLeftPanel, toggleFreeMode } from './helpers';
 
 const API = 'http://localhost:3001/api/v1';
 
@@ -100,7 +100,7 @@ test('crea una página, activa Libre y conserva las teclas visibles al recargar'
 
   await seedButtons(request, testPageId);
 
-  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  await toggleFreeMode(page);
   const plate = page.locator('[data-cy=bd-gs-plate]');
   await expect(plate).toBeVisible({ timeout: 10000 });
   await expect(plate.locator('.grid-stack-item')).toHaveCount(2);
@@ -144,7 +144,7 @@ test('permite crear y redimensionar la primera tecla desde una página vacía en
   await page.waitForTimeout(250);
 
   await collapseLeftPanel(page);
-  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  await toggleFreeMode(page);
   const plate = page.locator('[data-cy=bd-gs-plate]');
   await expect(plate).toBeVisible({ timeout: 10000 });
   await expect(plate.locator('.grid-stack-item')).toHaveCount(0);
@@ -161,6 +161,7 @@ test('permite crear y redimensionar la primera tecla desde una página vacía en
   buttonAId = createdBtn.id;
   expect(createdBtn.w, 'new free-mode key defaults to 1 wide').toBe(1);
   expect(createdBtn.h, 'new free-mode key defaults to 1 tall').toBe(1);
+  expect(createdBtn.data?.icon, 'new key gets the default icon').toBeTruthy();
 
   // La tecla 1×1 recién creada no tapa al resto: el grid sigue estable.
   await expect(plate.locator('.grid-stack-item')).toHaveCount(1);
@@ -251,7 +252,7 @@ test('Añadir usa el hueco visible aunque haya positions stale por arrastres', a
   }
 
   await collapseLeftPanel(page);
-  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  await toggleFreeMode(page);
   const plate = page.locator('[data-cy=bd-gs-plate]');
   await expect(plate).toBeVisible({ timeout: 10000 });
   await expect(plate.locator('.grid-stack-item')).toHaveCount(2);
@@ -270,6 +271,63 @@ test('Añadir usa el hueco visible aunque haya positions stale por arrastres', a
   expect(createdBtn.position, 'position stays unique (no 409)').toBe(3);
 
   await expect(plate.locator('.grid-stack-item')).toHaveCount(3);
+});
+
+test('cambiar filas/columnas redimensiona la rejilla y persiste al recargar', async ({
+  page,
+  request,
+}) => {
+  const createPagePromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/pages') && res.request().method() === 'POST',
+  );
+  await page.locator('[data-cy=bd-page-add]').click();
+  const createPageRes = await createPagePromise;
+  expect(createPageRes.status()).toBe(201);
+  const created = await createPageRes.json();
+  testPageId = created.id;
+  const pageName: string = created.name;
+
+  await expect(
+    page.locator('.bd-page .bd-chip[aria-pressed="true"]').filter({ hasText: pageName }).first(),
+  ).toBeVisible({ timeout: 10000 });
+  await page.waitForTimeout(250);
+  await collapseLeftPanel(page);
+
+  const rowsOut = page.locator('[data-cy=bd-grid-rows] output');
+  const colsOut = page.locator('[data-cy=bd-grid-cols] output');
+  const rows0 = Number(await rowsOut.innerText());
+  const cols0 = Number(await colsOut.innerText());
+  await expect(page.locator('[data-swapy-container] [data-cy=bd-key]')).toHaveCount(cols0 * rows0);
+
+  // +1 fila: PUT al perfil y la rejilla crece.
+  const putPromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/profiles/') && res.request().method() === 'PUT',
+    { timeout: 10000 },
+  );
+  await page.locator('[data-cy=bd-grid-rows] [data-d="r1"]').click();
+  await putPromise;
+  await expect(rowsOut).toHaveText(String(rows0 + 1), { timeout: 10000 });
+  await expect(page.locator('[data-swapy-container] [data-cy=bd-key]')).toHaveCount(
+    cols0 * (rows0 + 1),
+  );
+
+  // Persiste al recargar (viene del perfil, no del override local).
+  await page.reload();
+  await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('[data-cy=bd-grid-rows] output')).toHaveText(String(rows0 + 1), {
+    timeout: 10000,
+  });
+
+  // Restaurar el tamaño original para no contaminar otros tests.
+  const backPromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/profiles/') && res.request().method() === 'PUT',
+    { timeout: 10000 },
+  );
+  await page.locator('[data-cy=bd-grid-rows] [data-d="r-1"]').click();
+  await backPromise;
+  await expect(page.locator('[data-cy=bd-grid-rows] output')).toHaveText(String(rows0), {
+    timeout: 10000,
+  });
 });
 
 test('permite separar dos teclas y conserva la separación al recargar', async ({
@@ -292,7 +350,7 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
   await page.waitForTimeout(250);
 
   await collapseLeftPanel(page);
-  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  await toggleFreeMode(page);
   const plate = page.locator('[data-cy=bd-gs-plate]');
   await expect(plate).toBeVisible({ timeout: 10000 });
 

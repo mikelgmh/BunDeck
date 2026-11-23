@@ -182,6 +182,7 @@
             ref="gsContainer"
             class="grid-stack bd-gs"
             :class="{ 'bd-gs--ready': gsReady }"
+            :style="{ visibility: gsReady || gsFailed ? undefined : 'hidden' }"
             data-cy="bd-gs-plate"
             @keydown="onKeyNav"
             @dragover.prevent="onGsDragOver"
@@ -454,18 +455,30 @@ const swapy = ref<Swapy | null>(null)
 const gsContainer = ref<HTMLElement | null>(null)
 let gs: any = null
 const gsReady = ref(false)
+// GridStack se importa en dinámico: hasta que posiciona los widgets, los
+// nodos se apilan sin estilo (flash de "botones enormes" al cambiar a Libre).
+// La placa se mantiene oculta (pero con su sitio reservado) hasta que
+// GridStack la adopta; si la init falla del todo se muestra igual para no
+// dejar la página vacía.
+const gsFailed = ref(false)
 
 /** Items GridStack: misma tecla/drawers, geometría x/y/w/h del daemon. */
 const gsItems = computed(() => {
   const list = (props.allButtons ?? []).slice()
   const cols = Math.max(1, props.gridCols)
+  const rows = Math.max(1, props.gridRows)
   return list.map((b) => {
     // El ancho clásico puede cambiar después de guardar una geometría libre.
     // GridStack no pinta widgets que empiezan fuera de las columnas actuales.
     const w = Math.min(cols, Math.max(1, Math.round(Number(b.w) || 1)))
     const h = Math.max(1, Math.round(Number(b.h) || 1))
-    const rawX = Number.isFinite(b.x) ? Number(b.x) : b.position % cols
-    const rawY = Number.isFinite(b.y) ? Number(b.y) : Math.floor(b.position / cols)
+    // Sin geometría (tecla clásica con x/y NULL): deriva de position, pero
+    // ENVUELTA a las filas configuradas. Antes una position más allá del grid
+    // (p. ej. 99 en 5×3 → y=19) estiraba el modo libre a decenas de filas
+    // con el stepper marcando 3 ("tropecientas filas").
+    const pos = Number.isInteger(b.position) ? (b.position as number) : 0
+    const rawX = Number.isFinite(b.x) ? Number(b.x) : pos % cols
+    const rawY = Number.isFinite(b.y) ? Number(b.y) : Math.floor(pos / cols) % rows
     const x = Math.min(Math.max(0, Math.floor(rawX)), cols - w)
     const y = Math.max(0, Math.floor(rawY))
     return { id: b.id, position: b.position, x, y, w, h }
@@ -572,6 +585,7 @@ const destroyGs = () => {
   try { gs?.destroy(false) } catch { /* noop */ }
   gs = null
   gsReady.value = false
+  gsFailed.value = false
 }
 
 const emitGsLayout = (items: any[]) => {
@@ -641,6 +655,7 @@ const initGs = async (retries = 2) => {
     gs = null
     gsReady.value = false
     if (retries > 0) setTimeout(() => void initGs(retries - 1), 300)
+    else gsFailed.value = true
   }
 }
 
@@ -661,8 +676,18 @@ const adoptGsWidgets = () => {
 watch([() => props.layoutMode, () => props.mode], () => {
   if (!isGsMode.value) {
     destroyGs()
+    // La instancia de Swapy quedó atada al DOM clásico anterior (o a nada
+    // tras pasar por Libre): hay que re-vincularla a la placa recién montada
+    // o el drag & drop clásico queda muerto tras volver de Libre.
+    try { swapy.value?.destroy() } catch { /* noop */ }
+    swapy.value = null
+    if (props.mode === 'edit') void nextTick().then(() => initializeSwapy())
     return
   }
+  // Al entrar en Libre el DOM clásico se desmonta: soltar Swapy para no
+  // dejar una instancia atada a nodos muertos.
+  try { swapy.value?.destroy() } catch { /* noop */ }
+  swapy.value = null
   if (gs) {
     try { gs.setStatic(props.mode !== 'edit') } catch { /* noop */ }
     return

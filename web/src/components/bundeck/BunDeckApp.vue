@@ -415,14 +415,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
 import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2 } from 'lucide-vue-next'
-import { useStreamDeck } from '../../composables/useStreamDeck'
+import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {
   bdResolvedPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations,
   bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
-import { planFreeCell } from '../../composables/useDeckLayouts'
+import { planFreeCell, clampDropCell } from '../../composables/useDeckLayouts'
 import {
   actionTypeSurfaceKind, findActionAdata, findControlAction, isControlAction
 } from '../../composables/useActionPresentation'
@@ -1522,8 +1522,14 @@ const createFreeKey = async (opts: { x?: number; y?: number; actionType?: string
     const buttons = (currentButtons.value ?? []) as any[]
     // Un drop en una celda libre conserva el punto donde se soltó. Si está
     // ocupada (o no hay coordenadas), usar el mismo primer hueco que Añadir.
-    const wantedX = opts.x === undefined ? -1 : Math.min(cols - 1, Math.max(0, Math.floor(opts.x)))
-    const wantedY = opts.y === undefined ? -1 : Math.max(0, Math.floor(opts.y))
+    // El drop se acota a la cuadrícula visible: antes una suelta debajo de la
+    // placa persistía y enormes (p. ej. y=50) y el grid crecía a decenas de
+    // filas con el stepper marcando 3.
+    const drop = opts.x !== undefined && opts.y !== undefined
+      ? clampDropCell(opts.x, opts.y, cols, rows)
+      : { x: -1, y: -1 }
+    const wantedX = drop.x
+    const wantedY = drop.y
     const overlaps = (x: number, y: number) => buttons.some((b) => {
       const w = Math.min(cols, Math.max(1, Math.round(Number(b.w) || 1)))
       const h = Math.max(1, Math.round(Number(b.h) || 1))
@@ -1548,9 +1554,9 @@ const createFreeKey = async (opts: { x?: number; y?: number; actionType?: string
       spot = planFreeCell(buttons, cols, rows)
     }
     if (!spot) throw new Error(t('bd.gsNoRoom'))
-    const data = opts.actionType
+    const data = ensureDefaultIcon(opts.actionType
       ? { actions: [createAction(opts.actionType)] }
-      : {}
+      : {})
     const created = await apiPost('/buttons', {
       page_id: currentPage.value.id,
       position: spot.position,

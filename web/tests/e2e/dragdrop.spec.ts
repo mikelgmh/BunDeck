@@ -1,11 +1,12 @@
 import { test, expect, type APIRequestContext, type PlaywrightTestArgs } from '@playwright/test';
-import { collapseLeftPanel } from './helpers';
+import { collapseLeftPanel, dragSlotToSlot } from './helpers';
 
 const API = 'http://localhost:3001/api/v1';
 const LABEL_A = 'E2E-DRAG-A';
 const LABEL_B = 'E2E-DRAG-B';
 
 let pageId = '';
+let restorePageId = '';
 let posA = -1;
 let posB = -1;
 const createdIds: string[] = [];
@@ -21,37 +22,23 @@ test.beforeAll(async ({ playwright }) => {
     expect(profilesRes.ok()).toBeTruthy();
     const profiles = await profilesRes.json();
     const profile = profiles[0];
-    let gridCols = 5;
-    let gridRows = 3;
-    try {
-      const data = typeof profile.data === 'string' ? JSON.parse(profile.data) : profile.data;
-      if (data?.gridCols) gridCols = data.gridCols;
-      if (data?.gridRows) gridRows = data.gridRows;
-    } catch {
-      /* defaults */
-    }
-    const total = gridCols * gridRows;
 
-    const pagesRes = await api.get(`${API}/pages?profileId=${profile.id}`);
-    expect(pagesRes.ok()).toBeTruthy();
-    const pages = await pagesRes.json();
-    const page = pages.find((p: any) => p.is_folder === 0) ?? pages[0];
-    pageId = page.id;
+    // Página propia (no depende del modo de la primera página del perfil:
+    // si es libre no hay slots swapy y el drag clásico no aplica).
+    const curRes = await api.get(`${API}/settings?key=current.page_id`);
+    if (curRes.ok()) restorePageId = (await curRes.json()).value ?? '';
+
+    const pageRes = await api.post(`${API}/pages`, {
+      data: { profile_id: profile.id, name: 'E2E Drag Page', order_idx: 999, data: {} },
+    });
+    expect(pageRes.status()).toBe(201);
+    pageId = (await pageRes.json()).id;
 
     // Fijar la página actual para que la app la cargue al visitar
     await api.post(`${API}/settings`, { data: { key: 'current.page_id', value: pageId } });
 
-    const buttonsRes = await api.get(`${API}/buttons?pageId=${pageId}`);
-    expect(buttonsRes.ok()).toBeTruthy();
-    const buttons = await buttonsRes.json();
-    const taken = new Set(buttons.map((b: any) => b.position));
-    const free: number[] = [];
-    for (let i = 0; i < total && free.length < 2; i++) {
-      if (!taken.has(i)) free.push(i);
-    }
-    expect(free, 'need two free slots in the grid').toHaveLength(2);
-    posA = free[0];
-    posB = free[1];
+    posA = 0;
+    posB = 1;
 
     const mk = async (position: number, label: string, actions: any[]) => {
       const res = await api.post(`${API}/buttons`, {
@@ -83,6 +70,12 @@ test.afterAll(async ({ playwright }) => {
     for (const id of createdIds) {
       await api.delete(`${API}/buttons/${id}`);
     }
+    if (pageId) {
+      await api.delete(`${API}/pages/${pageId}`);
+    }
+    if (restorePageId) {
+      await api.post(`${API}/settings`, { data: { key: 'current.page_id', value: restorePageId } });
+    }
   } finally {
     await api.dispose();
   }
@@ -91,51 +84,17 @@ test.afterAll(async ({ playwright }) => {
 test('drags a button to another slot: optimistic immediately, persisted after reload', async ({
   page,
 }) => {
-  const reorderPromise = page.waitForResponse(
-    (res) => res.url().includes('/api/v1/buttons/reorder') && res.request().method() === 'POST',
-    { timeout: 10000 },
-  );
-
   await page.goto('/');
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 15000 });
   await collapseLeftPanel(page);
   await expect(page.getByText(LABEL_A).first()).toBeVisible({ timeout: 15000 });
   await expect(page.getByText(LABEL_B).first()).toBeVisible();
 
-  const src = page.locator(`[data-swapy-slot="slot-${posA}"] [data-swapy-item]`);
-  const tgt = page.locator(`[data-swapy-slot="slot-${posB}"]`);
-  await expect(src).toBeVisible();
-  await expect(tgt).toBeVisible();
-
-  const srcBox = await src.boundingBox();
-  const tgtBox = await tgt.boundingBox();
-  expect(srcBox, 'drag source item has a box').not.toBeNull();
-  expect(tgtBox, 'drag target slot has a box').not.toBeNull();
-  const x1 = srcBox!.x + srcBox!.width / 2;
-  const y1 = srcBox!.y + srcBox!.height / 2;
-  const x2 = tgtBox!.x + tgtBox!.width / 2;
-  const y2 = tgtBox!.y + tgtBox!.height / 2;
-
   // Gesto con mouse real (lo que Swapy escucha: pointerdown en el item,
   // movimientos con frames intermedios y pointerup en destino).
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  const steps = 10;
-  for (let i = 1; i <= steps; i++) {
-    const x = x1 + ((x2 - x1) * i) / steps;
-    const y = y1 + ((y2 - y1) * i) / steps;
-    await page.mouse.move(x, y, { steps: 2 });
-    await page.waitForTimeout(30);
-  }
-  await page.mouse.up();
-  await page.waitForTimeout(50);
-
-  // UI optimista: SIN recargar, A ya está en el slot de B y viceversa.
-  // Además el swap disparó la persistencia (POST /buttons/reorder).
-  const reorderRes = await reorderPromise;
+  const { reordered, order } = await dragSlotToSlot(page, posA, posB);
+  expect(reordered, 'swap disparó la persistencia (POST /buttons/reorder)').toBe(true);
   // Como en Cypress: verificar el body del REQUEST (order), no la respuesta.
-  const reorderReq = reorderRes.request().postDataJSON() as any;
-  const order = reorderReq?.order ?? [];
   expect(order).toEqual(expect.arrayContaining([{ id: createdIds[0], position: posB }]));
 
   await expect(page.locator(`[data-swapy-slot="slot-${posB}"]`), 'A moved to B slot').toContainText(

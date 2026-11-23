@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
  * Helpers API para los E2E Playwright — equivalentes a los cy.request()
@@ -142,6 +142,36 @@ export async function gotoBoard(page: Page): Promise<void> {
     .waitFor({ state: 'visible', timeout: 30_000 });
 }
 
+/** Acepta el diálogo "esta página se muestra en un Stream Deck" si aparece.
+ *
+ *  Las páginas clásicas nuevas se auto-asignan al deck de ejemplo y pasar a
+ *  Libre exige desasignarla: sin aceptar, la placa libre nunca aparece.
+ *  El selector se acota al diálogo abierto (hay dos <dialog> .bd-confirm).
+ */
+export async function acceptFreeModeConfirm(page: Page): Promise<void> {
+  const ok = page.locator('dialog.bd-confirm[open] .bd-confirm-actions .bd-pri');
+  try {
+    await ok.waitFor({ state: 'visible', timeout: 3000 });
+    await ok.click();
+  } catch {
+    /* sin diálogo: la página no estaba asignada a ningún deck */
+  }
+}
+
+/** Cambia a modo Libre aceptando el aviso y esperando al PUT que persiste. */
+export async function toggleFreeMode(page: Page): Promise<void> {
+  const putPromise = page.waitForResponse(
+    (res) =>
+      res.url().includes('/api/v1/pages/') &&
+      res.request().method() === 'PUT' &&
+      (res.request().postData()?.includes('gridstack') ?? false),
+    { timeout: 15000 },
+  );
+  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  await acceptFreeModeConfirm(page);
+  await putPromise;
+}
+
 /** Pliega el panel izquierdo si tapa el grid (a 1280px el drawer cubre teclas). */
 export async function collapseLeftPanel(page: Page): Promise<void> {
   const collapse = page.locator('[data-cy=bd-collapse-left]');
@@ -151,4 +181,58 @@ export async function collapseLeftPanel(page: Page): Promise<void> {
     await collapse.first().evaluate((el) => (el as HTMLElement).click());
     await page.locator('[data-cy=bd-expand-left]').first().waitFor({ timeout: 5000 });
   }
+}
+
+/** Arrastra una tecla de un slot a otro con gesto de ratón real.
+ *
+ *  Espera a que Swapy se haya re-vinculado tras la llegada de los botones: al
+ *  arrancar, Swapy se crea con el grid vacío y se re-vincula cuando la API
+ *  trae las teclas (resyncSwapy). Arrastrar en esa ventana (~200-500 ms) opera
+ *  sobre el mapa rancio y la suelta se ignora en silencio. Devuelve si el
+ *  daemon recibió el reorder y con qué order.
+ */
+export async function dragSlotToSlot(
+  page: Page,
+  from: number,
+  to: number,
+  timeout = 10000,
+): Promise<{ reordered: boolean; order: any[] }> {
+  const src = page.locator(`[data-swapy-slot="slot-${from}"] [data-swapy-item]`);
+  const tgt = page.locator(`[data-swapy-slot="slot-${to}"]`);
+  await expect(src).toBeVisible({ timeout });
+  await expect(tgt).toBeVisible({ timeout });
+  // Dar tiempo a la re-vinculación de Swapy (ver comentario arriba).
+  await page.waitForTimeout(1500);
+  const srcBox = await src.boundingBox();
+  const tgtBox = await tgt.boundingBox();
+  let order: any[] = [];
+  if (!srcBox || !tgtBox) return { reordered: false, order };
+  const reorderPromise = page
+    .waitForResponse(
+      (res) => res.url().includes('/api/v1/buttons/reorder') && res.request().method() === 'POST',
+      { timeout },
+    )
+    .then(
+      (res) => {
+        try {
+          order = (res.request().postDataJSON() as any)?.order ?? [];
+        } catch {
+          order = [];
+        }
+        return true;
+      },
+      () => false,
+    );
+  await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(
+      srcBox.x + ((tgtBox.x - srcBox.x) * i) / 10,
+      srcBox.y + ((tgtBox.y - srcBox.y) * i) / 10,
+      { steps: 2 },
+    );
+    await page.waitForTimeout(30);
+  }
+  await page.mouse.up();
+  return { reordered: await reorderPromise, order };
 }
