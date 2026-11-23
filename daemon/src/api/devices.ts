@@ -16,10 +16,12 @@ import type { ApiHandler } from './types';
 import {
   checkPageCompatibility,
   resolveDeckSize,
+  pickHwDeckForRepaint,
   DECK_MODELS,
   DEFAULT_DECK_MODEL,
   type DeviceKind,
 } from '../devices';
+import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 
 const KINDS: DeviceKind[] = ['deck', 'phone', 'tablet'];
 
@@ -162,6 +164,60 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
       const fixed = db.repairAssignments(profileId);
       const assignments = db.getAssignments(profileId);
       services.wsManager.broadcast('assignment.updated', { profileId, assignments }, 'pages');
+      // El HW físico sigue la asignación (nunca al revés): si cambió un deck,
+      // fijar la vista del HW a su página final (post-repair). Sin esto el
+      // botón "dispositivos" no movía nada físico. Best-effort: nunca tumba
+      // el guardado.
+      try {
+        const changedDecks = Object.entries(wanted)
+          .filter(([id, p]) => p !== null && byId.get(id)?.kind === 'deck')
+          .map(([id]) => id);
+        if (changedDecks.length > 0
+          && streamDeckDriver.isConnected()
+          && typeof services.wsManager.navigatePageTo === 'function') {
+          const allDevices = db.listDevices().map((d) => ({
+            id: d.id,
+            name: d.name,
+            kind: d.kind as DeviceKind,
+            model: (d as any).model ?? null,
+            cols: (d as any).cols ?? null,
+            rows: (d as any).rows ?? null,
+            hw_path: (d as any).hw_path ?? null,
+          }));
+          let hwGrid: { cols: number; rows: number } | null = null;
+          try {
+            hwGrid = streamDeckDriver.getGridGeometry();
+          } catch { hwGrid = null; }
+          let connectedPath: string | null = null;
+          try {
+            connectedPath = streamDeckDriver.getConnectedDevice() ?? null;
+          } catch { connectedPath = null; }
+          const picked = pickHwDeckForRepaint({
+            devices: allDevices,
+            changedDeckIds: changedDecks,
+            connectedPath,
+            hwGrid,
+          });
+          const finalPage = picked ? assignments[picked] : null;
+          if (picked && finalPage) {
+            let sameProfile = true;
+            try {
+              const view = streamDeckDriver.getSessionView();
+              sameProfile = !view.profileId || view.profileId === profileId;
+            } catch { sameProfile = true; }
+            // No arrancar al HW de otro perfil: solo sigue asignaciones de
+            // su perfil actual (o sin sesión todavía).
+            if (sameProfile) {
+              services.wsManager.navigatePageTo({
+                pageId: finalPage,
+                originDeviceId: null,
+                targets: { kind: 'devices', ids: [streamDeckDriver.getDeviceId()] },
+                context: { via: 'device-assignment' },
+              });
+            }
+          }
+        }
+      } catch { /* noop */ }
       return jsonResponse({ assignments, repaired: fixed });
     }
 

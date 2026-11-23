@@ -68,15 +68,20 @@ const DEFAULT_COLS = 5;
 const DEFAULT_ROWS = 3;
 
 function parseData(d: any): Record<string, any> {
-  if (!d) return {};
-  if (typeof d === 'string') {
+  let cur: any = d;
+  // Tolera doble/triple codificación histórica (capas de JSON.stringify
+  // acumuladas al reenviar el TEXT ya serializado en updatePage).
+  for (let i = 0; i < 5 && typeof cur === 'string'; i++) {
+    const t = cur.trim();
+    if (!t) return {};
     try {
-      return JSON.parse(d) ?? {};
+      cur = JSON.parse(t);
     } catch {
       return {};
     }
   }
-  return d ?? {};
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return {};
+  return cur;
 }
 
 /** `layoutMode` de página: 'gridstack' (libre) o 'classic' (cuadrícula). */
@@ -222,4 +227,39 @@ export function fixAssignments(opts: {
     }
   }
   return { assignments: out, dropped, unassigned };
+}
+
+/**
+ * ¿A qué deck lógico debe seguir el HW físico al cambiar asignaciones?
+ * (puro, testeable). Reglas:
+ * - Solo importan los decks con página pedida no-nula (`changedDeckIds`).
+ * - La coincidencia explícita `hw_path` con el path conectado manda.
+ * - Si algún deck tiene `hw_path`, un deck sin enlazar no empuja al HW.
+ * - Sin enlaces, el deck cambiado cuya geometría coincide con la del HW
+ *   (o se desconoce la del HW) es candidato.
+ * Devuelve el deviceId o null (no empujar: el HW se queda donde está).
+ */
+export function pickHwDeckForRepaint(opts: {
+  devices: LogicalDevice[];
+  changedDeckIds: string[];
+  connectedPath: string | null;
+  hwGrid: { cols: number; rows: number } | null;
+}): string | null {
+  const byId = new Map(opts.devices.map((d) => [d.id, d]));
+  const changed = opts.changedDeckIds
+    .map((id) => byId.get(id))
+    .filter((d): d is LogicalDevice => !!d && d.kind === 'deck');
+  if (changed.length === 0) return null;
+  if (opts.connectedPath) {
+    const bound = changed.find((d) => d.hw_path === opts.connectedPath);
+    if (bound) return bound.id;
+  }
+  if (opts.devices.some((d) => d.kind === 'deck' && d.hw_path)) return null;
+  const sized = opts.hwGrid
+    ? changed.filter((d) => {
+        const s = resolveDeckSize(d);
+        return s !== null && s.cols === opts.hwGrid!.cols && s.rows === opts.hwGrid!.rows;
+      })
+    : changed;
+  return sized[0]?.id ?? null;
 }

@@ -22,6 +22,7 @@ import {
   resolvePageSize,
   parseLayoutMode,
   fixAssignments,
+  pickHwDeckForRepaint,
   DECK_MODELS,
   type LogicalDevice,
   type PageView,
@@ -229,6 +230,35 @@ describe('API devices + assignments', () => {
     expect(after[m.id]).toBe(gridId);
   });
 
+  it('createPage/updatePage normalizan data ya serializada (sin doble capa)', () => {
+    const id = uid('page');
+    db.createPage({ id, profile_id: profId, name: 'Norm', order_idx: 99, is_folder: 0, data: JSON.stringify({ layoutMode: 'classic', gridCols: 5 }) });
+    const stored = db.getPage(id)!;
+    expect(parseLayoutMode((stored as any).data)).toBe('classic');
+    expect(JSON.parse((stored as any).data)).toEqual({ layoutMode: 'classic', gridCols: 5 });
+    // Reenviar el TEXT tal cual (como hacía el frontend) no añade otra capa.
+    db.updatePage(id, { data: (stored as any).data });
+    const stored2 = db.getPage(id)!;
+    expect(JSON.parse((stored2 as any).data)).toEqual({ layoutMode: 'classic', gridCols: 5 });
+    db.deletePage(id);
+  });
+
+  it('PUT delta con otra asignación rancia no bloquea un cambio válido', async () => {
+    const d1 = await (await call('/api/v1/devices', json({ method: 'POST', body: { name: 'DeckDelta1', kind: 'deck' } })))!.json();
+    const d2 = await (await call('/api/v1/devices', json({ method: 'POST', body: { name: 'DeckDelta2', kind: 'deck' } })))!.json();
+    // Estado rancio directo en BD (sin pasar por la validación): d2 apunta a la libre.
+    db.setAssignment(profId, d2.id, freeId);
+    // Delta solo para d1 con la cuadrícula válida → 200 aunque d2 siga rancia;
+    // la reparación posterior la repara sin tumbar la petición.
+    const res = await call(`/api/v1/profiles/${profId}/assignments`, json({
+      method: 'PUT',
+      body: { assignments: { [d1.id]: gridId } },
+    }));
+    expect(res!.status).toBe(200);
+    expect(db.getAssignments(profId)[d1.id]).toBe(gridId);
+    expect(db.getAssignments(profId)[d2.id]).toBe(gridId);
+  });
+
   it('eliminar una página limpia sus asignaciones', async () => {
     const d = await (await call('/api/v1/devices', json({ method: 'POST', body: { name: 'Tmp', kind: 'phone' } })))!.json();
     db.setAssignment(profId, d.id, freeId);
@@ -313,5 +343,62 @@ describe('guarda HW en navegación', () => {
     } finally {
       (streamDeckDriver as any).streamDeck = null;
     }
+  });
+});
+
+describe('pickHwDeckForRepaint (puro)', () => {
+  it('enlace hw_path explícito manda', () => {
+    const a = deck({ hw_path: 'PATH-A' });
+    const b = deck({ hw_path: null });
+    expect(pickHwDeckForRepaint({
+      devices: [a, b], changedDeckIds: [a.id, b.id],
+      connectedPath: 'PATH-A', hwGrid: { cols: 5, rows: 3 },
+    })).toBe(a.id);
+  });
+
+  it('sin enlaces, el deck cambiado con la geometría del HW es candidato', () => {
+    const a = deck({ model: 'mk2', cols: 5, rows: 3, hw_path: null });
+    const xl = deck({ model: 'xl', cols: 8, rows: 4, hw_path: null });
+    expect(pickHwDeckForRepaint({
+      devices: [a, xl], changedDeckIds: [xl.id],
+      connectedPath: 'PATH-X', hwGrid: { cols: 5, rows: 3 },
+    })).toBeNull();
+    expect(pickHwDeckForRepaint({
+      devices: [a, xl], changedDeckIds: [a.id],
+      connectedPath: 'PATH-X', hwGrid: { cols: 5, rows: 3 },
+    })).toBe(a.id);
+  });
+
+  it('si hay enlaces, un deck sin enlazar no empuja al HW', () => {
+    const bound = deck({ hw_path: 'PATH-A' });
+    const free = deck({ hw_path: null });
+    expect(pickHwDeckForRepaint({
+      devices: [bound, free], changedDeckIds: [free.id],
+      connectedPath: 'PATH-A', hwGrid: null,
+    })).toBeNull();
+  });
+
+  it('ignora no-decks y cambios vacíos', () => {
+    const p = phone({});
+    expect(pickHwDeckForRepaint({
+      devices: [p], changedDeckIds: [p.id], connectedPath: null, hwGrid: null,
+    })).toBeNull();
+    const d = deck({});
+    expect(pickHwDeckForRepaint({
+      devices: [d], changedDeckIds: [], connectedPath: null, hwGrid: null,
+    })).toBeNull();
+  });
+});
+
+describe('compatibilidad robusta a doble codificación', () => {
+  it('parseLayoutMode desenvuelve capas históricas', () => {
+    const double = JSON.stringify(JSON.stringify({ layoutMode: 'gridstack' }));
+    expect(parseLayoutMode(double)).toBe('gridstack');
+    expect(parseLayoutMode(JSON.stringify(double))).toBe('gridstack');
+  });
+
+  it('una libre doblemente codificada sigue siendo incompatible con deck', () => {
+    const double = JSON.stringify(JSON.stringify({ layoutMode: 'gridstack' }));
+    expect(checkPageCompatibility(gridPage({ data: double as any }), deck()).ok).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
   parseLayoutMode,
   resolvePageSize,
@@ -6,6 +6,7 @@ import {
   checkPageCompatibility,
   guessDeckModel,
   firstCompatibleRoot,
+  useDevices,
   DECK_MODELS,
   type LogicalDevice,
   type CompatView,
@@ -97,5 +98,42 @@ describe('useDevices: compatibilidad pagina-dispositivo', () => {
     expect(mRoot ? mRoot.id : null).toBe('g1')
     const none = firstCompatibleRoot(pages.filter((p) => p.id === 'g2'), mkDeck())
     expect(none).toBeNull()
+  })
+
+  it('parseLayoutMode tolera doble/triple codificación histórica', () => {
+    const double = JSON.stringify(JSON.stringify({ layoutMode: 'gridstack' }))
+    expect(parseLayoutMode(double)).toBe('gridstack')
+    const triple = JSON.stringify(double)
+    expect(parseLayoutMode(triple)).toBe('gridstack')
+  })
+
+  it('una libre doblemente codificada sigue siendo incompatible con deck', () => {
+    const double = JSON.stringify(JSON.stringify({ layoutMode: 'gridstack' }))
+    expect(checkPageCompatibility(mkPage({ data: double as any }), mkDeck()).ok).toBe(false)
+  })
+})
+
+describe('saveAssignments propaga details del 422', () => {
+  const origFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = origFetch
+  })
+
+  it('conserva details para el toast (qué dispositivo/página/motivo)', async () => {
+    const details = [{ deviceId: 'd1', pageId: 'g9', reason: 'página no existe en este perfil' }]
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 422,
+      text: async () => JSON.stringify({ error: 'Asignaciones incompatibles', details }),
+    })) as any
+    const store = useDevices(() => '')
+    let err: any = null
+    try {
+      await store.saveAssignments('p1', { d1: 'g1' })
+    } catch (e) {
+      err = e
+    }
+    expect(err?.status).toBe(422)
+    expect(err?.details).toEqual(details)
   })
 })

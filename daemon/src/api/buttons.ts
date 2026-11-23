@@ -45,7 +45,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
           // Reglas load/timer/var fuera del camino crítico (ver scheduleResyncButtonAutomations).
           try { (services.actionRunner as any)?.scheduleResyncButtonAutomations?.(); } catch { /* noop */ }
           if (streamDeckDriver.isConnected()) {
-            streamDeckDriver.scheduleUpdateFromPage(created.page_id);
+            streamDeckDriver.scheduleRefreshIfVisible(created.page_id);
           }
           return jsonResponse(created, 201);
         } catch (error) {
@@ -79,7 +79,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       // Repintado diferido (no bloquea la respuesta): el vaciado/creación
       // respondía tras un repintado completo y parecía "pillado".
       if (streamDeckDriver.isConnected()) {
-        streamDeckDriver.scheduleUpdateFromPage(button.page_id);
+        streamDeckDriver.scheduleRefreshIfVisible(button.page_id);
       }
 
       return jsonResponse(button, 201);
@@ -110,7 +110,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
         // Repintado diferido y coalescado (no bloquea la respuesta).
         if (streamDeckDriver.isConnected()) {
-          streamDeckDriver.scheduleUpdateFromPage(page_id);
+          streamDeckDriver.scheduleRefreshIfVisible(page_id);
         }
 
         return jsonResponse({ success: true, buttons: updated, pageVersion, mutationId: (raw as any)?.mutationId ?? null });
@@ -182,7 +182,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
       // Repintado diferido (no bloquea la respuesta).
       if (streamDeckDriver.isConnected() && updatedButton) {
-        streamDeckDriver.scheduleUpdateFromPage(updatedButton.page_id);
+        streamDeckDriver.scheduleRefreshIfVisible(updatedButton.page_id);
       }
 
       return jsonResponse(updatedButton);
@@ -205,7 +205,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       // Repintado diferido (no bloquea la respuesta): vaciar respondía
       // tras el repintado completo y la UI parecía congelada.
       if (streamDeckDriver.isConnected()) {
-        streamDeckDriver.scheduleUpdateFromPage(pageId);
+        streamDeckDriver.scheduleRefreshIfVisible(pageId);
       }
 
       return jsonResponse({ success: true });

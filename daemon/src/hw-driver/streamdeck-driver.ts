@@ -2,6 +2,15 @@ import type { StreamDeck } from '@elgato-stream-deck/node';
 import { DatabaseService } from '../db';
 import type { PressType } from '../flow/types';
 import { buttonHasTrigger } from '../flow/migrate';
+import type { Env } from '../variables/expressions';
+import {
+  DEFAULT_KEY_BG,
+  DEFAULT_KEY_FG,
+  displayNeedsLiveUpdate,
+  getDaemonDisplayEnv,
+  resolvedSignature,
+  resolveKeyDisplay,
+} from './key-display';
 
 // Carga perezosa de las libs nativas (node-hid): si faltan o fallan,
 // el driver queda "sin hardware" en vez de tumbar el daemon/API.
@@ -276,6 +285,16 @@ export class StreamDeckDriver {
   }
 
   async disconnect(): Promise<void> {
+    for (const [, iv] of this.dynamicIntervals.entries()) {
+      clearInterval(iv);
+    }
+    this.dynamicIntervals.clear();
+    if (this.liveInterval) {
+      clearInterval(this.liveInterval);
+      this.liveInterval = null;
+    }
+    this.liveSigs.clear();
+    this.liveRaws.clear();
     if (this.streamDeck) {
       this.streamDeck.removeAllListeners();
       await this.streamDeck.close();
@@ -519,7 +538,8 @@ export class StreamDeckDriver {
 
   async setButtonImage(keyIndex: number, imageBuffer: Buffer): Promise<void> {
     if (this.streamDeck) {
-      await this.streamDeck.fillKeyBuffer(keyIndex, imageBuffer);
+      // RGB top-down nativo del tamaño de la tecla (generateButtonImage).
+      await this.streamDeck.fillKeyBuffer(keyIndex, imageBuffer, { format: 'rgb' });
     }
   }
 
@@ -591,115 +611,165 @@ export class StreamDeckDriver {
     return buffer;
   }
 
-  async generateButtonImage(buttonData: any): Promise<Buffer> {
-    const width = 72;
-    const height = 72;
+  /**
+   * Tamaño nativo de tecla (px) del dispositivo conectado, leído de
+   * `CONTROLS` (pixelSize del primer botón LCD). Cubre todos los modelos
+   * (Mini 80, Classic/MK2 72, XL 96, Plus 120…); sin HW, fallback 72.
+   */
+  getIconSize(): number {
+    try {
+      const controls = (this.streamDeck as any)?.CONTROLS;
+      if (Array.isArray(controls)) {
+        for (const c of controls) {
+          const w = Number(c?.pixelSize?.width);
+          const h = Number(c?.pixelSize?.height);
+          if (c?.type === 'button' && Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0) {
+            return Math.min(w, h);
+          }
+        }
+      }
+    } catch { /* fallback 72 */ }
+    return 72;
+  }
+
+  /**
+   * Genera la imagen de una tecla replicando StageBoard (web): fondo
+   * `backgroundColor` (+ `backgroundImage` en cover), centro
+   * (`dynamicValue` > `iconImage` > icono Lucide tintado > `emoji`),
+   * `textTop` arriba y `textBottom`/`label` abajo (si `showTitle`).
+   * Icono y texto coexisten (antes el icono solo se pintaba sin texto).
+   *
+   * `buttonData` puede venir en crudo (con `looks`/`{{vars}}`): se resuelve
+   * con `resolveKeyDisplay`. El buffer es RGB top-down del tamaño nativo.
+   */
+  async generateButtonImage(buttonData: any, size?: number, env?: Env): Promise<Buffer> {
+    const s = size && Number.isInteger(size) && size > 0 ? size : this.getIconSize();
+    const width = s;
+    const height = s;
 
     const canvasLib = await getCanvas();
     if (!canvasLib) throw new Error('canvas no disponible: no se puede renderizar la tecla');
 
-    // Intentar usar Bun.Image si está disponible (Bun 1.3.13+), fallback a canvas
-    // Por ahora usamos canvas pero con soporte para valores dinámicos y iconos
+    const eff = resolveKeyDisplay(buttonData ?? {}, env ?? getDaemonDisplayEnv());
+
     const canvas = canvasLib.createCanvas(width, height);
     const ctx = canvas.getContext('2d');
-    
-    // Fondo: imagen de fondo si hay, si no backgroundColor o negro
-    const bg = buttonData.backgroundColor || '#000000';
-    ctx.fillStyle = bg;
+    const U = s / 72;
+
+    // Fondo sólido (la web usa gradiente; el HW pide color plano).
+    ctx.fillStyle = eff.backgroundColor || DEFAULT_KEY_BG;
     ctx.fillRect(0, 0, width, height);
 
-    // Imagen de fondo / personalizada (PNG normalizado o GIF: primer frame).
-    // Best-effort: si no se puede cargar, se sigue con color + texto/icono.
-    await this.tryDrawKeyImage(ctx, canvasLib, buttonData.iconImage ?? buttonData.backgroundImage, width, height, true);
-    
-    // Color de texto
-    ctx.fillStyle = buttonData.textColor || '#FFFFFF';
+    // Imagen de fondo en cover (best-effort).
+    await this.tryDrawKeyImage(ctx, canvasLib, eff.backgroundImage, width, height, true);
+
+    // Color de texto/icono.
+    const fg = eff.textColor || DEFAULT_KEY_FG;
+    ctx.fillStyle = fg;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
-    // Determinar qué texto mostrar — prioridad: dynamicValue > emoji > label > textTop/textBottom > icon > acción
-    let displayText = '';
-    let fontSize = 14;
-    
-    // 1) Valor dinámico (pc-vitals, etc.) — ya viene en buttonData.dynamicValue desde frontend o driver
-    if (buttonData.dynamicValue !== undefined && buttonData.dynamicValue !== null && String(buttonData.dynamicValue).trim() !== '') {
-      displayText = String(buttonData.dynamicValue).trim();
-      // Para valores como "45%" o "65°C", usar fuente grande
-      fontSize = displayText.length > 6 ? 16 : 22;
-      ctx.font = `bold ${fontSize}px Arial`;
-    } else if (buttonData.emoji && buttonData.emoji.trim()) {
-      displayText = buttonData.emoji.trim();
-      ctx.font = '32px Arial';
-    } else if (buttonData.label && buttonData.label.trim()) {
-      displayText = buttonData.label.trim();
-      fontSize = displayText.length > 10 ? 14 : displayText.length > 5 ? 18 : 24;
-      ctx.font = `${fontSize}px Arial`;
-    } else if (buttonData.textTop && buttonData.textTop.trim()) {
-      displayText = buttonData.textTop.trim();
-      ctx.font = '16px Arial';
-    } else if (buttonData.textBottom && buttonData.textBottom.trim()) {
-      displayText = buttonData.textBottom.trim();
-      ctx.font = '16px Arial';
-    } else if (buttonData.icon && buttonData.icon.trim()) {
-      // Icon es nombre lucide (ej: ArrowBigDownIcon) — renderizar SVG real con lucide
-      const iconName = buttonData.icon.replace(/Icon$/, '');
-      const hasIcon = await this.tryDrawLucideIcon(ctx, iconName, width, height, buttonData.textColor || '#FFFFFF');
-      if (hasIcon) {
-        // Icono dibujado, no necesita texto
-        // Flip y convertir a buffer directamente
-        const flippedCanvas = canvasLib.createCanvas(width, height);
-        const flippedCtx = flippedCanvas.getContext('2d');
-        flippedCtx.scale(1, -1);
-        flippedCtx.translate(0, -height);
-        flippedCtx.drawImage(canvas, 0, 0);
-        return this.canvasToRGBBuffer(flippedCanvas);
-      } else {
-        // Fallback si icono no encontrado
-        displayText = iconName.slice(0, 4).toUpperCase();
-        ctx.font = '14px Arial';
+    // Layout tipo web: textTop arriba, centro (dinámico/imagen/icono/emoji)
+    // y textBottom/label abajo. Icono y texto coexisten.
+    const cx = width / 2;
+    const hasTop = eff.textTop.trim() !== '';
+    const bottomText = eff.textBottom.trim() || eff.label.trim();
+    const hasBottom = eff.showTitle && bottomText !== '';
+
+    const topH = hasTop ? 16 * U : 5 * U;
+    const botH = hasBottom ? 16 * U : 5 * U;
+    const centerY = topH + (height - topH - botH) / 2;
+    const maxW = width - 10 * U;
+
+    const fitFont = (text: string, base: number, weight = ''): number => {
+      let fs = base;
+      try {
+        ctx.font = `${weight ? weight + ' ' : ''}${fs}px Arial`;
+        while (fs > 7 * U && ctx.measureText(text).width > maxW) {
+          fs -= 1;
+          ctx.font = `${weight ? weight + ' ' : ''}${fs}px Arial`;
+        }
+      } catch { /* medida no disponible: tamaño base */ }
+      return fs;
+    };
+    const ellipsis = (text: string): string => {
+      try {
+        if (ctx.measureText(text).width <= maxW) return text;
+        let t = text;
+        while (t.length > 1 && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1);
+        return `${t}…`;
+      } catch {
+        return text;
       }
-    } else if (buttonData.actions && buttonData.actions.length > 0) {
-      // Fallback: mostrar tipo de acción (ej: "RAM" para pc-vitals)
-      const firstAction = buttonData.actions[0];
-      if (firstAction.type?.includes('pc-vitals')) {
-        const comp = firstAction.parameters?.component || 'CPU';
-        displayText = comp.toUpperCase();
-        ctx.font = '16px Arial';
-      } else if (firstAction.type) {
-        const short = firstAction.type.split('.').pop() || firstAction.type;
-        displayText = short.slice(0, 6).toUpperCase();
-        ctx.font = '12px Arial';
+    };
+
+    const dyn = eff.dynamicValue.trim();
+    if (dyn !== '') {
+      // Valor dinámico: grande y centrado (web: .bd-dyn mono).
+      fitFont(dyn, dyn.length > 6 ? 16 * U : 22 * U, 'bold');
+      ctx.fillText(ellipsis(dyn), cx, centerY);
+    } else {
+      // Centro: iconImage (contain) > icono Lucide tintado > emoji.
+      const box = Math.min((hasBottom ? 34 : 42) * U, (height - topH - botH) * 0.92);
+      let centerDone = false;
+      if (eff.iconImage) {
+        centerDone = await this.tryDrawKeyImageBox(ctx, canvasLib, eff.iconImage, cx, centerY, box);
+      }
+      if (!centerDone && eff.icon.trim() !== '') {
+        centerDone = await this.tryDrawLucideIcon(
+          ctx, canvasLib, eff.icon.replace(/Icon$/, ''), cx, centerY, box, fg,
+        );
+      }
+      if (!centerDone && eff.emoji.trim() !== '') {
+        fitFont(eff.emoji.trim(), 26 * U);
+        ctx.fillText(eff.emoji.trim(), cx, centerY);
+        centerDone = true;
+      }
+      if (!centerDone) {
+        // Sin visual central: texto grande (clásico por texto).
+        const t = bottomText || eff.textTop.trim();
+        if (t !== '') {
+          if (t.length > 8 && t.includes(' ')) {
+            const parts = t.split(' ');
+            const mid = Math.ceil(parts.length / 2);
+            ctx.font = `${12 * U}px Arial`;
+            ctx.fillText(ellipsis(parts.slice(0, mid).join(' ')), cx, centerY - 8 * U);
+            ctx.fillText(ellipsis(parts.slice(mid).join(' ')), cx, centerY + 8 * U);
+          } else {
+            fitFont(t, t.length > 10 ? 13 * U : t.length > 5 ? 17 * U : 22 * U);
+            ctx.fillText(ellipsis(t), cx, centerY);
+          }
+        }
       }
     }
-    
-    // Si aún no hay texto, no dibujar nada (quedará fondo sólido)
-    if (displayText) {
-      // Ajustar para texto de dos líneas si es muy largo y contiene espacio
-      if (displayText.length > 8 && displayText.includes(' ')) {
-        const parts = displayText.split(' ');
-        const mid = Math.ceil(parts.length / 2);
-        const line1 = parts.slice(0, mid).join(' ');
-        const line2 = parts.slice(mid).join(' ');
-        ctx.font = '12px Arial';
-        ctx.fillText(line1, width / 2, height / 2 - 8);
-        ctx.fillText(line2, width / 2, height / 2 + 8);
-      } else {
-        ctx.fillText(displayText, width / 2, height / 2);
-      }
+
+    // textTop arriba (web: .bd-tt).
+    if (hasTop) {
+      fitFont(eff.textTop.trim(), Math.max(10 * U, eff.fontSize * U * 0.85));
+      ctx.fillText(ellipsis(eff.textTop.trim()), cx, topH / 2 + 1 * U);
     }
-    
-    // Flip the canvas vertically to correct orientation
-    const flippedCanvas = canvasLib.createCanvas(width, height);
-    const flippedCtx = flippedCanvas.getContext('2d');
-    flippedCtx.scale(1, -1);
-    flippedCtx.translate(0, -height);
-    flippedCtx.drawImage(canvas, 0, 0);
-    
-    // Convert to raw RGB buffer for StreamDeck
-    return this.canvasToRGBBuffer(flippedCanvas);
+    // textBottom/label abajo (web: .bd-tb/small, tono atenuado).
+    if (hasBottom) {
+      fitFont(bottomText, Math.max(10 * U, eff.fontSize * U * 0.8));
+      const prevAlpha = ctx.globalAlpha;
+      try { ctx.globalAlpha = 0.92; } catch { /* noop */ }
+      ctx.fillText(ellipsis(bottomText), cx, height - botH / 2);
+      try { ctx.globalAlpha = prevAlpha; } catch { /* noop */ }
+    }
+
+    // Buffer RGB top-down nativo (lo que fillKeyBuffer espera por defecto).
+    return this.canvasToRGBBuffer(canvas);
   }
 
-  private async tryDrawLucideIcon(ctx: any, iconName: string, width: number, height: number, color: string): Promise<boolean> {
+  /**
+   * Dibuja un icono Lucide centrado en (cx, cy) dentro de un cuadrado `box`,
+   * tintado con `color` (= textColor, como la web vía currentColor).
+   * Usa el `Path2D` de @napi-rs/canvas: el global no existe en Bun y era
+   * la causa de que ningún icono llegase al StreamDeck.
+   */
+  private async tryDrawLucideIcon(
+    ctx: any, canvasLib: any, iconName: string, cx: number, cy: number, box: number, color: string,
+  ): Promise<boolean> {
     try {
       // Normalizar nombre: ArrowBigDown -> ArrowBigDown, arrow-big-down -> ArrowBigDown
       // Lucide usa PascalCase en el paquete 'lucide'
@@ -732,34 +802,38 @@ export class StreamDeckDriver {
       }
 
       // iconData es array de [tag, attrs] como [["path", {d: "..."}]]
-      // Dibujar centrado y escalado para 72x72 (viewBox 24x24 -> escala 2x)
-      const scale = 2.2;
-      const offsetX = (width - 24 * scale) / 2;
-      const offsetY = (height - 24 * scale) / 2;
+      // Dibujar centrado en (cx, cy) dentro del cuadrado `box` (viewBox 24).
+      const scale = box / 24;
+      const offsetX = cx - (24 * scale) / 2;
+      const offsetY = cy - (24 * scale) / 2;
+
+      const P2D = (canvasLib as any)?.Path2D ?? (globalThis as any)?.Path2D;
       
       ctx.save();
+      let ok = true;
       ctx.translate(offsetX, offsetY);
-      ctx.scale(scale, scale);
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+        ctx.scale(scale, scale);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
-      for (const [tag, attrs] of iconData) {
-        if (tag === 'path' && attrs.d) {
-          try {
-            const path = new (globalThis as any).Path2D(attrs.d);
-            if (attrs.fill && attrs.fill !== 'none') {
-              ctx.fill(path);
-            } else {
-              ctx.stroke(path);
+        for (const [tag, attrs] of iconData) {
+          if (tag === 'path' && attrs.d) {
+            if (!P2D) { ok = false; break; }
+            try {
+              const path = new P2D(attrs.d);
+              if (attrs.fill && attrs.fill !== 'none') {
+                ctx.fill(path);
+              } else {
+                ctx.stroke(path);
+              }
+            } catch {
+              ok = false;
+              break;
             }
-          } catch {
-            // Fallback: si Path2D no disponible, ignorar
-            return false;
-          }
-        } else if (tag === 'circle' && attrs.cx) {
+          } else if (tag === 'circle' && attrs.cx) {
           ctx.beginPath();
           ctx.arc(Number(attrs.cx), Number(attrs.cy), Number(attrs.r), 0, Math.PI * 2);
           if (attrs.fill && attrs.fill !== 'none') ctx.fill();
@@ -790,9 +864,63 @@ export class StreamDeckDriver {
         }
       }
       ctx.restore();
-      return true;
+      return ok;
     } catch (e) {
       // console.error('Failed to draw lucide icon', iconName, e);
+      try { ctx.restore(); } catch { /* noop */ }
+      return false;
+    }
+  }
+
+  /**
+   * Dibuja `iconImage` contenida (fit) y centrada en (cx, cy) dentro de un
+   * cuadrado `box` (web: `.bd-kimg` 40px con cover y radio). Devuelve false
+   * si no se pudo cargar: el llamador prueba con icono/emoji/texto.
+   */
+  private async tryDrawKeyImageBox(
+    ctx: any,
+    canvasLib: any,
+    rel: unknown,
+    cx: number,
+    cy: number,
+    box: number,
+  ): Promise<boolean> {
+    try {
+      if (typeof rel !== 'string' || !rel) return false;
+      const name = rel.split('?')[0].replace(/^\/assets\//, '');
+      if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) return false;
+      const { getDataDir } = await import('../paths');
+      const { default: path } = await import('path');
+      const file = Bun.file(path.join(getDataDir(), 'assets', name));
+      if (!(await file.exists())) return false;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!bytes.byteLength) return false;
+      const loader = (canvasLib as any)?.loadImage;
+      if (typeof loader !== 'function') return false;
+      const img: any = await loader(bytes);
+      const iw = Number(img?.width) || 0;
+      const ih = Number(img?.height) || 0;
+      if (!iw || !ih) return false;
+      const s = Math.min(box / iw, box / ih);
+      const dw = Math.max(1, iw * s);
+      const dh = Math.max(1, ih * s);
+      const x = cx - dw / 2;
+      const y = cy - dh / 2;
+      ctx.save();
+      try {
+        if (typeof (ctx as any).roundRect === 'function') {
+          const r = Math.min(8 * (box / 40), dw / 2, dh / 2);
+          ctx.beginPath();
+          (ctx as any).roundRect(x, y, dw, dh, r);
+          ctx.clip();
+        }
+        ctx.drawImage(img, x, y, dw, dh);
+      } finally {
+        ctx.restore();
+      }
+      return true;
+    } catch {
       return false;
     }
   }
@@ -914,6 +1042,9 @@ export class StreamDeckDriver {
   }
 
   private dynamicIntervals = new Map<number, ReturnType<typeof setInterval>>();
+  private liveInterval: ReturnType<typeof setInterval> | null = null;
+  private liveSigs = new Map<number, string>();
+  private liveRaws = new Map<number, any>();
 
   // Repintado diferido y coalescado: los endpoints de botones llaman a esto
   // en vez de `await updateFromPage()` para no bloquear la respuesta HTTP.
@@ -937,58 +1068,115 @@ export class StreamDeckDriver {
     };
   }
 
-  private startDynamicPolling(buttons: any[]) {
-    // Limpiar intervalos previos
-    for (const [pos, iv] of this.dynamicIntervals.entries()) {
+  /**
+   * Repintado por EDICIÓN (no por navegación): solo refresca si el HW ya
+   * muestra esa página (o aún no tiene sesión). Nunca cambia la vista del
+   * HW: editar otra página en el editor no debe mover el deck físico.
+   * Como solo se llama cuando coincide, el `updateFromPage` interno no
+   * secuestra la sesión (reescribe la misma página).
+   */
+  scheduleRefreshIfVisible(pageId: string, delayMs = 150): void {
+    if (!pageId) return;
+    let cur: string | null = null;
+    try {
+      cur = this.getSessionView().pageId;
+    } catch { cur = null; }
+    if (cur && cur !== pageId) return;
+    this.scheduleUpdateFromPage(pageId, delayMs);
+  }
+
+  private startDynamicPolling(buttons: any[], profileName = '', pageName = '') {
+    // Limpiar intervalos previos (métricas + looks/tiempo).
+    for (const [, iv] of this.dynamicIntervals.entries()) {
       clearInterval(iv);
     }
     this.dynamicIntervals.clear();
+    if (this.liveInterval) {
+      clearInterval(this.liveInterval);
+      this.liveInterval = null;
+    }
+    this.liveSigs.clear();
+    this.liveRaws.clear();
+
+    const size = this.getIconSize();
 
     buttons.forEach((btn, idx) => {
       if (!btn || !btn.data?.actions?.some((a: any) => a.type?.includes('pc-vitals'))) return;
       const action = btn.data.actions.find((a: any) => a.type?.includes('pc-vitals'));
       const intervalMs = action?.parameters?.updateInterval || 1000;
       const pos = btn.position ?? idx;
+      const raw = btn.data;
       const iv = setInterval(async () => {
         try {
+          const env = getDaemonDisplayEnv(profileName, pageName);
           const dyn = await this.resolveDynamicValue(btn);
-          if (dyn) {
-            const dataWithDyn = { ...btn.data, dynamicValue: dyn };
-            const buf = await this.generateButtonImage(dataWithDyn);
-            await this.setButtonImage(pos, buf);
-          }
+          const dataWithDyn = dyn ? { ...raw, dynamicValue: dyn } : { ...raw };
+          const sig = resolvedSignature(resolveKeyDisplay(dataWithDyn, env));
+          if (this.liveSigs.get(pos) === sig) return;
+          this.liveSigs.set(pos, sig);
+          const buf = await this.generateButtonImage(dataWithDyn, size, env);
+          await this.setButtonImage(pos, buf);
         } catch {}
       }, Math.max(500, intervalMs));
       this.dynamicIntervals.set(pos, iv);
     });
+
+    // Looks/tiempo ({{hora}}, conds con vars…): re-resolver 1/s y repintar
+    // solo las teclas cuya apariencia efectiva cambió. Sin métricas aquí.
+    const live = buttons.filter(
+      (btn, idx) =>
+        btn?.data && !btn.data.actions?.some((a: any) => a.type?.includes('pc-vitals')) &&
+        displayNeedsLiveUpdate(btn.data),
+    ).map((btn, _i) => ({ pos: btn.position ?? buttons.indexOf(btn), raw: btn.data }));
+    if (!live.length) return;
+    try {
+      const env0 = getDaemonDisplayEnv(profileName, pageName);
+      for (const e of live) {
+        this.liveRaws.set(e.pos, e.raw);
+        this.liveSigs.set(e.pos, resolvedSignature(resolveKeyDisplay(e.raw, env0)));
+      }
+    } catch { /* primer tick lo fijará */ }
+    this.liveInterval = setInterval(() => {
+      void (async () => {
+        try {
+          const env = getDaemonDisplayEnv(profileName, pageName);
+          for (const [pos, raw] of this.liveRaws.entries()) {
+            try {
+              const sig = resolvedSignature(resolveKeyDisplay(raw, env));
+              if (this.liveSigs.get(pos) === sig) continue;
+              this.liveSigs.set(pos, sig);
+              const buf = await this.generateButtonImage(raw, size, env);
+              await this.setButtonImage(pos, buf);
+            } catch { /* best-effort por tecla */ }
+          }
+        } catch { /* best-effort */ }
+      })();
+    }, 1000);
   }
 
   canvasToRGBBuffer(canvas: any): Buffer {
     const width = canvas.width;
     const height = canvas.height;
-    
+
     // Get image data
     const imageData = canvas.getContext('2d').getImageData(0, 0, width, height);
     const data = imageData.data;
-    
-    // For StreamDeck, we need raw RGB data (no BMP header)
-    // StreamDeck expects BGR format, bottom-up
+
+    // RGB top-down: es lo que fillKeyBuffer espera por defecto
+    // (format 'rgb': fila 0 = arriba, stride width*3). Antes se emitía
+    // BGR bottom-up de la era BMP y los rojos/azules salían cruzados.
     const buffer = Buffer.alloc(width * height * 3);
     let offset = 0;
-    
-    for (let y = height - 1; y >= 0; y--) {
+
+    for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const pixelIndex = (y * width + x) * 4;
-        const r = data[pixelIndex];
-        const g = data[pixelIndex + 1];
-        const b = data[pixelIndex + 2];
-        
-        buffer[offset++] = b; // Blue
-        buffer[offset++] = g; // Green
-        buffer[offset++] = r; // Red
+        buffer[offset++] = data[pixelIndex]; // Red
+        buffer[offset++] = data[pixelIndex + 1]; // Green
+        buffer[offset++] = data[pixelIndex + 2]; // Blue
       }
     }
-    
+
     return buffer;
   }
 
@@ -1015,6 +1203,8 @@ export class StreamDeckDriver {
       // Fallback: si no hay página, usar lógica anterior pero sin hardcode "Botón"
       console.log('⚠️ No hay página actual, usando fallback por posición');
       const fallbackCount = this.getKeyCount();
+      const size = this.getIconSize();
+      const env = getDaemonDisplayEnv();
       for (let i = 0; i < Math.min(buttonStates.length, fallbackCount); i++) {
         const hasContent = buttonStates[i];
         if (hasContent) {
@@ -1022,12 +1212,14 @@ export class StreamDeckDriver {
           const pageId = db2.getSetting('current.page_id');
           const btn = pageId ? db2.getButtonsByPage(pageId).find(b => b.position === i) : null;
           const data = btn?.data || { label: `Btn ${i + 1}`, backgroundColor: '#374151', textColor: '#f1f5f9' };
-          const imageBuffer = await this.generateButtonImage(data);
+          const imageBuffer = await this.generateButtonImage(data, size, env);
           await this.setButtonImage(i, imageBuffer);
           console.log(`📝 Set button ${i} to TEXT (fallback)`);
         } else {
-          await this.setButtonColor(i, 255, 0, 0);
-          console.log(`🔴 Set button ${i} to RED (empty)`);
+          // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
+          const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+          await this.setButtonImage(i, imageBuffer);
+          console.log(`⬛ Set button ${i} to default (empty)`);
         }
       }
     } catch (error) {
@@ -1043,6 +1235,7 @@ export class StreamDeckDriver {
 
     console.log(`🎛️ Updating StreamDeck buttons with data for ${buttons.length} buttons`);
     const keyCount = this.getKeyCount();
+    const size = this.getIconSize();
 
     try {
       // Un solo fetch de métricas por repintado completo: antes se hacía un
@@ -1050,12 +1243,28 @@ export class StreamDeckDriver {
       // dejaba la API colgada y el HW "eterno" al vaciar/mover teclas.
       const hasDynamic = buttons.some((b) => b?.data?.actions?.some((a: any) => a.type?.includes('pc-vitals')));
       const metrics = await this.fetchSystemMetricsOnce(hasDynamic);
+      // Nombres para las incorporadas perfil/pagina del env (best-effort).
+      let profileName = '';
+      let pageName = '';
+      try {
+        const dbn = new DatabaseService();
+        const first = buttons.find((b) => b?.page_id);
+        if (first?.page_id) {
+          const pg = dbn.getPage(first.page_id);
+          if (pg) {
+            pageName = pg.name ?? '';
+            const pf = pg.profile_id ? dbn.getProfile(pg.profile_id) : null;
+            profileName = (pf as any)?.name ?? '';
+          }
+        }
+      } catch { /* sin nombres: env igualmente válido */ }
+      const env = getDaemonDisplayEnv(profileName, pageName);
       for (let i = 0; i < Math.min(buttons.length, keyCount); i++) {
         // Ceder el event loop por botón: el render (canvas) + escritura USB
         // son pesados y si no la API/WS se quedan colgados durante el repintado.
         await new Promise<void>((r) => setImmediate(r));
         const button = buttons[i];
-        
+
         if (button && button.data) {
           // Check if button has content
           const hasContent = !!(
@@ -1078,18 +1287,21 @@ export class StreamDeckDriver {
                 if (dyn) dataToRender = { ...button.data, dynamicValue: dyn };
               } catch {}
             }
-            const imageBuffer = await this.generateButtonImage(dataToRender);
+            const imageBuffer = await this.generateButtonImage(dataToRender, size, env);
             await this.setButtonImage(i, imageBuffer);
-            console.log(`📝 Set button ${i} to TEXT: "${dataToRender.dynamicValue || dataToRender.label || dataToRender.emoji || 'BTN'}"`);
+            const effLog = (() => { try { return resolveKeyDisplay(dataToRender, env); } catch { return null; } })();
+            console.log(`📝 Set button ${i} to "${effLog?.dynamicValue || effLog?.label || effLog?.emoji || effLog?.icon || 'BTN'}"`);
           } else {
-            // Rojo para botones vacíos
-            await this.setButtonColor(i, 255, 0, 0);
-            console.log(`🔴 Set button ${i} to RED (empty)`);
+            // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
+            const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+            await this.setButtonImage(i, imageBuffer);
+            console.log(`⬛ Set button ${i} to default (empty)`);
           }
         } else {
-          // Rojo para botones vacíos
-          await this.setButtonColor(i, 255, 0, 0);
-          console.log(`🔴 Set button ${i} to RED (empty)`);
+          // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
+          const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+          await this.setButtonImage(i, imageBuffer);
+          console.log(`⬛ Set button ${i} to default (empty)`);
         }
       }
 
@@ -1175,8 +1387,14 @@ export class StreamDeckDriver {
 
       console.log('🎛️ Updating buttons with full data');
       await this.updateButtonsWithData(buttonsByPosition);
-      // Iniciar polling para valores dinámicos (pc-vitals, etc.)
-      this.startDynamicPolling(buttonsByPosition);
+      // Polling en vivo: pc-vitals + looks/tiempo (1 s, solo cambios).
+      try {
+        const pg = db.getPage(pageId);
+        const pf = pg?.profile_id ? db.getProfile(pg.profile_id) : null;
+        this.startDynamicPolling(buttonsByPosition, (pf as any)?.name ?? '', pg?.name ?? '');
+      } catch {
+        this.startDynamicPolling(buttonsByPosition);
+      }
 
     } catch (error) {
       console.error('❌ Error updating StreamDeck from page:', error);

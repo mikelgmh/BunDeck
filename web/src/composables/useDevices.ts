@@ -60,15 +60,20 @@ const DEFAULT_COLS = 5
 const DEFAULT_ROWS = 3
 
 function parseData(d: any): Record<string, any> {
-  if (!d) return {}
-  if (typeof d === 'string') {
+  let cur: any = d
+  // Tolera doble/triple codificación histórica (updatePage reenviaba el
+  // TEXT ya serializado y cada guardado añadía una capa de JSON.stringify).
+  for (let i = 0; i < 5 && typeof cur === 'string'; i++) {
+    const t = cur.trim()
+    if (!t) return {}
     try {
-      return JSON.parse(d) ?? {}
+      cur = JSON.parse(t)
     } catch {
       return {}
     }
   }
-  return d ?? {}
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return {}
+  return cur
 }
 
 export function parseLayoutMode(pageData: any): DevicePageLayout {
@@ -148,20 +153,29 @@ export function useDevices(apiBase: () => string) {
       ...init,
     })
     if (!res.ok) {
+      // Conservar el cuerpo para propagar `details` (el PUT 422 devuelve
+      // { error, details: [{ deviceId, pageId, reason }] } y el toast lo necesita).
       let detail = ''
+      let body: any = null
       try {
         const txt = await res.text()
         try {
-          detail = String((JSON.parse(txt) as any)?.error ?? txt)
+          body = JSON.parse(txt)
+          detail = String(body?.error ?? txt)
         } catch {
           detail = txt
         }
       } catch { /* noop */ }
       const err: any = new Error(detail || `${path}: ${res.status}`)
       err.status = res.status
-      try {
-        err.details = (JSON.parse(detail) as any)?.details
-      } catch { /* noop */ }
+      if (body && Array.isArray((body as any)?.details)) {
+        err.details = (body as any).details
+      } else if (detail) {
+        try {
+          const d2 = JSON.parse(detail) as any
+          if (Array.isArray(d2?.details)) err.details = d2.details
+        } catch { /* noop */ }
+      }
       throw err
     }
     return res.json().catch(() => ({}))
@@ -232,10 +246,12 @@ export function useDevices(apiBase: () => string) {
     for (const a of snapshot.assignments ?? []) {
       if (!a.pageId) continue
       try {
-        const cur = await req(`/profiles/${encodeURIComponent(a.profileId)}/assignments`)
+        // Delta: solo el dispositivo restaurado. Enviar el mapa completo
+        // arrastra asignaciones rancias de otros dispositivos y el PUT 422
+        // las rechaza en bloque aunque esta sea válida.
         await req(`/profiles/${encodeURIComponent(a.profileId)}/assignments`, {
           method: 'PUT',
-          body: JSON.stringify({ assignments: { ...(cur.assignments ?? {}), [d.id]: a.pageId } }),
+          body: JSON.stringify({ assignments: { [d.id]: a.pageId } }),
         })
       } catch { /* la página pudo desaparecer: se ignora */ }
     }

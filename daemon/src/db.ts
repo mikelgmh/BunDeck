@@ -1030,6 +1030,26 @@ function parseJsonSafe(text: any): any {
   catch { return {}; }
 }
 
+/**
+ * Normaliza un campo JSON antes de guardarlo: si ya viene serializado
+ * (string), lo deserializa —incluso con doble/triple capa histórica— para
+ * que el `JSON.stringify` posterior guarde UNA sola capa. Evita que cada
+ * `updatePage` sin `data` explícita añada una capa de escaping.
+ */
+function normalizeJsonData(d: any): any {
+  let cur: any = d;
+  for (let i = 0; i < 5 && typeof cur === 'string'; i++) {
+    const t = cur.trim();
+    if (!t) return {};
+    try {
+      cur = JSON.parse(t);
+    } catch {
+      return {};
+    }
+  }
+  return cur ?? {};
+}
+
 function parseVariableValue(text: any): any {
   if (text === null || text === undefined) return null;
   if (typeof text !== 'string') return text;
@@ -1303,7 +1323,7 @@ export class DatabaseService {
       updated_at: now
     };
 
-    stmt.run(profile.id, profile.name, now, now, JSON.stringify(profile.data));
+    stmt.run(profile.id, profile.name, now, now, JSON.stringify(normalizeJsonData(profile.data)));
     return fullProfile;
   }
 
@@ -1319,7 +1339,7 @@ export class DatabaseService {
 
     stmt.run(
       updates.name || null,
-      updates.data ? JSON.stringify(updates.data) : null,
+      updates.data ? JSON.stringify(normalizeJsonData(updates.data)) : null,
       now,
       id
     );
@@ -1485,7 +1505,7 @@ export class DatabaseService {
     stmt.run(
       page.id, page.profile_id, page.name, page.order_idx, page.is_folder || 0,
       page.parent_id ?? null, page.grid_cols ?? null, page.grid_rows ?? null,
-      JSON.stringify(page.data)
+      JSON.stringify(normalizeJsonData(page.data))
     );
   }
 
@@ -1544,7 +1564,7 @@ export class DatabaseService {
 
     if (updates.data !== undefined) {
       setParts.push('data = ?');
-      values.push(JSON.stringify(updates.data));
+      values.push(JSON.stringify(normalizeJsonData(updates.data)));
     }
 
     if (setParts.length === 0) return;

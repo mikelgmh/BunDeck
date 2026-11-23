@@ -828,9 +828,19 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
         console.log('🎛️ Received button states for update:', buttonStates);
 
         // No bloquear: el repintado completo va en segundo plano.
-        // pageId manda; si no viene, el driver usa current.page_id.
+        // La sesión propia del HW manda: el editor no puede cambiar la vista
+        // del deck físico empujando su pageId (esa era la vía por la que
+        // navegar en el navegador movía el Stream Deck). Si piden otra
+        // página distinta de la sesión, se refresca la sesión actual.
         const { DatabaseService: DB } = await import('../db');
-        const target = pageId ?? new DB().getSetting('current.page_id');
+        let sessionPage: string | null = null;
+        try {
+          sessionPage = streamDeckDriver.getSessionView().pageId;
+        } catch { sessionPage = null; }
+        if (sessionPage && pageId && pageId !== sessionPage) {
+          console.log(`🎛️ Ignorando pageId del editor (${pageId}): el HW muestra su sesión (${sessionPage})`);
+        }
+        const target = sessionPage ?? pageId ?? new DB().getSetting('current.page_id');
         if (streamDeckDriver.isConnected() && target && target !== 'null' && target !== '') {
           streamDeckDriver.scheduleUpdateFromPage(target);
         } else if (streamDeckDriver.isConnected()) {

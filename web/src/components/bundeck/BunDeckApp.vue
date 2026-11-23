@@ -1089,8 +1089,11 @@ const onPageRename = async (pageId: string, name: string) => {
 const onDeviceAssign = async (deviceId: string, pageId: string | null) => {
   if (!selectedProfile.value) return
   try {
-    const map: Record<string, string | null> = { ...devStore.assignments.value, [deviceId]: pageId }
-    const body = await devStore.saveAssignments(selectedProfile.value, map)
+    // Delta: solo el dispositivo tocado. El PUT valida cada entrada enviada,
+    // así que arrastrar el mapa completo convertía cualquier asignación rancia
+    // de OTRO dispositivo (página borrada, de otro perfil o vuelta incompatible
+    // tras un resize) en un 422 que parecía culpar a la página elegida.
+    const body = await devStore.saveAssignments(selectedProfile.value, { [deviceId]: pageId })
     if (body.repaired) {
       const dropped = (body.repaired.dropped ?? []) as Array<{ deviceName: string; pageName: string; reason: string }>
       for (const d of dropped) {
@@ -1109,12 +1112,16 @@ const onDeviceAssign = async (deviceId: string, pageId: string | null) => {
       await onPageSelect(pageId)
     }
   } catch (e: any) {
-    if (e?.status === 422 && e?.details) {
+    if (e?.status === 422 && Array.isArray(e?.details) && e.details.length > 0) {
       const first = e.details[0]
+      const pageName = (currentPages.value ?? []).find((p) => p.id === first.pageId)?.name ?? first.pageId
+      const reason = first.reason === 'free-mode'
+        ? t('bd.deviceCompatFree')
+        : first.reason
       bdShowToast(t('bd.blockedNav', {
-        page: first.pageId,
+        page: pageName,
         device: devStore.devices.value.find((d) => d.id === first.deviceId)?.name ?? first.deviceId,
-        reason: first.reason,
+        reason,
       }))
     } else {
       bdShowToast(String(e?.message ?? e))
@@ -1428,11 +1435,14 @@ const apiPut = async (path: string, body: any) => {
 }
 /** Modo de layout por página: 'classic' (rejilla fija) o 'gridstack' (redimensionable). */
 const parsePageData = (d: any): Record<string, any> => {
-  if (!d) return {}
-  if (typeof d === 'string') {
-    try { return JSON.parse(d) ?? {} } catch { return {} }
+  let cur: any = d
+  // Tolera doble/triple codificación histórica (ver db.normalizeJsonData).
+  for (let i = 0; i < 5 && typeof cur === 'string'; i++) {
+    const t = cur.trim()
+    if (!t) return {}
+    try { cur = JSON.parse(t) } catch { return {} }
   }
-  return d
+  return cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}
 }
 /** Override optimista: la UI cambia al instante al pulsar Fija/Libre,
  *  aunque el PUT al daemon tarde o falle (entonces se revierte). */
@@ -1461,7 +1471,7 @@ const onLayoutModeChange = async (mode: 'classic' | 'gridstack') => {
       )
       if (!ok) return
       try {
-        const map: Record<string, string | null> = { ...devStore.assignments.value }
+        const map: Record<string, string | null> = {}
         for (const d of hw) map[d.id] = null
         await devStore.saveAssignments(selectedProfile.value, map)
         bdShowToast(t('bd.pageUnassignedFrom', {
@@ -1516,7 +1526,7 @@ const onGridSizeChange = async (dx: number, dy: number) => {
   await changeGridSize(dx, dy)
   if (hw.length && currentPage.value && selectedProfile.value) {
     try {
-      const map: Record<string, string | null> = { ...devStore.assignments.value }
+      const map: Record<string, string | null> = {}
       for (const d of hw) map[d.id] = null
       await devStore.saveAssignments(selectedProfile.value, map)
       bdShowToast(t('bd.pageUnassignedFrom', {

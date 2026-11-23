@@ -522,8 +522,9 @@ export function useStreamDeck() {
             } catch (error) {
               console.error('❌ Failed to save remote page change to database settings:', error)
             }
-            // Update StreamDeck after remote page change
-            await updateStreamDeckButtons()
+            // OJO: no se empuja la vista al HW. El Stream Deck físico sigue su
+            // propia sesión/asignación; solo cambia por acción o por el botón
+            // "dispositivos". (selectPage tampoco repinta el HW.)
           }
           console.log('✅ Page navigation completed')
         } catch (error) {
@@ -733,11 +734,10 @@ export function useStreamDeck() {
       if (selectedProfile.value) {
         await loadProfile()
 
-        // After loading profile and page, update StreamDeck if connected
-        console.log('🔌 Profile loaded, checking if we need to update StreamDeck...');
-        setTimeout(async () => {
-          await updateStreamDeckButtons();
-        }, 1000); // Small delay to ensure everything is loaded
+        // OJO: al arrancar NO se empuja la página del editor al HW. El driver
+        // restaura su propia sesión (device_sessions) al conectar; el HW solo
+        // cambia por acción o por el botón "dispositivos".
+        console.log('🔌 Profile loaded (sin empujar vista al StreamDeck).')
       }
     } catch (error) {
       console.error('Failed to load profiles:', error)
@@ -1658,9 +1658,9 @@ export function useStreamDeck() {
       }))
     }
 
-    // Force update StreamDeck after profile change (sin bloquear: el HW
-    // repinta en segundo plano; el perfil ya está visible).
-    void updateStreamDeckButtons()
+    // OJO: el editor NO empuja su vista al HW al navegar (ni selectProfile
+    // ni selectPage repintan el Stream Deck físico). El HW sigue su propia
+    // sesión/asignación y solo cambia por acción o por el botón "dispositivos".
   }
   const createProfile = async (name: string) => {
     try {
@@ -1864,8 +1864,8 @@ export function useStreamDeck() {
       console.error('❌ Failed to save page to database settings:', error)
     })
 
-    // Update StreamDeck buttons to reflect the current page (sin bloquear)
-    void updateStreamDeckButtons()
+    // OJO: navegar en el editor NO repinta el Stream Deck físico (ver nota en
+    // updateStreamDeckButtons). El HW sigue su propia sesión/asignación.
 
     // Broadcast page change to other devices (only for local changes)
     if (!isRemotePageChange.value) {
@@ -1977,6 +1977,20 @@ export function useStreamDeck() {
     }
   }
 
+  const normalizePageData = (d: any): Record<string, any> => {
+    let cur: any = d
+    for (let i = 0; i < 5 && typeof cur === 'string'; i++) {
+      const t = cur.trim()
+      if (!t) return {}
+      try {
+        cur = JSON.parse(t)
+      } catch {
+        return {}
+      }
+    }
+    return cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}
+  }
+
   const updatePage = async (pageId: string, updates: Partial<PageData>) => {
     try {
       const page = currentPages.value.find(p => p.id === pageId)
@@ -1988,7 +2002,9 @@ export function useStreamDeck() {
           name: updates.name || page.name,
           order_idx: updates.order_idx || page.order_idx,
           is_folder: updates.is_folder !== undefined ? updates.is_folder : page.is_folder,
-          data: updates.data || page.data
+          // Normalizar: page.data llega como TEXT serializado del daemon;
+          // reenviarlo tal cual sumaba una capa de JSON.stringify por guardado.
+          data: updates.data !== undefined ? updates.data : normalizePageData((page as any).data)
         })
       })
 
@@ -2392,6 +2408,13 @@ export function useStreamDeck() {
     }
   }
 
+  /**
+   * Repintado MANUAL del HW (sin llamadas automáticas desde navegación:
+   * ni selectPage, ni selectProfile, ni page.navigate remoto lo invocan).
+   * El Stream Deck físico sigue su propia sesión/asignación; esta función
+   * solo existe para refresco explícito/depuración y el daemon decide qué
+   * página mostrar (la sesión del HW manda sobre el pageId pedido).
+   */
   const updateStreamDeckButtons = async () => {
     try {
       // Verificar si hay un StreamDeck conectado primero

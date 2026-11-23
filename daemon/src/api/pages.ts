@@ -2,6 +2,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { jsonResponse, dataTooLarge, MAX_PAGE_PROFILE_DATA_BYTES } from './http-helpers';
 import type { ApiHandler } from './types';
+import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 
 export const handlePages: ApiHandler = async (_req, { url, method, path, db, services }) => {
   if (path === '/api/v1/pages') {
@@ -93,6 +94,13 @@ export const handlePages: ApiHandler = async (_req, { url, method, path, db, ser
         db.updatePage(pageId, body);
         const updatedPage = db.getPage(pageId);
         services.wsManager.broadcast('page.updated', { pageId, page: updatedPage }, 'pages');
+        // Refrescar el HW solo si muestra esta página (editar otra página en
+        // el editor no debe mover el deck físico).
+        if (body.data !== undefined || body.grid_cols !== undefined || body.grid_rows !== undefined) {
+          try {
+            if (streamDeckDriver.isConnected()) streamDeckDriver.scheduleRefreshIfVisible(pageId);
+          } catch { /* noop */ }
+        }
         return jsonResponse(updatedPage);
       } catch (error) {
         if (error instanceof Error && error.message.includes('already exists')) {
