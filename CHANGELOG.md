@@ -1,3 +1,10 @@
+## [1.10.2](https://github.com/mikelgmh/libredeck/compare/v1.10.1...v1.10.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* **updater:** bake LIBREDECK_VERSION into daemon and CLI binaries ([d9ffabf](https://github.com/mikelgmh/libredeck/commit/d9ffabfc50ae59534f842b0cb2c5fc3973032e5c))
+
 ## [1.10.1](https://github.com/mikelgmh/libredeck/compare/v1.10.0...v1.10.1) (2026-11-23)
 
 
