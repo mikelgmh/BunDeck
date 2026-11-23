@@ -1,3 +1,10 @@
+## [1.10.6](https://github.com/mikelgmh/libredeck/compare/v1.10.5...v1.10.6) (2026-11-23)
+
+
+### Bug Fixes
+
+* **qa-2:** snapshot de Deshacer desde la API + e2e de reglas load ([79892be](https://github.com/mikelgmh/libredeck/commit/79892bed5f9947c620ac806d7d4a949483ca373e))
+
 ## [1.10.5](https://github.com/mikelgmh/libredeck/compare/v1.10.4...v1.10.5) (2026-11-23)
 
 
