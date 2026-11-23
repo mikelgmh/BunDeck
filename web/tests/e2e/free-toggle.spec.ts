@@ -9,6 +9,7 @@ const LABEL_B = 'E2E Toggle B';
 let testPageId = '';
 let restorePageId = '';
 const createdButtonIds: string[] = [];
+const createdDeviceIds: string[] = [];
 
 async function seedButton(request: any, pageId: string, position: number, label: string, extra: any = {}) {
   const res = await request.post(`${API}/buttons`, {
@@ -24,6 +25,7 @@ test.beforeEach(async ({ page, request }) => {
   testPageId = '';
   restorePageId = '';
   createdButtonIds.length = 0;
+  createdDeviceIds.length = 0;
   await page.goto('/');
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
 
@@ -56,6 +58,9 @@ test.afterEach(async ({ request }) => {
   }
   if (testPageId) {
     await request.delete(`${API}/pages/${testPageId}`);
+  }
+  for (const id of createdDeviceIds) {
+    await request.delete(`${API}/devices/${id}`, { failOnStatusCode: false });
   }
   if (restorePageId) {
     await request.post(`${API}/settings`, {
@@ -185,13 +190,19 @@ test('cancelar el aviso mantiene la página en Fija sin llamar al daemon', async
   const created = await createTestPage(page);
   await collapseLeftPanel(page);
 
-  // Pre-asignar el deck a la página para que el aviso salga siempre
-  // (sin depender del auto-repair de asignaciones).
+  // Pre-asignar un deck a la página para que el aviso salga siempre
+  // (sin depender del auto-repair de asignaciones). Sin seed: se crea por API.
   const profilesRes = await request.get(`${API}/profiles`);
   const profiles = await profilesRes.json();
   const profile = profiles[0];
+  const deckRes = await request.post(`${API}/devices`, {
+    data: { name: 'E2E Deck', kind: 'deck', model: 'mk2' },
+  });
+  expect(deckRes.status()).toBe(201);
+  const deckId = (await deckRes.json()).id;
+  createdDeviceIds.push(deckId);
   await request.put(`${API}/profiles/${profile.id}/assignments`, {
-    data: { assignments: { 'dev-deck-mk2': testPageId } },
+    data: { assignments: { [deckId]: testPageId } },
   });
   // Recargar para que la UI lea la asignación (esperar al GET, no solo a los
   // chips: sin esto el toggle puede correr antes de que lleguen las

@@ -289,6 +289,32 @@
         </li>
       </ul>
       <p v-if="lanError" class="bd-err" role="alert" data-cy="remote-lan-error">{{ lanError }}</p>
+
+      <h4 class="bd-remote-subheading">{{ t('bd.browsersTitle') }}</h4>
+      <p class="bd-sub">{{ t('bd.browsersSub') }}</p>
+      <p v-if="!knownBrowsers.length" class="bd-hint" data-cy="remote-browsers-empty">{{ t('bd.browsersEmpty') }}</p>
+      <ul v-else class="bd-remote-list" data-cy="remote-browsers">
+        <li v-for="b in knownBrowsers" :key="b.id" class="bd-remote-row" data-cy="remote-browser-item">
+          <div class="bd-remote-row__info">
+            <b class="bd-remote-row__title"><i class="bd-dot" :class="{ 'bd-ok': !!b.online }" :title="b.online ? t('bd.deviceOnline') : t('bd.deviceOffline')" aria-hidden="true"></i>{{ b.name }}</b>
+            <p class="bd-remote-meta"><span>{{ browserKindLabel(b) }}</span><span>{{ b.online ? t('bd.deviceOnline') : t('bd.deviceOffline') }}</span></p>
+            <span v-if="b.id === ownDeviceId" class="bd-tag-def">{{ t('bd.browserThis') }}</span>
+          </div>
+          <div v-if="b.id !== ownDeviceId" class="bd-remote-row__actions">
+            <button
+              class="bd-remote-revoke"
+              :title="t('bd.deviceForget')"
+              :aria-label="`${t('bd.deviceForget')}: ${b.name}`"
+              data-cy="remote-browser-forget"
+              :data-id="b.id"
+              @click="onForgetBrowser(b.id)"
+            >
+              <Trash2 :size="16" aria-hidden="true" />
+              {{ t('bd.deviceForget') }}
+            </button>
+          </div>
+        </li>
+      </ul>
     </section>
 
     <!-- Sección 2 — Enlazar otro BunDeck (emparejamiento daemon-daemon E2E) -->
@@ -528,7 +554,9 @@ import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, 
 import { buildLanInviteUrl } from '../../utils/lanInvite'
 import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
-import { Link2, Globe, ShieldOff, KeyRound } from 'lucide-vue-next'
+import { useDevices, type LogicalDevice } from '../../composables/useDevices'
+import { getOrCreateDeviceId } from '../../utils/sessionRouting'
+import { Link2, Globe, ShieldOff, KeyRound, Trash2 } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -755,6 +783,7 @@ const onApprovalDeny = () => resolveApproval(false)
 const onRevokeSession = async (prefix: string) => {
   try {
     await revokeSession(prefix)
+    await loadBrowsers()
   } catch {
     /* noop */
   }
@@ -905,6 +934,28 @@ const onRotate = async () => {
   }
 }
 
+// --- Navegadores conocidos (gestión local: olvidar revoca y borra) ---
+const devStore = useDevices(apiBase)
+const ownDeviceId = getOrCreateDeviceId()
+const knownBrowsers = computed<LogicalDevice[]>(() =>
+  (Array.isArray(devStore.devices.value) ? devStore.devices.value : []).filter((d) => d.kind !== 'deck')
+)
+const browserKindLabel = (d: LogicalDevice) =>
+  d.kind === 'phone' ? t('bd.deviceKindPhone')
+  : d.kind === 'tablet' ? t('bd.deviceKindTablet')
+  : t('bd.deviceKindBrowser')
+const loadBrowsers = async () => {
+  try {
+    await devStore.loadDevices()
+  } catch { /* sin daemon */ }
+}
+const onForgetBrowser = async (id: string) => {
+  try {
+    await devStore.deleteDevice(id)
+    await loadBrowsers()
+  } catch { /* noop */ }
+}
+
 // --- Invitación LAN (red local solo-por-invitación) ---
 const lanBase = ref('')
 const lanLinkCopied = ref(false)
@@ -956,6 +1007,7 @@ const onLanRevoke = async () => {
 const onLanRevokeSession = async (prefix: string) => {
   try {
     await revokeLanSession(prefix)
+    await loadBrowsers()
   } catch { /* noop */ }
 }
 
@@ -969,6 +1021,7 @@ onMounted(() => {
   mobileLike.value = isMobileLike()
   refresh().catch(() => {})
   loadLanSessions().catch(() => {})
+  loadBrowsers().catch(() => {})
   connectWs()
   // En vivo: poll 5s + WS topic `remote` (si el composable lo soporta).
   startUiPoll()

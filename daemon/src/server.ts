@@ -235,10 +235,10 @@ class LibreDeckDaemon {
           const peerIp = getPeerIp(req, server);
           let verdict;
           try {
-            verdict = evaluateLanAccess(new DatabaseService(), req, peerIp);
+            verdict = evaluateLanAccess(new DatabaseService(), req, peerIp, { allowNullPeer: server == null });
           } catch {
             verdict = { ok: false as const, status: 401 as const, code: 'LAN_INVITE_REQUIRED', message: 'Sin permiso' };
-            if (peerIp === null) verdict = { ok: true as const, via: 'tunnel' as const };
+            if (peerIp === null && server == null) verdict = { ok: true as const, via: 'tunnel' as const };
           }
           if (!verdict.ok) {
             const denied = lanDeniedResponse(req, verdict);
@@ -305,7 +305,7 @@ class LibreDeckDaemon {
                 'Content-Type': 'text/html',
               },
             }
-          );
+          ));
         },
         error: (error) => {
           console.error('Frontend Server error:', error);

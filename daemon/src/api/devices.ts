@@ -17,13 +17,17 @@ import {
   checkPageCompatibility,
   resolveDeckSize,
   pickHwDeckForRepaint,
+  isHardwareDeviceId,
   DECK_MODELS,
   DEFAULT_DECK_MODEL,
   type DeviceKind,
 } from '../devices';
+import { unbindDevice, boundPrefixForDevice } from '../remote/device-bindings';
+import { revokeUiSessionByPrefix, notifyTunnelUiUnbind } from '../remote/ui-policy';
+import { revokeLanSessionByPrefix } from '../remote/lan-invites';
 import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 
-const KINDS: DeviceKind[] = ['deck', 'phone', 'tablet'];
+const KINDS: DeviceKind[] = ['deck', 'phone', 'tablet', 'browser'];
 
 /** Igualdad superficial de mapas deviceId → pageId (para no re-emitir). */
 function assignmentsChanged(a: Record<string, string>, b: Record<string, string>): boolean {
@@ -31,6 +35,169 @@ function assignmentsChanged(a: Record<string, string>, b: Record<string, string>
   const kb = Object.keys(b);
   if (ka.length !== kb.length) return true;
   return ka.some((k) => b[k] !== a[k]);
+}
+
+/**
+ * Fila del HW físico: siempre existe (el hardware no se crea ni se borra).
+ * Crea la fila si falta (sin tocar el nombre si el usuario lo renombró).
+ */
+function ensureHardwareRow(db: any): void {
+  try {
+    const id = 'streamdeck-local';
+    if (db.getDevice(id)) return;
+    db.createDevice({
+      id, name: 'Stream Deck', kind: 'deck',
+      model: null, cols: null, rows: null, hw_path: null,
+    });
+  } catch { /* carrera: otro hilo la creó */ }
+}
+
+/**
+ * Lista unificada de dispositivos (la única que ve la UI):
+ * - Hardware detectado (`streamdeck-local` o filas con `hw_path`).
+ * - Navegadores aceptados (auto-aprovisionados al identificarse por WS).
+ * - Filas heredadas sin sesión (semilla/legado): fuente `manual`, offline.
+ *
+ * Añade `online` (WS en vivo), `source` y `lastSeen`. Se auto-repara:
+ * crea la fila que falte para cada sesión conocida (el HW y los
+ * navegadores aparecen solos, sin alta manual).
+ */
+export function buildUnifiedDevices(db: any, services: any): any[] {
+  // El HW físico siempre existe como fila (aunque nunca se haya conectado).
+  ensureHardwareRow(db);
+  // Higiene oportunista: las sesiones de contextos que no vuelven en semanas
+  // (incógnitos, orígenes de prueba, invitados antiguos) se purgan para que
+  // la auto-reparación de abajo no las resucite como dispositivos.
+  // El HW offline conserva su fila (ensureHardwareRow) y sus asignaciones;
+  // al reconectar recupera la vista global.
+  try {
+    db.purgeStaleDeviceSessions?.(Date.now() - 30 * 24 * 3600 * 1000);
+  } catch { /* mejor esfuerzo */ }
+  // Auto-reparación: cada sesión persistida tiene su fila.
+  try {
+    const sessions = db.listDeviceSessions();
+    for (const s of sessions) {
+      const id = String(s?.device_id ?? '');
+      if (!id || id.startsWith('tunnel:')) continue;
+      const sk = String(s?.kind ?? '').toLowerCase();
+      if (sk === 'cli' || sk === 'api') continue;
+      if (!db.getDevice(id)) {
+        const hw = isHardwareDeviceId(id) || sk === 'hardware' || sk === 'streamdeck' || sk === 'elgato';
+        const label = (typeof s?.name === 'string' && s.name.trim())
+          ? s.name.trim().slice(0, 80)
+          : hw ? 'Stream Deck' : `Navegador ${id.slice(0, 4)}`;
+        try {
+          db.createDevice({
+            id, name: label, kind: hw ? 'deck' : 'browser',
+            model: null, cols: null, rows: null, hw_path: null,
+          });
+        } catch { /* carrera: otro hilo la creó */ }
+      }
+    }
+  } catch { /* mejor esfuerzo */ }
+
+  const online = new Set<string>();
+  try {
+    const views = services?.wsManager?.getSessions?.() ?? [];
+    for (const v of views) {
+      if (v?.connected && v?.deviceId) online.add(String(v.deviceId));
+    }
+  } catch { /* sin ws: todos offline */ }
+  let hwConnected = false;
+  try {
+    hwConnected = streamDeckDriver.isConnected();
+  } catch { hwConnected = false; }
+
+  let rows: any[] = [];
+  try {
+    rows = db.listDevices();
+  } catch {
+    return [];
+  }
+  const withMeta = rows.map((d: any) => {
+    const id = String(d.id);
+    const hw = isHardwareDeviceId(id) || !!d.hw_path;
+    let session: any = null;
+    try {
+      session = db.getDeviceSession(id) ?? null;
+    } catch { session = null; }
+    const isOnline = hw ? (hwConnected || online.has(id)) : online.has(id);
+    const source: 'hardware' | 'browser' | 'manual' =
+      hw ? 'hardware' : (session || d.kind === 'browser') ? 'browser' : 'manual';
+    return {
+      ...d,
+      online: isOnline,
+      source,
+      lastSeen: session?.updated_at ?? d.updated_at ?? null,
+    };
+  });
+  // Orden estable para la UI: hardware, online, resto (por actividad).
+  const rank = (d: any) => (d.source === 'hardware' ? 0 : d.online ? 1 : d.source === 'browser' ? 2 : 3);
+  withMeta.sort((a: any, b: any) => rank(a) - rank(b) || (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
+  return withMeta;
+}
+
+/**
+ * Olvidar un dispositivo = prohibirle la entrada:
+ * - Revoca sus sesiones de acceso vinculadas (UI remota / LAN).
+ * - Borra fila `devices`, sesión persistida, enlaces y asignaciones.
+ * - Cierra sus WS vivos y avisa por WS (`device.deleted` + presencia).
+ * Las llamadas desde el revocador de sesiones usan `revokeTokens: false`
+ * (el token ya se revocó ahí; evita auditorías duplicadas).
+ */
+export function forgetDeviceEverywhere(
+  db: any,
+  services: any,
+  deviceId: string,
+  opts?: { revokeTokens?: boolean },
+): { forgotten: boolean } {
+  const id = String(deviceId ?? '');
+  if (!id) return { forgotten: false };
+  // El hardware físico no se puede olvidar ni prohibir: siempre existe.
+  if (isHardwareDeviceId(id)) return { forgotten: false };
+  try {
+    if (!db.getDevice(id)) return { forgotten: false };
+  } catch {
+    return { forgotten: false };
+  }
+  if (opts?.revokeTokens !== false) {
+    for (const kind of ['ui', 'lan'] as const) {
+      let prefix: string | null = null;
+      try {
+        prefix = boundPrefixForDevice(db, kind, id);
+      } catch { prefix = null; }
+      if (!prefix) continue;
+      try {
+        if (kind === 'ui') {
+          const found = revokeUiSessionByPrefix(db, prefix);
+          if (found) notifyTunnelUiUnbind(found.token);
+        } else {
+          revokeLanSessionByPrefix(db, prefix);
+        }
+      } catch { /* noop */ }
+    }
+  }
+  try {
+    db.deleteDevice(id);
+  } catch { /* noop */ }
+  try {
+    db.deleteDeviceSession(id);
+  } catch { /* sin sesión: noop */ }
+  try {
+    unbindDevice(db, id);
+  } catch { /* noop */ }
+  try {
+    services?.wsManager?.disconnectDevice?.(id);
+  } catch { /* noop */ }
+  try {
+    for (const p of db.getProfiles()) db.repairAssignments(p.id);
+  } catch { /* noop */ }
+  try {
+    services?.wsManager?.broadcast?.('device.deleted', { deviceId: id }, 'pages');
+    services?.wsManager?.broadcast?.('device.offline', { deviceId: id, online: false }, 'devices');
+    services?.wsManager?.broadcast?.('assignment.updated', { deviceDeleted: id }, 'pages');
+  } catch { /* noop */ }
+  return { forgotten: true };
 }
 
 function cleanDeviceInput(body: any, isCreate: boolean): { ok: boolean; error?: string; value?: any } {
@@ -225,9 +392,12 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
   }
 
   // ---- CRUD de dispositivos ----
+  // GET devuelve la lista UNIFICADA (hardware + navegadores aceptados +
+  // legado) con `online`/`source`/`lastSeen`. Es la única que consume la UI:
+  // ya no hay altas manuales (el POST queda para restaurar/deshacer y MCP).
   if (path === '/api/v1/devices') {
     if (method === 'GET') {
-      return jsonResponse(db.listDevices());
+      return jsonResponse(buildUnifiedDevices(db, services));
     }
     if (method === 'POST') {
       const body = (await _req.json()) as any ?? {};
@@ -257,6 +427,14 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
       const existing = db.getDevice(id);
       if (!existing) return jsonResponse({ error: 'Device not found' }, 404);
       const body = (await _req.json()) as any ?? {};
+      // El hardware solo admite renombrar: su clase/geometría la manda el
+      // driver detectado, no la edición manual.
+      if (isHardwareDeviceId(id)) {
+        const forbidden = ['kind', 'model', 'cols', 'rows', 'hw_path'].filter((k) => body?.[k] !== undefined);
+        if (forbidden.length > 0) {
+          return jsonResponse({ error: `El hardware solo admite renombrar (campos bloqueados: ${forbidden.join(', ')})` }, 400);
+        }
+      }
       const cleaned = cleanDeviceInput(body, false);
       if (!cleaned.ok) return jsonResponse({ error: cleaned.error }, 400);
       const updated = db.updateDevice(id, cleaned.value);
@@ -271,16 +449,19 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
       return jsonResponse({ device: updated, repaired });
     }
     if (method === 'DELETE') {
+      // El hardware físico no se puede eliminar ni revocar: siempre existe.
+      if (isHardwareDeviceId(id)) {
+        return jsonResponse({ error: 'El hardware no se puede eliminar' }, 403);
+      }
       const existing = db.getDevice(id);
       if (!existing) return jsonResponse({ error: 'Device not found' }, 404);
       const snapshot = {
         device: existing,
         assignments: db.getProfiles().map((p) => ({ profileId: p.id, pageId: db.getAssignments(p.id)[id] ?? null })),
       };
-      db.deleteDevice(id);
-      for (const p of db.getProfiles()) db.repairAssignments(p.id);
-      services.wsManager.broadcast('device.deleted', { deviceId: id }, 'pages');
-      services.wsManager.broadcast('assignment.updated', { deviceDeleted: id }, 'pages');
+      // Olvidar = prohibir: revoca sesiones vinculadas, borra filas y
+      // cierra sus WS (ver forgetDeviceEverywhere).
+      forgetDeviceEverywhere(db, services, id);
       // Snapshot para deshacer en el frontend (re-crea dispositivo + asignaciones).
       return jsonResponse({ success: true, snapshot });
     }

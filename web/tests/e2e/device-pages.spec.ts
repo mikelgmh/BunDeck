@@ -6,6 +6,9 @@ let testPageId = '';
 let restorePageId = '';
 let initialAssignments: Record<string, string | null> = {};
 let profileId = '';
+// Sin seed de dispositivos: cada spec aprovisiona los suyos por API.
+let phoneId = '';
+let deckId = '';
 
 async function currentProfileAndPage(request: any, page: any) {
   await page.goto('/');
@@ -60,8 +63,30 @@ async function createTestPage(page: any) {
 
 test.beforeEach(async ({ page, request }) => {
   testPageId = '';
+  phoneId = '';
+  deckId = '';
   await currentProfileAndPage(request, page);
 });
+
+async function ensurePhoneDevice(request: any) {
+  if (phoneId) return phoneId;
+  const res = await request.post(`${API}/devices`, {
+    data: { name: 'E2E Navegador', kind: 'browser' },
+  });
+  expect(res.status()).toBe(201);
+  phoneId = (await res.json()).id;
+  return phoneId;
+}
+
+async function ensureDeckDevice(request: any) {
+  if (deckId) return deckId;
+  const res = await request.post(`${API}/devices`, {
+    data: { name: 'E2E Deck', kind: 'deck', model: 'mk2' },
+  });
+  expect(res.status()).toBe(201);
+  deckId = (await res.json()).id;
+  return deckId;
+}
 
 test.afterEach(async ({ request }) => {
   if (testPageId) {
@@ -74,6 +99,9 @@ test.afterEach(async ({ request }) => {
       failOnStatusCode: false,
     });
   }
+  for (const id of [phoneId, deckId]) {
+    if (id) await request.delete(`${API}/devices/${id}`, { failOnStatusCode: false });
+  }
   if (restorePageId) {
     await request.post(`${API}/settings`, {
       data: { key: 'current.page_id', value: restorePageId },
@@ -83,10 +111,11 @@ test.afterEach(async ({ request }) => {
 
 test('asignar una página a un dispositivo persiste tras recargar', async ({ page, request }) => {
   const created = await createTestPage(page);
+  // Navegador aprovisionado por API (ya no hay seed).
+  const pid = await ensurePhoneDevice(request);
   await openDevicesPopover(page);
 
-  // El teléfono de ejemplo existe en DBs con seed.
-  const select = page.locator('[data-cy=bd-device-page-dev-phone]');
+  const select = page.locator(`[data-cy=bd-device-page-${pid}]`);
   await expect(select).toBeVisible({ timeout: 5000 });
 
   const putPromise = page.waitForResponse(
@@ -104,10 +133,10 @@ test('asignar una página a un dispositivo persiste tras recargar', async ({ pag
   await page.reload();
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
   await openDevicesPopover(page);
-  await expect(page.locator('[data-cy=bd-device-page-dev-phone]')).toHaveValue(testPageId);
+  await expect(page.locator(`[data-cy=bd-device-page-${pid}]`)).toHaveValue(testPageId);
 
   const asgRes = await request.get(`${API}/profiles/${profileId}/assignments`);
-  expect(((await asgRes.json()).assignments ?? {})['dev-phone']).toBe(testPageId);
+  expect(((await asgRes.json()).assignments ?? {})[pid]).toBe(testPageId);
 });
 
 test('una página libre no se puede asignar a un deck (solo fijas compatibles)', async ({
@@ -128,16 +157,17 @@ test('una página libre no se puede asignar a un deck (solo fijas compatibles)',
   await expect(page.locator('[data-cy=bd-gs-plate]')).toBeVisible({ timeout: 10000 });
 
   // En el desplegable del deck la opción de la página libre está deshabilitada.
+  const did = await ensureDeckDevice(request);
   await openDevicesPopover(page);
   const option = page.locator(
-    `[data-cy=bd-device-page-dev-deck-mk2] option[value="${created.id}"]`,
+    `[data-cy=bd-device-page-${did}] option[value="${created.id}"]`,
   );
   await expect(option).toBeAttached({ timeout: 5000 });
   await expect(option).toBeDisabled();
 
   // Y el daemon la rechaza aunque se intente por API (422).
   const direct = await request.put(`${API}/profiles/${profileId}/assignments`, {
-    data: { assignments: { ...initialAssignments, 'dev-deck-mk2': created.id } },
+    data: { assignments: { ...initialAssignments, [did]: created.id } },
   });
   expect(direct.status()).toBe(422);
 

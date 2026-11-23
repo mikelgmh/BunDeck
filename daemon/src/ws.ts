@@ -4,6 +4,8 @@ import { windowWatcher } from './window-watcher';
 import { DatabaseService } from './db';
 import { isLoopbackIp, hasValidLanSession, LAN_DENIED_CODE } from './http/lan-guard';
 import { redeemLanInvite, validateLanSession } from './remote/lan-invites';
+import { validateUiSession } from './remote/ui-policy';
+import { bindDeviceToToken } from './remote/device-bindings';
 import { parseLayoutMode, resolvePageSize, isHardwareDeviceId } from './devices';
 import { getEventBus, BUS_WS_FORWARD, busWsTopic, type EventBus } from './events/bus';
 import { resolveNavTargets, normalizeDeviceKind, type NavTargets } from './sessions';
@@ -149,7 +151,9 @@ export class WebSocketManager {
         close: (ws: any) => {
           const clientData = this.getClientByWs(ws);
           if (clientData) {
+            const deviceId = clientData.deviceId;
             this.clients.delete(clientData.id);
+            this.broadcastOfflineIfGone(deviceId);
           }
         }
       }
@@ -206,7 +210,7 @@ export class WebSocketManager {
         type: 'error',
         payload: {
           code: LAN_DENIED_CODE,
-          message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que genere una invitación (QR o enlace) y vuelve a intentarlo.',
+          message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que te lo enseñe desde Ajustes → Acceso remoto o con el botón de QR de la barra superior (Abrir en el móvil), o que te pase el enlace de invitación, y vuelve a intentarlo.',
         },
       });
       return;
@@ -300,15 +304,27 @@ export class WebSocketManager {
     const client = this.clients.get(clientId);
     if (!client) return;
 
+    // Tokens presentados (para vincular deviceId ↔ sesión más abajo).
+    // - LAN: `invite`/`token` (sesión portadora o código de un solo uso).
+    // - UI remota (túnel): `sessionToken` (el relay ya validó; aquí solo se
+    //   registra el enlace para que revocar oculte el dispositivo).
+    const presentedLan =
+      (typeof payload?.invite === 'string' && payload.invite) ||
+      (typeof payload?.lanInvite === 'string' && payload.lanInvite) ||
+      (typeof payload?.lanSessionToken === 'string' && payload.lanSessionToken) ||
+      null;
+    const presentedUi =
+      (typeof payload?.sessionToken === 'string' && payload.sessionToken) ||
+      (typeof payload?.uiSessionToken === 'string' && payload.uiSessionToken) ||
+      null;
+    // Compat: antes la sesión LAN también viajaba en `sessionToken`/`token`.
+    const presentedLegacy =
+      (typeof payload?.token === 'string' && payload.token) || null;
+
     // Autenticación LAN en `hello` (solo si aún no está autorizado):
     // acepta sesión portadora o código de invitación de un solo uso.
     if (!client.lanAuthed) {
-      const presented =
-        (typeof payload?.sessionToken === 'string' && payload.sessionToken) ||
-        (typeof payload?.invite === 'string' && payload.invite) ||
-        (typeof payload?.lanInvite === 'string' && payload.lanInvite) ||
-        (typeof payload?.token === 'string' && payload.token) ||
-        null;
+      const presented = presentedLan || presentedUi || presentedLegacy;
       let authed = false;
       let freshToken: string | null = null;
       if (presented) {
@@ -329,7 +345,7 @@ export class WebSocketManager {
           type: 'error',
           payload: {
             code: LAN_DENIED_CODE,
-            message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que genere una invitación (QR o enlace) y vuelve a intentarlo.',
+            message: 'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que te lo enseñe desde Ajustes → Acceso remoto o con el botón de QR de la barra superior (Abrir en el móvil), o que te pase el enlace de invitación, y vuelve a intentarlo.',
           },
         });
         return;
@@ -343,7 +359,16 @@ export class WebSocketManager {
       : (typeof payload?.device_id === 'string' && payload.device_id.length > 0 ? payload.device_id : null);
     const deviceId = rawId || client.deviceId;
     const kind = normalizeDeviceKind(payload?.kind ?? client.kind);
-    const name = typeof payload?.name === 'string' && payload.name.length > 0 ? payload.name : client.name;
+    let name = typeof payload?.name === 'string' && payload.name.length > 0 ? payload.name : client.name;
+    // Nombres únicos por navegador: dos orígenes del mismo navegador no
+    // deben verse idénticos en las listas (p. ej. dos "Chrome").
+    try {
+      const k = String(kind ?? '').toLowerCase();
+      if (name && (k === 'browser' || k === 'phone' || k === 'tablet' || k === 'unknown')) {
+        const clash = this.db.listDevices().some((d: any) => d && d.id !== deviceId && (d.name ?? '') === name);
+        if (clash) name = `${name} ${deviceId.slice(0, 4)}`;
+      }
+    } catch { /* mejor esfuerzo */ }
 
     client.deviceId = deviceId;
     client.kind = kind;
@@ -352,6 +377,20 @@ export class WebSocketManager {
 
     // Persistir identidad (crea la fila si no existe)
     const persisted = this.db.upsertDeviceSession({ device_id: deviceId, name, kind });
+
+    // Vincular deviceId ↔ sesión de acceso (revocar = prohibir + ocultar).
+    // Solo con tokens válidos; nunca se guarda el secreto completo.
+    try {
+      const lanToken = presentedLan || presentedLegacy || (client as any).lanSessionToken || null;
+      if (lanToken && validateLanSession(this.db, lanToken).ok) {
+        bindDeviceToToken(this.db, 'lan', deviceId, lanToken);
+      }
+    } catch { /* mejor esfuerzo */ }
+    try {
+      if (presentedUi && validateUiSession(this.db, presentedUi).ok) {
+        bindDeviceToToken(this.db, 'ui', deviceId, presentedUi);
+      }
+    } catch { /* mejor esfuerzo */ }
 
     // Vista: explícita en hello > persistida > startup asignado > global actual
     let profileId: string | null =
@@ -392,6 +431,23 @@ export class WebSocketManager {
     client.pageId = pageId;
     this.db.upsertDeviceSession({ device_id: deviceId, name, kind, profile_id: profileId, page_id: pageId });
 
+    // Auto-provisión: todo dispositivo que se identifica existe como fila
+    // `devices` (los dispositivos ya no se crean a mano). Así la lista
+    // unificada y las asignaciones por perfil lo ven sin pasos extra.
+    let deviceCreated = false;
+    try {
+      deviceCreated = this.ensureDeviceRow(deviceId, kind, name);
+    } catch { /* mejor esfuerzo */ }
+    try {
+      if (deviceCreated) {
+        const row = this.db.getDevice(deviceId);
+        if (row) this.broadcast('device.created', { device: row }, 'pages');
+      }
+    } catch { /* noop */ }
+    try {
+      this.broadcast('device.online', { deviceId, online: true }, 'devices');
+    } catch { /* noop */ }
+
     this.sendToClient(clientId, {
       type: 'session.state',
       payload: {
@@ -402,6 +458,58 @@ export class WebSocketManager {
       },
     });
     try { delete (client as any).lanSessionToken; } catch { /* noop */ }
+  }
+
+  /**
+   * Crea la fila `devices` si falta (idempotente). No toca filas existentes.
+   * - HW (`streamdeck*`, `hw:*`, `hardware:*` o kind hardware) → `deck`.
+   * - Navegadores/relay → `browser`. `cli` y `tunnel:*` provisionales no se
+   *   aprovisionan (no son pantallas asignables).
+   */
+  public ensureDeviceRow(deviceId: string, kind?: string | null, name?: string | null): boolean {
+    const id = String(deviceId ?? '');
+    if (!id || id.startsWith('tunnel:')) return false;
+    try {
+      if (this.db.getDevice(id)) return false;
+    } catch {
+      return false;
+    }
+    const k = String(kind ?? '').toLowerCase();
+    if (k === 'cli' || k === 'api') return false;
+    const hw = isHardwareDeviceId(id) || k === 'hardware' || k === 'streamdeck' || k === 'elgato';
+    const rowKind = hw ? 'deck' : 'browser';
+    const label = (typeof name === 'string' && name.trim())
+      ? name.trim().slice(0, 80)
+      : hw ? 'Stream Deck' : `Navegador ${id.slice(0, 4)}`;
+    try {
+      this.db.createDevice({ id, name: label, kind: rowKind as any, model: null, cols: null, rows: null, hw_path: null } as any);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Cierra todos los WS vivos de un dispositivo (olvidar+prohibir). */
+  public disconnectDevice(deviceId: string): number {
+    let n = 0;
+    try {
+      for (const c of this.clientsOfDevice(deviceId)) {
+        try { c.ws?.close?.(); } catch { /* noop */ }
+        this.clients.delete(c.id);
+        n++;
+      }
+      if (n > 0) this.broadcast('device.offline', { deviceId, online: false }, 'devices');
+    } catch { /* noop */ }
+    return n;
+  }
+
+  /** Emite `device.offline` si ya no queda ningún cliente de ese deviceId. */
+  private broadcastOfflineIfGone(deviceId: string): void {
+    try {
+      if (this.clientsOfDevice(deviceId).length === 0) {
+        this.broadcast('device.offline', { deviceId, online: false }, 'devices');
+      }
+    } catch { /* noop */ }
   }
 
   private sessionPayloadFor(client: WebSocketClient): any {
@@ -1026,7 +1134,11 @@ export class WebSocketManager {
 
   /** Elimina el cliente virtual del túnel. */
   public removeTunnelClient(tunnelId: string): void {
-    this.clients.delete(`tunnel:${tunnelId}`);
+    const id = `tunnel:${tunnelId}`;
+    const client = this.clients.get(id);
+    const deviceId = client?.deviceId;
+    this.clients.delete(id);
+    if (deviceId) this.broadcastOfflineIfGone(deviceId);
   }
 
   /** Trata un mensaje del túnel como si lo hubiera enviado un cliente local. */

@@ -7,7 +7,7 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
-import { getOrCreateDeviceId, isNavigationForMe } from '../utils/sessionRouting'
+import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 /** Icono Lucide por defecto para teclas recién creadas (nombre PascalCase,
@@ -502,13 +502,18 @@ export function useStreamDeck() {
           payload: {
             deviceId: deviceId.value,
             kind: 'browser',
-            name: 'Navegador',
+            // Nombre visible en las listas: la familia real (Chrome, Edge…)
+            // en vez del genérico, para distinguir varios orígenes.
+            name: browserFamilyName(),
             ...(lanSession.value ? { invite: lanSession.value } : {}),
+             // UI remota (túnel): el token viaja en la URL (/t/...). Se
+             // reenvía para vincular deviceId ↔ sesión (revocar = ocultar).
+             ...(getTunnelToken() ? { sessionToken: getTunnelToken() } : {}),
           }
         }))
         ws?.send(JSON.stringify({
           type: 'subscribe',
-          payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages'] }
+          payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote'] }
         }))
       }
 
@@ -726,6 +731,8 @@ export function useStreamDeck() {
       case 'device.created':
       case 'device.updated':
       case 'device.deleted':
+      case 'device.online':
+      case 'device.offline':
       case 'assignment.updated':
         // Dispositivos/asignaciones: otro cliente cambió algo → recargar
         if (typeof window !== 'undefined') {

@@ -396,7 +396,7 @@ export function validateBackup(obj: any): ValidationResult {
         if (!isObj(d) || !d.id || !d.name) { errors.push(`devices[${i}]: id y name requeridos`); return; }
         if (seen.has(d.id)) errors.push(`devices[${i}]: id duplicado ${JSON.stringify(d.id)}`);
         seen.add(d.id);
-        if (!['deck', 'phone', 'tablet'].includes(d.kind)) errors.push(`devices[${i}]: kind debe ser deck|phone|tablet`);
+        if (!['deck', 'phone', 'tablet', 'browser'].includes(d.kind)) errors.push(`devices[${i}]: kind debe ser deck|phone|tablet|browser`);
         for (const k of ['cols', 'rows'] as const) {
           if (d[k] !== undefined && d[k] !== null && (!Number.isInteger(d[k]) || d[k] < 1 || d[k] > 12)) {
             errors.push(`devices[${i}]: ${k} debe estar entre 1 y 12`);
@@ -664,7 +664,7 @@ export function restoreBackup(
             data: page.data,
           },
           {
-            id: device.id, name: device.name, kind: device.kind as 'deck' | 'phone' | 'tablet',
+            id: device.id, name: device.name, kind: device.kind as 'deck' | 'phone' | 'tablet' | 'browser',
             model: device.model, cols: device.cols, rows: device.rows,
           },
           profile?.data,

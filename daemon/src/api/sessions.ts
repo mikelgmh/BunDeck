@@ -2,6 +2,8 @@
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
 import { resolveNavTargets } from '../sessions';
+import { isHardwareDeviceId } from '../devices';
+import { unbindDevice } from '../remote/device-bindings';
 
 function matchId(path: string): string | null {
   const m = path.match(/^\/api\/v1\/sessions\/([^/]+)(\/navigate)?$/);
@@ -105,6 +107,14 @@ export const handleSessions: ApiHandler = async (_req, { url, method, path, db, 
     if (method === 'DELETE' && !isNavigate) {
       if (!deviceId) return jsonResponse({ error: 'Session not found' }, 404);
       db.deleteDeviceSession(deviceId);
+      // La sesión está asignada a un navegador: sin sesión no hay fila.
+      // (El hardware nunca se borra: su fila la repone el listado.)
+      try {
+        if (db.getDevice(deviceId) && !isHardwareDeviceId(deviceId)) db.deleteDevice(deviceId);
+      } catch { /* noop */ }
+      try {
+        unbindDevice(db, deviceId);
+      } catch { /* noop */ }
       return jsonResponse({ ok: true });
     }
   }

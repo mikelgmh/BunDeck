@@ -209,6 +209,7 @@
         @swap="handleSwap"
         @grid-size-change="onGridSizeChange"
         @mode-change="(m) => setMode(m)"
+        @kiosk-enter="enterKiosk"
         @layout-mode-change="onLayoutModeChange"
         @layout-change="onGsLayoutChange"
         @gs-add="onGsAdd"
@@ -412,6 +413,8 @@
 
     <IosWarningDialog />
 
+    <StreamDeckConflictDialog />
+
     <WelcomeDialog ref="welcomeDialog" />
 
     <dialog ref="confirmDialog" class="bd-confirm" :aria-label="confirmTitle">
@@ -474,6 +477,7 @@ import {
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
 import {
   parseKioskFromLocation,
+  withKioskParam,
   withoutKioskParam,
   guardModeChange,
   isTripleTap,
@@ -496,6 +500,7 @@ import TitleBar from './TitleBar.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
+import StreamDeckConflictDialog from './StreamDeckConflictDialog.vue'
 // Diálogos pesados: chunks diferidos (solo cliente; BunDeckApp es
 // client:load, así que no hay SSR que romper). Se cargan al abrirse.
 const ActionCommandPalette = defineAsyncComponent(() => import('./ActionCommandPalette.vue'))
@@ -521,6 +526,21 @@ let kioskCornerTaps: number[] = []
 const setMode = (m: 'edit' | 'use') => {
   mode.value = guardModeChange(kiosk.value, m)
   selectedButton.value = null
+}
+
+/** Entrada manual al kiosco (botón Kiosco en Editar/Usar): sin recargar,
+ *  propaga ?kiosk=1 a la URL para que recargar/enlazar conserve el modo. */
+const enterKiosk = () => {
+  if (kiosk.value) return
+  kiosk.value = true
+  mode.value = 'use'
+  selectedButton.value = null
+  kioskCornerTaps = []
+  try {
+    window.history.replaceState(null, '', withKioskParam(window.location.href))
+  } catch {
+    /* sin history: el estado interno ya entró en kiosco */
+  }
 }
 
 /** Pide salir del kiosco (con confirmación) y limpia el param de la URL. */

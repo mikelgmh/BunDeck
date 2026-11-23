@@ -275,6 +275,17 @@ describe('device-sessions: hello, reconexión y startup', () => {
     expect((mgr as any).clients.get('c-H').kind).toBe('browser');
   });
 
+  it('hello con nombre repetido lo desambigua con el id', () => {
+    const mgr = makeManager();
+    const a = addClient(mgr, { clientId: 'c-N1', deviceId: 'aaaa1111-0000-0000-0000-000000000001' });
+    send(mgr, 'c-N1', { type: 'hello', payload: { deviceId: 'aaaa1111-0000-0000-0000-000000000001', kind: 'browser', name: 'Chrome' } });
+    const b = addClient(mgr, { clientId: 'c-N2', deviceId: 'bbbb2222-0000-0000-0000-000000000002' });
+    send(mgr, 'c-N2', { type: 'hello', payload: { deviceId: 'bbbb2222-0000-0000-0000-000000000002', kind: 'browser', name: 'Chrome' } });
+    expect(db.getDevice('aaaa1111-0000-0000-0000-000000000001')?.name).toBe('Chrome');
+    expect(db.getDevice('bbbb2222-0000-0000-0000-000000000002')?.name).toBe('Chrome bbbb');
+    void a; void b;
+  });
+
   it('reconexión con el mismo deviceId restaura la vista', () => {
     const mgr = makeManager();
     const a = addClient(mgr, { clientId: 'c-R1', deviceId: 'dev-recon' });
@@ -396,6 +407,24 @@ describe('device-sessions: REST /sessions', () => {
     const mgr = makeManager();
     const r = await restCall(mgr, '/api/v1/sessions/dev-fantasma-xyz', 'GET');
     expect(r.status).toBe(404);
+  });
+
+  it('DELETE /sessions/:id borra sesión y fila del navegador (al hardware no lo toca)', async () => {
+    const mgr = makeManager();
+    db.upsertDeviceSession({ device_id: 'dev-D1', name: 'Navegador', kind: 'browser' });
+    db.createDevice({ id: 'dev-D1', name: 'Navegador', kind: 'browser', model: null, cols: null, rows: null, hw_path: null });
+    const r = await restCall(mgr, '/api/v1/sessions/dev-D1', 'DELETE');
+    expect(r.status).toBe(200);
+    expect(db.getDeviceSession('dev-D1')).toBeNull();
+    expect(db.getDevice('dev-D1')).toBeNull();
+    // El hardware conserva su fila aunque se borre su sesión.
+    db.upsertDeviceSession({ device_id: 'streamdeck-local', name: null, kind: 'hardware' });
+    db.createDevice({ id: 'streamdeck-local', name: 'Stream Deck', kind: 'deck', model: null, cols: null, rows: null, hw_path: null });
+    const rh = await restCall(mgr, '/api/v1/sessions/streamdeck-local', 'DELETE');
+    expect(rh.status).toBe(200);
+    expect(db.getDeviceSession('streamdeck-local')).toBeNull();
+    expect(db.getDevice('streamdeck-local')).toBeTruthy();
+    db.deleteDeviceSession('streamdeck-local');
   });
 });
 

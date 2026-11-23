@@ -17,7 +17,7 @@ import type { PluginLoader } from '../plugin-loader';
 import type { DatabaseService } from '../db';
 import type { WebSocketManager } from '../ws';
 import { validateManifest } from '../plugin-system/validator';
-import { checkPageCompatibility, resolveDeckSize, DECK_MODELS, DEFAULT_DECK_MODEL } from '../devices';
+import { checkPageCompatibility, resolveDeckSize, isHardwareDeviceId, DECK_MODELS, DEFAULT_DECK_MODEL } from '../devices';
 import { hasScope } from './scopes';
 import { getVariableStore, varToJSON } from '../variables/store';
 import { pushHistory, listHistory, peekUndo, markUndone, clearHistory } from './history';
@@ -436,7 +436,7 @@ const TOOL_DEFS: ToolDef[] = [
   // ---- Dispositivos lógicos ----
   {
     name: 'list_devices',
-    description: 'Lista los dispositivos lógicos (deck/phone/tablet) con su tamaño.',
+    description: 'Lista los dispositivos (deck/phone/tablet/browser) con su tamaño.',
     scope: 'devices.read',
     inputSchema: { type: 'object', properties: {} },
   },
@@ -448,13 +448,13 @@ const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'create_device',
-    description: "Crea un dispositivo lógico. kind: 'deck'|'phone'|'tablet' (defecto phone). En deck, model (mini/mk2/neo/xl) fija cols/rows salvo override explícito.",
+    description: "Crea un dispositivo. kind: 'deck'|'phone'|'tablet'|'browser' (defecto phone). En deck, model (mini/mk2/neo/xl) fija cols/rows salvo override explícito.",
     scope: 'devices.write',
     inputSchema: {
       type: 'object',
       properties: {
         id: S('string', 'Id explícito (opcional)'), name: S('string'),
-        kind: S('string', "'deck'|'phone'|'tablet' (opcional)"),
+        kind: S('string', "'deck'|'phone'|'tablet'|'browser' (opcional)"),
         model: S('string', "Modelo deck: 'mini'|'mk2'|'neo'|'xl' (opcional)"),
         cols: S('number', 'Columnas 1..12 (opcional)'), rows: S('number', 'Filas 1..12 (opcional)'),
         hw_path: S('string', 'Path HID del HW enlazado (opcional)'),
@@ -469,7 +469,7 @@ const TOOL_DEFS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: S('string'), name: S('string'), kind: S('string', "'deck'|'phone'|'tablet'"),
+        id: S('string'), name: S('string'), kind: S('string', "'deck'|'phone'|'tablet'|'browser'"),
         model: S('string', 'Modelo deck o null'), cols: S('number', 'Columnas 1..12 o null'),
         rows: S('number', 'Filas 1..12 o null'), hw_path: S('string', 'Path HID o null'),
       },
@@ -1284,7 +1284,7 @@ function checkGeometryArgs(args: any): void {
   }
 }
 
-const DEVICE_KINDS = ['deck', 'phone', 'tablet'] as const;
+const DEVICE_KINDS = ['deck', 'phone', 'tablet', 'browser'] as const;
 
 /** Sanea argumentos de dispositivo (espejo de api/devices.ts). Lanza si inválido. */
 function cleanDeviceArgs(body: any, isCreate: boolean): any {
@@ -1545,7 +1545,10 @@ async function applyInverse(inverse: { tool: string; arguments: any; batch?: any
     case '__restore_plugin_settings': await pluginLoader.savePluginSettings(a.plugin_id, a.values ?? {}); return { success: true };
     case 'set_current_profile': db.setCurrentProfile(a.profile_id); return { success: true };
     case 'set_current_page': db.setCurrentPage(a.page_id); return { success: true };
-    case 'delete_device': db.deleteDevice(a.id); return { success: true, deviceId: a.id };
+    case 'delete_device': {
+      if (isHardwareDeviceId(a.id)) throw new Error('El hardware no se puede eliminar');
+      db.deleteDevice(a.id); return { success: true, deviceId: a.id };
+    }
     case 'update_device': {
       db.updateDevice(a.id, { ...(a.name !== undefined ? { name: a.name } : {}), ...(a.kind !== undefined ? { kind: a.kind } : {}), ...(a.model !== undefined ? { model: a.model } : {}), ...(a.cols !== undefined ? { cols: a.cols } : {}), ...(a.rows !== undefined ? { rows: a.rows } : {}), ...(a.hw_path !== undefined ? { hw_path: a.hw_path } : {}) });
       return { success: true, deviceId: a.id };
@@ -2459,6 +2462,11 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       const id = reqStr(args, 'id');
       const prevRaw = db.getDevice(id) as any;
       if (!prevRaw) throw new Error('Dispositivo no encontrado');
+      // El hardware solo admite renombrar (igual que PUT /devices/:id).
+      if (isHardwareDeviceId(id)) {
+        const forbidden = ['kind', 'model', 'cols', 'rows', 'hw_path'].filter((k) => (args as any)?.[k] !== undefined);
+        if (forbidden.length > 0) throw new Error(`El hardware solo admite renombrar (campos bloqueados: ${forbidden.join(', ')})`);
+      }
       // Clon profundo: el store puede devolver referencias vivas (el mock
       // global de la suite muta la fila in place) y la inversa debe ver
       // los valores previos, no los ya actualizados (igual que snapshotButton).
@@ -2479,6 +2487,7 @@ async function callTool(name: string, args: any, ctx: McpContext) {
     }
     case 'delete_device': {
       const id = reqStr(args, 'id');
+      if (isHardwareDeviceId(id)) throw new Error('El hardware no se puede eliminar');
       const existing = db.getDevice(id) as any;
       if (!existing) throw new Error('Dispositivo no encontrado');
       const snapshot = {

@@ -3,11 +3,14 @@
     <div v-if="!kiosk" class="bd-tool">
       <div class="bd-tgrp">
         <div class="bd-seg" role="group" :aria-label="t('bd.mode')">
-          <button data-md="edit" :aria-pressed="mode === 'edit'" @click="$emit('mode-change', 'edit')">
+          <button data-md="edit" :aria-pressed="mode === 'edit' && !kiosk" @click="$emit('mode-change', 'edit')">
             {{ t('bd.edit') }}
           </button>
-          <button data-md="use" :aria-pressed="mode === 'use'" @click="$emit('mode-change', 'use')">
+          <button data-md="use" :aria-pressed="mode === 'use' && !kiosk" @click="$emit('mode-change', 'use')">
             {{ t('bd.use') }}
+          </button>
+          <button data-md="kiosk" :aria-pressed="kiosk" data-cy="bd-mode-kiosk" :title="t('bd.kioskHint')" @click="$emit('kiosk-enter')">
+            {{ t('bd.kiosk') }}
           </button>
         </div>
       </div>
@@ -48,7 +51,7 @@
       </div>
 
       <div class="bd-tgrp">
-        <div v-if="devices.length" class="bd-dvwrap">
+        <div v-if="visibleDevices.length" class="bd-dvwrap">
         <button
           type="button"
           class="bd-dvtrig"
@@ -58,13 +61,13 @@
           data-cy="bd-devices-btn"
           @click.stop="devOpen = !devOpen"
         >
-          <MonitorSmartphone :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.devicesTrigger') }}</span><span class="bd-dvbadge" data-cy="bd-devices-badge">{{ unassignedCount > 0 ? `⚠ ${devices.length - unassignedCount}/${devices.length}` : devices.length }}</span>
+          <MonitorSmartphone :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.devicesTrigger') }}</span><span class="bd-dvbadge" data-cy="bd-devices-badge">{{ unassignedCount > 0 ? `⚠ ${visibleDevices.length - unassignedCount}/${visibleDevices.length}` : visibleDevices.length }}</span>
         </button>
         <div v-if="devOpen" id="bd-dvpop" class="bd-dvpop" data-cy="bd-devices-pop" role="dialog" :aria-label="t('bd.devicesTitle', { name: profileName })">
           <div class="bd-dvpop-hd"><b>{{ t('bd.devicesTitle', { name: profileName }) }}</b><button class="bd-btn" data-cy="bd-devices-manage" @click="devOpen = false; $emit('manage-devices')">{{ t('bd.devicesManage') }}</button></div>
           <div class="bd-dvpop-list">
-            <label v-for="d in devices" :key="d.id" class="bd-dv" :class="{ 'bd-warn2': !assignments[d.id] }" :data-cy="`bd-device-row-${d.id}`">
-              <span class="bd-dv-info"><span class="bd-dvi"><component :is="deviceIcon(d.kind)" :size="18" stroke-width="1.75" aria-hidden="true" /></span><span class="bd-dvn"><span>{{ d.name }}</span><small>{{ deviceSub(d) }}</small></span></span>
+            <label v-for="d in visibleDevices" :key="d.id" class="bd-dv" :class="{ 'bd-warn2': !assignments[d.id] }" :data-cy="`bd-device-row-${d.id}`">
+              <span class="bd-dv-info"><span class="bd-dvi"><i class="bd-dot" :class="{ 'bd-ok': !!d.online }" :title="d.online ? t('bd.deviceOnline') : t('bd.deviceOffline')" aria-hidden="true"></i><component :is="deviceIcon(d.kind)" :size="18" stroke-width="1.75" aria-hidden="true" /></span><span class="bd-dvn"><span>{{ d.name }}</span><small>{{ deviceSub(d) }}</small></span></span>
               <select :value="assignments[d.id] ?? ''" :aria-label="d.name" :data-cy="`bd-device-page-${d.id}`" :title="noCompatibleTitle(d)" @change="$emit('device-assign', d.id, ($event.target as HTMLSelectElement).value || null)">
                 <option value="">{{ t('bd.deviceNoScreen') }}</option>
                 <option v-for="p in currentPages" :key="p.id" :value="p.id" :disabled="!compatOf(p, d).ok">{{ pageOptionLabel(p, d) }}</option>
@@ -439,6 +442,7 @@ interface Emits {
   (e: 'swap', event: any): void
   (e: 'grid-size-change', deltaX: number, deltaY: number): void
   (e: 'mode-change', mode: 'edit' | 'use'): void
+  (e: 'kiosk-enter'): void
   (e: 'layout-mode-change', mode: 'classic' | 'gridstack'): void
   /** GridStack: widgets movidos/redimensionados [{id,x,y,w,h}]. */
   (e: 'layout-change', items: Array<{ id: string; x: number; y: number; w: number; h: number }>): void
@@ -511,6 +515,10 @@ const isGsMode = computed(() => (props.layoutMode ?? 'classic') === 'gridstack')
 // ---- Dispositivos y pantallas por perfil ----
 const devOpen = ref(false)
 const deviceList = computed(() => props.devices ?? [])
+/** El desplegable solo gestiona pantallas: únicamente lo que está en línea.
+ *  Los desconectados (otro origen, invitados idos, hardware apagado) se
+ *  gestionan en Acceso remoto y no ensucian la asignación. */
+const visibleDevices = computed(() => deviceList.value.filter((d) => !!d.online))
 const previewDevice = computed(() =>
   props.previewDeviceId ? (deviceList.value.find((d) => d.id === props.previewDeviceId) ?? null) : null
 )
@@ -518,7 +526,7 @@ const showNoScreen = computed(() =>
   props.mode === 'use' && !!previewDevice.value && !props.assignments?.[previewDevice.value.id]
 )
 const unassignedCount = computed(() =>
-  deviceList.value.filter((d) => !props.assignments?.[d.id]).length
+  visibleDevices.value.filter((d) => !props.assignments?.[d.id]).length
 )
 const pageViewOf = (p: PageData): CompatView => ({
   id: p.id,
@@ -540,10 +548,12 @@ const deckSizeOf = (d: LogicalDevice) => {
   const s = resolveDeckSize(d)
   return s ? `${s.cols}×${s.rows}` : ''
 }
-const deviceSub = (d: LogicalDevice) =>
-  d.kind === 'deck'
+const deviceSub = (d: LogicalDevice) => {
+  const base = d.kind === 'deck'
     ? t('bd.deviceDeckView', { size: deckSizeOf(d) })
     : t('bd.deviceAnyView')
+  return `${base} · ${d.online ? t('bd.deviceOnline') : t('bd.deviceOffline')}`
+}
 /** Motivo legible de incompatibilidad (o null si es compatible). */
 const reasonText = (p: PageData, d: LogicalDevice): string | null => {
   const c = compatOf(p, d)

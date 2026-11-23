@@ -294,7 +294,15 @@ return res.json().then(function(data){
 if(done||!data)return;
 if(data.status==='approved'&&typeof data.sessionToken==='string'&&data.sessionToken){
 cleanup();show('approved');
-location.replace('/t/'+encodeURIComponent(data.sessionToken)+'/');
+var kq='';
+try{
+var sp=new URLSearchParams(location.search||'');
+var keep=new URLSearchParams();
+['kiosk','mode'].forEach(function(k){var v=sp.get(k);if(v!==null&&v!=='')keep.set(k,v);});
+var qs=keep.toString();
+kq=(qs?'?'+qs:'')+(location.hash||'');
+}catch(e){kq=(location.search||'')+(location.hash||'');}
+location.replace('/t/'+encodeURIComponent(data.sessionToken)+'/'+kq);
 }else if(data.status==='denied'){cleanup();show('denied');}
 else if(data.status==='expired'){expired();}
 }).catch(function(){});

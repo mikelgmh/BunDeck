@@ -3,49 +3,75 @@
     <nav class="bd-dnav" role="tablist" aria-orientation="vertical" :aria-label="t('bd.dlgSettings')">
       <span class="bd-sh">{{ t('bd.dlgSettings') }}</span>
       <button
-        v-for="item in navItems"
+        v-for="item in filteredNav"
         :key="item.id"
         role="tab"
         :data-sec="item.id"
         :aria-selected="section === item.id"
-        @click="section = item.id"
+        @click="selectSection(item.id)"
       >
         <component :is="item.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
         {{ item.label }}
       </button>
+      <p v-if="query && !filteredNav.length" class="bd-dempty">{{ t('bd.settingsNoResults', { q: query }) }}</p>
     </nav>
 
     <div class="bd-dbody" ref="bodyEl">
+      <div class="bd-dsearch">
+        <Search :size="16" stroke-width="1.75" aria-hidden="true" />
+        <input
+          v-model="query"
+          type="search"
+          class="bd-inp"
+          :placeholder="t('bd.settingsSearch')"
+          :aria-label="t('bd.settingsSearch')"
+          data-cy="bd-settings-search"
+          @keydown.escape="query = ''"
+        />
+        <button v-if="query" class="bd-ibtn" :aria-label="t('bd.settingsClear')" :title="t('bd.settingsClear')" @click="query = ''">
+          <X :size="14" stroke-width="1.75" aria-hidden="true" />
+        </button>
+      </div>
+      <!-- Resultados de búsqueda: filtra el menú y salta al ajuste concreto -->
+      <template v-if="isSearching">
+        <h2>{{ t('bd.settingsResults', { n: searchResults.length }) }}</h2>
+        <p class="bd-sub">{{ t('bd.settingsResultsHint') }}</p>
+        <div v-if="searchResults.length" class="bd-sres-list">
+          <button
+            v-for="r in searchResults"
+            :key="`${r.section}:${r.id}`"
+            class="bd-sres"
+            :data-cy="`bd-search-result-${r.section}-${r.id}`"
+            @click="goToResult(r)"
+          >
+            <span class="bd-sres-sec">{{ r.sectionLabel }}</span>
+            <b>{{ r.title }}</b>
+            <span v-if="r.hint" class="bd-sres-hint">{{ r.hint }}</span>
+          </button>
+        </div>
+        <p v-else class="bd-hint">{{ t('bd.settingsNoResults', { q: query }) }}</p>
+      </template>
       <!-- General -->
-      <template v-if="section === 'general'">
+      <template v-else-if="section === 'general'">
         <h2>{{ t('bd.secGeneral') }}</h2>
         <p class="bd-sub">{{ t('bd.generalSub') }}</p>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.language') }}</b><p>{{ t('bd.interfaceLang') }}</p></div>
-          <div class="bd-ctl">
-            <select class="bd-inp" :aria-label="t('bd.language')" :value="currentLocale" data-cy="bd-language-select" @change="emit('language-changed', ($event.target as HTMLSelectElement).value)">
-              <option value="es">{{ t('toolbar.spanish') }}</option>
-              <option value="en">{{ t('toolbar.english') }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="autostart">
           <div><b>{{ t('bd.startWithSystem') }}</b><p>{{ t('bd.startWithSystemHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.autostart" :aria-label="t('bd.startWithSystem')" /><span></span></label></div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="tray">
           <div><b>{{ t('bd.keepInTray') }}</b><p>{{ t('bd.keepInTrayHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.tray" :aria-label="t('bd.keepInTray')" /><span></span></label></div>
         </div>
-        <div v-if="showUpdates" class="bd-srow">
+        <div v-if="showUpdates" class="bd-srow" data-setting="updates">
           <div><b>{{ t('bd.checkUpdates') }}</b><p>{{ t('bd.checkUpdatesHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.updates" :aria-label="t('bd.checkUpdates')" /><span></span></label></div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="undo">
           <div><b>{{ t('bd.allowUndo') }}</b><p>{{ t('bd.allowUndoHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.undo" :aria-label="t('bd.allowUndo')" /><span></span></label></div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="autoswitch">
           <div><b>{{ t('bd.autoSwitch') }}</b><p>{{ t('bd.autoSwitchHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="autoCfg.enabled" :aria-label="t('bd.autoSwitch')" @change="toggleAutoSwitch(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
         </div>
@@ -60,7 +86,7 @@
           <h3 id="bd-device-hardware-title" class="bd-settings-group__title">{{ t('bd.deviceHardware') }}</h3>
           <p class="bd-settings-group__sub">{{ t('bd.deviceHardwareSub') }}</p>
 
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="device">
             <div><b>{{ t('bd.streamdeckDevice') }}</b><p>{{ t('bd.streamdeckDeviceHint') }}</p></div>
             <div class="bd-ctl bd-ctl-device">
               <select
@@ -81,7 +107,7 @@
             </div>
           </div>
 
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="brightness">
             <div><b>{{ t('bd.brightness') }}</b><p>{{ t('bd.brightnessHint') }}</p></div>
             <div class="bd-ctl">
               <div class="bd-rg">
@@ -125,7 +151,7 @@
             </div>
           </div>
 
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="longpress">
             <div><b>{{ t('bd.longPressTime') }}</b><p>{{ t('bd.longPressTimeHint') }}</p></div>
             <div class="bd-ctl">
               <div class="bd-rg">
@@ -143,57 +169,6 @@
           <div class="bd-srow">
             <div><b>{{ t('bd.clickSound') }}</b><p>{{ t('bd.clickSoundHint') }}</p></div>
             <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.sound" :aria-label="t('bd.clickSound')" /><span></span></label></div>
-          </div>
-        </section>
-
-        <section class="bd-settings-group" aria-labelledby="bd-device-profiles-title" data-cy="bd-device-profiles">
-          <h3 id="bd-device-profiles-title" class="bd-settings-group__title">{{ t('bd.deviceProfiles') }}</h3>
-          <p class="bd-settings-group__sub">{{ t('bd.devicesSub') }}</p>
-          <p class="bd-hint" data-cy="bd-hw-hint">{{ hwHint }}</p>
-          <div>
-            <div v-for="d in devStore.devices.value" :key="d.id" class="bd-pr dvrow" :data-cy="`bd-device-${d.id}`">
-              <input
-                type="text"
-                class="bd-inp"
-                :value="d.name"
-                :aria-label="t('bd.deviceName')"
-                @change="renameLogicalDevice(d, ($event.target as HTMLInputElement).value)"
-              />
-              <select
-                class="bd-inp"
-                :value="d.kind"
-                :aria-label="t('bd.deviceType')"
-                @change="changeLogicalKind(d, ($event.target as HTMLSelectElement).value)"
-              >
-                <option value="deck">{{ t('bd.deviceKindDeck') }}</option>
-                <option value="phone">{{ t('bd.deviceKindPhone') }}</option>
-                <option value="tablet">{{ t('bd.deviceKindTablet') }}</option>
-              </select>
-              <select
-                v-if="d.kind === 'deck'"
-                class="bd-inp"
-                :value="d.model ?? ''"
-                :aria-label="t('bd.deviceModel')"
-                @change="changeLogicalModel(d, ($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="m in DECK_MODELS" :key="m.id" :value="m.id">{{ m.label }} · {{ m.cols }}×{{ m.rows }}</option>
-              </select>
-              <span v-else class="bd-hint">{{ t('bd.deviceAnyView') }}</span>
-              <button class="bd-ibtn" :aria-label="`${t('bd.delete')} ${d.name}`" :title="t('bd.delete')" @click="deleteLogicalDevice(d)">
-                <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-          <div class="bd-device-add">
-            <button class="bd-btn" data-cy="bd-device-add-deck" @click="addLogicalDevice('deck')">
-              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddDeck') }}
-            </button>
-            <button class="bd-btn" data-cy="bd-device-add-phone" @click="addLogicalDevice('phone')">
-              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddPhone') }}
-            </button>
-            <button class="bd-btn" data-cy="bd-device-add-tablet" @click="addLogicalDevice('tablet')">
-              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddTablet') }}
-            </button>
           </div>
         </section>
       </template>
@@ -286,7 +261,16 @@
       <template v-else-if="section === 'appearance'">
         <h2>{{ t('bd.secAppearance') }}</h2>
         <p class="bd-sub">{{ t('bd.appearanceSub') }}</p>
-        <div class="bd-srow bd-col">
+        <div class="bd-srow" data-setting="language">
+          <div><b>{{ t('bd.language') }}</b><p>{{ t('bd.interfaceLang') }}</p></div>
+          <div class="bd-ctl">
+            <select class="bd-inp" :aria-label="t('bd.language')" :value="currentLocale" data-cy="bd-language-select" @change="emit('language-changed', ($event.target as HTMLSelectElement).value)">
+              <option value="es">{{ t('toolbar.spanish') }}</option>
+              <option value="en">{{ t('toolbar.english') }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="bd-srow bd-col" data-setting="palette">
           <div><b>{{ t('bd.palette') }}</b><p>{{ t('bd.paletteHint') }}</p></div>
           <div class="bd-pals">
             <button
@@ -301,7 +285,7 @@
             </button>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="keysize">
           <div><b>{{ t('bd.keySize') }}</b><p>{{ t('bd.keySizeHint') }}</p></div>
           <div class="bd-ctl">
             <div class="bd-rg">
@@ -310,7 +294,7 @@
             </div>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="rounding">
           <div><b>{{ t('bd.rounding') }}</b><p>{{ t('bd.roundingHint') }}</p></div>
           <div class="bd-ctl">
             <div class="bd-rg">
@@ -319,7 +303,7 @@
             </div>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="labels">
           <div><b>{{ t('bd.keyLabels') }}</b><p>{{ t('bd.keyLabelsHint') }}</p></div>
           <div class="bd-ctl">
             <div class="bd-seg">
@@ -329,7 +313,7 @@
             </div>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="animations">
           <div><b>{{ t('bd.animations') }}</b><p>{{ t('bd.animationsHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="bdAnimations" :aria-label="t('bd.animations')" @change="bdSetAnimations(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
         </div>
@@ -439,21 +423,21 @@
       <template v-else-if="section === 'shortcuts'">
         <h2>{{ t('bd.secShortcuts') }}</h2>
         <p class="bd-sub">{{ t('bd.shortcutsSub') }}</p>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="showhide">
           <div><b>{{ t('bd.showHideWindow') }}</b></div>
           <div class="bd-ctl">
             <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">P</kbd></span>
             <label class="bd-sw"><input type="checkbox" v-model="mock.k1" :aria-label="t('bd.showHideWindow')" /><span></span></label>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="nextprofile">
           <div><b>{{ t('bd.nextProfile') }}</b></div>
           <div class="bd-ctl">
             <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">→</kbd></span>
             <label class="bd-sw"><input type="checkbox" v-model="mock.k2" :aria-label="t('bd.nextProfile')" /><span></span></label>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="muteall">
           <div><b>{{ t('bd.muteAll') }}</b></div>
           <div class="bd-ctl">
             <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">M</kbd></span>
@@ -466,11 +450,11 @@
       <template v-else-if="section === 'advanced'">
         <h2>{{ t('bd.secAdvanced') }}</h2>
         <p class="bd-sub">{{ t('bd.advancedSub') }}</p>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="port">
           <div><b>{{ t('bd.localPort') }}</b><p>{{ t('bd.localPortHint') }}</p></div>
           <div class="bd-ctl"><input type="number" class="bd-inp" v-model.number="mock.port" min="1024" max="65535" :aria-label="t('bd.localPort')" /></div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="loglevel">
           <div><b>{{ t('bd.logLevel') }}</b><p>{{ t('bd.logLevelHint') }}</p></div>
           <div class="bd-ctl">
             <select class="bd-inp" v-model="mock.log" :aria-label="t('bd.logLevel')">
@@ -481,11 +465,11 @@
             </select>
           </div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="devmode">
           <div><b>{{ t('bd.devMode') }}</b><p>{{ t('bd.devModeHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.dev" :aria-label="t('bd.devMode')" /><span></span></label></div>
         </div>
-        <div class="bd-srow">
+        <div class="bd-srow" data-setting="reset">
           <div><b>{{ t('bd.resetSettings') }}</b><p>{{ t('bd.resetSettingsHint') }}</p></div>
           <div class="bd-ctl"><button class="bd-btn bd-dng" @click="resetAll">{{ t('bd.resetBtn') }}</button></div>
         </div>
@@ -535,7 +519,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
 import {
-  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, ShieldAlert, Sparkles, ScrollText
+  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, ShieldAlert, Sparkles, ScrollText, Search, X
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 // Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
@@ -552,9 +536,6 @@ import {
 import { useAutoProfile } from '../../composables/useAutoProfile'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
 import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
-import {
-  useDevices, DECK_MODELS, DEFAULT_DECK_MODEL, type LogicalDevice,
-} from '../../composables/useDevices'
 import { IDRE, RES } from '../../composables/useExpressions'
 import type { ProfileData } from '../../types/streamdeck'
 
@@ -627,6 +608,94 @@ const navItems = computed(() => [
   { id: 'logs' as const, label: t('bd.secLogs'), icon: ScrollText },
   { id: 'about' as const, label: t('bd.secAbout'), icon: Info }
 ])
+
+// Buscador: filtra el menú lateral y ofrece salto directo al ajuste concreto.
+const query = ref('')
+const norm = (s: string) =>
+  (s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+const filteredNav = computed(() => {
+  const q = norm(query.value.trim())
+  if (!q) return navItems.value
+  return navItems.value.filter((i) => norm(i.label).includes(q))
+})
+interface SearchEntry { section: Section; id: string; title: string; hint: string; sectionLabel: string }
+const searchIndex = computed<SearchEntry[]>(() => {
+  const L = (sec: Section, id: string, title: string, hint = ''): SearchEntry => ({
+    section: sec,
+    id,
+    title,
+    hint,
+    sectionLabel: navItems.value.find((n) => n.id === sec)?.label ?? sec,
+  })
+  const entries: SearchEntry[] = [
+    // Secciones (para que "apariencia", "copias", "atajos"… lleven a su página)
+    ...navItems.value.map((n) => L(n.id, `sec-${n.id}`, n.label)),
+    // General
+    L('general', 'autostart', t('bd.startWithSystem'), t('bd.startWithSystemHint')),
+    L('general', 'tray', t('bd.keepInTray'), t('bd.keepInTrayHint')),
+    L('general', 'undo', t('bd.allowUndo'), t('bd.allowUndoHint')),
+    L('general', 'autoswitch', t('bd.autoSwitch'), t('bd.autoSwitchHint')),
+    // Dispositivos
+    L('devices', 'device', t('bd.streamdeckDevice'), t('bd.streamdeckDeviceHint')),
+    L('devices', 'brightness', t('bd.brightness'), t('bd.brightnessHint')),
+    L('devices', 'longpress', t('bd.longPressTime'), t('bd.longPressTimeHint')),
+    // Copias
+    L('backup', 'backup-export', t('bd.backupExportTitle'), t('bd.backupExportSub')),
+    // Apariencia (incluye el idioma movido desde General)
+    L('appearance', 'language', t('bd.language'), t('bd.interfaceLang')),
+    L('appearance', 'palette', t('bd.palette'), t('bd.paletteHint')),
+    L('appearance', 'keysize', t('bd.keySize'), t('bd.keySizeHint')),
+    L('appearance', 'rounding', t('bd.rounding'), t('bd.roundingHint')),
+    L('appearance', 'labels', t('bd.keyLabels'), t('bd.keyLabelsHint')),
+    L('appearance', 'animations', t('bd.animations'), t('bd.animationsHint')),
+    // Atajos
+    L('shortcuts', 'showhide', t('bd.showHideWindow')),
+    L('shortcuts', 'nextprofile', t('bd.nextProfile')),
+    L('shortcuts', 'muteall', t('bd.muteAll')),
+    // Avanzado
+    L('advanced', 'port', t('bd.localPort'), t('bd.localPortHint')),
+    L('advanced', 'loglevel', t('bd.logLevel'), t('bd.logLevelHint')),
+    L('advanced', 'devmode', t('bd.devMode'), t('bd.devModeHint')),
+    L('advanced', 'reset', t('bd.resetSettings'), t('bd.resetSettingsHint')),
+  ]
+  // Sin duplicados sección+id (las entradas de sección usan `sec-*`)
+  const seen = new Set<string>()
+  return entries.filter((e) => {
+    const k = `${e.section}:${e.id}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+})
+const isSearching = computed(() => query.value.trim().length > 0)
+const searchResults = computed(() => {
+  const q = norm(query.value.trim())
+  if (!q) return []
+  return searchIndex.value
+    .filter((e) => norm(`${e.title} ${e.hint} ${e.sectionLabel}`).includes(q))
+    .slice(0, 30)
+})
+const selectSection = (id: Section) => {
+  section.value = id
+  query.value = ''
+  nextTick(() => bodyEl.value?.scrollTo(0, 0))
+}
+const goToResult = (r: SearchEntry) => {
+  section.value = r.section
+  const target = r.id.startsWith('sec-') ? null : r.id
+  query.value = ''
+  nextTick(() => {
+    bodyEl.value?.scrollTo(0, 0)
+    if (!target || !bodyEl.value) return
+    requestAnimationFrame(() => {
+      const el = bodyEl.value?.querySelector(`[data-setting="${target}"]`)
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  })
+}
 
 const palettes = computed(() => [
   { id: 'auto' as const, label: t('bd.palAuto'), colors: ['#121315', '#f3f3f1', '#e0a84a', '#2d5be3'] },
@@ -923,87 +992,6 @@ const testDevice = async () => {
   } catch { /* noop */ }
 }
 
-// ---- Dispositivos lógicos (pantallas por perfil) ----
-const devStore = useDevices(() => apiBase())
-const hwHint = computed(() => {
-  const hw = devStore.hwStatus.value
-  if (hw.connected && hw.grid) {
-    const model = DECK_MODELS.find((m) => m.id === hw.modelGuess)
-    return t('bd.deviceHwDetected', {
-      model: model?.label ?? 'Stream Deck',
-      size: `${hw.grid.cols}×${hw.grid.rows}`,
-    })
-  }
-  return t('bd.deviceHwUnknown')
-})
-const loadLogicalDevices = async () => {
-  try {
-    await devStore.loadDevices()
-    await devStore.loadHwStatus()
-  } catch { /* sin daemon */ }
-}
-const addLogicalDevice = async (kind: 'deck' | 'phone' | 'tablet') => {
-  try {
-    const n = devStore.devices.value.filter((d) => d.kind === kind).length + 1
-    const base = kind === 'deck' ? t('bd.deviceKindDeck') : kind === 'phone' ? t('bd.deviceKindPhone') : t('bd.deviceKindTablet')
-    const preset = DECK_MODELS.find((m) => m.id === DEFAULT_DECK_MODEL)!
-    const created = await devStore.createDevice({
-      name: `${base} ${n}`,
-      kind,
-      ...(kind === 'deck' ? { model: preset.id, cols: preset.cols, rows: preset.rows } : {}),
-    })
-    emit('notify', t('bd.deviceAdded', { name: created.name }))
-  } catch (e) {
-    emit('notify', String((e as Error)?.message ?? e))
-  }
-}
-const renameLogicalDevice = async (d: LogicalDevice, name: string) => {
-  const clean = name.trim().slice(0, 80)
-  if (!clean || clean === d.name) return
-  try {
-    await devStore.updateDevice(d.id, { name: clean })
-  } catch (e) {
-    emit('notify', String((e as Error)?.message ?? e))
-    await loadLogicalDevices()
-  }
-}
-const changeLogicalKind = async (d: LogicalDevice, kind: string) => {
-  if (kind === d.kind) return
-  try {
-    if (kind === 'deck') {
-      const preset = DECK_MODELS.find((m) => m.id === (d.model ?? DEFAULT_DECK_MODEL)) ?? DECK_MODELS.find((m) => m.id === DEFAULT_DECK_MODEL)!
-      await devStore.updateDevice(d.id, { kind: 'deck', model: preset.id, cols: preset.cols, rows: preset.rows })
-    } else {
-      await devStore.updateDevice(d.id, { kind: kind as 'phone' | 'tablet', model: null, cols: null, rows: null })
-    }
-  } catch (e) {
-    emit('notify', String((e as Error)?.message ?? e))
-  }
-}
-const changeLogicalModel = async (d: LogicalDevice, model: string) => {
-  const preset = DECK_MODELS.find((m) => m.id === model)
-  if (!preset || preset.id === d.model) return
-  try {
-    await devStore.updateDevice(d.id, { model: preset.id, cols: preset.cols, rows: preset.rows })
-  } catch (e) {
-    emit('notify', String((e as Error)?.message ?? e))
-  }
-}
-const deleteLogicalDevice = async (d: LogicalDevice) => {
-  try {
-    const { snapshot } = await devStore.deleteDevice(d.id)
-    emit('notify', t('bd.deviceDeleted', { name: d.name }), async () => {
-      try {
-        await devStore.restoreDevice(snapshot)
-      } catch (e) {
-        emit('notify', String((e as Error)?.message ?? e))
-      }
-    })
-  } catch (e) {
-    emit('notify', String((e as Error)?.message ?? e))
-  }
-}
-
 const resetAll = () => {
   bdSetPalette('auto')
   bdSetLabelMode('a')
@@ -1017,6 +1005,7 @@ const resetAll = () => {
 
 const show = (at?: Section, pluginTab?: PluginsTab) => {
   section.value = at ?? 'general'
+  query.value = ''
   if (at === 'plugins') {
     nextTick(() => pluginsPane.value?.setTab(pluginTab ?? 'inst'))
   }
@@ -1028,7 +1017,6 @@ const show = (at?: Section, pluginTab?: PluginsTab) => {
   void syncApiPort().then(() => {
     loadDevices()
     loadStatus()
-    loadLogicalDevices()
   })
   loadVersion()
 }

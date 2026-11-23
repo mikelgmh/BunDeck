@@ -520,22 +520,10 @@ export async function initDatabase() {
     db.exec('DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT 5000)');
   } catch { /* mejor esfuerzo: la app sigue sin poda */ }
 
-  // Dispositivos lógicos de ejemplo (sin ninguno, la barra de Dispositivos
-  // de la UI se oculta y la función es invisible). Solo la primera vez:
-  // si el usuario los borra, no vuelven solos al reiniciar.
-  try {
-    const seeded = db.prepare("SELECT value FROM settings WHERE key = 'devices.seeded_v1'").get() as { value: string } | undefined;
-    if (!seeded) {
-      const nowSeed = Date.now();
-      const seedDevice = db.prepare(
-        'INSERT OR IGNORE INTO devices (id, name, kind, model, cols, rows, hw_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      );
-      seedDevice.run('dev-deck-mk2', 'Stream Deck MK.2', 'deck', 'mk2', 5, 3, null, nowSeed, nowSeed);
-      seedDevice.run('dev-phone', 'Móvil', 'phone', null, null, null, null, nowSeed, nowSeed);
-      seedDevice.run('dev-tablet', 'Tablet', 'tablet', null, null, null, null, nowSeed, nowSeed);
-      db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run('devices.seeded_v1', '1');
-    }
-  } catch { /* mejor esfuerzo: la app sigue sin ejemplos */ }
+  // Los dispositivos ya NO se crean a mano: el HW detectado y los
+  // navegadores aceptados se auto-aprovisionan al identificarse por WS
+  // (ver buildUnifiedDevices/ensureDeviceRow). Sin semilla: la migración 9
+  // ya eliminó las filas heredadas sin sesión en DBs existentes.
 
   console.log('Database initialized at:', dbPath);
 }
@@ -921,7 +909,40 @@ function runMigrations(db: Database) {
     console.error('❌ Migration 8 failed:', error);
   }
 
+  // Migration 9: los dispositivos ya NO se crean a mano (son HW detectado o
+  // navegadores aceptados, auto-aprovisionados). Purga las filas heredadas
+  // sin respaldo: sin sesión persistida y sin `hw_path` (semilla y altas
+  // manuales antiguas). Las asignaciones huérfanas las repara el próximo
+  // GET /profiles/:id/assignments. Idempotente.
+  try {
+    const removed = purgeManualDevices(new DatabaseService());
+    console.log(`✅ Migration 9 completed: ${removed.length} dispositivos manuales heredados eliminados`);
+  } catch (error) {
+    console.error('❌ Migration 9 failed:', error);
+  }
+
   console.log('✅ Database migrations completed');
+}
+
+/**
+ * Purga filas `devices` sin respaldo (sin `device_sessions` y sin `hw_path`):
+ * semilla y altas manuales de versiones anteriores. Devuelve los ids
+ * eliminados. No toca HW ni navegadores aceptados (tienen sesión).
+ */
+export function purgeManualDevices(svc: DatabaseService): string[] {
+  const removed: string[] = [];
+  try {
+    const backed = new Set(svc.listDeviceSessions().map((s) => s.device_id));
+    for (const d of svc.listDevices()) {
+      if (backed.has(d.id)) continue;
+      if ((d as any).hw_path) continue;
+      try {
+        svc.deleteDevice(d.id);
+        removed.push(d.id);
+      } catch { /* fila fantasma: seguir */ }
+    }
+  } catch { /* sin tablas: noop */ }
+  return removed;
 }
 
 async function installBuiltInPlugins(db: Database) {
@@ -1448,7 +1469,7 @@ export class DatabaseService {
     const devices = this.listDevices().map((d) => ({
       id: d.id,
       name: d.name,
-      kind: d.kind as 'deck' | 'phone' | 'tablet',
+      kind: d.kind as 'deck' | 'phone' | 'tablet' | 'browser',
       model: d.model,
       cols: d.cols,
       rows: d.rows,
@@ -2598,5 +2619,18 @@ export class DatabaseService {
     try {
       this.db.prepare('DELETE FROM device_sessions WHERE device_id = ?').run(deviceId);
     } catch { /* sin tabla: noop */ }
+  }
+
+  /**
+   * Higiene contra acumulación fantasma: borra las sesiones sin actividad
+   * desde `beforeMs` (ms epoch). Cada contexto efímero (incógnito, origen de
+   * prueba, invitado antiguo) dejaba una fila permanente que la auto-reparación
+   * del listado resucitaba como dispositivo. Devuelve filas borradas.
+   */
+  purgeStaleDeviceSessions(beforeMs: number): number {
+    try {
+      const r = this.db.prepare('DELETE FROM device_sessions WHERE updated_at < ?').run(beforeMs);
+      return Number((r as any)?.changes ?? 0);
+    } catch { return 0; }
   }
 }

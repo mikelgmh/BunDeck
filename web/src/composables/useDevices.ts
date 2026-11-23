@@ -7,8 +7,11 @@
  */
 import { ref } from 'vue'
 
-export type DeviceKind = 'deck' | 'phone' | 'tablet'
+export type DeviceKind = 'deck' | 'phone' | 'tablet' | 'browser'
 export type DevicePageLayout = 'classic' | 'gridstack'
+
+/** Origen del dispositivo (la UI ya no crea dispositivos a mano). */
+export type DeviceSource = 'hardware' | 'browser' | 'manual'
 
 export interface LogicalDevice {
   id: string
@@ -22,6 +25,11 @@ export interface LogicalDevice {
   updated_at?: number
   /** Tamaño efectivo resuelto por el daemon (GET individual). */
   effectiveSize?: { cols: number; rows: number } | null
+  /** ¿Conectado ahora por WS? (lista unificada del daemon). */
+  online?: boolean
+  /** Origen: hardware detectado, navegador aceptado o fila heredada. */
+  source?: DeviceSource
+  lastSeen?: number | null
 }
 
 export interface DeckModel {

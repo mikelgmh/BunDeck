@@ -24,6 +24,8 @@ import {
   createLanInvite, getLanInviteMeta, revokeLanInvite, redeemLanInvite,
   listLanSessions, revokeLanSessionByPrefix,
 } from '../remote/lan-invites';
+import { devicesForTokenPrefix } from '../remote/device-bindings';
+import { forgetDeviceEverywhere } from './devices';
 import { allowLanRedeem, getLanContext } from '../http/lan-guard';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
@@ -293,6 +295,12 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     if (!r) return jsonResponse({ error: 'Sesión desconocida' }, 404);
     try { services.wsManager?.broadcast('remote.ui-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
     notifyTunnelUiUnbind(r.token);
+    // Revocar = prohibir + ocultar: olvidar los dispositivos vinculados.
+    try {
+      for (const deviceId of devicesForTokenPrefix(db, 'ui', prefix)) {
+        forgetDeviceEverywhere(db, services, deviceId, { revokeTokens: false });
+      }
+    } catch { /* noop */ }
     return jsonResponse({ ok: true, revoked: prefix });
   }
 
@@ -367,6 +375,12 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     const ok = revokeLanSessionByPrefix(db, prefix);
     if (!ok) return jsonResponse({ error: 'Sesión desconocida' }, 404);
     try { services.wsManager?.broadcast('remote.lan-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    // Revocar = prohibir + ocultar: olvidar los dispositivos vinculados.
+    try {
+      for (const deviceId of devicesForTokenPrefix(db, 'lan', prefix)) {
+        forgetDeviceEverywhere(db, services, deviceId, { revokeTokens: false });
+      }
+    } catch { /* noop */ }
     return jsonResponse({ ok: true, revoked: prefix });
   }
 

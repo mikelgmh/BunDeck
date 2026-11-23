@@ -21,8 +21,8 @@ const freePage = {
   id: 'g2', profile_id: 'p', name: 'Libre', order_idx: 1, is_folder: 0,
   data: { layoutMode: 'gridstack' },
 }
-const deck = { id: 'd1', name: 'Deck', kind: 'deck', model: 'mk2', cols: 5, rows: 3, hw_path: null }
-const mobile = { id: 'm1', name: 'Móvil', kind: 'phone', model: null, cols: null, rows: null, hw_path: null }
+const deck = { id: 'd1', name: 'Deck', kind: 'deck', model: 'mk2', cols: 5, rows: 3, hw_path: null, source: 'hardware', online: true }
+const mobile = { id: 'm1', name: 'Móvil', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: true, source: 'browser' }
 
 const baseProps = {
   gridCols: 5,
@@ -120,6 +120,40 @@ describe('StageBoard: dispositivos y pantallas', () => {
     })
     const chip = wrapper.find('[data-cy=bd-page-g1]')
     expect(chip.find('.bd-dvs').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('navegador acepta modo libre y muestra presencia online', async () => {
+    const browser = { id: 'b1', name: 'Navegador', kind: 'browser', model: null, cols: null, rows: null, hw_path: null, online: true, source: 'browser' }
+    const wrapper = mount(StageBoard, {
+      props: { ...baseProps, devices: [deck, browser], assignments: { d1: 'g1' } },
+    })
+    await wrapper.find('[data-cy=bd-devices-btn]').trigger('click')
+    // El navegador sí puede mostrar la página libre.
+    const bsel = wrapper.find('[data-cy=bd-device-page-b1]')
+    const bfree = bsel.findAll('option').find((o) => (o.element as HTMLOptionElement).value === 'g2')
+    expect((bfree!.element as HTMLOptionElement).disabled).toBe(false)
+    // Punto verde de presencia en su fila.
+    const row = wrapper.find('[data-cy=bd-device-row-b1]')
+    expect(row.find('.bd-dot.bd-ok').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('el desplegable solo muestra lo que está en línea', async () => {
+    const hwOff = { ...deck, online: false }
+    const ghost = { id: 'g9', name: 'Navegador', kind: 'browser', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
+    const ownOff = { id: 'own', name: 'Este', kind: 'browser', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
+    const wrapper = mount(StageBoard, {
+      props: { ...baseProps, devices: [hwOff, ghost, ownOff, mobile], assignments: {} },
+    })
+    await wrapper.find('[data-cy=bd-devices-btn]').trigger('click')
+    // Solo el móvil en línea; ni hardware apagado, ni fantasmas, ni el propio en gris.
+    expect(wrapper.find('[data-cy=bd-device-row-d1]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy=bd-device-row-g9]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy=bd-device-row-own]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy=bd-device-row-m1]').exists()).toBe(true)
+    // El badge cuenta solo lo visible.
+    expect(wrapper.find('[data-cy=bd-devices-badge]').text()).toContain('1')
     wrapper.unmount()
   })
 })

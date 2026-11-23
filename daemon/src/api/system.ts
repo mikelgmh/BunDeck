@@ -4,6 +4,10 @@
  */
 import { getSystemMetricsScript } from '../scripts/system-metrics.ps1';
 import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
+import {
+  getConflictProcessesCached,
+  closeConflictProcesses,
+} from '../hw-driver/streamdeck-conflict';
 import { getVersion } from '../version';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
@@ -798,13 +802,52 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
     if (method === 'GET') {
       const grid = streamDeckDriver.getGridGeometry();
       const { guessDeckModel } = await import('../devices');
+      let conflictProcesses: Array<{ name: string; pid: number | null }> = [];
+      try {
+        conflictProcesses = await getConflictProcessesCached();
+      } catch {
+        conflictProcesses = [];
+      }
+      // Heurístico HID: la app oficial suele dejar el HID ocupado aunque el
+      // proceso ya muriera (o al revés). Si no estamos conectados y el HID
+      // no lista nada, se marca como pista adicional — nunca como prueba.
+      let hidBusyHint = false;
+      try {
+        if (!streamDeckDriver.isConnected()) {
+          const devs = await streamDeckDriver.listDevices();
+          hidBusyHint = devs.length === 0;
+        }
+      } catch {
+        hidBusyHint = false;
+      }
+      const detected = conflictProcesses.length > 0;
       return jsonResponse({
         isConnected: streamDeckDriver.isConnected(),
         connectedDevice: streamDeckDriver.getConnectedDevice(),
         keyCount: streamDeckDriver.getKeyCount(),
         grid,
         modelGuess: guessDeckModel(grid),
+        conflict: {
+          detected,
+          processes: conflictProcesses,
+          hidBusyHint,
+          reason: detected ? (hidBusyHint ? 'both' : 'process') : hidBusyHint ? 'hid-busy' : 'none',
+        },
       });
+    }
+  }
+
+  // Cierra la app oficial de Elgato (solo allowlist interna, nunca PIDs
+  // arbitrarios desde el cliente). La UI lo usa desde el diálogo bloqueante.
+  if (path === '/api/v1/devices/streamdeck/close-official') {
+    if (method === 'POST') {
+      try {
+        const { closed, remaining } = await closeConflictProcesses();
+        return jsonResponse({ closed, remaining, detected: remaining.length > 0 });
+      } catch (error) {
+        console.error('Failed to close official StreamDeck app:', error);
+        return jsonResponse({ error: 'Failed to close official StreamDeck app' }, 500);
+      }
     }
   }
 

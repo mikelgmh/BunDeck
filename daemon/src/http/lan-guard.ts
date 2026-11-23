@@ -125,7 +125,7 @@ export type LanVerdict =
   | { ok: false; status: 401 | 403 | 429; code: string; message: string };
 
 const DENIED_MSG =
-  'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que genere una invitación (QR o enlace) y vuelve a intentarlo.';
+  'Sin permiso: entra con el QR del anfitrión. Pide al anfitrión que te lo enseñe desde Ajustes → Acceso remoto o con el botón de QR de la barra superior (Abrir en el móvil), o que te pase el enlace de invitación, y vuelve a intentarlo.';
 const HOST_ONLY_MSG =
   'Solo el anfitrión (localhost) puede gestionar invitaciones.';
 
@@ -133,15 +133,21 @@ export function evaluateLanAccess(
   db: DatabaseService,
   req: Request,
   peerIp: string | null,
-  opts?: { ua?: string },
+  opts?: { ua?: string; allowNullPeer?: boolean },
 ): LanVerdict {
   const url = new URL(req.url);
   const path = url.pathname;
   const method = req.method;
 
-  // Túnel del relay (petición sintética sin socket): el relay ya validó la
-  // sesión UI; no aplicar la policy LAN aquí.
-  if (peerIp === null) return { ok: true, via: 'tunnel' };
+  // Túnel del relay (petición sintética sin socket: allowNullPeer): el relay
+  // ya validó la sesión UI; no aplicar la policy LAN aquí.
+  // OJO: en un socket real la IP siempre se conoce. Si falta (requestIP
+  // falló), se DENIEGA por defecto: permitir sería un agujero (antes todo
+  // peerIp null entraba como 'tunnel').
+  if (peerIp === null) {
+    if (opts?.allowNullPeer) return { ok: true, via: 'tunnel' };
+    return { ok: false, status: 401, code: LAN_DENIED_CODE, message: DENIED_MSG };
+  }
   // Anfitrión local: exento siempre.
   if (isLoopbackIp(peerIp)) return { ok: true, via: 'loopback' };
   // Solo-lectura pública + canje explícito.
@@ -225,7 +231,7 @@ export function lanDeniedResponse(req: Request, verdict: Extract<LanVerdict, { o
     `h1{font-size:1.25rem;margin:0 0 .5rem}p{color:#d1d5db;line-height:1.5}code{color:#fbbf24}</style></head>` +
     `<body data-cy="lan-denied"><div class="card"><h1>🔒 Sin permiso</h1>` +
     `<p>${escapeHtml(msg)}</p>` +
-    `<p lang="en">No permission: ask the host for the QR code or invite link and try again.</p>` +
+    `<p lang="en">No permission: ask the host to show you the QR from Settings → Remote access or via the QR button in the top bar, or to send you the invite link, and try again.</p>` +
     `</div></body></html>`;
   return new Response(body, {
     status: 403,

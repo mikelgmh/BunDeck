@@ -26,6 +26,27 @@ export function getOrCreateDeviceId(storage?: Pick<Storage, 'getItem' | 'setItem
 }
 
 /**
+ * Familia del navegador actual (Chrome, Edge, Firefox, Safari, Brave…)
+ * para identificar cada contexto en las listas de dispositivos.
+ * Recibe `navigator` como parámetro para poder probarla sin DOM.
+ */
+export function browserFamilyName(nav?: any | null): string {
+  try {
+    const n = nav ?? (typeof navigator !== 'undefined' ? navigator : null)
+    const ua = String(n?.userAgent ?? '')
+    const brands: Array<{ brand?: string }> = n?.userAgentData?.brands ?? []
+    const b = brands.map((x) => String(x?.brand ?? '').toLowerCase()).join(' ')
+    if (b.includes('brave') || !!(n as any)?.brave) return 'Brave'
+    if (/edg/i.test(ua) || b.includes('edge') || /(^|\s)edg($|\s)/.test(b)) return 'Edge'
+    if (/opr\/|opera|opt\//i.test(ua) || b.includes('opera')) return 'Opera'
+    if (/firefox|fxios/i.test(ua)) return 'Firefox'
+    if (/chrome|chromium|crios/i.test(ua) || b.includes('chromium') || b.includes('chrome')) return 'Chrome'
+    if (/safari/i.test(ua)) return 'Safari'
+  } catch { /* sin navigator: nombre genérico */ }
+  return 'Navegador'
+}
+
+/**
  * ¿Debe este dispositivo aplicar una navegación recibida por WS?
  * - Sin destino (o 'all') → broadcast antiguo: aplica a todos (compat).
  * - Con destino → solo si coincide con el deviceId (o clientId) propio.

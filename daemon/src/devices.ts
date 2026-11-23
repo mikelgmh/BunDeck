@@ -7,10 +7,16 @@
  * - `deck` (Stream Deck): solo páginas en cuadrícula (`classic`) con su
  *   tamaño exacto. El tamaño sale del HW detectado primero y, si no se
  *   identifica, del modelo configurado en el dispositivo lógico.
- * - `phone` / `tablet`: aceptan cualquier página (grid o libre).
+ * - `phone` / `tablet` / `browser`: aceptan cualquier página (grid o libre).
+ *   `browser` es la clase auto-aprovisionada para navegadores aceptados
+ *   (invitación LAN o UI remota); `phone`/`tablet` quedan como legado.
  */
 
-export type DeviceKind = 'deck' | 'phone' | 'tablet';
+export type DeviceKind = 'deck' | 'phone' | 'tablet' | 'browser';
+/** Clases que aceptan cualquier página (todo lo que no sea deck físico). */
+export function isGenericScreenKind(kind: unknown): boolean {
+  return kind === 'phone' || kind === 'tablet' || kind === 'browser';
+}
 export type PageLayout = 'classic' | 'gridstack';
 
 /** Modelos físicos conocidos (tamaño fijo en teclas: cols × rows). */

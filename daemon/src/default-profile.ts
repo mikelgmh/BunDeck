@@ -383,35 +383,11 @@ export function ensureDefaultProfile(db: DatabaseService): {
     if (!db.getSetting('current.profile_id')) db.setSetting('current.profile_id', profileId);
   } catch { /* noop */ }
 
-  // 5) Dispositivos de ejemplo por tamaño (si faltan) y asignaciones
-  //    por defecto (solo donde falten): cada deck muestra su pantalla.
-  try {
-    const now = Date.now();
-    const has = new Set(db.listDevices().map((d) => d.id));
-    const wantDevices: Array<{ id: string; name: string; kind: string; model: string | null; cols: number | null; rows: number | null }> = [
-      { id: 'dev-deck-mini', name: 'Stream Deck Mini', kind: 'deck', model: 'mini', cols: 3, rows: 2 },
-      { id: 'dev-deck-neo', name: 'Stream Deck Neo', kind: 'deck', model: 'neo', cols: 4, rows: 2 },
-      { id: 'dev-deck-xl', name: 'Stream Deck XL', kind: 'deck', model: 'xl', cols: 8, rows: 4 },
-    ];
-    for (const d of wantDevices) {
-      if (!has.has(d.id)) {
-        db.createDevice({ ...d, hw_path: null } as any);
-        void now;
-      }
-    }
-    const current = db.getAssignments(profileId);
-    const defaults: Record<string, string> = {
-      'dev-deck-mk2': deckPageId,
-      'dev-deck-mini': miniPageId,
-      'dev-deck-neo': neoPageId,
-      'dev-deck-xl': xlPageId,
-      'dev-phone': freePageId,
-      'dev-tablet': freePageId,
-    };
-    for (const [deviceId, pageId] of Object.entries(defaults)) {
-      if (!current[deviceId] && db.getDevice(deviceId)) db.setAssignment(profileId, deviceId, pageId);
-    }
-  } catch { /* mejor esfuerzo */ }
+  // 5) Sin dispositivos de ejemplo: el HW detectado y los navegadores
+  //    aceptados se auto-aprovisionan solos al identificarse por WS.
+  //    Las asignaciones por defecto no tienen sentido sin filas: el primer
+  //    GET /profiles/:id/assignments auto-asigna la primera raíz compatible
+  //    a cada dispositivo sin pantalla (ver fixAssignments).
 
   return { profileId, deckPageId, miniPageId, neoPageId, xlPageId, freePageId, seeded };
 }

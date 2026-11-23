@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getOrCreateDeviceId, isNavigationForMe, describeNavTarget } from '../utils/sessionRouting'
+import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe, describeNavTarget } from '../utils/sessionRouting'
 
 function memStorage(): Pick<Storage, 'getItem' | 'setItem'> & { data: Record<string, string> } {
   const data: Record<string, string> = {}
@@ -29,6 +29,21 @@ describe('sessionRouting: deviceId estable', () => {
     const s = memStorage()
     s.setItem('libredeck_device_id', 'dev-fijo-123')
     expect(getOrCreateDeviceId(s)).toBe('dev-fijo-123')
+  })
+})
+
+describe('sessionRouting: browserFamilyName', () => {
+  it('detecta Chrome, Edge, Firefox, Safari y Brave', () => {
+    expect(browserFamilyName({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36' })).toBe('Chrome')
+    expect(browserFamilyName({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0' })).toBe('Edge')
+    expect(browserFamilyName({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0' })).toBe('Firefox')
+    expect(browserFamilyName({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15' })).toBe('Safari')
+    expect(browserFamilyName({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36', brave: {} })).toBe('Brave')
+  })
+
+  it('sin datos devuelve el genérico', () => {
+    expect(browserFamilyName({ userAgent: '' })).toBe('Navegador')
+    expect(browserFamilyName({})).toBe('Navegador')
   })
 })
 

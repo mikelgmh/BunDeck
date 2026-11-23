@@ -106,6 +106,43 @@ describe('RemotePane', () => {
     expect(code.text()).toContain('482913')
   })
 
+  it('lista navegadores conocidos con olvidar (el propio marcado)', async () => {
+    const unified = [
+      { id: 'hw1', name: 'Deck', kind: 'deck', source: 'hardware', online: true },
+      { id: 'b1', name: 'Brave', kind: 'browser', source: 'browser', online: true },
+      { id: 'b2', name: 'Chrome', kind: 'browser', source: 'browser', online: false },
+    ]
+    const base = mockFetch()
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/v1/devices') && (init?.method ?? 'GET') === 'GET') {
+        return { ok: true, json: async () => unified }
+      }
+      return base(url, init)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.localStorage.setItem('libredeck_device_id', 'b1')
+    try {
+      const wrapper = mount(RemotePane)
+      await flushPromises()
+      expect(wrapper.find('[data-cy="remote-browsers"]').exists()).toBe(true)
+      // El hardware no sale aquí (se gestiona en Dispositivos).
+      expect(wrapper.findAll('[data-cy="remote-browser-item"]').length).toBe(2)
+      // El propio marcado y sin papelera; el ajeno con papelera.
+      expect(wrapper.find('[data-cy="remote-browser-forget"][data-id="b1"]').exists()).toBe(false)
+      const forgetB2 = wrapper.find('[data-cy="remote-browser-forget"][data-id="b2"]')
+      expect(forgetB2.exists()).toBe(true)
+      await forgetB2.trigger('click')
+      await flushPromises()
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/devices/b2'),
+        expect.objectContaining({ method: 'DELETE' })
+      )
+      wrapper.unmount()
+    } finally {
+      window.localStorage.removeItem('libredeck_device_id')
+    }
+  })
+
   it('separa las dos funciones en dos tarjetas con título e icono propios', async () => {
     vi.stubGlobal('fetch', mockFetch())
     const wrapper = mount(RemotePane)

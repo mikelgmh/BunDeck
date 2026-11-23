@@ -1,5 +1,5 @@
-/* BunDeck design system — adaptado del mockup Plectro.
-   Todo el CSS vive bajo el ámbito `.bundeck` para no chocar con Tailwind/DaisyUI.
+/* BunDeck design system â adaptado del mockup Plectro.
+   Todo el CSS vive bajo el Ã¡mbito `.bundeck` para no chocar con Tailwind/DaisyUI.
    Tokens: --bd-bg, --bd-sf, --bd-ln, --bd-ink, --bd-mu, --bd-ac, --bd-ks, --bd-rk... */
 
 .bundeck {
@@ -71,7 +71,7 @@
 .bundeck .bd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .bundeck .bd-sp { flex: 1; }
 
-/* — Titlebar custom (ventana frameless Electrobun) — */
+/* â Titlebar custom (ventana frameless Electrobun) â */
 .bundeck .bd-titlebar { height: 40px; flex: none; display: flex; align-items: stretch; background: var(--bd-bg); border-bottom: 1px solid var(--bd-ln); user-select: none; }
 .bundeck .bd-titlebar-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; cursor: default; }
 .bundeck .bd-titlebar-mark { width: 18px; height: 18px; flex: none; }
@@ -82,7 +82,7 @@
 .bundeck .bd-winbtn.bd-close:hover { background: #e81123; color: #fff; }
 .bundeck .bd-winbtn:focus-visible { outline: 2px solid var(--bd-ac); outline-offset: -2px; }
 
-/* — Header — */
+/* â Header â */
 .bundeck header.bd-top { height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--bd-ln); flex: none; }
 .bundeck .bd-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
 .bundeck .bd-mark { width: 28px; height: 28px; flex: none; }
@@ -106,7 +106,7 @@
 .bd-confirm-body .bd-inp { width: 100%; padding: 8px 12px; border: 1px solid var(--bd-ln); border-radius: 8px; background: var(--bd-bg); min-height: 40px; color: var(--bd-ink); }
 .bd-confirm .bd-err { color: #e5806f; font-size: 12px; margin: 0; padding: 0; }
 
-/* — Botones — */
+/* â Botones â */
 .bundeck .bd-btn { padding: 4px 12px; min-height: 32px; border-radius: 8px; border: 1px solid var(--bd-ln); background: var(--bd-sf); font-weight: 500; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
 .bundeck .bd-btn:hover { border-color: var(--bd-mu); }
 .bundeck .bd-btn:disabled { opacity: 0.4; cursor: default; }
@@ -118,13 +118,13 @@
 .bundeck .bd-spin, .bundeck .bd-spin svg { animation: bd-rot 1s linear infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes bd-rot { to { transform: rotate(360deg); } }
 
-/* — Layout principal — */
+/* â Layout principal â */
 .bundeck main.bd-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--bd-lw) 1fr var(--bd-rw); }
 .bundeck[data-anim='1'] main.bd-main { transition: grid-template-columns 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .bundeck aside.bd-side { overflow: visible; min-width: 0; min-height: 0; position: relative; }
 .bundeck aside.bd-side > div { height: 100%; overflow: auto; padding: 24px 20px; overscroll-behavior: contain; position: relative; z-index: 2; background: var(--bd-bg); }
 .bundeck aside.bd-side > div.bd-collapsed-hit { overflow: hidden; }
-/* — Pestañas exteriores: viven POR DETRÁS del panel y se asoman por arriba por fuera — */
+/* â PestaÃ±as exteriores: viven POR DETRÃS del panel y se asoman por arriba por fuera â */
 .bundeck .bd-edge { position: absolute; top: 12px; z-index: 1; width: 28px; height: 64px; display: grid; place-items: center; background: var(--bd-sf); border: 1px solid var(--bd-ln); color: var(--bd-mu); cursor: pointer; opacity: 0; pointer-events: none; }
 .bundeck .bd-edge:hover { color: var(--bd-ink); border-color: var(--bd-mu); }
 .bundeck .bd-edge-r { left: 100%; border-left: 0; border-radius: 0 12px 12px 0; transform: translateX(-100%); box-shadow: 8px 12px 24px -12px rgba(0, 0, 0, 0.6); }
@@ -142,7 +142,7 @@
 .bundeck aside.bd-side:focus-within > .bd-edge-l,
 .bundeck .bd-edge-l:hover,
 .bundeck .bd-edge-l:focus-visible { transform: translateX(0); }
-/* Colapsado: la pestaña queda siempre asomando para invitar a abrir */
+/* Colapsado: la pestaÃ±a queda siempre asomando para invitar a abrir */
 .bundeck aside.bd-side.bd-collapsed > .bd-edge { opacity: 1; pointer-events: auto; transform: translateX(0); }
 @media (pointer: coarse) {
   .bundeck aside.bd-side > .bd-edge { opacity: 1; pointer-events: auto; transform: translateX(0); }
@@ -158,7 +158,7 @@
 .bundeck .bd-cnt { font-family: var(--bd-mono); background: var(--bd-sf); border-radius: 8px; padding: 0 8px; font-weight: 500; }
 .bundeck .bd-ttl { font-size: 20px; line-height: 28px; margin: 4px 0 16px; }
 
-/* — Escenario — */
+/* â Escenario â */
 .bundeck .bd-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .bundeck .bd-tool { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--bd-ln); background: var(--bd-bg); min-height: 54px; flex: none; flex-wrap: wrap; }
 .bundeck .bd-tgrp { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -197,7 +197,7 @@
 .bundeck .bd-crumb b { color: var(--bd-ink); font-weight: 500; }
 .bundeck .bd-plate { display: grid; grid-template-columns: repeat(var(--bd-c), var(--bd-ks)); gap: 12px; padding: 24px; border-radius: calc(var(--bd-rk) + 12px); background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 32px 48px -28px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.35); }
 
-/* — Teclas — */
+/* â Teclas â */
 .bundeck .bd-key { position: relative; width: var(--bd-ks); height: var(--bd-ks); border-radius: var(--bd-rk); color: var(--bd-g); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: linear-gradient(180deg, var(--bd-k1), var(--bd-k2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 -2px 0 rgba(0, 0, 0, 0.35) inset, 0 8px 8px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .bundeck[data-anim='1'] .bd-key { transition: transform 0.12s, box-shadow 0.12s; }
 .bundeck .bd-key svg { opacity: var(--bd-br); }
@@ -270,7 +270,7 @@
 .bundeck .bd-cs[aria-pressed='true'] { outline: 2px solid var(--bd-ink); outline-offset: 4px; }
 .bundeck .bd-bg-default { background: linear-gradient(180deg, var(--bd-k1), var(--bd-k2)); }
 
-/* — Lista de acciones (inspector) — */
+/* â Lista de acciones (inspector) â */
 .bundeck .bd-al { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; }
 .bundeck .bd-ac { border: 1px solid var(--bd-ln); border-radius: 12px; background: var(--bd-sf); padding: 8px 8px 12px 12px; }
 .bundeck .bd-ah { display: flex; align-items: center; gap: 8px; min-height: 32px; }
@@ -285,7 +285,7 @@
 .bundeck .bd-ac .bd-dl2 { display: flex; align-items: center; gap: 8px; margin: 8px 4px 0 0; color: var(--bd-mu); font-size: 12px; }
 .bundeck .bd-ac .bd-dl2 input { width: 96px; min-height: 32px; padding: 4px 8px; }
 .bundeck .bd-ac input, .bundeck .bd-ac select { min-height: 32px; }
-/* Parámetros de acción (SchemaForm) dentro de la tarjeta sf: inputs en bg */
+/* ParÃ¡metros de acciÃ³n (SchemaForm) dentro de la tarjeta sf: inputs en bg */
 .bundeck .bd-ac .bd-inp { background: var(--bd-bg); }
 .bundeck .bd-schema { display: flex; flex-direction: column; gap: 10px; }
 .bundeck .bd-schema .bd-fld { margin: 0; }
@@ -304,7 +304,7 @@
 .bundeck .bd-acts { display: flex; gap: 8px; margin-top: 24px; }
 .bundeck .bd-acts .bd-btn { flex: 1; }
 
-/* — Inspector nuevo: cabecera con vista previa, tabs y pie fijo — */
+/* â Inspector nuevo: cabecera con vista previa, tabs y pie fijo â */
 .bundeck .bd-ih { display: flex; gap: 12px; align-items: center; padding: 16px 12px 12px 20px; flex: none; }
 .bundeck .bd-pv { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; color: var(--bd-g, var(--bd-ink)); flex: none; background: linear-gradient(180deg, var(--bd-k1), var(--bd-k2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 0 0 1px rgba(0, 0, 0, 0.45); overflow: hidden; }
 /* Vista previa clicable: hover oscurece y muestra el icono de foto. */
@@ -315,7 +315,7 @@
 .bundeck button.bd-pvbtn:hover .bd-pvov, .bundeck button.bd-pvbtn:focus-visible .bd-pvov { opacity: 1; }
 .bundeck .bd-ics { width: 24px; height: 24px; object-fit: cover; border-radius: 6px; flex: none; }
 .bundeck .bd-kimg { width: 40px; height: 40px; object-fit: cover; border-radius: 10px; opacity: var(--bd-br); }
-/* Pestaña Imagen del selector de iconos. */
+/* PestaÃ±a Imagen del selector de iconos. */
 .bundeck .bd-imgdrop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 16px; border: 1px dashed var(--bd-ln); border-radius: 12px; color: var(--bd-mu); cursor: pointer; text-align: center; }
 .bundeck .bd-imgdrop:hover, .bundeck .bd-imgdrop.bd-on { border-color: var(--bd-ac); color: var(--bd-ink); background: var(--bd-as); }
 .bundeck .bd-imgcur { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -326,7 +326,7 @@
 .bundeck .bd-itabs { display: flex; padding: 0 12px; border-bottom: 1px solid var(--bd-ln); gap: 4px; flex: none; }
 .bundeck .bd-itabs button { padding: 8px 12px; color: var(--bd-mu); font-weight: 500; margin-bottom: -1px; border-bottom: 2px solid transparent; min-height: 40px; display: flex; gap: 8px; align-items: center; }
 .bundeck .bd-itabs button[aria-selected='true'] { color: var(--bd-ink); border-color: var(--bd-ac); }
-/* Etiquetas de presentación en biblioteca y tarjetas (Control / Dato / Solo libre). */
+/* Etiquetas de presentaciÃ³n en biblioteca y tarjetas (Control / Dato / Solo libre). */
 .bundeck .bd-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--bd-ln); color: var(--bd-mu); background: var(--bd-bg); white-space: nowrap; }
 .bundeck .bd-tag-ctl { color: var(--bd-ac); border-color: color-mix(in srgb, var(--bd-ac) 55%, var(--bd-ln)); }
 .bundeck .bd-ibody { flex: 1; min-height: 0; overflow: auto; padding: 20px; overscroll-behavior: contain; }
@@ -335,12 +335,12 @@
 .bundeck .bd-ifoot .bd-btn kbd.bd-kbd, .bundeck .bd-btn kbd.bd-kbd { margin-left: 8px; font-size: 11px; padding: 0 4px; }
 .bundeck .bd-ac[data-bd-dragging] { box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.55); border-color: var(--bd-ac); }
 
-/* — Paleta de comandos (Ctrl+K) — */
+/* â Paleta de comandos (Ctrl+K) â */
 .bundeck dialog.bd-cmd[open] { display: flex; flex-direction: column; height: auto; max-height: min(520px, 80vh); margin-top: 12vh; }
 .bundeck .bd-cmd-list { display: flex; flex-direction: column; gap: 0; }
 .bundeck .bd-cmd-list .bd-act[aria-selected='true'] { background: var(--bd-sf); outline: 2px solid var(--bd-ac); outline-offset: -2px; }
 
-/* — Reglas, looks y variables — */
+/* â Reglas, looks y variables â */
 .bundeck .bd-rl { border: 1px solid var(--bd-ln); border-radius: 12px; background: var(--bd-sf); padding: 12px; margin-bottom: 12px; }
 .bundeck .bd-rl > .bd-ah { padding: 0 0 4px; }
 .bundeck .bd-sh2 { font-size: 12px; font-weight: 600; color: var(--bd-mu); margin: 12px 0 8px; }
@@ -365,7 +365,7 @@
   .bundeck .bd-vr { grid-template-columns: 1fr 1fr; }
 }
 
-/* — Exportar / importar — */
+/* â Exportar / importar â */
 .bundeck .bd-code { font: 12px/16px var(--bd-mono); white-space: pre; overflow: auto; min-height: 200px; resize: vertical; }
 .bundeck .bd-warnbox { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border-radius: 12px; background: var(--bd-as); }
 .bundeck .bd-warnbox svg { flex: none; color: var(--bd-ac); margin-top: 2px; }
@@ -374,9 +374,9 @@
 .bundeck .bd-srch { position: relative; margin-bottom: 8px; }
 .bundeck .bd-srch svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--bd-mu); pointer-events: none; display: flex; flex: none; }
 .bundeck .bd-srch input.bd-inp:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']) { padding-left: 38px; }
-/* Fila input + botón (marketplace, tokens, ajustes de plugin): el input
-   ocupa el espacio libre y el botón conserva su ancho. Sin esto el input
-   (width:100%) empuja el botón a la línea siguiente. */
+/* Fila input + botÃ³n (marketplace, tokens, ajustes de plugin): el input
+   ocupa el espacio libre y el botÃ³n conserva su ancho. Sin esto el input
+   (width:100%) empuja el botÃ³n a la lÃ­nea siguiente. */
 .bundeck .bd-r2 { display: flex; gap: 8px; align-items: center; }
 .bundeck .bd-r2 .bd-inp { flex: 1 1 auto; min-width: 0; }
 .bundeck .bd-r2 .bd-btn { flex: none; white-space: nowrap; }
@@ -392,7 +392,7 @@
 .bundeck .bd-act.is-disabled:hover { background: none; }
 .bundeck kbd.bd-kbd { font-size: 12px; background: var(--bd-bg); border: 1px solid var(--bd-ln); border-bottom-width: 2px; border-radius: 4px; padding: 0 8px; white-space: nowrap; }
 
-/* — Diálogos — */
+/* â DiÃ¡logos â */
 .bundeck dialog.bd-dlg { margin: auto; border: 0; padding: 0; border-radius: 20px; background: var(--bd-sf); color: var(--bd-ink); width: min(880px, 94vw); height: min(640px, 88vh); box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--bd-ln); overscroll-behavior: contain; }
 .bundeck dialog.bd-dlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 .bundeck dialog.bd-dlg[open] { animation: bd-pop 0.2s ease-out; }
@@ -403,6 +403,21 @@
 .bundeck .bd-dnav button { display: flex; gap: 12px; align-items: center; min-height: 40px; padding: 8px 12px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; text-align: left; }
 .bundeck .bd-dnav button:hover { color: var(--bd-ink); }
 .bundeck .bd-dnav button[aria-selected='true'] { background: var(--bd-sf); color: var(--bd-ink); box-shadow: 0 0 0 1px var(--bd-ln); }
+.bundeck .bd-dbody > .bd-dsearch { position: sticky; top: -24px; z-index: 5; margin: -24px -32px 16px; padding: 12px 32px; border: 0; border-bottom: 1px solid var(--bd-ln); border-radius: 0; background: var(--bd-sf); }
+.bundeck .bd-dsearch { display: flex; align-items: center; gap: 8px; color: var(--bd-mu); }
+.bundeck .bd-dsearch:focus-within { color: var(--bd-ink); }
+.bundeck .bd-dsearch svg { flex: none; }
+.bundeck .bd-dsearch .bd-inp { flex: 1; min-width: 0; }
+.bundeck .bd-dbody > .bd-dsearch input.bd-inp:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']) { border: 0; background: transparent; box-shadow: none; }
+.bundeck .bd-dbody > .bd-dsearch input.bd-inp:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus { border: 0; box-shadow: none; }
+.bundeck .bd-dsearch .bd-ibtn { flex: none; }
+.bundeck .bd-dempty { margin: 4px 8px; font-size: 12px; color: var(--bd-mu); }
+.bundeck .bd-sres-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.bundeck .bd-sres { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px; border: 1px solid var(--bd-ln); border-radius: 12px; background: var(--bd-sf); }
+.bundeck .bd-sres:hover { border-color: var(--bd-ac); }
+.bundeck .bd-sres-sec { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--bd-mu); }
+.bundeck .bd-sres b { font-weight: 600; }
+.bundeck .bd-sres-hint { font-size: 12px; color: var(--bd-mu); }
 .bundeck .bd-dbody { padding: 24px 32px; overflow: auto; }
 .bundeck .bd-dbody h2, .bundeck .bd-dh h2 { font-size: 24px; line-height: 32px; }
 .bundeck .bd-sub { color: var(--bd-mu); margin-bottom: 8px; }
@@ -422,7 +437,7 @@
 .bundeck .bd-ctl select.bd-inp { width: 176px; }
 .bundeck .bd-ctl input[type='number'].bd-inp { width: 104px; }
 .bundeck .bd-ctl .bd-rg input { width: 152px; flex: none; }
-/* Selector de Stream Deck: el path HID es larguísimo, no debe ensanchar el diálogo */
+/* Selector de Stream Deck: el path HID es larguÃ­simo, no debe ensanchar el diÃ¡logo */
 .bundeck .bd-ctl-device { flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; max-width: 280px; width: 100%; flex: 1 1 auto; }
 .bundeck .bd-device-select { width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bundeck .bd-device-status { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -434,8 +449,14 @@
 .bundeck .bd-sw4 { display: flex; height: 32px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px rgba(128, 128, 128, 0.3) inset; }
 .bundeck .bd-sw4 i { flex: 1; }
 .bundeck .bd-pr { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 8px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--bd-ln); }
-.bundeck .bd-pr.dvrow { grid-template-columns: 1fr 128px 188px 40px; }
-/* Diálogo de confirmación (guardas destructivas: libre / resize en decks). */
+/* Fila de dispositivo unificado: punto de presencia + nombre (flexible) +
+   origen + capacidad + acción. El nombre es lo único que encoge. */
+.bundeck .bd-pr.bd-dvrow { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+.bundeck .bd-pr.bd-dvrow .bd-dot { margin: 0; flex: none; }
+.bundeck .bd-pr.bd-dvrow .bd-inp { min-width: 0; }
+.bundeck .bd-dvrow-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bundeck .bd-dvrow-lock { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: var(--bd-mu); }
+/* DiÃ¡logo de confirmaciÃ³n (guardas destructivas: libre / resize en decks). */
 .bd-confirm { margin: auto; border: 0; padding: 0; border-radius: 20px; background: var(--bd-sf); color: var(--bd-ink); width: min(480px, 94vw); box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--bd-ln); }
 .bd-confirm::backdrop { background: rgba(0, 0, 0, 0.55); }
 .bd-confirm h2 { font-size: 20px; margin: 0; padding: 20px 24px 0; }
@@ -454,8 +475,8 @@
 .bundeck .bd-dtabs button { padding: 8px 12px; color: var(--bd-mu); font-weight: 500; margin-bottom: -1px; border-bottom: 2px solid transparent; min-height: 40px; }
 .bundeck .bd-dtabs button[aria-selected='true'] { color: var(--bd-ink); border-color: var(--bd-ac); }
 .bundeck .bd-pb { flex: 1; min-height: 0; overflow: auto; padding: 24px; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 16px; }
-/* Plugins como sección de Ajustes: reutiliza las pestañas del antiguo diálogo
-   pero integradas en el body con scroll propio del diálogo. */
+/* Plugins como secciÃ³n de Ajustes: reutiliza las pestaÃ±as del antiguo diÃ¡logo
+   pero integradas en el body con scroll propio del diÃ¡logo. */
 .bundeck .bd-plug { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .bundeck .bd-dbody .bd-dtabs { padding: 0; }
 .bundeck .bd-plug-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -466,7 +487,7 @@
 .bundeck .bd-mk-url { display: flex; flex-direction: column; gap: 4px; }
 .bundeck .bd-mk-label { font-size: 12px; font-weight: 600; color: var(--bd-mu); }
 
-/* — Superficies dentro de diálogos: el diálogo es sf, los controles directos
+/* â Superficies dentro de diÃ¡logos: el diÃ¡logo es sf, los controles directos
    y los paneles (cards, mcp, mk-tools) van en bg, y los controles anidados
    vuelven a sf. Sin esta alternancia inputs y botones se mimetizan con el fondo. */
 .bundeck dialog.bd-dlg .bd-inp { background: var(--bd-bg); }
@@ -536,7 +557,7 @@
 .bundeck .bd-qrbox svg { width: 100%; height: auto; display: block; }
 .bundeck .bd-warn-ic { width: 56px; height: 56px; border-radius: 16px; background: var(--bd-as); color: var(--bd-ac); display: grid; place-items: center; margin: 0 auto; }
 
-/* — Acceso remoto: emparejamiento, solicitudes y sesiones — */
+/* â Acceso remoto: emparejamiento, solicitudes y sesiones â */
 .bundeck .bd-remote-card { margin-top: 12px; gap: 8px; }
 .bundeck .bd-remote-heading { display: flex; align-items: center; gap: 8px; }
 .bundeck .bd-remote-heading svg { color: var(--bd-mu); flex: none; }
@@ -593,12 +614,12 @@
 .bundeck .bd-remote-approval__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px 20px; border-top: 1px solid var(--bd-ln); }
 .bundeck .bd-remote-approval__actions .bd-btn { min-width: 112px; }
 
-/* — Toast — */
+/* â Toast â */
 .bundeck .bd-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 16px); background: var(--bd-ink); color: var(--bd-bg); padding: 12px 16px; border-radius: 12px; display: flex; gap: 16px; align-items: center; opacity: 0; pointer-events: none; transition: 0.2s; z-index: 50; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); max-width: 92vw; }
 .bundeck .bd-toast.bd-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .bundeck .bd-toast button { font-weight: 600; text-decoration: underline; }
 
-/* — Swapy (arrastrar y soltar, sin cambios funcionales) — */
+/* â Swapy (arrastrar y soltar, sin cambios funcionales) â */
 .bundeck [data-swapy-item] { cursor: grab; }
 .bundeck [data-swapy-item]:active { cursor: grabbing; }
 .bundeck [data-swapy-item].swapy-item-dragging { opacity: 0.9 !important; z-index: 1000 !important; transition: none !important; }
@@ -608,7 +629,7 @@
 .bundeck [data-swapy-container].swapy-container-dragging { cursor: grabbing; }
 .bundeck [data-swapy-container].swapy-container-dragging [data-swapy-slot]:not(.swapy-slot-over) { opacity: 0.6; }
 
-/* — Responsive — */
+/* â Responsive â */
 @media (max-width: 1180px) {
   .bundeck .bd-tool { flex-wrap: wrap; padding: 8px 12px; }
   .bundeck .bd-tgrp.bd-mid { order: 3; flex-basis: 100%; justify-content: center; padding-top: 6px; border-top: 1px solid var(--bd-ln); }
@@ -621,13 +642,13 @@
   .bundeck aside#bd-drw { order: 1; }
   .bundeck aside.bd-side > div { height: auto; }
   .bundeck #bd-ins > div, .bundeck #bd-drw > div { width: auto; border: 0; border-top: 1px solid var(--bd-ln); margin: 0; overflow: visible; }
-  /* En móvil los paneles se apilan en vertical: el colapsado debe seguir
-     mostrando la pestaña con el botón de expandir, nunca ocultarse del todo. */
+  /* En mÃ³vil los paneles se apilan en vertical: el colapsado debe seguir
+     mostrando la pestaÃ±a con el botÃ³n de expandir, nunca ocultarse del todo. */
   .bundeck aside.bd-side.bd-collapsed { display: block; }
   .bundeck aside.bd-side.bd-collapsed > div,
   .bundeck #bd-ins.bd-collapsed > div,
   .bundeck #bd-drw.bd-collapsed > div { width: auto; padding: 8px 12px; overflow: hidden; border: 0; border-top: 1px solid var(--bd-ln); margin: 0; }
-  /* En vertical no hay "fuera" lateral: la pestaña flota arriba a la derecha del drawer */
+  /* En vertical no hay "fuera" lateral: la pestaÃ±a flota arriba a la derecha del drawer */
   .bundeck aside.bd-side > .bd-edge { top: 8px; left: auto; right: 8px; transform: none; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--bd-ln); box-shadow: none; z-index: 3; }
   .bundeck aside.bd-side:hover > .bd-edge,
   .bundeck aside.bd-side:focus-within > .bd-edge,
@@ -644,6 +665,7 @@
   .bundeck .bd-dnav button { white-space: nowrap; }
   .bundeck .bd-dfoot { grid-column: 1; padding: 12px 16px; }
   .bundeck .bd-dbody { padding: 16px; }
+  .bundeck .bd-dbody > .bd-dsearch { top: -16px; margin: -16px -16px 12px; padding: 10px 16px; }
   .bundeck .bd-cat-tools { grid-template-columns: minmax(0, 1fr) minmax(136px, 0.7fr); gap: 8px; }
   .bundeck .bd-cat-compat { grid-column: 1 / -1; justify-self: start; min-width: 200px; }
   .bundeck .bd-lrow.bd-cat-item { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 12px; }
@@ -651,6 +673,9 @@
   .bundeck .bd-cat-item > .bd-hint { grid-column: 2; justify-self: start; }
   .bundeck .bd-srow { flex-wrap: wrap; }
   .bundeck .bd-pr { grid-template-columns: 1fr 1fr; }
+  /* En estrecho la fila de dispositivo apila la capacidad debajo del nombre. */
+  .bundeck .bd-pr.bd-dvrow { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .bundeck .bd-dvrow-sub { grid-column: 2 / -1; justify-self: start; max-width: 100%; }
   .bundeck .bd-mkgrid, .bundeck .bd-pals { grid-template-columns: 1fr; }
   .bundeck .bd-remote-qr { grid-template-columns: 1fr; justify-items: stretch; gap: 12px; }
   .bundeck .bd-remote-qr__image { width: min(192px, 100%); justify-self: center; }
@@ -679,7 +704,7 @@
   .bundeck *, .bundeck *::before, .bundeck *::after { animation: none !important; transition: none !important; }
 }
 
-/* — Cambio automático de perfil (pestaña Perfiles + modal dedicada) — */
+/* â Cambio automÃ¡tico de perfil (pestaÃ±a Perfiles + modal dedicada) â */
 .bundeck .bd-pauto-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border-radius: 12px; background: var(--bd-bg); border: 1px solid var(--bd-ln); margin-bottom: 20px; }
 .bundeck .bd-pauto-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .bundeck .bd-pauto-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500; background: var(--bd-bg); border: 1px solid var(--bd-ln); color: var(--bd-mu); }
@@ -709,7 +734,7 @@
   .bundeck .bd-pauto-banner { flex-direction: column; align-items: stretch; }
 }
 
-/* — MCP: tokens con permisos y catálogo de herramientas — */
+/* â MCP: tokens con permisos y catÃ¡logo de herramientas â */
 .bundeck .bd-toks { display: flex; flex-direction: column; gap: 12px; }
 .bundeck .bd-tok { border: 1px solid var(--bd-ln); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .bundeck .bd-mcp-new { border-top: 1px dashed var(--bd-ln); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -724,7 +749,7 @@
 .bundeck .bd-tgroup summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .bundeck .bd-tgroup .bd-chips { margin-top: 8px; }
 
-/* — Deck layouts (nuevo editor de widgets; el grid fijo legacy sigue intacto) — */
+/* â Deck layouts (nuevo editor de widgets; el grid fijo legacy sigue intacto) â */
 .bundeck .bd-deck-toggle { display: inline-flex; border: 1px solid var(--bd-ln); border-radius: 10px; overflow: hidden; }
 .bundeck .bd-deck-toggle button { padding: 6px 10px; font-size: 12px; color: var(--bd-mu); background: transparent; border: 0; cursor: pointer; }
 .bundeck .bd-deck-toggle button[aria-pressed='true'] { background: var(--bd-as); color: var(--bd-ink); }
@@ -745,8 +770,8 @@
 /* El viewport se comporta como plate-wrap en el ejemplo: conserva la placa a
    su ancho natural y la desplaza en pantallas estrechas, nunca la comprime. */
 .bundeck .bd-gs-viewport { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overflow-y: visible; padding: 4px; }
-/* Libre: ancho fijo (columnas × 96px + padding 48px), misma métrica que la
-   altura de celda; así cada 1×1 queda cuadrado en desktop y móvil. */
+/* Libre: ancho fijo (columnas Ã 96px + padding 48px), misma mÃ©trica que la
+   altura de celda; asÃ­ cada 1Ã1 queda cuadrado en desktop y mÃ³vil. */
 .bundeck .bd-gs-wrap { position: relative; width: calc(var(--bd-c, 5) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) + 48px); max-width: none; min-width: 0; flex: none; display: flex; flex-direction: column; padding: 24px; border-radius: calc(var(--bd-rk) + 12px); background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 32px 48px -28px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .bundeck .bd-gs-add { display: inline-flex; align-items: center; gap: 6px; }
 .bundeck .bd-gs { width: 100%; min-width: 0; min-height: calc(var(--bd-r, 3) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px))); background-color: transparent; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1.2px, transparent 1.8px); background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px)); background-position: center; border: 0; border-radius: 12px; padding: 0; }
@@ -787,7 +812,7 @@
   .bundeck .bd-deck-use .bd-widget .bd-key { min-height: 96px; }
 }
 
-/* — Dispositivos y pantallas por perfil — */
+/* â Dispositivos y pantallas por perfil â */
 .bundeck .bd-stage { position: relative; }
 .bundeck .bd-freenote { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px; background: var(--bd-as); border: 1px solid var(--bd-ac); font-size: 12px; color: var(--bd-ink); }
 .bundeck .bd-freenote svg { color: var(--bd-ac); flex: none; }
@@ -816,7 +841,7 @@
 .bundeck .bd-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .bundeck .bd-dvs { display: inline-flex; gap: 3px; margin-left: 4px; color: var(--bd-ac); align-items: center; }
 
-/* — Diálogo de bienvenida (réplica del mockup #wlc) — */
+/* â DiÃ¡logo de bienvenida (rÃ©plica del mockup #wlc) â */
 .bundeck dialog.bd-dlg.bd-wlc { width: min(600px, 94vw); height: fit-content; max-height: calc(100dvh - 32px); overflow: hidden; }
 .bundeck dialog.bd-dlg.bd-wlc[open] { display: flex; flex-direction: column; }
 .bundeck .bd-wlc-art, .bundeck .bd-wlc-body, .bundeck .bd-wlc-foot { flex: none; }
@@ -833,7 +858,7 @@
 .bundeck .bd-wlc-dots button { width: 8px; height: 8px; border-radius: 99px; background: var(--bd-ln); transition: width 0.2s, background 0.2s; padding: 0; }
 .bundeck .bd-wlc-dots button[aria-selected='true'] { width: 22px; background: var(--bd-ac); }
 
-/* � Feedback t�ctil de pulsaci�n (Fase A; port del prototipo con prefijo bd-) � */
+/*  Feedback táctil de pulsación (Fase A; port del prototipo con prefijo bd-)  */
 .bundeck .bd-key { overflow: hidden; isolation: isolate; }
 .bundeck .bd-kfx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit; overflow: hidden; z-index: 2; }
 .bundeck .bd-kfx-rip { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: radial-gradient(circle, currentColor 0%, transparent 72%); opacity: 0.45; transform: scale(0); animation: bd-krip 0.48s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }

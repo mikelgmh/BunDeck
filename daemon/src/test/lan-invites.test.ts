@@ -215,7 +215,16 @@ describe('lan-guard: HTTP', () => {
   it('localhost exento y túnel exento (todo pasa)', () => {
     expect(evaluateLanAccess(db, lanReq('/api/v1/profiles'), '127.0.0.1')).toMatchObject({ ok: true, via: 'loopback' });
     expect(evaluateLanAccess(db, lanReq('/api/v1/profiles'), '::1')).toMatchObject({ ok: true, via: 'loopback' });
-    expect(evaluateLanAccess(db, lanReq('/'), null)).toMatchObject({ ok: true, via: 'tunnel' });
+    expect(evaluateLanAccess(db, lanReq('/'), null, { allowNullPeer: true })).toMatchObject({ ok: true, via: 'tunnel' });
+  });
+
+  it('IP desconocida en socket real → denegado (deny por defecto)', () => {
+    const v = evaluateLanAccess(db, lanReq('/api/v1/profiles'), null);
+    expect(v.ok).toBe(false);
+    if (!v.ok) {
+      expect(v.status).toBe(401);
+      expect(v.code).toBe(LAN_DENIED_CODE);
+    }
   });
 
   it('rutas públicas abiertas sin invitación; control cerrado', () => {
@@ -429,6 +438,9 @@ describe('lan-guard: WebSocket en cuarentena', () => {
       const deniedHello = await wsNext(ws);
       expect(deniedHello.type).toBe('error');
       expect(deniedHello.payload.code).toBe(LAN_DENIED_CODE);
+      // El invitado denegado no deja rastro: ni sesión ni fila de dispositivo.
+      expect(db.getDeviceSession('d-guest')).toBeNull();
+      expect(db.getDevice('d-guest')).toBeNull();
     } finally {
       ws.close();
     }
