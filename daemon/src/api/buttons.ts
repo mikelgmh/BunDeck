@@ -22,6 +22,38 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
     if (method === 'POST') {
       const body = await _req.json();
+      const hasGeometry =
+        body.x !== undefined || body.y !== undefined ||
+        body.w !== undefined || body.h !== undefined ||
+        body.widget_type !== undefined || body.kind !== undefined;
+      // Geometría GridStack: crear como widget (x/y/w/h) manteniendo position legacy.
+      if (hasGeometry) {
+        try {
+          const created = db.createButtonWidget({
+            id: uuidv4(),
+            page_id: body.page_id,
+            position: body.position,
+            kind: body.widget_type ?? body.kind ?? 'action_button',
+            x: body.x ?? null,
+            y: body.y ?? null,
+            w: body.w ?? 1,
+            h: body.h ?? 1,
+            parent_widget_id: body.parent_widget_id ?? null,
+            data: body.data || {},
+          });
+          services.wsManager.broadcast('button.created', { buttonId: created.id, button: created, mutationId: (body as any)?.mutationId }, 'buttons');
+          try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
+          if (streamDeckDriver.isConnected()) {
+            streamDeckDriver.scheduleUpdateFromPage(created.page_id);
+          }
+          return jsonResponse(created, 201);
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            return jsonResponse({ error: `La posición ${body.position} ya está ocupada en esta página` }, 409);
+          }
+          return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       const button = {
         id: uuidv4(),
         page_id: body.page_id,
@@ -38,6 +70,10 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
         throw error;
       }
       services.wsManager.broadcast('button.created', { buttonId: button.id, button, mutationId: (body as any)?.mutationId }, 'buttons');
+
+      // Las reglas load/timer/var de la tecla funcionan con la UI cerrada:
+      // re-sincronizar automatizaciones (best-effort, no bloquea).
+      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta): el vaciado/creación
       // respondía tras un repintado completo y parecía "pillado".
@@ -63,6 +99,7 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
         const updated = db.reorderButtons(page_id, order);
         services.wsManager.broadcastButtonsReordered(page_id, updated, (raw as any)?.mutationId);
+        try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 
         // Repintado diferido y coalescado (no bloquea la respuesta).
         if (streamDeckDriver.isConnected()) {
@@ -95,10 +132,27 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
     if (method === 'PUT') {
       const body = await _req.json();
+      const hasGeometry =
+        body.x !== undefined || body.y !== undefined ||
+        body.w !== undefined || body.h !== undefined ||
+        body.widget_type !== undefined || body.kind !== undefined ||
+        body.parent_widget_id !== undefined;
 
       try {
-        // Use new complete update function if position is provided
-        if (body.position !== undefined) {
+        // Geometría GridStack: actualizar x/y/w/h/tipo sin tocar data si no viene.
+        if (hasGeometry) {
+          db.updateButtonWidget(buttonId, {
+            kind: body.widget_type ?? body.kind,
+            x: body.x ?? undefined,
+            y: body.y ?? undefined,
+            w: body.w ?? undefined,
+            h: body.h ?? undefined,
+            parent_widget_id: body.parent_widget_id,
+            data: body.data,
+            position: body.position,
+            page_id: body.page_id,
+          });
+        } else if (body.position !== undefined) {
           db.updateButtonComplete(buttonId, {
             data: body.data,
             position: body.position,
@@ -115,6 +169,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
 
       const updatedButton = db.getButton(buttonId);
       services.wsManager.broadcastButtonUpdate(buttonId, updatedButton, (body as any)?.mutationId);
+
+      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta).
       if (streamDeckDriver.isConnected() && updatedButton) {
@@ -134,6 +190,8 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
       db.deleteButton(buttonId);
       const deleteBody = await _req.json().catch(() => ({}));
       services.wsManager.broadcastButtonDeleted(buttonId, (deleteBody as any)?.mutationId);
+
+      try { (services.actionRunner as any)?.resyncButtonAutomations?.(); } catch { /* noop */ }
 
       // Repintado diferido (no bloquea la respuesta): vaciar respondía
       // tras el repintado completo y la UI parecía congelada.

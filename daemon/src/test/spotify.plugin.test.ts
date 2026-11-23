@@ -49,13 +49,13 @@ describe('SpotifyPlugin', () => {
 
         expect(manifest.id).toBe('spotify')
         expect(manifest.name).toBe('Spotify')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.2.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')
-        expect(manifest.actions).toHaveLength(4)
+        expect(manifest.actions).toHaveLength(5)
         expect(manifest.actions.map((a: any) => a.id).sort()).toEqual(
-            ['like', 'playback', 'playlist', 'shuffle'].sort()
+            ['like', 'now-playing', 'playback', 'playlist', 'shuffle'].sort()
         )
 
         // Todos los schemas son JSON válidos con hints ui. El token vive en
@@ -82,13 +82,14 @@ describe('SpotifyPlugin', () => {
         expect(typeof manifest.instructions).toBe('string')
     })
 
-    it('registra los 4 handlers', () => {
+    it('registra los 5 handlers', () => {
         const { plugin } = makePlugin()
         const handlers = plugin.getActionHandlers()
         expect(handlers.has('playback')).toBe(true)
         expect(handlers.has('like')).toBe(true)
         expect(handlers.has('shuffle')).toBe(true)
         expect(handlers.has('playlist')).toBe(true)
+        expect(handlers.has('now-playing')).toBe(true)
     })
 
     it('playback play llama a PUT /me/player/play con el token', async () => {

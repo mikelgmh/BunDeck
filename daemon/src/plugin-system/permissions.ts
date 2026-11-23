@@ -21,6 +21,16 @@ export function requirePermission(manifest: PluginManifestV2, perm: PluginPermis
   }
 }
 
+export function isLocalhostUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return ['localhost', '127.0.0.1', '::1'].includes(u.hostname);
+  } catch { return false; }
+}
+
+/** IPs de metadatos cloud (SSRF): nunca accesibles sin permiso `system`. */
+const METADATA_HOSTS = new Set(['169.254.169.254', 'metadata.google.internal']);
+
 export function checkUrlPermission(manifest: PluginManifestV2, url: string): void {
   // http/network permiten cualquier URL https/http; sin permiso bloquea
   if (!hasPermission(manifest, 'http') && !hasPermission(manifest, 'network')) {
@@ -29,6 +39,9 @@ export function checkUrlPermission(manifest: PluginManifestV2, url: string): voi
   const u = new URL(url);
   if (!['http:', 'https:'].includes(u.protocol)) {
     throw new Error(`Protocolo no permitido: ${u.protocol}`);
+  }
+  if (METADATA_HOSTS.has(u.hostname)) {
+    throw new Error(`Acceso a endpoint de metadatos cloud bloqueado (${u.hostname})`);
   }
   // Bloquear localhost sin permiso system (evitar SSRF a daemon)
   if (['localhost', '127.0.0.1', '::1'].includes(u.hostname) && !hasPermission(manifest, 'system')) {
@@ -43,7 +56,7 @@ export function checkShellPermission(manifest: PluginManifestV2, command: string
   // lógico separada, timeout con terminate, I/O mediada por el padre), pero un
   // plugin malicioso dentro del Worker aún puede importar node:child_process.
   // No presentes esto como contención a nivel OS.
-  const blocked = ['rm -rf /', 'format', 'shutdown', 'mkfs'];
+  const blocked = ['rm -rf /', 'rm -rf /*', ':(){:|:&};:', 'mkfs', 'dd if=', 'format', 'shutdown', 'reboot', 'halt', 'poweroff', 'del /f /s /q c:\\windows', 'takeown', 'cipher /w', 'powershell -enc', 'powershell.exe -enc', 'frombase64string', '| sh'];
   const lower = command.toLowerCase();
   for (const b of blocked) if (lower.includes(b)) throw new Error(`Comando bloqueado por política: ${b}`);
 }

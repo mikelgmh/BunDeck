@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
@@ -109,9 +110,12 @@ export class ObsPlugin {
         return {
             id: 'obs',
             name: 'OBS Studio',
-            version: '1.1.0',
+            version: '1.2.0',
             description: 'Controla OBS Studio (escenas, fuentes, directo, grabación y audio) vía obs-websocket v5',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
             permissions: ['network'],
             settingsSchema: {
                 type: 'object',
@@ -147,6 +151,8 @@ export class ObsPlugin {
                     name: 'Cambiar de escena',
                     description: 'Cambia la escena actual del programa en OBS',
                     icon: 'Layers',
+                    timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    optionsFrom: { field: 'scene', sourceAction: 'scene-list', cacheMs: 30000 },
                     schema: {
                         type: 'object',
                         properties: {
@@ -211,6 +217,11 @@ export class ObsPlugin {
                     name: 'Iniciar / detener directo',
                     description: 'Inicia, detiene o alterna la emisión en directo',
                     icon: 'Radio',
+                    timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    states: [
+                        { value: 'live', label: 'En directo', icon: 'Radio' },
+                        { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -239,6 +250,11 @@ export class ObsPlugin {
                     name: 'Grabar',
                     description: 'Inicia, detiene o alterna la grabación',
                     icon: 'Video',
+                    timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    states: [
+                        { value: 'recording', label: 'Grabando', icon: 'Disc' },
+                        { value: 'stopped', label: 'Detenido', icon: 'Video' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -456,6 +472,27 @@ export class ObsPlugin {
                     name: 'Listar escenas',
                     description: 'Devuelve las escenas disponibles y cuál está en programa',
                     icon: 'List',
+                    timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...connection
+                        },
+                        required: []
+                    }
+                },
+                {
+                    id: 'status',
+                    name: 'Estado de OBS',
+                    description: 'Directo/grabación actuales para iconos dinámicos (states: live/offline, recording/stopped)',
+                    icon: 'Activity',
+                    dynamic: true,
+                    pollMs: 5000,
+                    timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    states: [
+                        { value: 'live', label: 'En directo', icon: 'Radio' },
+                        { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -481,6 +518,7 @@ export class ObsPlugin {
         handlers.set('transition', this.executeTransitionAction.bind(this))
         handlers.set('screenshot', this.executeScreenshotAction.bind(this))
         handlers.set('scene-list', this.executeSceneListAction.bind(this))
+        handlers.set('status', this.executeStatusAction.bind(this))
         return handlers
     }
 
@@ -845,9 +883,48 @@ export class ObsPlugin {
                 return { scenes, currentProgramSceneName: res?.currentProgramSceneName ?? null }
             })
             this.context.log('info', `OBS: ${result.scenes.length} escenas`, { current: result.currentProgramSceneName })
-            return { action: 'scene-list', ...result, host, port }
+            return { action: 'scene-list', ...result, options: result.scenes.map((s: string) => ({ value: s, label: s })), host, port }
         } catch (error) {
             this.context.log('error', `OBS: no se pudieron listar las escenas: ${error}`, { host, port })
+            throw error
+        }
+    }
+
+    /**
+     * Estado de OBS (GetStreamStatus + GetRecordStatus) para iconos dinámicos.
+     * Devuelve `state: 'live' | 'offline'`, `recordState` y `options` de
+     * escenas (para `optionsFrom` de la acción scene).
+     */
+    private async executeStatusAction(params: any, _context: any): Promise<any> {
+        const { host, port } = this.resolveConnection(params)
+        this.context.log('info', 'OBS: consultando estado', { host, port })
+        try {
+            const result = await this.withObsSession(params, async (send) => {
+                const stream = await send('GetStreamStatus').catch(() => null)
+                const record = await send('GetRecordStatus').catch(() => null)
+                const scenes = await send('GetSceneList').catch(() => null)
+                const streaming = stream?.outputActive === true
+                const recording = record?.outputActive === true
+                const names: string[] = Array.isArray(scenes?.scenes)
+                    ? scenes.scenes.map((s: any) => s?.sceneName).filter((n: any) => typeof n === 'string')
+                    : []
+                return { streaming, recording, scenes: names, currentProgramSceneName: scenes?.currentProgramSceneName ?? null }
+            })
+            const state = result.streaming ? 'live' : 'offline'
+            const recordState = result.recording ? 'recording' : 'stopped'
+            this.context.log('info', `OBS: estado ${state}/${recordState}`)
+            return {
+                action: 'status',
+                state,
+                recordState,
+                streaming: result.streaming,
+                recording: result.recording,
+                currentScene: result.currentProgramSceneName,
+                options: result.scenes.map((s: string) => ({ value: s, label: s })),
+                host, port,
+            }
+        } catch (error) {
+            this.context.log('error', `OBS: no se pudo consultar el estado: ${error}`, { host, port })
             throw error
         }
     }

@@ -13,6 +13,8 @@ export interface ActionHandler {
     (params: any, context: any): Promise<any>
 }
 
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
+
 async function runCommand(cmd: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] })
     const [stdout, stderr] = await Promise.all([
@@ -38,17 +40,46 @@ export class PCVitalsPlugin {
         return {
             id: 'pc-vitals',
             name: 'PC Vitals',
-            version: '1.1.0',
+            version: '1.2.0',
             description: 'Muestra el estado del equipo: CPU, RAM, GPU, temperatura, disco, red, uptime y procesos',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'system',
             permissions: ['system', 'monitoring'],
+            widgets: [
+                { id: 'cpu', kind: 'gauge', title: 'CPU', description: 'Uso de CPU en %', sourceAction: 'summary', refreshMs: 2000 },
+                { id: 'ram', kind: 'gauge', title: 'RAM', description: 'Uso de RAM en %', sourceAction: 'summary', refreshMs: 2000 }
+            ],
             actions: [
+                {
+                    id: 'summary',
+                    name: 'Resumen del sistema',
+                    description: 'CPU/RAM/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)',
+                    icon: 'Gauge',
+                    dynamic: true,
+                    pollMs: 5000,
+                    timeoutMs: 15000,
+                    states: [
+                        { value: 'ok', label: 'Normal', icon: 'Activity' },
+                        { value: 'warn', label: 'Carga alta', icon: 'TriangleAlert' },
+                        { value: 'crit', label: 'Crítica', icon: 'Siren' }
+                    ],
+                    schema: { type: 'object', properties: {}, required: [] }
+                },
                 {
                     id: 'monitor',
                     name: 'Monitor PC Metric',
                     description: 'Display real-time system metrics on button',
                     icon: 'Activity',
                     dynamic: true,
+                    pollMs: 2000,
+                    timeoutMs: 10000,
+                    states: [
+                        { value: 'ok', label: 'Normal', icon: 'Activity' },
+                        { value: 'warn', label: 'Carga alta', icon: 'TriangleAlert' },
+                        { value: 'crit', label: 'Crítica', icon: 'Siren' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -165,6 +196,7 @@ export class PCVitalsPlugin {
                     name: 'Procesos top',
                     description: 'Procesos con más CPU/memoria (ps en Linux/macOS, tasklist en Windows)',
                     icon: 'ListOrdered',
+                    timeoutMs: 15000,
                     schema: {
                         type: 'object',
                         properties: {
@@ -191,6 +223,7 @@ export class PCVitalsPlugin {
     public getActionHandlers(): Map<string, ActionHandler> {
         const handlers = new Map<string, ActionHandler>()
         handlers.set('monitor', this.monitorVitals.bind(this))
+        handlers.set('summary', this.systemSummary.bind(this))
         handlers.set('gpu-temp', this.gpuTemp.bind(this))
         handlers.set('disk-usage', this.diskUsage.bind(this))
         handlers.set('net-speed', this.netSpeed.bind(this))
@@ -429,6 +462,46 @@ export class PCVitalsPlugin {
         const minutes = Math.floor((seconds % 3600) / 60)
         const human = days > 0 ? `${days}d ${hours}h ${minutes}m` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
         return { action: 'uptime', value: seconds, unit: 's', human, monitored: true, source: 'node:os' }
+    }
+
+    /**
+     * Resumen del sistema en una llamada (widgets gauge v2.2).
+     * CPU/RAM vía endpoint del daemon; disco/uptime con los helpers
+     * existentes; `state` discreto por umbrales (ok/warn/crit).
+     */
+    private async systemSummary(_params: any, _context: any): Promise<any> {
+        let cpu: number | null = null
+        let ram: number | null = null
+        try {
+            const { API_PORT } = await import('../config')
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 8000)
+            try {
+                const response = await fetch(`http://localhost:${API_PORT}/api/v1/system/metrics`, { signal: ctrl.signal })
+                if (response.ok) {
+                    const metrics = await response.json()
+                    if (typeof metrics?.cpu?.usage === 'number') cpu = metrics.cpu.usage
+                    if (typeof metrics?.ram?.usage === 'number') ram = metrics.ram.usage
+                }
+            } finally {
+                clearTimeout(timer)
+            }
+        } catch (e) {
+            this.context.log('warn', `summary: sin endpoint de métricas (${e instanceof Error ? e.message : String(e)})`)
+        }
+        const peak = Math.max(cpu ?? 0, ram ?? 0)
+        const state = peak >= 90 ? 'crit' : peak >= 75 ? 'warn' : 'ok'
+        return {
+            action: 'summary',
+            state,
+            cpu, ram,
+            monitored: cpu !== null || ram !== null,
+            widget: {
+                kind: 'gauge' as const,
+                value: cpu ?? ram ?? 0,
+                label: cpu !== null ? `CPU ${Math.round(cpu)}%` : ram !== null ? `RAM ${Math.round(ram)}%` : 'sin datos',
+            },
+        }
     }
 
     /**

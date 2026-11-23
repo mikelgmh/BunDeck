@@ -112,6 +112,8 @@ const loginError = ref('')
 let loginTimer: ReturnType<typeof setInterval> | null = null
 const form = ref<Record<string, any>>({})
 const revealed = ref<Record<string, boolean>>({})
+/** Campos secretos según el daemon (contrato v2.2); [] si el daemon es antiguo. */
+const secretFields = ref<string[]>([])
 const loadError = ref('')
 const saveError = ref('')
 const saving = ref(false)
@@ -135,6 +137,9 @@ const fields = computed(() => {
     placeholder: p.ui?.placeholder ?? p.examples?.[0] ?? '',
     required: required.has(key),
     secret:
+      secretFields.value.includes(key) ||
+      p.secret === true ||
+      p.format === 'password' ||
       p.ui?.type === 'password' ||
       /token|password|secret|passwd|api[_-]?key/i.test(key + ' ' + (p.title ?? '')),
   }))
@@ -158,11 +163,13 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   oauth.value = null
   configured.value = true
   form.value = {}
+  secretFields.value = []
   try {
     const res = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pid)}/settings`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     schema.value = data.schema ?? null
+    secretFields.value = Array.isArray(data.secretFields) ? data.secretFields : []
     instructions.value = data.instructions ?? ''
     oauth.value = data.oauth ?? null
     configured.value = data.configured ?? true

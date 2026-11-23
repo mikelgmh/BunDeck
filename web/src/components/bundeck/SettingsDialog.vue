@@ -135,6 +135,58 @@
         </div>
       </template>
 
+      <!-- Dispositivos lógicos (pantallas por perfil) -->
+      <template v-else-if="section === 'devices'">
+        <h2>{{ t('bd.secDevices') }}</h2>
+        <p class="bd-sub">{{ t('bd.devicesSub') }}</p>
+        <p class="bd-hint" data-cy="bd-hw-hint">{{ hwHint }}</p>
+        <div>
+          <div v-for="d in devStore.devices.value" :key="d.id" class="bd-pr dvrow" :data-cy="`bd-device-${d.id}`">
+            <input
+              type="text"
+              class="bd-inp"
+              :value="d.name"
+              :aria-label="t('bd.secDevices')"
+              @change="renameLogicalDevice(d, ($event.target as HTMLInputElement).value)"
+            />
+            <select
+              class="bd-inp"
+              :value="d.kind"
+              :aria-label="t('bd.secDevices')"
+              @change="changeLogicalKind(d, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="deck">{{ t('bd.deviceKindDeck') }}</option>
+              <option value="phone">{{ t('bd.deviceKindPhone') }}</option>
+              <option value="tablet">{{ t('bd.deviceKindTablet') }}</option>
+            </select>
+            <select
+              v-if="d.kind === 'deck'"
+              class="bd-inp"
+              :value="d.model ?? ''"
+              :aria-label="t('bd.deviceKindDeck')"
+              @change="changeLogicalModel(d, ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="m in DECK_MODELS" :key="m.id" :value="m.id">{{ m.label }} · {{ m.cols }}×{{ m.rows }}</option>
+            </select>
+            <span v-else class="bd-hint">{{ t('bd.deviceAnyView') }}</span>
+            <button class="bd-ibtn" :aria-label="t('bd.delete')" :title="t('bd.delete')" @click="deleteLogicalDevice(d)">
+              <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap">
+          <button class="bd-btn" data-cy="bd-device-add-deck" @click="addLogicalDevice('deck')">
+            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddDeck') }}
+          </button>
+          <button class="bd-btn" data-cy="bd-device-add-phone" @click="addLogicalDevice('phone')">
+            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddPhone') }}
+          </button>
+          <button class="bd-btn" data-cy="bd-device-add-tablet" @click="addLogicalDevice('tablet')">
+            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddTablet') }}
+          </button>
+        </div>
+      </template>
+
       <!-- Perfiles (cableado a datos reales) -->
       <template v-else-if="section === 'profiles'">
         <h2>{{ t('bd.secProfiles') }}</h2>
@@ -415,7 +467,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import {
-  SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone
+  SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 import McpPane from './McpPane.vue'
@@ -429,12 +481,15 @@ import {
 import { useAutoProfile } from '../../composables/useAutoProfile'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
 import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
+import {
+  useDevices, DECK_MODELS, DEFAULT_DECK_MODEL, type LogicalDevice,
+} from '../../composables/useDevices'
 import { IDRE, RES } from '../../composables/useExpressions'
 import type { ProfileData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
 
-type Section = 'general' | 'device' | 'profiles' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'about'
+type Section = 'general' | 'device' | 'devices' | 'profiles' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'about'
 
 interface Props {
   currentLocale: string
@@ -461,7 +516,7 @@ interface Emits {
   (e: 'profile-created'): void
   (e: 'profile-duplicated', profileId: string): void
   (e: 'activate-profile', profileId: string): void
-  (e: 'notify', message: string): void
+  (e: 'notify', message: string, undo?: () => void): void
   (e: 'toggle-plugin', pluginId: string, on: boolean): void
   (e: 'remove-plugin', pluginId: string, name: string): void
   (e: 'install-file', file: File): void
@@ -486,6 +541,7 @@ const pluginsPane = ref<InstanceType<typeof PluginsPane> | null>(null)
 const navItems = computed(() => [
   { id: 'general' as const, label: t('bd.secGeneral'), icon: SlidersHorizontal },
   { id: 'device' as const, label: t('bd.secDevice'), icon: Monitor },
+  { id: 'devices' as const, label: t('bd.secDevices'), icon: MonitorSmartphone },
   { id: 'profiles' as const, label: t('bd.secProfiles'), icon: Users },
   { id: 'appearance' as const, label: t('bd.secAppearance'), icon: Paintbrush },
   { id: 'vars' as const, label: t('bd.secVars'), icon: Variable },
@@ -728,6 +784,87 @@ const testDevice = async () => {
   } catch { /* noop */ }
 }
 
+// ---- Dispositivos lógicos (pantallas por perfil) ----
+const devStore = useDevices(() => apiBase())
+const hwHint = computed(() => {
+  const hw = devStore.hwStatus.value
+  if (hw.connected && hw.grid) {
+    const model = DECK_MODELS.find((m) => m.id === hw.modelGuess)
+    return t('bd.deviceHwDetected', {
+      model: model?.label ?? 'Stream Deck',
+      size: `${hw.grid.cols}×${hw.grid.rows}`,
+    })
+  }
+  return t('bd.deviceHwUnknown')
+})
+const loadLogicalDevices = async () => {
+  try {
+    await devStore.loadDevices()
+    await devStore.loadHwStatus()
+  } catch { /* sin daemon */ }
+}
+const addLogicalDevice = async (kind: 'deck' | 'phone' | 'tablet') => {
+  try {
+    const n = devStore.devices.value.filter((d) => d.kind === kind).length + 1
+    const base = kind === 'deck' ? t('bd.deviceKindDeck') : kind === 'phone' ? t('bd.deviceKindPhone') : t('bd.deviceKindTablet')
+    const preset = DECK_MODELS.find((m) => m.id === DEFAULT_DECK_MODEL)!
+    const created = await devStore.createDevice({
+      name: `${base} ${n}`,
+      kind,
+      ...(kind === 'deck' ? { model: preset.id, cols: preset.cols, rows: preset.rows } : {}),
+    })
+    emit('notify', t('bd.deviceAdded', { name: created.name }))
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+  }
+}
+const renameLogicalDevice = async (d: LogicalDevice, name: string) => {
+  const clean = name.trim().slice(0, 80)
+  if (!clean || clean === d.name) return
+  try {
+    await devStore.updateDevice(d.id, { name: clean })
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+    await loadLogicalDevices()
+  }
+}
+const changeLogicalKind = async (d: LogicalDevice, kind: string) => {
+  if (kind === d.kind) return
+  try {
+    if (kind === 'deck') {
+      const preset = DECK_MODELS.find((m) => m.id === (d.model ?? DEFAULT_DECK_MODEL)) ?? DECK_MODELS.find((m) => m.id === DEFAULT_DECK_MODEL)!
+      await devStore.updateDevice(d.id, { kind: 'deck', model: preset.id, cols: preset.cols, rows: preset.rows })
+    } else {
+      await devStore.updateDevice(d.id, { kind: kind as 'phone' | 'tablet', model: null, cols: null, rows: null })
+    }
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+  }
+}
+const changeLogicalModel = async (d: LogicalDevice, model: string) => {
+  const preset = DECK_MODELS.find((m) => m.id === model)
+  if (!preset || preset.id === d.model) return
+  try {
+    await devStore.updateDevice(d.id, { model: preset.id, cols: preset.cols, rows: preset.rows })
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+  }
+}
+const deleteLogicalDevice = async (d: LogicalDevice) => {
+  try {
+    const { snapshot } = await devStore.deleteDevice(d.id)
+    emit('notify', t('bd.deviceDeleted', { name: d.name }), async () => {
+      try {
+        await devStore.restoreDevice(snapshot)
+      } catch (e) {
+        emit('notify', String((e as Error)?.message ?? e))
+      }
+    })
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+  }
+}
+
 const resetAll = () => {
   bdSetPalette('auto')
   bdSetLabelMode('a')
@@ -751,6 +888,7 @@ const show = (at?: Section, pluginTab?: PluginsTab) => {
   void syncApiPort().then(() => {
     loadDevices()
     loadStatus()
+    loadLogicalDevices()
   })
   loadVersion()
 }

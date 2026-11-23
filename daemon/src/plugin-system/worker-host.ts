@@ -70,7 +70,7 @@ function serializeInit(init: RequestInit | undefined): any {
   return { method: init.method ?? 'GET', headers, body };
 }
 
-function buildAPI(id: string, apiVersion = '2.1'): any {
+function buildAPI(id: string, apiVersion = '2.2'): any {
   const api: any = {
     version: apiVersion,
     pluginId: id,
@@ -80,6 +80,18 @@ function buildAPI(id: string, apiVersion = '2.1'): any {
     },
     emitEvent(eventName: string, payload: any): void {
       notifyParent('emit-event', { eventName, payload });
+    },
+    /** Contrato v2.2: estado del botón para iconos dinámicos (topic plugins). */
+    setButtonState(buttonId: string, state: string | { state: string; label?: string; icon?: string; value?: string | number }): void {
+      notifyParent('button-state', { buttonId, state });
+    },
+    /** Contrato v2.2: actualización de widget personalizado básico. */
+    setWidget(widgetId: string, data: unknown): void {
+      notifyParent('widget-update', { widgetId, data });
+    },
+    /** Contrato v2.2: todos los ajustes de una vez. */
+    getSettings(keys: string[]): Promise<Record<string, string | null>> {
+      return requestParent('get-settings', { keys });
     },
     getSetting(key: string): Promise<string | null> {
       return requestParent('get-setting', { key });

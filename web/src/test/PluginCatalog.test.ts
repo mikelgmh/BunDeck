@@ -118,7 +118,9 @@ describe('PluginCatalog', () => {
   it('el filtro "solo compatibles" oculta el plugin incompatible', async () => {
     const wrapper = mountCatalog()
     await flushPromises()
-    await wrapper.find('[data-cy="bd-catalog-compatible"]').setChecked(true)
+    const compatibleSwitch = wrapper.find('[data-cy="bd-catalog-compatible"]')
+    expect(compatibleSwitch.attributes('role')).toBe('switch')
+    await compatibleSwitch.setChecked(true)
     const items = wrapper.findAll('[data-cy="bd-catalog-item"]')
     expect(items).toHaveLength(2)
     expect(wrapper.text()).not.toContain('Future Plugin')

@@ -149,9 +149,12 @@
 .bundeck .bd-ttl { font-size: 20px; line-height: 28px; margin: 4px 0 16px; }
 
 /* — Escenario — */
-.bundeck .bd-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.bundeck .bd-tool { display: flex; gap: 8px 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 12px 12px 0; }
+.bundeck .bd-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.bundeck .bd-tool { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--bd-ln); background: var(--bd-bg); min-height: 54px; flex: none; flex-wrap: wrap; }
+.bundeck .bd-tgrp { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bundeck .bd-tgrp.bd-mid { justify-content: center; flex: 1; flex-wrap: wrap; row-gap: 8px; }
 .bundeck .bd-tool > * { flex: none; }
+.bundeck .bd-tool .bd-tgrp.bd-mid { flex: 1 1 auto; }
 .bundeck .bd-tool .bd-seg, .bundeck .bd-tool .bd-step { min-height: 40px; }
 .bundeck .bd-step { display: flex; align-items: center; gap: 4px; background: var(--bd-sf); border: 1px solid var(--bd-ln); border-radius: 12px; padding: 3px 4px; }
 .bundeck .bd-step span { padding: 0 8px; color: var(--bd-mu); }
@@ -255,6 +258,7 @@
 .bundeck .bd-cols { display: flex; gap: 12px; }
 .bundeck .bd-cs { width: 28px; height: 28px; border-radius: 50%; background: var(--bd-s); box-shadow: 0 0 0 1px rgba(128, 128, 128, 0.4) inset; }
 .bundeck .bd-cs[aria-pressed='true'] { outline: 2px solid var(--bd-ink); outline-offset: 4px; }
+.bundeck .bd-bg-default { background: linear-gradient(180deg, var(--bd-k1), var(--bd-k2)); }
 
 /* — Lista de acciones (inspector) — */
 .bundeck .bd-al { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; }
@@ -409,6 +413,13 @@
 .bundeck .bd-sw4 { display: flex; height: 32px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px rgba(128, 128, 128, 0.3) inset; }
 .bundeck .bd-sw4 i { flex: 1; }
 .bundeck .bd-pr { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 8px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--bd-ln); }
+.bundeck .bd-pr.dvrow { grid-template-columns: 1fr 128px 188px 40px; }
+/* Diálogo de confirmación (guardas destructivas: libre / resize en decks). */
+.bd-confirm { margin: auto; border: 0; padding: 0; border-radius: 20px; background: var(--bd-sf); color: var(--bd-ink); width: min(480px, 94vw); box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--bd-ln); }
+.bd-confirm::backdrop { background: rgba(0, 0, 0, 0.55); }
+.bd-confirm h2 { font-size: 20px; margin: 0; padding: 20px 24px 0; }
+.bd-confirm p { padding: 8px 24px 0; color: var(--bd-mu); font-size: 13px; }
+.bd-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 20px 24px 24px; }
 .bundeck .bd-dfoot { grid-column: 2; display: flex; justify-content: space-between; align-items: center; padding: 16px 32px; border-top: 1px solid var(--bd-ln); color: var(--bd-mu); font-size: 12px; }
 .bundeck dialog.bd-dlg.bd-flex[open] { display: flex; flex-direction: column; }
 .bundeck dialog.bd-dlg.bd-qr { width: min(440px, 94vw); height: fit-content; max-height: calc(100dvh - 32px); overflow: auto; }
@@ -467,6 +478,23 @@
 .bundeck .bd-lrow:last-child { border: 0; }
 .bundeck .bd-lrow > div:nth-child(2) { flex: 1; min-width: 0; }
 .bundeck .bd-lrow p { color: var(--bd-mu); font-size: 12px; }
+.bundeck .bd-cat { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.bundeck .bd-cat-tools { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(150px, 190px) auto; align-items: center; gap: 12px; }
+.bundeck .bd-cat-tools > .bd-inp { min-width: 0; }
+.bundeck .bd-cat-compat { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 0 12px; border: 1px solid var(--bd-ln); border-radius: 8px; background: var(--bd-bg); color: var(--bd-ink); font-size: 13px; white-space: nowrap; cursor: pointer; }
+.bundeck .bd-cat-compat .bd-sw { width: 40px; height: 24px; }
+.bundeck .bd-cat-list { display: flex; flex-direction: column; gap: 8px; }
+.bundeck .bd-lrow.bd-cat-item { align-items: flex-start; gap: 16px; padding: 16px; border: 1px solid var(--bd-ln); border-radius: 12px; background: var(--bd-bg); }
+.bundeck .bd-cat-item > .bd-tile { margin-top: 2px; }
+.bundeck .bd-cat-content { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+.bundeck .bd-cat-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 500; }
+.bundeck .bd-cat-title svg { flex: none; color: var(--bd-mu); }
+.bundeck .bd-cat-desc { color: var(--bd-mu); font-size: 13px; line-height: 1.5; }
+.bundeck .bd-cat-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.bundeck .bd-cat-meta .bd-chip { height: 28px; min-height: 28px; padding: 0 10px; border-radius: 8px; gap: 6px; font-size: 11px; }
+.bundeck .bd-cat-item > .bd-btn,
+.bundeck .bd-cat-item > .bd-hint { flex: none; align-self: center; }
+.bundeck .bd-cat-item > .bd-hint { margin: 0; }
 .bundeck .bd-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .bundeck .bd-mcp { border: 1px solid var(--bd-ln); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--bd-bg); }
 .bundeck .bd-mcp .bd-r2 { display: flex; gap: 8px; }
@@ -558,6 +586,10 @@
 .bundeck [data-swapy-container].swapy-container-dragging [data-swapy-slot]:not(.swapy-slot-over) { opacity: 0.6; }
 
 /* — Responsive — */
+@media (max-width: 1180px) {
+  .bundeck .bd-tool { flex-wrap: wrap; padding: 8px 12px; }
+  .bundeck .bd-tgrp.bd-mid { order: 3; flex-basis: 100%; justify-content: center; padding-top: 6px; border-top: 1px solid var(--bd-ln); }
+}
 @media (max-width: 1020px) {
   .bundeck main.bd-main { display: flex; flex-direction: column; overflow: auto; }
   .bundeck .bd-stage { min-height: 70vh; flex: none; order: -1; }
@@ -589,6 +621,11 @@
   .bundeck .bd-dnav button { white-space: nowrap; }
   .bundeck .bd-dfoot { grid-column: 1; padding: 12px 16px; }
   .bundeck .bd-dbody { padding: 16px; }
+  .bundeck .bd-cat-tools { grid-template-columns: minmax(0, 1fr) minmax(136px, 0.7fr); gap: 8px; }
+  .bundeck .bd-cat-compat { grid-column: 1 / -1; justify-self: start; min-width: 200px; }
+  .bundeck .bd-lrow.bd-cat-item { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .bundeck .bd-cat-item > .bd-btn,
+  .bundeck .bd-cat-item > .bd-hint { grid-column: 2; justify-self: start; }
   .bundeck .bd-srow { flex-wrap: wrap; }
   .bundeck .bd-pr { grid-template-columns: 1fr 1fr; }
   .bundeck .bd-mkgrid, .bundeck .bd-pals { grid-template-columns: 1fr; }
@@ -610,6 +647,7 @@
   .bundeck .bd-tool select.bd-inp { min-height: 48px; }
   .bundeck .bd-tool .bd-ibtn { width: 48px; height: 48px; }
   .bundeck .bd-chip { min-width: 44px; min-height: 44px; }
+  .bundeck .bd-cat-meta .bd-chip { min-width: 0; min-height: 28px; }
   .bundeck .bd-pageadd { min-width: 44px; min-height: 44px; }
   .bundeck .bd-page.bd-with-menu .bd-chip { padding-right: 36px; }
   .bundeck .bd-pagemenu-btn { width: 28px; height: 28px; right: 6px; }
@@ -662,3 +700,91 @@
 .bundeck .bd-tgroup { border: 1px solid var(--bd-ln); border-radius: 10px; padding: 8px 12px; }
 .bundeck .bd-tgroup summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .bundeck .bd-tgroup .bd-chips { margin-top: 8px; }
+
+/* — Deck layouts (nuevo editor de widgets; el grid fijo legacy sigue intacto) — */
+.bundeck .bd-deck-toggle { display: inline-flex; border: 1px solid var(--bd-ln); border-radius: 10px; overflow: hidden; }
+.bundeck .bd-deck-toggle button { padding: 6px 10px; font-size: 12px; color: var(--bd-mu); background: transparent; border: 0; cursor: pointer; }
+.bundeck .bd-deck-toggle button[aria-pressed='true'] { background: var(--bd-as); color: var(--bd-ink); }
+.bundeck .bd-deck-editor { display: grid; grid-template-columns: 300px 1fr; gap: 16px; width: 100%; min-height: 0; }
+/* En modo layouts el main legacy (3 columnas) aplastaba el editor: ocupar todo el ancho. */
+.bundeck main.bd-main > .bd-deck-wrap { grid-column: 1 / -1; width: 100%; min-width: 0; }
+.bundeck .bd-deck-side { border-right: 1px solid var(--bd-ln); padding-right: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.bundeck .bd-deck-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bundeck .bd-deck-list li { display: flex; align-items: center; gap: 4px; }
+.bundeck .bd-deck-list li.is-active .bd-chip { border-color: var(--bd-ac); }
+.bundeck .bd-deck-palette { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bundeck .bd-deck-canvas { min-width: 0; overflow: auto; }
+.bundeck .bd-deck-grid { display: flex; flex-direction: column; gap: 12px; }
+.bundeck .bd-deck-plate { display: grid; grid-template-columns: repeat(var(--bd-c, 6), minmax(0, 1fr)); grid-auto-rows: minmax(72px, auto); gap: 8px; padding: 12px; border: 1px solid var(--bd-ln); border-radius: 12px; background: var(--bd-p2); }
+.bundeck .bd-deck-plate--use { grid-auto-rows: minmax(88px, auto); }
+.bundeck .bd-deck-cell { min-height: 72px; border-radius: 10px; }
+.bundeck .bd-deck-cell.is-free { border: 1px dashed var(--bd-ln); background: transparent; opacity: .7; }
+/* El viewport se comporta como plate-wrap en el ejemplo: conserva la placa a
+   su ancho natural y la desplaza en pantallas estrechas, nunca la comprime. */
+.bundeck .bd-gs-viewport { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overflow-y: visible; padding: 4px; }
+/* Libre: ancho fijo (columnas × 96px + padding 48px), misma métrica que la
+   altura de celda; así cada 1×1 queda cuadrado en desktop y móvil. */
+.bundeck .bd-gs-wrap { position: relative; width: calc(var(--bd-c, 5) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) + 48px); max-width: none; min-width: 0; flex: none; display: flex; flex-direction: column; padding: 24px; border-radius: calc(var(--bd-rk) + 12px); background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 32px 48px -28px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.bundeck .bd-gs-add { display: inline-flex; align-items: center; gap: 6px; }
+.bundeck .bd-gs { width: 100%; min-width: 0; min-height: calc(var(--bd-r, 3) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px))); background-color: transparent; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1.2px, transparent 1.8px); background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px)); background-position: center; border: 0; border-radius: 12px; padding: 0; }
+.bundeck .bd-gs .grid-stack-item-content { overflow: visible; }
+.bundeck .bd-gs .bd-key { width: 100%; height: 100%; min-height: 0; }
+.bundeck .bd-gs .grid-stack-item { min-width: 0; }
+.bundeck .bd-gs-drag-handle { position: absolute; z-index: 102; top: 10px; right: 10px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--bd-kt); background: rgba(0, 0, 0, .45); opacity: 0; cursor: grab; transition: opacity .12s; }
+.bundeck .grid-stack-item:hover .bd-gs-drag-handle, .bundeck .bd-gs-drag-handle:focus-visible { opacity: 1; }
+.bundeck .bd-gs-drag-handle:active { cursor: grabbing; }
+.bundeck .bd-deck-cell.bd-over { outline: 2px dashed var(--bd-ac); outline-offset: 2px; }
+.bundeck .bd-widget { border: 1px solid var(--bd-ln); border-radius: 10px; background: var(--bd-k1); padding: 8px; display: flex; min-height: 72px; }
+.bundeck .bd-widget--sel { outline: 2px solid var(--bd-ac); outline-offset: 1px; }
+.bundeck .bd-widget .bd-key { width: 100%; }
+.bundeck .bd-widget-label { font-weight: 600; }
+.bundeck .bd-widget-sub { color: var(--bd-mu); font-size: 12px; }
+.bundeck .bd-widget-slider, .bundeck .bd-widget-clock, .bundeck .bd-widget-timer { display: flex; flex-direction: column; gap: 8px; width: 100%; align-items: stretch; justify-content: center; }
+.bundeck .bd-widget-clock, .bundeck .bd-widget-timer { align-items: center; text-align: center; }
+.bundeck .bd-widget-clock time, .bundeck .bd-widget-timer .bd-mono { font-size: 22px; font-weight: 600; }
+.bundeck .bd-widget-timer-btns { display: flex; gap: 8px; }
+.bundeck .bd-btn-sm { padding: 4px 10px; font-size: 12px; }
+.bundeck .bd-deck-sel { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px dashed var(--bd-ln); padding-top: 12px; }
+.bundeck .bd-deck-inspector { border-top: 1px solid var(--bd-ln); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.bundeck .bd-deck-use { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 900px; margin: 0 auto; width: 100%; min-height: 100dvh; }
+.bundeck .bd-deck-use-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.bundeck .bd-deck-use-head h1 { font-size: 20px; margin: 0; }
+.bundeck .bd-deck-use .bd-widget { min-height: 88px; }
+.bundeck .bd-deck-use .bd-widget .bd-key { min-height: 88px; font-size: 16px; }
+.bundeck .bd-deck-pair { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+@media (max-width: 900px) {
+  .bundeck .bd-deck-editor { grid-template-columns: 1fr; }
+  .bundeck .bd-deck-side { border-right: 0; border-bottom: 1px solid var(--bd-ln); padding-right: 0; padding-bottom: 12px; }
+}
+@media (pointer: coarse) {
+  .bundeck .bd-deck-use .bd-widget .bd-key { min-height: 96px; }
+}
+
+/* — Dispositivos y pantallas por perfil — */
+.bundeck .bd-stage { position: relative; }
+.bundeck .bd-freenote { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px; background: var(--bd-as); border: 1px solid var(--bd-ac); font-size: 12px; color: var(--bd-ink); }
+.bundeck .bd-freenote svg { color: var(--bd-ac); flex: none; }
+.bundeck .bd-usel { display: inline-flex; align-items: center; gap: 8px; background: var(--bd-sf); border: 1px solid var(--bd-ln); border-radius: 12px; padding: 2px 4px 2px 12px; min-height: 40px; color: var(--bd-mu); font-size: 13px; }
+.bundeck .bd-usel select { border: 0; background: transparent; color: var(--bd-ink); min-height: 32px; }
+.bundeck .bd-dvwrap { position: relative; }
+.bundeck .bd-dvtrig { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--bd-ln); background: var(--bd-sf); font-weight: 500; white-space: nowrap; }
+.bundeck .bd-dvtrig:hover { border-color: var(--bd-mu); }
+.bundeck .bd-dvtrig[aria-expanded='true'] { border-color: var(--bd-ac); background: var(--bd-as); }
+.bundeck .bd-dvtrig.bd-haswarn { border-color: var(--bd-ac); }
+.bundeck .bd-dvbadge { font: 500 11px var(--bd-mono); padding: 1px 6px; border-radius: 6px; background: var(--bd-bg); color: var(--bd-mu); }
+.bundeck .bd-dvtrig.bd-haswarn .bd-dvbadge { color: var(--bd-ac); }
+.bundeck .bd-dvpop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 45; width: min(400px, calc(100vw - 32px)); background: var(--bd-sf); border: 1px solid var(--bd-ln); border-radius: 16px; box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.65); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.bundeck .bd-dvpop-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--bd-ln); }
+.bundeck .bd-dvpop-hd b { font-size: 13px; font-weight: 600; }
+.bundeck .bd-dvpop-list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.bundeck .bd-dv { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--bd-ln); background: var(--bd-bg); border-radius: 10px; padding: 8px 10px; }
+.bundeck .bd-dv.bd-warn2 { border-color: var(--bd-ac); }
+.bundeck .bd-dv-info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.bundeck .bd-dv .bd-dvi { color: var(--bd-mu); display: flex; flex: none; }
+.bundeck .bd-dv.bd-warn2 .bd-dvi { color: var(--bd-ac); }
+.bundeck .bd-dvn { font-weight: 500; font-size: 13px; display: flex; flex-direction: column; line-height: 17px; min-width: 0; }
+.bundeck .bd-dvn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bundeck .bd-dvn small { font: 11px var(--bd-mono); color: var(--bd-mu); }
+.bundeck .bd-dv select { border: 1px solid var(--bd-ln); background: var(--bd-sf); color: var(--bd-ink); width: 158px; flex: none; min-height: 32px; padding: 4px 8px; font-size: 12px; border-radius: 8px; }
+.bundeck .bd-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.bundeck .bd-dvs { display: inline-flex; gap: 3px; margin-left: 4px; color: var(--bd-ac); align-items: center; }

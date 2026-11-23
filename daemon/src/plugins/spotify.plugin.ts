@@ -5,6 +5,8 @@
  * la sección "Spotify" del panel usando la API oficial con OAuth.
  */
 
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
+
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
     getSetting?: (key: string) => string | null
@@ -84,9 +86,12 @@ export class SpotifyPlugin {
         return {
             id: 'spotify',
             name: 'Spotify',
-            version: '1.1.0',
+            version: '1.2.0',
             description: 'Controla la reproducción de Spotify: reproducir/pausar, Me gusta, aleatorio y playlists',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
             permissions: ['http', 'network'],
             // OAuth sin Client ID propio: la app de escritorio abre el Web Player
             // oficial en una ventana Electrobun y extrae el token de sesión.
@@ -141,6 +146,12 @@ export class SpotifyPlugin {
                     name: 'Reproducir / Pausar / Siguiente / Anterior',
                     description: 'Controla la reproducción de Spotify (play, pause, next, previous)',
                     icon: 'Play',
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'playing', label: 'Sonando', icon: 'Pause' },
+                        { value: 'paused', label: 'En pausa', icon: 'Play' },
+                        { value: 'stopped', label: 'Detenido', icon: 'Square' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -318,6 +329,32 @@ export class SpotifyPlugin {
                         required: [],
                         anyOf: [{ required: ['playlistId'] }, { required: ['contextUri'] }]
                     }
+                },
+                {
+                    id: 'now-playing',
+                    name: 'Lo que suena',
+                    description: 'Pista actual e is_playing para iconos dinámicos (states: playing/paused/stopped)',
+                    icon: 'Music',
+                    dynamic: true,
+                    pollMs: 10000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'playing', label: 'Sonando', icon: 'Pause' },
+                        { value: 'paused', label: 'En pausa', icon: 'Play' },
+                        { value: 'stopped', label: 'Detenido', icon: 'Square' }
+                    ],
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            token: {
+                                type: 'string',
+                                title: 'Token OAuth',
+                                description: 'Si se omite usa el de los ajustes',
+                                ui: { component: 'input', type: 'password', placeholder: 'Usa el de ajustes' }
+                            }
+                        },
+                        required: []
+                    }
                 }
             ]
         }
@@ -329,6 +366,7 @@ export class SpotifyPlugin {
         handlers.set('like', this.executeLike.bind(this))
         handlers.set('shuffle', this.executeShuffle.bind(this))
         handlers.set('playlist', this.executePlaylist.bind(this))
+        handlers.set('now-playing', this.executeNowPlaying.bind(this))
         return handlers
     }
 
@@ -569,6 +607,29 @@ export class SpotifyPlugin {
             body: { context_uri: contextUri }
         })
         return { contextUri, executed: true, status }
+    }
+
+    /**
+     * Lo que suena (GET /me/player): pista actual + `state` discreto para
+     * iconos dinámicos del botón (playing/paused/stopped). No modifica nada.
+     */
+    private async executeNowPlaying(params: any, _context: any): Promise<any> {
+        const token = this.requireToken(params)
+        const { status, body } = await this.authorizedFetch(token, 'lo que suena', '/me/player', { method: 'GET' })
+        if (status === 204 || !body) {
+            return { state: 'stopped', isPlaying: false, track: null, status }
+        }
+        const track = body?.item
+        const name = typeof track?.name === 'string' ? track.name : null
+        const artists = Array.isArray(track?.artists) ? track.artists.map((a: any) => a?.name).filter(Boolean).join(', ') : null
+        const isPlaying = body?.is_playing === true
+        return {
+            state: isPlaying ? 'playing' : (name ? 'paused' : 'stopped'),
+            isPlaying,
+            track: name ? { name, artists, id: track?.id ?? null } : null,
+            device: body?.device?.name ?? null,
+            status,
+        }
     }
 
     public dispose(): void {

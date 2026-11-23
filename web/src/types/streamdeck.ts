@@ -20,6 +20,13 @@ export interface ButtonEntity {
     page_id: string
     position: number
     data: ButtonData
+    /** Geometría GridStack (Fase 1 daemon). NULL/undefined = legacy por position. */
+    x?: number | null
+    y?: number | null
+    w?: number | null
+    h?: number | null
+    widget_type?: string | null
+    parent_widget_id?: string | null
 }
 
 export interface ButtonData {

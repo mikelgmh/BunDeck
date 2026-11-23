@@ -363,6 +363,15 @@
           <span class="bd-lb">{{ t('bd.keyBackground') }}</span>
           <div class="bd-cols">
             <button
+              type="button"
+              class="bd-cs bd-bg-default"
+              :aria-pressed="!buttonConfig.backgroundColor"
+              :aria-label="t('bd.keyBackgroundDefault')"
+              :title="t('bd.keyBackgroundDefault')"
+              data-cy="bd-bg-default"
+              @click="emit('update-field', 'backgroundColor', '')"
+            ></button>
+            <button
               v-for="(hex, j) in BG_SWATCHES"
               :key="hex"
               class="bd-cs"

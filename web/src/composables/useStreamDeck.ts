@@ -1,5 +1,6 @@
 import { ref, computed, nextTick } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
+import { getOrCreateDeviceId, isNavigationForMe } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 export function useStreamDeck() {
@@ -53,8 +54,8 @@ export function useStreamDeck() {
     emoji: '',
     icon: '',
     iconImage: '',
-    backgroundColor: '#374151',
-    textColor: '#f1f5f9',
+    backgroundColor: '',
+    textColor: '#e8e9eb',
     showTitle: true,
     mode: 'seq',
     longPress: 'none',
@@ -66,6 +67,14 @@ export function useStreamDeck() {
 
   // WebSocket
   let ws: WebSocket | null = null
+
+  // Sesión propia del dispositivo: vista profile/page independiente por
+  // browser (el daemon la persiste y la restaura al reconectar).
+  const deviceId = ref(getOrCreateDeviceId())
+  const clientId = ref<string | null>(null)
+  const sessionStartupProfileId = ref<string | null>(null)
+  // Clientes conectados y su vista actual (GET /sessions).
+  const sessions = ref<any[]>([])
 
   // Flag to prevent infinite loops when receiving page change broadcasts
   const isRemotePageChange = ref(false)
@@ -225,8 +234,8 @@ export function useStreamDeck() {
       icon: '',
       iconImage: '',
       emoji: '',
-      backgroundColor: '#374151',
-      textColor: '#f1f5f9',
+      backgroundColor: '',
+      textColor: '#e8e9eb',
       showTitle: true,
       mode: 'seq',
       longPress: 'none',
@@ -256,8 +265,8 @@ export function useStreamDeck() {
     if (!data) return {}
 
     return {
-      backgroundColor: data.backgroundColor || '#374151',
-      color: data.textColor || '#f1f5f9'
+      backgroundColor: data.backgroundColor ?? '',
+      color: data.textColor || '#e8e9eb'
     }
   })
 
@@ -304,7 +313,13 @@ export function useStreamDeck() {
         connectionStatus.value = 'bg-success'
         connectionText.value = 'Conectado'
 
-        console.log('🔌 WebSocket connected, subscribing to topics...')
+        console.log('🔌 WebSocket connected, identifying session...', { deviceId: deviceId.value })
+        // Sesión propia: el daemon restaura nuestra vista (reconexión) o
+        // aplica el startup profile asignado, y responde `session.state`.
+        ws?.send(JSON.stringify({
+          type: 'hello',
+          payload: { deviceId: deviceId.value, kind: 'browser', name: 'Navegador' }
+        }))
         ws?.send(JSON.stringify({
           type: 'subscribe',
           payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages'] }
@@ -334,6 +349,15 @@ export function useStreamDeck() {
     switch (message.type) {
       case 'connected':
         console.log('🔗 WebSocket connected:', message.payload)
+        if (message.payload?.clientId) clientId.value = message.payload.clientId
+        break
+      case 'session.state':
+        console.log('🪪 Session state:', message.payload)
+        if (message.payload?.clientId) clientId.value = message.payload.clientId
+        if (message.payload?.deviceId) deviceId.value = message.payload.deviceId
+        if ('startupProfileId' in (message.payload ?? {})) {
+          sessionStartupProfileId.value = message.payload.startupProfileId
+        }
         break
       case 'subscribed':
         console.log('✅ WebSocket subscribed to topics:', message.payload)
@@ -426,6 +450,12 @@ export function useStreamDeck() {
         }
         break
       case 'page.navigate':
+        // Dirigida: solo aplica si es para este dispositivo; los broadcasts
+        // antiguos (sin destino) aplican a todos (compat).
+        if (!isNavigationForMe(message.payload, deviceId.value, clientId.value)) {
+          console.log('🧭 Page navigation ignored (for another device):', message.payload)
+          break
+        }
         console.log('🧭 Page navigation requested:', message.payload)
         console.log('📥 Received page.navigate, calling selectPage with isRemotePageChange = true')
         isRemotePageChange.value = true
@@ -456,6 +486,10 @@ export function useStreamDeck() {
         }
         break
       case 'profile.navigate':
+        if (!isNavigationForMe(message.payload, deviceId.value, clientId.value)) {
+          console.log('👤 Profile navigation ignored (for another device):', message.payload)
+          break
+        }
         console.log('👤 Profile navigation requested:', message.payload)
         isRemoteProfileChange.value = true
         if (message.payload.profileId) {
@@ -530,6 +564,22 @@ export function useStreamDeck() {
         // Algo cambió en los plugins: recarga listas y acciones
         loadPlugins()
         break
+      case 'device.created':
+      case 'device.updated':
+      case 'device.deleted':
+      case 'assignment.updated':
+        // Dispositivos/asignaciones: otro cliente cambió algo → recargar
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('libredeck:devices-changed'))
+        }
+        break
+      case 'page.blocked': {
+        // El HW físico rechazó una navegación incompatible: avisar
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('libredeck:page-blocked', { detail: message.payload }))
+        }
+        break
+      }
     }
   }
 
@@ -942,8 +992,8 @@ export function useStreamDeck() {
         icon: button.data?.icon || '',
         iconImage: typeof button.data?.iconImage === 'string' ? button.data.iconImage : '',
         emoji: button.data?.emoji || '',
-        backgroundColor: button.data?.backgroundColor || '#374151',
-        textColor: button.data?.textColor || '#f1f5f9',
+        backgroundColor: typeof button.data?.backgroundColor === 'string' ? button.data.backgroundColor : '',
+        textColor: button.data?.textColor || '#e8e9eb',
         showTitle: button.data?.showTitle !== false,
         mode: button.data?.mode || 'seq',
         longPress: button.data?.longPress || 'none',
@@ -974,8 +1024,8 @@ export function useStreamDeck() {
         icon: '',
         iconImage: '',
         emoji: '',
-        backgroundColor: '#374151',
-        textColor: '#f1f5f9',
+        backgroundColor: '',
+        textColor: '#e8e9eb',
         showTitle: true,
         mode: 'seq',
         longPress: 'none',
@@ -1013,7 +1063,10 @@ export function useStreamDeck() {
               buttonId: button.id,
               pageId: button.page_id,
               profileId: currentProfile.value?.id,
-              position
+              position,
+              // Origen de la acción: la navegación que provoque (page.action)
+              // por defecto solo se aplica en este dispositivo.
+              deviceId: deviceId.value
             }
           })
         })
@@ -1354,8 +1407,44 @@ export function useStreamDeck() {
   const executeSingleAction = async (action: any, context: Record<string, any>) => {
     return apiRequest('/actions/execute', {
       method: 'POST',
-      body: JSON.stringify({ action, context })
+      body: JSON.stringify({ action, context: { deviceId: deviceId.value, ...context } })
     })
+  }
+
+  // ---- Sesiones por dispositivo (vista profile/page propia por cliente) ----
+
+  /** Lista clientes conectados y su vista actual (más sesiones persistidas). */
+  const loadSessions = async () => {
+    try {
+      sessions.value = await apiRequest('/sessions')
+    } catch (error) {
+      console.error('Failed to load sessions:', error)
+      sessions.value = []
+    }
+  }
+
+  /**
+   * Navegación dirigida a otro dispositivo (o broadcast con target 'all'):
+   * fija su vista y le envía page/profile.navigate solo a él.
+   */
+  const navigateSession = async (
+    targetDeviceId: string,
+    view: { profileId?: string; pageId?: string }
+  ) => {
+    await apiRequest(`/sessions/${encodeURIComponent(targetDeviceId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(view)
+    })
+    await loadSessions()
+  }
+
+  /** Perfil de arranque asignable: se aplica al registrarse/reconectar. */
+  const setSessionStartupProfile = async (targetDeviceId: string, startupProfileId: string | null) => {
+    await apiRequest(`/sessions/${encodeURIComponent(targetDeviceId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ startupProfileId })
+    })
+    await loadSessions()
   }
 
   // Profile management functions
@@ -1387,7 +1476,9 @@ export function useStreamDeck() {
     if (!isRemoteProfileChange.value) {
       ws?.send(JSON.stringify({
         type: 'profile.select',
-        payload: { profileId }
+        // Por defecto solo este dispositivo (el daemon no reemite a otros
+        // salvo target 'all'/broadcast explícito).
+        payload: { profileId, deviceId: deviceId.value }
       }))
     }
 
@@ -1563,8 +1654,8 @@ export function useStreamDeck() {
       emoji: '',
       icon: '',
       iconImage: '',
-      backgroundColor: '#374151',
-      textColor: '#f1f5f9',
+      backgroundColor: '',
+      textColor: '#e8e9eb',
       showTitle: true,
       mode: 'seq',
       longPress: 'none',
@@ -1604,7 +1695,8 @@ export function useStreamDeck() {
       console.log('📤 Sending page.select message:', { pageId })
       ws?.send(JSON.stringify({
         type: 'page.select',
-        payload: { pageId }
+        // Por defecto solo este dispositivo (ver comentario en selectProfile).
+        payload: { pageId, deviceId: deviceId.value }
       }))
     } else {
       console.log('🔕 Skipping page.select broadcast (remote change)')
@@ -2309,6 +2401,15 @@ export function useStreamDeck() {
     startDynamicUpdates,
     stopDynamicUpdates,
     stopDynamicUpdateForButton,
+
+    // Sesiones por dispositivo (vista propia + control dirigido)
+    deviceId,
+    clientId,
+    sessionStartupProfileId,
+    sessions,
+    loadSessions,
+    navigateSession,
+    setSessionStartupProfile,
 
     // URLs
     API_BASE,

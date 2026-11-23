@@ -175,8 +175,12 @@ const TOOL_GROUPS = [
   { id: 'pages', label: 'mcpGroupPages', tools: ['list_pages', 'get_page', 'create_page', 'update_page', 'delete_page', 'set_current_page'] },
   { id: 'buttons', label: 'mcpGroupButtons', tools: ['list_buttons', 'get_button', 'create_button', 'update_button', 'delete_button', 'move_button', 'reorder_buttons', 'duplicate_button', 'press_button', 'add_button_action', 'update_button_action', 'remove_button_action', 'reorder_button_actions'] },
   { id: 'actions', label: 'mcpGroupActions', tools: ['list_actions', 'execute_action'] },
+  { id: 'widgets', label: 'mcpGroupWidgets', tools: ['list_widgets', 'get_widget', 'create_widget', 'update_widget', 'delete_widget'] },
+  { id: 'flows', label: 'mcpGroupFlows', tools: ['list_flows', 'get_flow', 'create_flow', 'update_flow', 'delete_flow', 'execute_flow'] },
+  { id: 'automations', label: 'mcpGroupAutomations', tools: ['list_automations', 'get_automation', 'create_automation', 'update_automation', 'delete_automation', 'set_automation_enabled'] },
+  { id: 'variables', label: 'mcpGroupVariables', tools: ['list_variables', 'get_variable', 'set_variable', 'delete_variable'] },
   { id: 'plugins', label: 'mcpGroupPlugins', tools: ['get_plugin_template', 'validate_manifest', 'install_plugin', 'install_plugin_from_git', 'list_plugins', 'get_plugin', 'enable_plugin', 'disable_plugin', 'reload_plugin', 'rollback_plugin', 'update_plugin', 'uninstall_plugin', 'get_plugin_settings', 'save_plugin_settings'] },
-  { id: 'system', label: 'mcpGroupSystem', tools: ['get_state', 'list_settings', 'get_setting', 'set_setting', 'get_logs'] },
+  { id: 'system', label: 'mcpGroupSystem', tools: ['get_state', 'list_settings', 'get_setting', 'set_setting', 'get_logs', 'execute_batch', 'get_history', 'undo_last', 'clear_history'] },
 ]
 
 const GROUP_LABEL: Record<string, string> = {
@@ -184,12 +188,16 @@ const GROUP_LABEL: Record<string, string> = {
   pages: 'mcpGroupPages',
   buttons: 'mcpGroupButtons',
   actions: 'mcpGroupActions',
+  widgets: 'mcpGroupWidgets',
+  flows: 'mcpGroupFlows',
+  automations: 'mcpGroupAutomations',
+  variables: 'mcpGroupVariables',
   plugins: 'mcpGroupPlugins',
   system: 'mcpGroupSystem',
 }
 
 const scopeGroups = computed(() => {
-  const order = ['profiles', 'pages', 'buttons', 'actions', 'plugins', 'system']
+  const order = ['profiles', 'pages', 'buttons', 'actions', 'widgets', 'flows', 'automations', 'variables', 'plugins', 'system']
   const byGroup = new Map<string, Array<{ id: string; group: string }>>()
   for (const s of props.mcpScopes ?? []) {
     if (!byGroup.has(s.group)) byGroup.set(s.group, [])

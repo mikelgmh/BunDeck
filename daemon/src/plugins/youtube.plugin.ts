@@ -17,6 +17,8 @@ export interface ActionHandler {
 const YT_API_BASE = 'https://www.googleapis.com/youtube/v3'
 const REQUEST_TIMEOUT_MS = 15000
 
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
+
 export class YoutubePlugin {
     private context: PluginContext
 
@@ -28,10 +30,16 @@ export class YoutubePlugin {
         return {
             id: 'youtube',
             name: 'YouTube',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'YouTube para creadores: espectadores del directo, chat en vivo, control de emisión y panel',
             author: 'BunDeck',
-            permissions: ['network', 'process'],
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
+            permissions: ['network'],
+            widgets: [
+                { id: 'viewers', kind: 'text', title: 'Espectadores', description: 'Espectadores del directo actual', sourceAction: 'viewer-count', refreshMs: 60000 }
+            ],
             settingsSchema: {
                 type: 'object',
                 properties: {
@@ -57,6 +65,11 @@ export class YoutubePlugin {
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve espectadores actuales del directo y si sigue en vivo',
+                    dynamic: true, pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'live', label: 'En directo', icon: 'Radio' },
+                        { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -199,13 +212,16 @@ export class YoutubePlugin {
         if (!video) throw new Error(`No se encontró ningún vídeo con ID "${videoId}". Revisa el ID (lo que va tras "watch?v=").`)
         const details = video.liveStreamingDetails ?? {}
         const live = Boolean(details.activeLiveChatId || details.actualStartTime) && !details.actualEndTime
+        const viewerCount = details.concurrentViewers !== undefined ? Number(details.concurrentViewers) : 0
         return {
             action: 'viewer-count',
+            state: live ? 'live' : 'offline',
             videoId,
             title: video.snippet?.title ?? null,
             live,
-            viewerCount: details.concurrentViewers !== undefined ? Number(details.concurrentViewers) : 0,
+            viewerCount,
             likeCount: video.statistics?.likeCount !== undefined ? Number(video.statistics.likeCount) : null,
+            widget: { kind: 'text' as const, value: String(viewerCount), label: live ? 'en directo' : 'offline' },
         }
     }
 

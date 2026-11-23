@@ -5,10 +5,11 @@ import path from 'path';
 import fs from 'fs';
 import { createHash } from 'node:crypto';
 import { validateManifest, assertValidManifest, satisfiesEngine, compareSemver } from './plugin-system/validator';
-import { LIBREDECK_ENGINE_VERSION } from './plugin-system/types';
+import { LIBREDECK_ENGINE_VERSION, secretFieldsOf } from './plugin-system/types';
 import { ExternalPluginWorker } from './plugin-system/plugin-worker';
 import type { PluginManifestV2, PluginActionV2, LoadedPluginV2 } from './plugin-system/types';
 import { getNativeManifests } from './plugins/index';
+import { isVersionRangeRef, pickBestTag, invalidateCatalog } from './catalog';
 import { getPluginConfiguredStatus } from './plugins/connection-status';
 
 // Re-export para compatibilidad
@@ -26,7 +27,7 @@ export interface PluginEventBroadcaster {
 export const BUILT_IN_IDS = new Set([
   'shell', 'http', 'hotkey', 'type-text', 'multimedia',
   'open-app', 'page', 'utility', 'browser', 'pc-vitals',
-  'obs', 'homeassistant', 'spotify',
+  'obs', 'homeassistant', 'spotify', 'weather', 'email',
 ]);
 
 export function isBuiltIn(id: string): boolean {
@@ -910,7 +911,7 @@ export class PluginLoader {
   }
 
   /** Ajustes generales del plugin: schema + instrucciones + valores actuales. */
-  public getPluginSettingsBundle(pluginId: string): { schema: any | null; values: Record<string, string>; instructions: string | null; configured: boolean; missing: string[]; requiresConfiguration: boolean; oauth: any | null } {
+  public getPluginSettingsBundle(pluginId: string): { schema: any | null; values: Record<string, string>; instructions: string | null; configured: boolean; missing: string[]; requiresConfiguration: boolean; oauth: any | null; secretFields: string[] } {
     const id = this.resolveCanonicalId(pluginId);
     const loaded = this.loadedPlugins.get(id);
     let manifest: any = loaded?.manifest;
@@ -930,6 +931,12 @@ export class PluginLoader {
     const schema = manifest.settingsSchema ?? manifest.ui?.settingsSchema ?? null;
     const values = this.db.getPluginSettings(manifest.id ?? id);
     const st = getPluginConfiguredStatus(manifest, values);
+    // Config flows seguros: la UI usa `secretFields` para pintar inputs
+    // password y no autocompletar/eco en logs (nunca viajan en claro a WS).
+    let secretFields: string[] = [];
+    try {
+      secretFields = secretFieldsOf(schema);
+    } catch { secretFields = []; }
     return {
       schema,
       values,
@@ -938,6 +945,7 @@ export class PluginLoader {
       missing: st.missing,
       requiresConfiguration: st.requiresConfiguration,
       oauth: manifest?.oauth ?? null,
+      secretFields,
     };
   }
 
@@ -1222,6 +1230,7 @@ export class PluginLoader {
     // Limpiar staging residual
     try { if (fs.existsSync(stageDir)) fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
     console.log(`✓ Installed plugin: ${pluginId} v${manifest.version}`);
+    try { invalidateCatalog(); } catch {}
     this.emitProgress(pluginId, 'done', `Instalado ${manifest.name} v${manifest.version}`, opts.onProgress);
     return pluginId;
   }
@@ -1299,9 +1308,13 @@ export class PluginLoader {
     await fs.promises.mkdir(pluginsDir, { recursive: true });
     const stage = path.join(pluginsDir, `.staging_git_${Date.now()}`);
     this.emitProgress(url, 'clone', `Clonando ${url}…`, opts.onProgress);
-    const args = ['clone', '--depth', '1'];
-    if (opts.ref) args.push('--branch', opts.ref);
-    args.push(url, stage);
+    // Instalación versionada: si `ref` es un rango (^1.0.0, >=2.0.0, *) se
+    // clona completo, se elige el mejor tag y se hace checkout. Si es
+    // rama/tag literal se clona --depth 1 como antes.
+    const wantsRange = typeof opts.ref === 'string' && isVersionRangeRef(opts.ref);
+    const args = wantsRange ? ['clone', url, stage] : ['clone', '--depth', '1'];
+    if (!wantsRange && opts.ref) args.push('--branch', opts.ref);
+    if (!wantsRange) args.push(url, stage);
     let proc: any;
     try {
       proc = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'pipe' });
@@ -1317,6 +1330,29 @@ export class PluginLoader {
       const msg = `git clone falló: ${err.slice(0, 500)}`;
       this.emitProgress(url, 'error', msg, opts.onProgress);
       throw new Error(msg);
+    }
+    // Checkout del mejor tag cuando se pidió un rango de versión.
+    if (wantsRange) {
+      try {
+        const tagProc = Bun.spawn(['git', '-C', stage, 'tag', '--list'], { stdout: 'pipe', stderr: 'pipe' });
+        await tagProc.exited;
+        const tags = tagProc.exitCode === 0 ? (await new Response(tagProc.stdout).text()).split('\n').map((t) => t.trim()).filter(Boolean) : [];
+        const best = pickBestTag(tags, opts.ref!);
+        if (best) {
+          this.emitProgress(url, 'clone', `Fijando versión ${best} (rango ${opts.ref})…`, opts.onProgress);
+          const coProc = Bun.spawn(['git', '-C', stage, 'checkout', '--quiet', best], { stdout: 'pipe', stderr: 'pipe' });
+          await coProc.exited;
+          if (coProc.exitCode !== 0) {
+            const err = await new Response(coProc.stderr).text();
+            throw new Error(`checkout de ${best} falló: ${err.slice(0, 200)}`);
+          }
+        } else {
+          this.emitProgress(url, 'clone', `Sin tags para el rango ${opts.ref}: usando HEAD`, opts.onProgress);
+        }
+      } catch (e) {
+        // Best-effort: si el checkout falla, se sigue con HEAD pero avisando.
+        this.emitProgress(url, 'clone', `No se pudo fijar el rango ${opts.ref}, usando HEAD`, opts.onProgress);
+      }
     }
     let commit: string | null = null;
     try {
@@ -1478,6 +1514,7 @@ export class PluginLoader {
       // Limpiar settings namespaced
       getDatabase().prepare("DELETE FROM settings WHERE key LIKE ?").run(`plugin.${pluginId}.%`);
     } catch (e) { console.warn(`No se pudo limpiar settings de ${pluginId}:`, e); }
+    try { invalidateCatalog(); } catch {}
 
     try {
       this.broadcaster?.broadcast('plugin.uninstalled', { pluginId }, 'plugins');

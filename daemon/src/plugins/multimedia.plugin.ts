@@ -1,7 +1,11 @@
 /**
  * Native Multimedia Plugin
  * Provides multimedia control actions (play, pause, volume, etc.)
+ * con timeout real vía sysrun (sin colgar el ActionRunner).
  */
+
+import { runCommand, isCommandNotFound } from './sysrun'
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
@@ -25,9 +29,12 @@ export class MultimediaPlugin {
         return {
             id: 'multimedia',
             name: 'Multimedia Controls',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Control media playback and system volume',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'media',
             permissions: ['multimedia', 'system'],
             actions: [
                 {
@@ -35,6 +42,7 @@ export class MultimediaPlugin {
                     name: 'Multimedia Control',
                     description: 'Control media playback (play, pause, volume, etc.)',
                     icon: 'Volume2',
+                    timeoutMs: 15000,
                     schema: {
                         type: 'object',
                         properties: {
@@ -105,6 +113,7 @@ export class MultimediaPlugin {
 
     /**
      * Execute multimedia actions on Windows using PowerShell
+     * con timeout real (sysrun mata el proceso si se cuelga).
      */
     private async executeWindowsMultimedia(action: string): Promise<any> {
         const command = 'powershell.exe'
@@ -142,22 +151,23 @@ export class MultimediaPlugin {
         }
 
         try {
-            const proc = Bun.spawn({
-                cmd: [command, ...args],
-                stdio: ['ignore', 'pipe', 'pipe']
-            })
+            const r = await runCommand([command, ...args], { timeoutMs: 15000 })
+            if (r.exitCode !== 0) {
+                throw new Error(`El comando multimedia terminó con código ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
+            }
 
-            await proc.exited
-
-            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: proc.exitCode })
+            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: r.exitCode })
 
             return {
                 action,
                 executed: true,
-                exitCode: proc.exitCode,
+                exitCode: r.exitCode,
                 platform: 'windows'
             }
         } catch (error) {
+            if (isCommandNotFound(error)) {
+                throw new Error(`PowerShell no disponible para la acción multimedia "${action}".`)
+            }
             this.context.log('error', `Multimedia action failed: ${error}`, { action })
             throw error
         }
@@ -197,22 +207,23 @@ export class MultimediaPlugin {
         }
 
         try {
-            const proc = Bun.spawn({
-                cmd: [command, ...args],
-                stdio: ['ignore', 'pipe', 'pipe']
-            })
+            const r = await runCommand([command, ...args], { timeoutMs: 15000 })
+            if (r.exitCode !== 0) {
+                throw new Error(`osascript terminó con código ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
+            }
 
-            await proc.exited
-
-            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: proc.exitCode })
+            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: r.exitCode })
 
             return {
                 action,
                 executed: true,
-                exitCode: proc.exitCode,
+                exitCode: r.exitCode,
                 platform: 'macos'
             }
         } catch (error) {
+            if (isCommandNotFound(error)) {
+                throw new Error(`osascript no disponible para la acción multimedia "${action}".`)
+            }
             this.context.log('error', `Multimedia action failed: ${error}`, { action })
             throw error
         }
@@ -262,22 +273,23 @@ export class MultimediaPlugin {
         }
 
         try {
-            const proc = Bun.spawn({
-                cmd: [command, ...args],
-                stdio: ['ignore', 'pipe', 'pipe']
-            })
+            const r = await runCommand([command, ...args], { timeoutMs: 15000 })
+            if (r.exitCode !== 0) {
+                throw new Error(`"${command}" terminó con código ${r.exitCode}: ${r.stderr.slice(0, 200)}. Quizá falta instalar ${command} (pactl/playerctl).`)
+            }
 
-            await proc.exited
-
-            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: proc.exitCode })
+            this.context.log('info', `Multimedia action executed: ${action}`, { exitCode: r.exitCode })
 
             return {
                 action,
                 executed: true,
-                exitCode: proc.exitCode,
+                exitCode: r.exitCode,
                 platform: 'linux'
             }
         } catch (error) {
+            if (isCommandNotFound(error)) {
+                throw new Error(`No se encontró "${command}" para la acción "${action}". Instala pactl/playerctl (ej. "sudo apt install pulseaudio-utils playerctl").`)
+            }
             this.context.log('error', `Multimedia action failed: ${error}`, { action })
             throw error
         }

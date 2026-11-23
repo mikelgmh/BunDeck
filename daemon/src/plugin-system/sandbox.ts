@@ -19,6 +19,11 @@ const MAX_FILE_WRITE = 2 * 1024 * 1024; // 2MB por archivo de plugin
 const MAX_SETTING_VALUE = 64 * 1024; // 64KB por setting
 const HTTP_TIMEOUT_MS = 30000;
 
+/** Límites del contrato v2.2 (estados de botón y widgets). Sin eval en daemon. */
+const MAX_BUTTON_STATE_CHARS = 8 * 1024;
+export const BUTTON_STATE_EVENT = 'button.state';
+export const WIDGET_UPDATE_EVENT = 'widget.update';
+
 /**
  * Resuelve una ruta relativa del plugin dentro de su sandbox
  * (`<data>/plugins/<pluginId>/`). Lanza si hay path traversal.
@@ -55,6 +60,18 @@ export class PluginSandbox {
     switch (op) {
       case 'get-setting':
         return db.getSetting(`plugin.${pluginId}.${args.key}`);
+      case 'get-settings': {
+        // Lote de ajustes (contrato v2.2): evita N idas y vueltas del worker.
+        const keys = Array.isArray(args?.keys) ? args.keys.filter((k: unknown) => typeof k === 'string') : null;
+        if (!keys) throw new Error('get-settings requiere keys: string[]');
+        if (keys.length > 64) throw new Error('get-settings: máximo 64 claves');
+        const out: Record<string, string | null> = {};
+        for (const k of keys.slice(0, 64)) {
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(k)) throw new Error(`Clave de ajuste inválida: ${k}`);
+          out[k] = db.getSetting(`plugin.${pluginId}.${k}`);
+        }
+        return out;
+      }
       case 'set-setting':
         if (String(args.value).length > MAX_SETTING_VALUE) throw new Error('Setting excede 64KB');
         db.setSetting(`plugin.${pluginId}.${args.key}`, String(args.value));
@@ -79,6 +96,31 @@ export class PluginSandbox {
         });
         this.eventSink?.(args.eventName, args.payload, pluginId);
         return undefined;
+      case 'button-state': {
+        // Contrato v2.2: estados de botón e iconos dinámicos desde integraciones.
+        // Transporte como evento reservado `button.state` (topic plugins).
+        const buttonId = String(args?.buttonId ?? '');
+        const state = String(args?.state?.state ?? args?.state ?? '');
+        if (!buttonId || buttonId.length > 128) throw new Error('button-state: buttonId inválido');
+        if (!state || state.length > 64) throw new Error('button-state: state inválido');
+        const payload = { pluginId, buttonId, ...(typeof args.state === 'object' ? args.state : { state }) };
+        if (JSON.stringify(payload).length > MAX_BUTTON_STATE_CHARS) {
+          throw new Error('button-state excede 8KB');
+        }
+        db.addLog({ level: 'info', message: `[${pluginId}] button ${buttonId} -> ${state}`, meta: { pluginId, buttonId, state }, ts: Date.now() });
+        this.eventSink?.(BUTTON_STATE_EVENT, payload, pluginId);
+        return undefined;
+      }
+      case 'widget-update': {
+        const widgetId = String(args?.widgetId ?? '');
+        if (!widgetId || widgetId.length > 128) throw new Error('widget-update: widgetId inválido');
+        const payload = { pluginId, widgetId, data: args?.data ?? null };
+        if (JSON.stringify(payload).length > MAX_BUTTON_STATE_CHARS * 4) {
+          throw new Error('widget-update excede 32KB');
+        }
+        this.eventSink?.(WIDGET_UPDATE_EVENT, payload, pluginId);
+        return undefined;
+      }
       case 'http-fetch': {
         checkUrlPermission(manifest, args.url);
         const ctrl = new AbortController();

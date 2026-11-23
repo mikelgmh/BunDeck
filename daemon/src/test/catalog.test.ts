@@ -107,7 +107,10 @@ describe('catalog: búsqueda y filtros', () => {
     const onlyCompat = searchCatalog(withFuture, { compatible: true, appVersion: '1.0.0' });
     expect(onlyCompat.some((e) => e.id === 'futuro')).toBe(false);
     const onlyIncompat = searchCatalog(withFuture, { compatible: false, appVersion: '1.0.0' });
-    expect(onlyIncompat.map((e) => e.id)).toEqual(['futuro']);
+    // 'futuro' es incompatible; también lo son los nativos con engine ^1.5.0
+    expect(onlyIncompat.some((e) => e.id === 'futuro')).toBe(true);
+    for (const e of onlyIncompat) expect(isCompatible(e, '1.0.0')).toBe(false);
+    for (const e of onlyCompat) expect(isCompatible(e, '1.0.0')).toBe(true);
   });
 
   it('combina q + category', () => {
@@ -188,7 +191,9 @@ describe('catalog: integridad sha256', () => {
 describe('catalog: compatibilidad e inferencia', () => {
   it('isCompatible respeta minVersion/engine', () => {
     const base = getCatalogEntry('obs')!;
-    expect(isCompatible(base, '0.1.0')).toBe(true);
+    // obs declara engine ^1.5.0: compatible con 1.5.x, no con 0.1.0
+    expect(isCompatible(base, '1.5.0')).toBe(true);
+    expect(isCompatible(base, '0.1.0')).toBe(false);
     expect(
       isCompatible({ compatibility: { os: ['win32'], minVersion: '>=2.0.0' } }, '1.0.0')
     ).toBe(false);

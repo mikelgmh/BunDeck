@@ -1,5 +1,7 @@
 import type { StreamDeck } from '@elgato-stream-deck/node';
 import { DatabaseService } from '../db';
+import type { PressType } from '../flow/types';
+import { buttonHasTrigger } from '../flow/migrate';
 
 // Carga perezosa de las libs nativas (node-hid): si faltan o fallan,
 // el driver queda "sin hardware" en vez de tumbar el daemon/API.
@@ -62,6 +64,148 @@ export class StreamDeckDriver {
   private streamDeck: StreamDeck | null = null;
   private connectedDevice: string | null = null;
 
+  /**
+   * Sesión propia del hardware (independiente de los browsers/relay).
+   * Sobrevive a reinicios vía `device_sessions` (deviceId estable).
+   */
+  private readonly deviceId = 'streamdeck-local';
+  private sessionProfileId: string | null = null;
+  private sessionPageId: string | null = null;
+
+  /** Identificador estable de la sesión hardware (para navegación dirigida). */
+  getDeviceId(): string {
+    return this.deviceId;
+  }
+
+  /** Vista actual propia (no lee `current.*` globales salvo migración inicial). */
+  getSessionView(): { profileId: string | null; pageId: string | null } {
+    // Refrescar desde la tabla si la memoria aún no se inicializó
+    if (!this.sessionProfileId && !this.sessionPageId) {
+      this.loadSessionView();
+    }
+    return { profileId: this.sessionProfileId, pageId: this.sessionPageId };
+  }
+
+  /**
+   * Fija la vista propia (p. ej. desde POST /sessions/streamdeck-local o
+   * navegación dirigida) y repinta si hay hardware conectado.
+   */
+  async setSessionView(view: { profileId?: string | null; pageId?: string | null }): Promise<void> {
+    const db = new DatabaseService();
+    if (view.profileId !== undefined) {
+      if (view.profileId !== null && !db.getProfile(view.profileId)) {
+        throw new Error(`Profile not found: ${view.profileId}`);
+      }
+      this.sessionProfileId = view.profileId;
+    }
+    if (view.pageId !== undefined) {
+      if (view.pageId !== null && !db.getPage(view.pageId)) {
+        throw new Error(`Page not found: ${view.pageId}`);
+      }
+      if (view.pageId !== null && this.streamDeck) {
+        // El HW solo muestra cuadrícula con su tamaño exacto.
+        const { parseLayoutMode, resolvePageSize } = await import('../devices');
+        const grid = this.getGridGeometry();
+        const pg = db.getPage(view.pageId)!;
+        if (grid && parseLayoutMode(pg.data) !== 'classic') {
+          throw new Error(`La página «${pg.name}» está en modo libre y un Stream Deck solo admite cuadrícula`);
+        }
+        if (grid) {
+          const profileData = db.getProfile(pg.profile_id)?.data;
+          const size = resolvePageSize(
+            { grid_cols: pg.grid_cols ?? null, grid_rows: pg.grid_rows ?? null },
+            profileData,
+          );
+          if (size.cols !== grid.cols || size.rows !== grid.rows) {
+            throw new Error(
+              `La página «${pg.name}» es de ${size.cols}×${size.rows} y el Stream Deck es de ${grid.cols}×${grid.rows}`,
+            );
+          }
+        }
+      }
+      this.sessionPageId = view.pageId;
+      const page = view.pageId ? db.getPage(view.pageId) : null;
+      if (page) this.sessionProfileId = page.profile_id;
+    }
+    db.upsertDeviceSession({
+      device_id: this.deviceId,
+      name: 'StreamDeck',
+      kind: 'hardware',
+      profile_id: this.sessionProfileId,
+      page_id: this.sessionPageId,
+    });
+    if (this.sessionPageId && this.streamDeck) {
+      await this.updateFromPage(this.sessionPageId);
+    }
+  }
+
+  /** Carga la vista propia desde `device_sessions` (o migra la global). */
+  private loadSessionView(): void {
+    try {
+      const db = new DatabaseService();
+      const persisted = db.getDeviceSession(this.deviceId);
+      if (persisted && (persisted.profile_id || persisted.page_id)) {
+        this.sessionProfileId = persisted.profile_id;
+        this.sessionPageId = persisted.page_id;
+        // Validar que sigan existiendo
+        if (this.sessionProfileId && !db.getProfile(this.sessionProfileId)) {
+          this.sessionProfileId = null;
+        }
+        if (this.sessionPageId) {
+          const page = db.getPage(this.sessionPageId);
+          if (!page) {
+            this.sessionPageId = null;
+          } else if (this.sessionProfileId && page.profile_id !== this.sessionProfileId) {
+            this.sessionPageId = null;
+          } else if (!this.sessionProfileId) {
+            this.sessionProfileId = page.profile_id;
+          }
+        }
+        if (this.sessionProfileId && !this.sessionPageId) {
+          const pages = db.getPagesByProfile(this.sessionProfileId);
+          const first = pages.find((p) => p.is_folder === 0) || pages[0];
+          this.sessionPageId = first ? first.id : null;
+        }
+        if (this.sessionProfileId) return;
+      }
+      // Migración inicial: heredar la vista global una sola vez
+      const globalProfileId = db.getSetting('current.profile_id');
+      const globalPageId = db.getSetting('current.page_id');
+      const valid = (v: string | null) => (v && v !== 'null' && v !== '' ? v : null);
+      let profileId = valid(globalProfileId);
+      let pageId = valid(globalPageId);
+      if (profileId && !db.getProfile(profileId)) profileId = null;
+      if (pageId) {
+        const page = db.getPage(pageId);
+        if (!page || (profileId && page.profile_id !== profileId)) {
+          pageId = null;
+        } else if (!profileId) {
+          profileId = page.profile_id;
+        }
+      }
+      if (!profileId) {
+        const profiles = db.getProfiles();
+        profileId = profiles.length > 0 ? profiles[0].id : null;
+      }
+      if (profileId && !pageId) {
+        const pages = db.getPagesByProfile(profileId);
+        const first = pages.find((p) => p.is_folder === 0) || pages[0];
+        pageId = first ? first.id : null;
+      }
+      this.sessionProfileId = profileId;
+      this.sessionPageId = pageId;
+      db.upsertDeviceSession({
+        device_id: this.deviceId,
+        name: 'StreamDeck',
+        kind: 'hardware',
+        profile_id: profileId,
+        page_id: pageId,
+      });
+    } catch {
+      // sin BD: la sesión queda vacía hasta conectar
+    }
+  }
+
   /** Lista dispositivos sin tumbar nada si no hay HID. */
   async listDevices(): Promise<any[]> {
     const mod = await getElgato();
@@ -117,6 +261,12 @@ export class StreamDeckDriver {
 
       // Try to update with current page if available
       // This will be called from the API route after connection
+      // Vista propia de la sesión hardware (no la global de los browsers).
+      this.loadSessionView();
+      if (this.sessionPageId) {
+        console.log(`🎛️ Restoring hardware session page: ${this.sessionPageId}`);
+        await this.updateFromPage(this.sessionPageId);
+      }
       return true;
     } catch (error) {
       console.error('❌ Failed to connect to StreamDeck:', error);
@@ -138,21 +288,125 @@ export class StreamDeckDriver {
   private setupEventHandlers(): void {
     if (!this.streamDeck) return;
 
-    this.streamDeck.on('down', async (keyInfo) => {
+    this.streamDeck.on('down', (keyInfo) => {
       // keyInfo might be an object with index property, or just the index number
       const keyIndex = typeof keyInfo === 'object' && keyInfo !== null ? keyInfo.index || keyInfo.keyIndex || 0 : keyInfo;
       console.log(`StreamDeck button ${keyIndex} pressed`);
-      await this.handleButtonPress(keyIndex);
+      void this.handleKeyDown(keyIndex);
     });
 
     this.streamDeck.on('up', (keyInfo) => {
       const keyIndex = typeof keyInfo === 'object' && keyInfo !== null ? keyInfo.index || keyInfo.keyIndex || 0 : keyInfo;
       console.log(`StreamDeck button ${keyIndex} released`);
+      void this.handleKeyUp(keyIndex);
     });
 
     this.streamDeck.on('error', (error) => {
       console.error('StreamDeck error:', error);
     });
+  }
+
+  // ---- Detección de pressType (short/long/double/touch-start/touch-end) ----
+  //
+  // El daemon ejecuta cada pressType como flujo (acciones + reglas `when`).
+  // Sin UI abierta esto sustituye al motor cliente (useKeyEngine): la
+  // semántica vive en `flow/migrate.ts` y la ejecuta POST /buttons/press.
+
+  private keyDownAt = new Map<number, number>();
+  private longTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private longFired = new Set<number>();
+  private pendingShort = new Map<number, ReturnType<typeof setTimeout>>();
+  private lastUpAt = new Map<number, number>();
+
+  private static readonly LONG_MS = 500;
+  private static readonly DOUBLE_GAP_MS = 350;
+
+  private getLongPressMs(): number {
+    try {
+      const db = new DatabaseService();
+      const raw = db.getSetting('input.longpress_ms') ?? db.getSetting('hardware.longpress_ms');
+      const n = raw ? parseInt(raw, 10) : NaN;
+      if (Number.isFinite(n) && n >= 150 && n <= 3000) return n;
+    } catch { /* umbral por defecto */ }
+    return StreamDeckDriver.LONG_MS;
+  }
+
+  private async handleKeyDown(keyIndex: number): Promise<void> {
+    this.keyDownAt.set(keyIndex, Date.now());
+    this.longFired.delete(keyIndex);
+    // Si había un short pendiente (posible doble), se cancela: la segunda
+    // pulsación decide (double), no se ejecuta el short anterior.
+    const pending = this.pendingShort.get(keyIndex);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingShort.delete(keyIndex);
+    }
+    // touch-start: solo si la tecla tiene reglas para ello (evita POSTs inútiles).
+    try {
+      const target = this.resolvePressTarget(keyIndex);
+      if (target && buttonHasTrigger(target.button.data, 'touch-start')) {
+        void this.postPress(target, 'touch-start');
+      }
+    } catch { /* mejor esfuerzo */ }
+    // Armar long-press.
+    const longMs = this.getLongPressMs();
+    const timer = setTimeout(() => {
+      this.longTimers.delete(keyIndex);
+      const downAt = this.keyDownAt.get(keyIndex);
+      if (downAt === undefined) return; // ya se soltó
+      this.longFired.add(keyIndex);
+      void this.handleButtonPress(keyIndex, 'long');
+    }, longMs);
+    if (typeof (timer as any).unref === 'function') (timer as any).unref();
+    this.longTimers.set(keyIndex, timer);
+  }
+
+  private async handleKeyUp(keyIndex: number): Promise<void> {
+    const timer = this.longTimers.get(keyIndex);
+    if (timer) {
+      clearTimeout(timer);
+      this.longTimers.delete(keyIndex);
+    }
+    this.keyDownAt.delete(keyIndex);
+    // touch-end (best-effort, solo con reglas).
+    try {
+      const target = this.resolvePressTarget(keyIndex);
+      if (target && buttonHasTrigger(target.button.data, 'touch-end')) {
+        void this.postPress(target, 'touch-end');
+      }
+      if (this.longFired.has(keyIndex)) {
+        this.longFired.delete(keyIndex);
+        return; // el long ya se ejecutó al cumplirse el umbral
+      }
+      // ¿Doble pulsación? (misma tecla, gap corto desde el último `up`)
+      const now = Date.now();
+      const lastUp = this.lastUpAt.get(keyIndex) ?? 0;
+      this.lastUpAt.set(keyIndex, now);
+      if (now - lastUp <= StreamDeckDriver.DOUBLE_GAP_MS && target && buttonHasTrigger(target.button.data, 'double')) {
+        // Cancelar el short pendiente de la primera pulsación, si lo hay.
+        const pending = this.pendingShort.get(keyIndex);
+        if (pending) {
+          clearTimeout(pending);
+          this.pendingShort.delete(keyIndex);
+        }
+        await this.handleButtonPress(keyIndex, 'double');
+        return;
+      }
+      // Si la tecla distingue double, retrasar el short para no ejecutarlo
+      // antes de saber si viene la segunda pulsación; si no, inmediato.
+      if (target && buttonHasTrigger(target.button.data, 'double')) {
+        const t = setTimeout(() => {
+          this.pendingShort.delete(keyIndex);
+          void this.handleButtonPress(keyIndex, 'short');
+        }, StreamDeckDriver.DOUBLE_GAP_MS);
+        if (typeof (t as any).unref === 'function') (t as any).unref();
+        this.pendingShort.set(keyIndex, t);
+        return;
+      }
+      await this.handleButtonPress(keyIndex, 'short');
+    } catch (error) {
+      console.error(`❌ Error handling StreamDeck button release ${keyIndex}:`, error);
+    }
   }
 
   getConnectedDevice(): string | null {
@@ -223,10 +477,9 @@ export class StreamDeckDriver {
     }
     // Restaurar la página actual tras el test
     try {
-      const db = new DatabaseService();
-      const pageId = db.getSetting('current.page_id');
-      if (pageId && pageId !== 'null' && pageId !== '') {
-        await this.updateFromPage(pageId);
+      const view = this.getSessionView();
+      if (view.pageId) {
+        await this.updateFromPage(view.pageId);
       }
     } catch (error) {
       console.error('❌ Failed to restore StreamDeck after test:', error);
@@ -834,6 +1087,23 @@ export class StreamDeckDriver {
       return;
     }
 
+    // La página repintada pasa a ser la vista propia de la sesión hardware.
+    try {
+      const dbSession = new DatabaseService();
+      const page = dbSession.getPage(pageId);
+      if (page) {
+        this.sessionPageId = pageId;
+        this.sessionProfileId = page.profile_id;
+        dbSession.upsertDeviceSession({
+          device_id: this.deviceId,
+          name: 'StreamDeck',
+          kind: 'hardware',
+          profile_id: page.profile_id,
+          page_id: pageId,
+        });
+      }
+    } catch { /* best-effort */ }
+
     // Coalescar repintados concurrentes: si ya hay uno en vuelo (p.ej. un
     // vaciado seguido de un reorder), encolar el último pageId y volver.
     // Evita N repintados completos solapados que eternizaban el HW.
@@ -911,145 +1181,182 @@ export class StreamDeckDriver {
     await this.updateButtonStates(buttonStates, pageId);
   }
 
-  async handleButtonPress(keyIndex: number): Promise<void> {
+  async handleButtonPress(keyIndex: number, pressType: PressType = 'short'): Promise<void> {
     try {
-      console.log(`🎛️ StreamDeck button ${keyIndex} pressed - executing actions`);
+      console.log(`🎛️ StreamDeck button ${keyIndex} pressed (${pressType}) - executing flow`);
 
-      // Get current profile and page from database
-      const db = new DatabaseService();
-      
-      // Debug: Check what settings are stored
-      const currentProfileId = db.getSetting('current.profile_id');
-      const currentPageId = db.getSetting('current.page_id');
-      console.log(`🔍 Current settings - profile_id: "${currentProfileId}", page_id: "${currentPageId}"`);
-      
-      // Log current frontend state (if available via WebSocket or other means)
-      // Since we can't directly access frontend state, we'll show what should be current
-      const allProfiles = db.getProfiles();
-      console.log(`👤 Available profiles: ${allProfiles.length}`, allProfiles.map(p => ({ id: p.id, name: p.name })));
-      
-      // Try to determine what the "current" profile should be
-      let expectedProfileId = currentProfileId;
-      if (expectedProfileId === 'null' || expectedProfileId === null || expectedProfileId === '') {
-        // If invalid, use the first available profile
-        if (allProfiles.length > 0) {
-          expectedProfileId = allProfiles[0].id;
-          console.log(`⚠️ Invalid profile_id in settings, using first available profile: ${expectedProfileId}`);
-        }
-      }
-      
-      console.log(`📍 Expected current profile: ${expectedProfileId}`);
-      
-      // If we need to update settings, do it now
-      if (expectedProfileId !== currentProfileId) {
-        console.log(`🔧 Auto-correcting invalid profile_id setting to: ${expectedProfileId}`);
-        db.setSetting('current.profile_id', expectedProfileId);
-      }
-      
-      // Now try to get the profile with the corrected ID
-      const currentProfile = expectedProfileId ? db.getProfile(expectedProfileId) : null;
-      console.log(`🔍 Current profile lookup result:`, currentProfile ? `Found profile ${currentProfile.id} (${currentProfile.name})` : 'No profile found');
-      
-      if (!currentProfile) {
-        console.log('❌ No current profile found for StreamDeck button press');
-        // List all available profiles for debugging
-        console.log(`📋 Available profiles in database: ${allProfiles.length}`, allProfiles.map(p => ({ id: p.id, name: p.name })));
+      const target = this.resolvePressTarget(keyIndex);
+      if (!target) return;
+      const { button } = target;
+
+      // Sin contenido ejecutable para este pressType no se hace nada
+      // (p. ej. tecla sin reglas `long` ante una pulsación larga).
+      if (!buttonHasTrigger(button.data, pressType)) {
+        console.log(`⚠️ Button at position ${keyIndex} has no flow content for pressType ${pressType}`);
         return;
       }
 
-      // Log current page state
-      const allPages = db.getPagesByProfile(currentProfile.id);
-      console.log(`📄 Available pages for current profile: ${allPages.length}`, allPages.map(p => ({ id: p.id, name: p.name, is_folder: p.is_folder })));
-      
-      // Try to determine what the "current" page should be
-      let expectedPageId = currentPageId;
-      if (expectedPageId === 'null' || expectedPageId === null || expectedPageId === '') {
-        // If invalid, use the first non-folder page
-        const nonFolderPages = allPages.filter(p => p.is_folder === 0);
-        if (nonFolderPages.length > 0) {
-          expectedPageId = nonFolderPages[0].id;
-          console.log(`⚠️ Invalid page_id in settings, using first non-folder page: ${expectedPageId}`);
-        }
-      }
-      
-      console.log(`📍 Expected current page: ${expectedPageId}`);
-      
-      // If we need to update settings, do it now
-      if (expectedPageId !== currentPageId) {
-        console.log(`🔧 Auto-correcting invalid page_id setting to: ${expectedPageId}`);
-        db.setSetting('current.page_id', expectedPageId);
-      }
-      
-      // Now try to get the page with the corrected ID
-      const currentPage = expectedPageId ? db.getPage(expectedPageId) : null;
-      // Verify the page belongs to the current profile
-      const validCurrentPage = currentPage && currentPage.profile_id === currentProfile.id ? currentPage : null;
-      console.log(`🔍 Current page lookup result:`, validCurrentPage ? `Found page ${validCurrentPage.id} (${validCurrentPage.name})` : 'No page found');
-      
-      if (!validCurrentPage) {
-        console.log('❌ No current page found for StreamDeck button press');
-        // List all pages for the current profile
-        console.log(`📄 Available pages for profile ${currentProfile.id}: ${allPages.length}`, allPages.map(p => ({ id: p.id, name: p.name, is_folder: p.is_folder })));
-        return;
-      }
+      console.log(`🔘 Executing flow for button at position ${keyIndex} (pressType=${pressType})`);
+      await this.postPress(target, pressType);
 
-      // Find button at the specified position
-      const button = db.getButtonsByPage(validCurrentPage.id).find(b => b.position === keyIndex);
-      console.log(`🔍 Button lookup at position ${keyIndex}:`, button ? `Found button ${button.id}` : 'No button found');
-      
-      if (!button) {
-        console.log(`❌ No button found at position ${keyIndex}`);
-        // List all buttons for debugging
-        const allButtons = db.getButtonsByPage(validCurrentPage.id);
-        console.log(`🔘 All buttons in page ${validCurrentPage.id}: ${allButtons.length}`, allButtons.map(b => ({ id: b.id, position: b.position, hasData: !!b.data })));
-        return;
-      }
-
-      if (!button.data?.actions || button.data.actions.length === 0) {
-        console.log(`⚠️ Button at position ${keyIndex} has no actions to execute`);
-        return;
-      }
-
-      console.log(`🔘 Executing ${button.data.actions.length} actions for button at position ${keyIndex}`);
-
-      // Execute each action using the existing API endpoint
-      for (const action of button.data.actions) {
-        try {
-          console.log(`▶️ Executing action: ${action.type}`);
-
-          const { API_PORT } = await import('../config');
-          const response = await fetch(`http://localhost:${API_PORT}/api/v1/actions/execute`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              action,
-              context: {
-                buttonId: button.id,
-                pageId: validCurrentPage.id,
-                profileId: currentProfile.id,
-                position: keyIndex,
-                source: 'streamdeck'
-              }
-            })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ Failed to execute action ${action.type}: ${response.status} ${errorText}`);
-          } else {
-            const result = await response.json();
-            console.log(`✅ Action executed successfully: ${action.type}`, result);
-          }
-        } catch (error) {
-          console.error(`❌ Error executing action ${action.type}:`, error);
-        }
-      }
-
-      console.log(`✅ Finished executing actions for StreamDeck button ${keyIndex}`);
+      console.log(`✅ Finished executing flow for StreamDeck button ${keyIndex}`);
     } catch (error) {
       console.error(`❌ Error handling StreamDeck button press ${keyIndex}:`, error);
+    }
+  }
+
+  /**
+   * Resuelve perfil/página/botón de la SESIÓN PROPIA del hardware
+   * (device_sessions), con los mismos fallbacks que antes (global → primer
+   * perfil/página). Devuelve null si no hay nada ejecutable.
+   */
+  private resolvePressTarget(keyIndex: number): { button: any; page: any; profile: any } | null {
+    const db = new DatabaseService();
+    const view = this.getSessionView();
+
+    let currentProfile = view.profileId ? db.getProfile(view.profileId) : null;
+    if (!currentProfile) {
+      const globalProfileId = db.getSetting('current.profile_id');
+      const valid = (v: string | null) => (v && v !== 'null' && v !== '' ? v : null);
+      let fallbackId = valid(globalProfileId);
+      if (fallbackId && !db.getProfile(fallbackId)) fallbackId = null;
+      if (!fallbackId) {
+        const allProfiles = db.getProfiles();
+        fallbackId = allProfiles.length > 0 ? allProfiles[0].id : null;
+      }
+      if (fallbackId) {
+        this.sessionProfileId = fallbackId;
+        db.upsertDeviceSession({
+          device_id: this.deviceId,
+          name: 'StreamDeck',
+          kind: 'hardware',
+          profile_id: fallbackId,
+          page_id: this.sessionPageId,
+        });
+        currentProfile = db.getProfile(fallbackId);
+      }
+    }
+
+    if (!currentProfile) {
+      console.log('❌ No current profile found for StreamDeck button press');
+      return null;
+    }
+
+    const allPages = db.getPagesByProfile(currentProfile.id);
+    let validCurrentPage = view.pageId ? db.getPage(view.pageId) : null;
+    if (!validCurrentPage || validCurrentPage.profile_id !== currentProfile.id) {
+      const nonFolderPages = allPages.filter(p => p.is_folder === 0);
+      const fallbackPage = nonFolderPages.length > 0 ? nonFolderPages[0] : (allPages.length > 0 ? allPages[0] : null);
+      if (fallbackPage) {
+        this.sessionPageId = fallbackPage.id;
+        db.upsertDeviceSession({
+          device_id: this.deviceId,
+          name: 'StreamDeck',
+          kind: 'hardware',
+          profile_id: currentProfile.id,
+          page_id: fallbackPage.id,
+        });
+        validCurrentPage = fallbackPage;
+      }
+    }
+
+    if (!validCurrentPage) {
+      console.log('❌ No current page found for StreamDeck button press');
+      return null;
+    }
+
+    const button = db.getButtonsByPage(validCurrentPage.id).find(b => b.position === keyIndex);
+    if (!button) {
+      console.log(`❌ No button found at position ${keyIndex}`);
+      return null;
+    }
+    return { button, page: validCurrentPage, profile: currentProfile };
+  }
+
+  /**
+   * Ejecución canónica: un solo POST a /api/v1/buttons/press que corre el
+   * flujo (acciones + reglas del pressType) en el daemon. Si el endpoint aún
+   * no existe (daemon antiguo), cae al bucle legacy por acción.
+   */
+  private async postPress(target: { button: any; page: any; profile: any }, pressType: PressType): Promise<void> {
+    const { button, page, profile } = target;
+    const keyIndex = button.position;
+    try {
+      const { API_PORT } = await import('../config');
+      const response = await fetch(`http://localhost:${API_PORT}/api/v1/buttons/press`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          buttonId: button.id,
+          pressType,
+          context: {
+            buttonId: button.id,
+            pageId: page.id,
+            profileId: profile.id,
+            position: keyIndex,
+            source: 'streamdeck',
+            deviceId: this.deviceId
+          }
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json().catch(() => ({}));
+        console.log(`✅ Flow executed for StreamDeck button ${keyIndex} (${pressType})`, result?.empty ? '(empty)' : '');
+        return;
+      }
+      const text = await response.text().catch(() => '');
+      if (response.status !== 404 || !/API endpoint not found/.test(text)) {
+        console.error(`❌ Flow press failed: ${response.status} ${text}`);
+        return;
+      }
+      console.log('⚠️ /buttons/press no disponible, usando ejecución legacy por acción');
+    } catch (error) {
+      console.error(`❌ Error posting flow press:`, error);
+      return;
+    }
+    await this.legacyExecuteActions(target);
+  }
+
+  /** Compat: ejecuta `data.actions` en orden (sin reglas) vía /actions/execute. */
+  private async legacyExecuteActions(target: { button: any; page: any; profile: any }): Promise<void> {
+    const { button, page, profile } = target;
+    const keyIndex = button.position;
+    for (const action of button.data.actions ?? []) {
+      try {
+        console.log(`▶️ Executing action: ${action.type}`);
+
+        const { API_PORT } = await import('../config');
+        const response = await fetch(`http://localhost:${API_PORT}/api/v1/actions/execute`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action,
+            context: {
+              buttonId: button.id,
+              pageId: page.id,
+              profileId: profile.id,
+              position: keyIndex,
+              source: 'streamdeck',
+              deviceId: this.deviceId
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`❌ Failed to execute action ${action.type}: ${response.status} ${errorText}`);
+        } else {
+          const result = await response.json();
+          console.log(`✅ Action executed successfully: ${action.type}`, result);
+        }
+      } catch (error) {
+        console.error(`❌ Error executing action ${action.type}:`, error);
+      }
     }
   }
 }

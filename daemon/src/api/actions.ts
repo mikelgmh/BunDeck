@@ -2,6 +2,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
+import { resolveNavTargets } from '../sessions';
 
 export const handleActions: ApiHandler = async (_req, { method, path, services }) => {
   if (path === '/api/v1/actions/execute') {
@@ -21,29 +22,59 @@ export const handleActions: ApiHandler = async (_req, { method, path, services }
         if (result.success) {
           services.wsManager.broadcastActionFinished(actionId, result);
 
-          // Check if this is a page navigation action
+          // Check if this is a page navigation action.
+          // Dirigida por defecto: solo el dispositivo que ejecuta la acción
+          // (context.target/deviceId) la aplica; con broadcast/target 'all'
+          // llega a todos (compat: sin contexto de dispositivo → broadcast).
           if (result.result && result.result.action === 'navigate_to_page') {
-            services.wsManager.broadcast(
-              'page.navigate',
-              {
+            const origin = context?.deviceId ?? context?.device_id ?? context?.clientId ?? null;
+            const targets = origin
+              ? resolveNavTargets(context, String(origin))
+              : { kind: 'all' as const };
+            if (typeof services.wsManager.navigatePageTo === 'function') {
+              services.wsManager.navigatePageTo({
                 pageId: result.result.pageId,
                 pageName: result.result.pageName,
+                originDeviceId: origin ? String(origin) : null,
+                targets,
                 context,
-              },
-              'pages'
-            );
+              });
+            } else {
+              services.wsManager.broadcast(
+                'page.navigate',
+                {
+                  pageId: result.result.pageId,
+                  pageName: result.result.pageName,
+                  context,
+                },
+                'pages'
+              );
+            }
           }
 
           // Check if this is a profile navigation action (profile-auto.switch-profile/restore)
           if (result.result && result.result.action === 'navigate_to_profile') {
-            services.wsManager.broadcast(
-              'profile.navigate',
-              {
+            const origin = context?.deviceId ?? context?.device_id ?? context?.clientId ?? null;
+            const targets = origin
+              ? resolveNavTargets(context, String(origin))
+              : { kind: 'all' as const };
+            if (typeof services.wsManager.navigateProfileTo === 'function') {
+              services.wsManager.navigateProfileTo({
                 profileId: result.result.profileId,
+                originDeviceId: origin ? String(origin) : null,
+                targets,
                 context,
-              },
-              'profiles'
-            );
+              });
+            } else {
+              services.wsManager.broadcast(
+                'profile.navigate',
+                {
+                  profileId: result.result.profileId,
+                  context,
+                },
+                'profiles'
+              );
+            }
           }
         } else {
           services.wsManager.broadcastActionError(actionId, result.error);

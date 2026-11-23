@@ -1,7 +1,9 @@
 /**
  * Native HTTP Plugin
- * Make HTTP requests
+ * Make HTTP requests (con timeout, límite de tamaño y métodos validados).
  */
+
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
@@ -10,6 +12,11 @@ export interface PluginContext {
 export interface ActionHandler {
     (params: any, context: any): Promise<any>
 }
+
+const REQUEST_TIMEOUT_MS = 15000
+const MAX_BODY_CHARS = 2 * 1024 * 1024 // 2MB
+const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD']
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 
 export class HttpPlugin {
     private context: PluginContext
@@ -22,9 +29,12 @@ export class HttpPlugin {
         return {
             id: 'http',
             name: 'HTTP Requests',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Make HTTP/HTTPS requests to APIs and webhooks',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
             permissions: ['http', 'network'],
             actions: [
                 {
@@ -32,6 +42,7 @@ export class HttpPlugin {
                     name: 'HTTP Request',
                     description: 'Make an HTTP request',
                     icon: 'Globe',
+                    timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',
                         properties: {
@@ -79,6 +90,15 @@ export class HttpPlugin {
                                 ui: {
                                     component: 'hidden' // Can be shown in advanced mode
                                 }
+                            },
+                            timeoutMs: {
+                                type: 'number',
+                                title: 'Tiempo límite (ms)',
+                                description: 'Timeout de la petición (por defecto 15000, máx 60000)',
+                                default: REQUEST_TIMEOUT_MS,
+                                minimum: 500,
+                                maximum: 60000,
+                                ui: { component: 'hidden' }
                             }
                         },
                         required: ['url']
@@ -95,24 +115,47 @@ export class HttpPlugin {
     }
 
     private async executeHttpAction(params: any, context: any): Promise<any> {
-        const { url, method = 'GET', headers = {}, body } = params
+        const { url, method = 'GET', headers = {}, body, timeoutMs = REQUEST_TIMEOUT_MS } = params
 
         if (!url) {
             throw new Error('URL is required for HTTP action')
         }
+        const upperMethod = String(method).toUpperCase()
+        if (!ALLOWED_METHODS.includes(upperMethod)) {
+            throw new Error(`Método HTTP no permitido: "${method}" (válidos: ${ALLOWED_METHODS.join(', ')})`)
+        }
+        let parsed: URL
+        try {
+            parsed = new URL(url)
+        } catch {
+            throw new Error(`URL no válida: "${url}"`)
+        }
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            throw new Error(`Protocolo no permitido: ${parsed.protocol} (solo http/https)`)
+        }
+        if (LOCAL_HOSTS.has(parsed.hostname)) {
+            this.context.log('warn', `HTTP a localhost: ${upperMethod} ${url} (el plugin http no expone secretos del daemon)`)
+        }
+        const timeout = Math.min(Math.max(Number(timeoutMs) || REQUEST_TIMEOUT_MS, 500), 60000)
 
-        this.context.log('info', `Making HTTP request: ${method} ${url}`)
+        this.context.log('info', `Making HTTP request: ${upperMethod} ${url}`)
 
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), timeout)
         try {
             const response = await fetch(url, {
-                method,
+                method: upperMethod,
                 headers,
-                body: body ? JSON.stringify(body) : undefined
+                body: body ? JSON.stringify(body) : undefined,
+                signal: controller.signal
             })
 
             const responseBody = await response.text()
+            if (responseBody.length > MAX_BODY_CHARS) {
+                throw new Error(`Respuesta HTTP excede 2MB (${responseBody.length} caracteres)`)
+            }
 
-            this.context.log('info', `HTTP request completed: ${method} ${url}`, {
+            this.context.log('info', `HTTP request completed: ${upperMethod} ${url}`, {
                 status: response.status,
                 statusText: response.statusText
             })
@@ -123,9 +166,14 @@ export class HttpPlugin {
                 headers: Object.fromEntries(response.headers.entries()),
                 body: responseBody
             }
-        } catch (error) {
-            this.context.log('error', `HTTP request failed: ${error}`, { url, method })
+        } catch (error: any) {
+            if (error?.name === 'AbortError') {
+                throw new Error(`La petición HTTP tardó demasiado (timeout de ${timeout} ms): ${upperMethod} ${url}`)
+            }
+            this.context.log('error', `HTTP request failed: ${error}`, { url, method: upperMethod })
             throw error
+        } finally {
+            clearTimeout(timer)
         }
     }
 

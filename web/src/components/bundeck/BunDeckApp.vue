@@ -135,10 +135,13 @@
       <StageBoard
         :grid-cols="gridCols"
         :grid-rows="gridRows"
+        :key-size="bdKeySize"
+        :layout-mode="pageLayoutMode"
         :selected-button="selectedButton"
         :executing-buttons="executingButtons"
         :button-config="buttonConfig"
         :get-button="getButton"
+        :all-buttons="currentButtons"
         :get-button-data="getButtonData"
         :display-data="(pos: number) => engine.resolveDisplay(pos)"
         :mode="mode"
@@ -148,15 +151,22 @@
         :current-page="currentPage"
         :nav-trail="navTrail"
         :profile-name="currentProfile?.name ?? ''"
+        :profile-data="(currentProfile as any)?.data"
+        :devices="devStore.devices.value"
+        :assignments="devStore.assignments.value"
+        :preview-device-id="previewDeviceId"
         :busy="pageBusy"
         @button-click="(pos) => selectButton(pos)"
         @button-execute="(pos) => onExecute(pos)"
         @button-long-press="(pos) => engine.execKey(pos, 'long')"
         @button-delete="(pos) => onDeleteButton(pos)"
         @swap="handleSwap"
-        @grid-size-change="(dx, dy) => changeGridSize(dx, dy)"
+        @grid-size-change="onGridSizeChange"
         @mode-change="(m) => setMode(m)"
-        @page-select="onPageSelect"
+        @layout-mode-change="onLayoutModeChange"
+        @layout-change="onGsLayoutChange"
+        @gs-add="onGsAdd"
+        @page-select="onPageSelectGuard"
         @page-create="onPageCreate"
         @page-delete="onPageDelete"
         @page-rename="onPageRename"
@@ -164,6 +174,9 @@
         @action-drop="onActionDrop"
         @button-export="(pos) => openExport(pos)"
         @button-import="(pos) => openImport(pos)"
+        @device-assign="onDeviceAssign"
+        @preview-device-change="onPreviewDeviceChange"
+        @manage-devices="() => settingsDialog?.show('devices')"
       />
 
       <aside id="bd-ins" class="bd-side" :class="{ 'bd-collapsed': !bdShowRight }" :aria-label="t('bd.inspectorLabel')">
@@ -247,7 +260,7 @@
       @update-mcp-token="onUpdateMcpToken"
       @revoke-mcp-token="onRevokeMcpToken"
       @dismiss-install-progress="clearInstallProgress"
-      @notify="(msg) => bdShowToast(msg)"
+      @notify="(msg, undo) => bdShowToast(msg, undo)"
     />
 
     <PluginSettingsDialog
@@ -318,6 +331,15 @@
 
     <IosWarningDialog />
 
+    <dialog ref="confirmDialog" class="bd-confirm" :aria-label="confirmTitle">
+      <h2>{{ confirmTitle }}</h2>
+      <p>{{ confirmMsg }}</p>
+      <div class="bd-confirm-actions">
+        <button class="bd-btn" @click="resolveConfirm(false)">{{ t('bd.cancel') }}</button>
+        <button class="bd-btn bd-pri" @click="resolveConfirm(true)">{{ confirmOk }}</button>
+      </div>
+    </dialog>
+
     <div v-if="bdToast" class="bd-toast bd-on" role="status" aria-live="polite">
       <span>{{ bdToast.message }}</span>
       <button v-if="bdToast.undo" @click="doUndo">{{ t('bd.undo') }}</button>
@@ -337,6 +359,10 @@ import {
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
+import {
+  useDevices, checkPageCompatibility, resolvePageSize, resolveDeckSize,
+  type LogicalDevice,
+} from '../../composables/useDevices'
 import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
 import KeyInspector from './KeyInspector.vue'
@@ -401,6 +427,84 @@ const headerMenuBtn = ref<HTMLElement | null>(null)
 const headerMenuOpen = ref(false)
 let ruleTimer: ReturnType<typeof setInterval> | null = null
 let unsubVar: (() => void) | null = null
+
+// ---- Dispositivos lógicos + pantallas por perfil ----
+const devStore = useDevices(() => API_BASE.value)
+const previewDeviceId = ref<string | null>(null)
+const previewDevice = computed(() =>
+  previewDeviceId.value
+    ? (devStore.devices.value.find((d) => d.id === previewDeviceId.value) ?? null)
+    : null
+)
+
+// Confirmación con promesa (guardas destructivas: libre / resize en decks).
+const confirmDialog = ref<HTMLDialogElement | null>(null)
+const confirmTitle = ref('')
+const confirmMsg = ref('')
+const confirmOk = ref('')
+let confirmResolve: ((v: boolean) => void) | null = null
+const askConfirm = (title: string, msg: string, ok: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    confirmTitle.value = title
+    confirmMsg.value = msg
+    confirmOk.value = ok
+    confirmResolve = resolve
+    confirmDialog.value?.showModal()
+  })
+const resolveConfirm = (v: boolean) => {
+  confirmDialog.value?.close()
+  confirmResolve?.(v)
+  confirmResolve = null
+}
+
+/** Vista mínima de página para la regla de compatibilidad. */
+const compatPageOf = (p: any) => ({
+  id: p.id,
+  name: p.name,
+  is_folder: p.is_folder,
+  parent_id: p.parent_id ?? null,
+  grid_cols: p.grid_cols ?? null,
+  grid_rows: p.grid_rows ?? null,
+  data: p.data,
+})
+const profileDataOf = computed(() => (currentProfile.value as any)?.data)
+const compatOf = (p: any, d: LogicalDevice) =>
+  checkPageCompatibility(compatPageOf(p), d, profileDataOf.value, devStore.hwStatus.value.grid)
+/** Decks que muestran la página actual (o sus carpetas padre). */
+const decksOfCurrentChain = computed(() => {
+  const chain = new Set<string>()
+  let cur: any = currentPage.value
+  const byId = new Map((currentPages.value ?? []).map((p: any) => [p.id, p]))
+  while (cur && !chain.has(cur.id)) {
+    chain.add(cur.id)
+    cur = cur.parent_id ? byId.get(cur.parent_id) : null
+  }
+  return devStore.devices.value.filter(
+    (d) => d.kind === 'deck' && chain.has(devStore.assignments.value[d.id])
+  )
+})
+/** Páginas que ningún deck de la cadena actual puede mostrar (selector de carpeta). */
+const folderBlockedReasons = computed(() => {
+  const decks = decksOfCurrentChain.value
+  const out = new Map<string, string>()
+  if (!decks.length) return out
+  for (const p of currentPages.value ?? []) {
+    const bad = decks.find((d) => !compatOf(p as any, d).ok)
+    if (!bad) continue
+    const c = checkPageCompatibility(compatPageOf(p as any), bad, profileDataOf.value, devStore.hwStatus.value.grid)
+    out.set((p as any).id, c.why === 'free-mode'
+      ? t('bd.deviceCompatFree')
+      : (() => {
+        const size = resolvePageSize(compatPageOf(p as any), profileDataOf.value)
+        const want = resolveDeckSize(bad) ?? devStore.hwStatus.value.grid
+        return t('bd.deviceCompatSize', {
+          size: `${size.cols}×${size.rows}`,
+          want: want ? `${want.cols}×${want.rows}` : '',
+        })
+      })())
+  }
+  return out
+})
 
 const canExportSelected = computed(() => {
   if (selectedButton.value === null) return false
@@ -538,7 +642,15 @@ const onDocClickHeader = (e: MouseEvent) => {
 const availablePages = computed(() =>
   currentPages.value
     .filter((page) => page.is_folder === 0)
-    .map((page) => ({ id: page.id, name: page.name }))
+    .map((page) => {
+      const reason = folderBlockedReasons.value.get(page.id)
+      return {
+        id: page.id,
+        name: page.name,
+        disabled: reason !== undefined,
+        disabledReason: reason,
+      }
+    })
 )
 
 // Rastro de navegación para el breadcrumb: solo carpetas (is_folder === 1)
@@ -595,6 +707,17 @@ const toggleFullscreen = async () => {
 // Perfiles
 const handleProfileChange = async (profileId: string) => {
   await selectProfile(profileId)
+  // Asignaciones del perfil (el GET ya repara incompatibles en el daemon).
+  try {
+    await devStore.loadAssignments(profileId)
+  } catch { /* sin daemon: se sigue sin dispositivos */ }
+  // Si se simula un dispositivo, se abre su pantalla asignada.
+  if (previewDevice.value) {
+    const target = devStore.assignments.value[previewDevice.value.id]
+    if (target && target !== currentPage.value?.id && (currentPages.value ?? []).some((p) => p.id === target)) {
+      await selectPage(target)
+    }
+  }
   navTrail.value = currentPage.value ? [currentPage.value.name] : []
   engine.runLoad(allPositions)
 }
@@ -716,6 +839,30 @@ const onPageSelect = async (pageId: string) => {
     engine.runLoad(allPositions)
   })
 }
+/** Guarda en modo uso: el dispositivo simulado no abre páginas incompatibles. */
+const onPageSelectGuard = async (pageId: string) => {
+  if (mode.value === 'use' && previewDevice.value && previewDevice.value.kind === 'deck') {
+    const page = (currentPages.value ?? []).find((p) => p.id === pageId)
+    if (page) {
+      const c = compatOf(page, previewDevice.value)
+      if (!c.ok) {
+        const reason = c.why === 'free-mode'
+          ? t('bd.deviceCompatFree')
+          : (() => {
+            const size = resolvePageSize(compatPageOf(page), profileDataOf.value)
+            const want = resolveDeckSize(previewDevice.value!) ?? devStore.hwStatus.value.grid
+            return t('bd.deviceCompatSize', {
+              size: `${size.cols}×${size.rows}`,
+              want: want ? `${want.cols}×${want.rows}` : '',
+            })
+          })()
+        bdShowToast(t('bd.blockedNav', { page: page.name, device: previewDevice.value.name, reason }))
+        return
+      }
+    }
+  }
+  await onPageSelect(pageId)
+}
 const onPageCreate = async () => {
   await withPageOp(async () => {
     const created = await createPage(uniquePageName(`Página ${currentPages.value.length + 1}`), false)
@@ -735,6 +882,66 @@ const onPageRename = async (pageId: string, name: string) => {
     }
   })
 }
+// ---- Dispositivos: asignar pantalla, simular, sincronizar ----
+const onDeviceAssign = async (deviceId: string, pageId: string | null) => {
+  if (!selectedProfile.value) return
+  try {
+    const map: Record<string, string | null> = { ...devStore.assignments.value, [deviceId]: pageId }
+    const body = await devStore.saveAssignments(selectedProfile.value, map)
+    if (body.repaired) {
+      const dropped = (body.repaired.dropped ?? []) as Array<{ deviceName: string; pageName: string; reason: string }>
+      for (const d of dropped) {
+        bdShowToast(t('bd.pageUnassignedFrom', { page: d.pageName, devices: d.deviceName }))
+      }
+    }
+    const device = devStore.devices.value.find((d) => d.id === deviceId)
+    if (pageId) {
+      const page = (currentPages.value ?? []).find((p) => p.id === pageId)
+      bdShowToast(t('bd.deviceAssigned', { page: page?.name ?? pageId, device: device?.name ?? deviceId }))
+    } else {
+      bdShowToast(t('bd.deviceUnassigned', { device: device?.name ?? deviceId }))
+    }
+    // Si se simula este dispositivo en modo uso, abrir su pantalla (o vacío).
+    if (deviceId === previewDeviceId.value && mode.value === 'use' && pageId) {
+      await onPageSelect(pageId)
+    }
+  } catch (e: any) {
+    if (e?.status === 422 && e?.details) {
+      const first = e.details[0]
+      bdShowToast(t('bd.blockedNav', {
+        page: first.pageId,
+        device: devStore.devices.value.find((d) => d.id === first.deviceId)?.name ?? first.deviceId,
+        reason: first.reason,
+      }))
+    } else {
+      bdShowToast(String(e?.message ?? e))
+    }
+  }
+}
+const onPreviewDeviceChange = async (deviceId: string | null) => {
+  previewDeviceId.value = deviceId
+  selectedButton.value = null
+  if (mode.value === 'use' && deviceId) {
+    const target = devStore.assignments.value[deviceId]
+    if (target && target !== currentPage.value?.id && (currentPages.value ?? []).some((p) => p.id === target)) {
+      await onPageSelect(target)
+    }
+  }
+}
+const onDevicesChanged = async () => {
+  try {
+    await devStore.loadDevices()
+    if (selectedProfile.value) await devStore.loadAssignments(selectedProfile.value)
+  } catch { /* noop */ }
+}
+const onPageBlockedMsg = (e: Event) => {
+  const d = (e as CustomEvent).detail
+  if (d?.pageId) {
+    const page = (currentPages.value ?? []).find((p) => p.id === d.pageId)
+    bdShowToast(t('bd.blockedNav', { page: page?.name ?? d.pageId, device: 'Stream Deck', reason: d.reason ?? '' }))
+  }
+}
+
 const onPageDelete = async (page: PageData | null) => {
   if (!page || currentPages.value.length < 2) return
   const snapshot = {
@@ -924,6 +1131,194 @@ const apiDel = async (path: string) => {
     throw new Error(txt || `DELETE ${path}: ${res.status}`)
   }
   return res.json().catch(() => ({}))
+}
+const apiPut = async (path: string, body: any) => {
+  const res = await fetch(`${apiBase.value}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(txt || `PUT ${path}: ${res.status}`)
+  }
+  return res.json().catch(() => ({}))
+}
+/** Modo de layout por página: 'classic' (rejilla fija) o 'gridstack' (redimensionable). */
+const parsePageData = (d: any): Record<string, any> => {
+  if (!d) return {}
+  if (typeof d === 'string') {
+    try { return JSON.parse(d) ?? {} } catch { return {} }
+  }
+  return d
+}
+/** Override optimista: la UI cambia al instante al pulsar Fija/Libre,
+ *  aunque el PUT al daemon tarde o falle (entonces se revierte). */
+const layoutModeOverride = ref<Record<string, 'classic' | 'gridstack'>>({})
+const pageLayoutMode = computed<'classic' | 'gridstack'>(() => {
+  const pid = (currentPage.value as any)?.id
+  if (pid && layoutModeOverride.value[pid]) return layoutModeOverride.value[pid]
+  const m = parsePageData((currentPage.value as any)?.data)?.layoutMode
+  return m === 'gridstack' ? 'gridstack' : 'classic'
+})
+const onLayoutModeChange = async (mode: 'classic' | 'gridstack') => {
+  if (!currentPage.value || pageLayoutMode.value === mode) return
+  // Pasar a libre una página asignada a un deck pide confirmación y la desasigna.
+  if (mode === 'gridstack') {
+    const hw = decksOfCurrentChain.value.filter((d) =>
+      (devStore.assignments.value[d.id] === (currentPage.value as any).id)
+    )
+    if (hw.length) {
+      const ok = await askConfirm(
+        t('bd.confirmFreeTitle'),
+        t('bd.confirmFreeMsg', {
+          page: (currentPage.value as any).name,
+          devices: hw.map((d) => d.name).join(', '),
+        }),
+        t('bd.confirmFreeOk'),
+      )
+      if (!ok) return
+      try {
+        const map: Record<string, string | null> = { ...devStore.assignments.value }
+        for (const d of hw) map[d.id] = null
+        await devStore.saveAssignments(selectedProfile.value, map)
+        bdShowToast(t('bd.pageUnassignedFrom', {
+          page: (currentPage.value as any).name,
+          devices: hw.map((d) => d.name).join(', '),
+        }))
+      } catch (e) {
+        bdShowToast(String((e as Error)?.message ?? e))
+        return
+      }
+    }
+  }
+  const pid = (currentPage.value as any).id
+  const prev = pageLayoutMode.value
+  layoutModeOverride.value[pid] = mode
+  try {
+    const data = { ...parsePageData((currentPage.value as any)?.data), layoutMode: mode }
+    await updatePage(pid, { data } as any)
+    // Sincronizado: soltar el override para que mande el servidor.
+    if (layoutModeOverride.value[pid] === mode) delete layoutModeOverride.value[pid]
+  } catch (e) {
+    if (layoutModeOverride.value[pid] === mode) layoutModeOverride.value[pid] = prev
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+}
+/** Cambio de filas/columnas con guarda: si un deck muestra esta página y el
+ *  nuevo tamaño no le cabe, pide confirmación y la desasigna. */
+const onGridSizeChange = async (dx: number, dy: number) => {
+  const nextCols = gridCols.value + dx
+  const nextRows = gridRows.value + dy
+  const hw = (currentPage.value ? decksOfCurrentChain.value.filter((d) =>
+    devStore.assignments.value[d.id] === (currentPage.value as any).id
+  ) : []).filter((d) => {
+    const want = resolveDeckSize(d) ?? devStore.hwStatus.value.grid
+    return !want || want.cols !== nextCols || want.rows !== nextRows
+  })
+  if (hw.length && currentPage.value) {
+    const ok = await askConfirm(
+      t('bd.confirmResizeTitle'),
+      t('bd.confirmResizeMsg', {
+        page: (currentPage.value as any).name,
+        size: `${nextCols}×${nextRows}`,
+        devices: hw.map((d) => {
+          const want = resolveDeckSize(d) ?? devStore.hwStatus.value.grid
+          return want ? `${d.name} (${want.cols}×${want.rows})` : d.name
+        }).join(', '),
+      }),
+      t('bd.confirmResizeOk'),
+    )
+    if (!ok) return
+  }
+  await changeGridSize(dx, dy)
+  if (hw.length && currentPage.value && selectedProfile.value) {
+    try {
+      const map: Record<string, string | null> = { ...devStore.assignments.value }
+      for (const d of hw) map[d.id] = null
+      await devStore.saveAssignments(selectedProfile.value, map)
+      bdShowToast(t('bd.pageUnassignedFrom', {
+        page: (currentPage.value as any).name,
+        devices: hw.map((d) => d.name).join(', '),
+      }))
+    } catch (e) {
+      bdShowToast(String((e as Error)?.message ?? e))
+    }
+  }
+}
+/** Persistir geometría GridStack al mover/redimensionar (misma tecla, mismos drawers). */
+const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number; w: number; h: number }>) => {
+  if (!items.length) return
+  try {
+    for (const it of items) {
+      if (!it.id) continue
+      await apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x: it.x, y: it.y, w: it.w, h: it.h })
+    }
+    if (currentPage.value) {
+      const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
+      currentButtons.value = fresh
+    }
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+}
+
+/** Crear tecla 1×1 en la primera celda libre (modo Libre).
+ *  GridStack la adopta vía makeWidget sin re-crear la instancia. */
+const onGsAdd = async () => {
+  if (!currentPage.value || pageBusy.value) return
+  try {
+    pageBusy.value = true
+    const cols = Math.max(1, gridCols.value)
+    const rows = Math.max(1, gridRows.value)
+    const occupied = new Set<number>()
+    const takenPos = new Set((currentButtons.value ?? []).map((b: any) => b.position))
+    for (const b of currentButtons.value ?? []) {
+      const w = Math.min(cols, Math.max(1, Math.round(Number((b as any).w) || 1)))
+      const rawX = Number.isFinite((b as any).x) ? Number((b as any).x) : (b as any).position % cols
+      const rawY = Number.isFinite((b as any).y) ? Number((b as any).y) : Math.floor((b as any).position / cols)
+      const bx = Math.min(Math.max(0, Math.floor(rawX)), cols - w)
+      const by = Math.max(0, Math.floor(rawY))
+      const bh = Math.max(1, Math.round(Number((b as any).h) || 1))
+      for (let dy = 0; dy < bh; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+          occupied.add((by + dy) * cols + bx + dx)
+        }
+      }
+    }
+    let fx = 0
+    let fy = 0
+    let found = false
+    for (let y = 0; y < rows + 50 && !found; y++) {
+      for (let x = 0; x < cols && !found; x++) {
+        const cell = y * cols + x
+        if (!occupied.has(cell) && !takenPos.has(cell)) {
+          fx = x
+          fy = y
+          found = true
+        }
+      }
+    }
+    if (!found) throw new Error(t('bd.gsNoRoom'))
+    const position = fy * cols + fx
+    const created = await apiPost('/buttons', {
+      page_id: currentPage.value.id,
+      position,
+      x: fx,
+      y: fy,
+      w: 1,
+      h: 1,
+      data: {},
+    })
+    const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
+    currentButtons.value = fresh
+    const pos = created?.position ?? position
+    await selectButton(pos)
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  } finally {
+    pageBusy.value = false
+  }
 }
 
 const manifestOf = (pid: string) => {
@@ -1465,8 +1860,8 @@ watch(selectedButton, (newVal, oldVal) => {
       icon: '',
       iconImage: '',
       emoji: '',
-      backgroundColor: '#374151',
-      textColor: '#f1f5f9',
+      backgroundColor: '',
+      textColor: '#e8e9eb',
       showTitle: true,
       mode: 'seq',
       longPress: 'none',
@@ -1512,10 +1907,18 @@ const onKeyDown = (event: KeyboardEvent) => {
 }
 
 onMounted(async () => {
-  loadProfiles().then(() => {
+  loadProfiles().then(async () => {
     // Reglas «load» de la página inicial.
     try { engine.runLoad(allPositions) } catch { /* noop */ }
+    // Asignaciones del perfil inicial (el GET repara incompatibles).
+    try {
+      if (selectedProfile.value) await devStore.loadAssignments(selectedProfile.value)
+    } catch { /* sin daemon */ }
   }).catch(() => {})
+  devStore.loadDevices().catch(() => {})
+  devStore.loadHwStatus().catch(() => {})
+  window.addEventListener('libredeck:devices-changed', onDevicesChanged)
+  window.addEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   loadMarketplace().catch(() => {})
   loadMcpTokens().catch(() => {})
   loadMcpScopes().catch(() => {})
@@ -1560,6 +1963,8 @@ onUnmounted(() => {
   cleanup()
   window.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('click', onDocClickHeader)
+  window.removeEventListener('libredeck:devices-changed', onDevicesChanged)
+  window.removeEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   if (ruleTimer) {
     clearInterval(ruleTimer)
     ruleTimer = null

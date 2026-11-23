@@ -1,32 +1,90 @@
 <template>
   <section class="bd-stage">
     <div class="bd-tool">
-      <div class="bd-seg" role="group" :aria-label="t('bd.mode')">
-        <button data-md="edit" :aria-pressed="mode === 'edit'" @click="$emit('mode-change', 'edit')">
-          {{ t('bd.edit') }}
+      <div class="bd-tgrp">
+        <div class="bd-seg" role="group" :aria-label="t('bd.mode')">
+          <button data-md="edit" :aria-pressed="mode === 'edit'" @click="$emit('mode-change', 'edit')">
+            {{ t('bd.edit') }}
+          </button>
+          <button data-md="use" :aria-pressed="mode === 'use'" @click="$emit('mode-change', 'use')">
+            {{ t('bd.use') }}
+          </button>
+        </div>
+      </div>
+      <div class="bd-tgrp bd-mid">
+        <div v-if="mode === 'edit'" class="bd-seg" role="group" aria-label="layout">
+          <button :aria-pressed="(layoutMode ?? 'classic') === 'classic'" data-cy="bd-layout-classic" :disabled="!currentPage" :title="!currentPage ? t('bd.layoutLoadingPage') : ''" @click="$emit('layout-mode-change', 'classic')">
+            {{ t('bd.layoutClassic') }}
+          </button>
+          <button :aria-pressed="(layoutMode ?? 'classic') === 'gridstack'" data-cy="bd-layout-gridstack" :disabled="!currentPage" :title="!currentPage ? t('bd.layoutLoadingPage') : ''" @click="$emit('layout-mode-change', 'gridstack')">
+            {{ t('bd.layoutGridstack') }}
+          </button>
+        </div>
+
+        <div class="bd-step" v-if="mode === 'edit'" data-cy="bd-grid-rows">
+          <span>{{ t('bd.rows') }}</span>
+          <button data-d="r-1" :aria-label="t('bd.decreaseRow')" :disabled="gridRows <= 2" @click="$emit('grid-size-change', 0, -1)">−</button>
+          <output>{{ gridRows }}</output>
+          <button data-d="r1" :aria-label="t('bd.increaseRow')" :disabled="gridRows >= 6" @click="$emit('grid-size-change', 0, 1)">+</button>
+        </div>
+        <div class="bd-step" v-if="mode === 'edit'" data-cy="bd-grid-cols">
+          <span>{{ t('bd.columns') }}</span>
+          <button data-d="c-1" :aria-label="t('bd.decreaseCol')" :disabled="gridCols <= 3" @click="$emit('grid-size-change', -1, 0)">−</button>
+          <output>{{ gridCols }}</output>
+          <button data-d="c1" :aria-label="t('bd.increaseCol')" :disabled="gridCols >= 8" @click="$emit('grid-size-change', 1, 0)">+</button>
+        </div>
+        <button
+          v-if="isGsMode && mode === 'edit'"
+          type="button"
+          class="bd-btn bd-pri bd-gs-add-tool"
+          data-cy="bd-gs-add-tool"
+          :disabled="!currentPage"
+          :title="t('bd.gsAddHint')"
+          @click="$emit('gs-add')"
+        >
+          <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.gsAddKey') }}
         </button>
-        <button data-md="use" :aria-pressed="mode === 'use'" @click="$emit('mode-change', 'use')">
-          {{ t('bd.use') }}
-        </button>
+        <label v-if="mode === 'use'" class="bd-usel" data-cy="bd-preview-dev"><span>{{ t('bd.previewAs') }}</span><select :value="previewDeviceId ?? ''" :aria-label="t('bd.previewAs')" @change="$emit('preview-device-change', ($event.target as HTMLSelectElement).value || null)"><option value="">{{ t('bd.deviceNoScreen') }}…</option><option v-for="d in devices" :key="d.id" :value="d.id">{{ d.name }}</option></select></label>
       </div>
 
-      <div class="bd-step">
-        <span>{{ t('bd.rows') }}</span>
-        <button data-d="r-1" :aria-label="t('bd.decreaseRow')" :disabled="gridRows <= 2" @click="$emit('grid-size-change', 0, -1)">−</button>
-        <output>{{ gridRows }}</output>
-        <button data-d="r1" :aria-label="t('bd.increaseRow')" :disabled="gridRows >= 6" @click="$emit('grid-size-change', 0, 1)">+</button>
-      </div>
-      <div class="bd-step">
-        <span>{{ t('bd.columns') }}</span>
-        <button data-d="c-1" :aria-label="t('bd.decreaseCol')" :disabled="gridCols <= 3" @click="$emit('grid-size-change', -1, 0)">−</button>
-        <output>{{ gridCols }}</output>
-        <button data-d="c1" :aria-label="t('bd.increaseCol')" :disabled="gridCols >= 8" @click="$emit('grid-size-change', 1, 0)">+</button>
+      <div class="bd-tgrp">
+        <div v-if="devices.length" class="bd-dvwrap">
+        <button
+          type="button"
+          class="bd-dvtrig"
+          :class="{ 'bd-haswarn': unassignedCount > 0 }"
+          :aria-expanded="devOpen"
+          aria-controls="bd-dvpop"
+          data-cy="bd-devices-btn"
+          @click.stop="devOpen = !devOpen"
+        >
+          <MonitorSmartphone :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.devicesTrigger') }}</span><span class="bd-dvbadge" data-cy="bd-devices-badge">{{ unassignedCount > 0 ? `⚠ ${devices.length - unassignedCount}/${devices.length}` : devices.length }}</span>
+        </button>
+        <div v-if="devOpen" id="bd-dvpop" class="bd-dvpop" data-cy="bd-devices-pop" role="dialog" :aria-label="t('bd.devicesTitle', { name: profileName })">
+          <div class="bd-dvpop-hd"><b>{{ t('bd.devicesTitle', { name: profileName }) }}</b><button class="bd-btn" data-cy="bd-devices-manage" @click="devOpen = false; $emit('manage-devices')">{{ t('bd.devicesManage') }}</button></div>
+          <div class="bd-dvpop-list">
+            <label v-for="d in devices" :key="d.id" class="bd-dv" :class="{ 'bd-warn2': !assignments[d.id] }" :data-cy="`bd-device-row-${d.id}`">
+              <span class="bd-dv-info"><span class="bd-dvi"><component :is="deviceIcon(d.kind)" :size="18" stroke-width="1.75" aria-hidden="true" /></span><span class="bd-dvn"><span>{{ d.name }}</span><small>{{ deviceSub(d) }}</small></span></span>
+              <select :value="assignments[d.id] ?? ''" :aria-label="d.name" :data-cy="`bd-device-page-${d.id}`" :title="noCompatibleTitle(d)" @change="$emit('device-assign', d.id, ($event.target as HTMLSelectElement).value || null)">
+                <option value="">{{ t('bd.deviceNoScreen') }}</option>
+                <option v-for="p in currentPages" :key="p.id" :value="p.id" :disabled="!compatOf(p, d).ok">{{ pageOptionLabel(p, d) }}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        </div>
       </div>
 
     </div>
 
     <div class="bd-floor">
      <div class="bd-stack">
+      <div v-if="showNoScreen" class="bd-gs-empty-state" data-cy="bd-no-screen">
+        <p><b>{{ t('bd.deviceNoScreen') }}</b></p>
+        <p class="bd-hint">{{ t('bd.deviceNoScreenHint', { name: previewDevice?.name ?? '', profile: profileName }) }}</p>
+      </div>
+      <template v-else>
+      <div v-if="isGsMode && mode === 'edit'" class="bd-freenote" data-cy="bd-free-note"><Smartphone :size="15" stroke-width="1.75" aria-hidden="true" /><span><b>{{ t('bd.freeNote') }}</b></span></div>
       <div v-if="navTrail.length > 1" class="bd-crumb">
         <button class="bd-btn" @click="$emit('nav-back')">
           <ArrowLeft :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.back') }}
@@ -40,6 +98,7 @@
       </div>
 
       <div
+        v-if="(layoutMode ?? 'classic') === 'classic'"
         ref="container"
         :key="domVersion"
         data-swapy-container
@@ -111,7 +170,93 @@
           </div>
         </div>
       </div>
+      <div
+        v-else
+        class="bd-gs-viewport"
+      >
+        <div
+          class="bd-gs-wrap"
+          :style="{ '--bd-c': gridCols, '--bd-r': gridRows, '--bd-gs-unit': `${gsCellSize}px`, '--bd-total-r': gsTotalRows }"
+        >
+          <div
+            ref="gsContainer"
+            class="grid-stack bd-gs"
+            :class="{ 'bd-gs--ready': gsReady }"
+            data-cy="bd-gs-plate"
+            @keydown="onKeyNav"
+          >
+            <div
+              v-for="b in gsItems"
+              :key="b.id"
+              class="grid-stack-item"
+              :gs-id="b.id"
+              :gs-x="b.x"
+              :gs-y="b.y"
+              :gs-w="b.w"
+              :gs-h="b.h"
+              :data-gs-id="b.id"
+            >
+              <div class="grid-stack-item-content">
+                <button
+                  class="bd-key"
+                  :class="{ 'bd-hit': executingButtons.includes(b.position) }"
+                  :aria-pressed="selectedButton === b.position"
+                  :aria-label="keyAriaLabel(b.position)"
+                  :style="keyColorVar(b.position)"
+                  :data-position="b.position"
+                  data-cy="bd-key"
+                  @click="onKeyClick(b.position)"
+                  @dblclick="mode === 'edit' ? $emit('button-execute', b.position) : null"
+                  @pointerdown="onPressStart($event, b.position)"
+                  @pointerup="onPressEnd(b.position)"
+                  @pointercancel="onPressCancel"
+                  @pointerleave="onPressCancel"
+                  @contextmenu.prevent.stop="showContextMenu($event, b.position)"
+                  @dragover.prevent="onDragOver($event, b.position)"
+                  @dragleave="onDragLeave($event)"
+                  @drop.prevent="onDrop($event, b.position)"
+                >
+                  <template v-if="getButton(b.position)">
+                    <span v-if="keyTop(b.position)" class="bd-tt" :style="keyFont(b.position)">{{ keyTop(b.position) }}</span>
+                    <component v-if="keyDyn(b.position)" :is="'span'" class="bd-dyn">{{ keyDyn(b.position) }}</component>
+                    <img
+                      v-else-if="keyImage(b.position)"
+                      :src="keyImage(b.position)"
+                      class="bd-kimg"
+                      alt=""
+                      aria-hidden="true"
+                      draggable="false"
+                    />
+                    <component
+                      v-else-if="keyIcon(b.position)"
+                      :is="keyIcon(b.position)"
+                      :size="28"
+                      :stroke-width="1.75"
+                      aria-hidden="true"
+                    />
+                    <span v-else-if="keyEmoji(b.position)" style="font-size: 24px" aria-hidden="true">{{ keyEmoji(b.position) }}</span>
+                    <span v-if="keyBottom(b.position)" class="bd-tb" :style="keyFont(b.position)">{{ keyBottom(b.position) }}</span>
+                    <small v-else-if="labelMode !== 'n' && showTitleOf(b.position) && keyLabel(b.position)">{{ keyLabel(b.position) }}</small>
+                    <span v-if="actionCount(b.position) > 1" class="bd-bdg">{{ actionCount(b.position) }}</span>
+                  </template>
+                  <Plus v-else-if="mode === 'edit'" :size="16" stroke-width="1.75" aria-hidden="true" />
+                </button>
+              </div>
+              <span
+                v-if="mode === 'edit'"
+                class="bd-gs-drag-handle"
+                aria-hidden="true"
+                :title="t('bd.moveWidget')"
+                data-cy="bd-gs-drag-handle"
+              >
+                <GripVertical :size="14" stroke-width="2" />
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
 
+      </template>
       <div class="bd-pages">
         <template v-for="page in currentPages" :key="page.id">
           <input
@@ -130,10 +275,12 @@
             <button
               class="bd-chip"
               :aria-pressed="page.id === currentPage?.id"
-              :disabled="busy"
+              :disabled="busy || pageBlocked(page)"
+              :title="pageTitle(page)"
+              :data-cy="`bd-page-${page.id}`"
               @click="$emit('page-select', page.id)"
             >
-              <Folder v-if="page.is_folder === 1" :size="14" stroke-width="1.75" aria-hidden="true" />{{ page.name }}
+              <Folder v-if="page.is_folder === 1" :size="14" stroke-width="1.75" aria-hidden="true" /><Move v-else-if="pageLayoutOf(page) === 'gridstack'" :size="14" stroke-width="1.75" aria-hidden="true" />{{ page.name }}<span v-if="pageDevices(page).length" class="bd-dvs" :title="t('bd.shownOn', { devices: pageDevices(page).map((d) => d.name).join(', ') })"><component v-for="d in pageDevices(page)" :key="d.id" :is="deviceIcon(d.kind)" :size="12" stroke-width="1.75" aria-hidden="true" /></span>
             </button>
             <button
               v-if="mode === 'edit'"
@@ -189,12 +336,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { createSwapy, type Swapy } from 'swapy'
+import 'gridstack/dist/gridstack.min.css'
+// GridStack se importa en dinámico dentro de initGs: el import estático
+// rompe el SSR de Astro (gridstack-engine sin extensión).
 import {
-  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown
+  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone
 } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { checkPageCompatibility, parseLayoutMode, resolvePageSize, resolveDeckSize, type LogicalDevice, type CompatView } from '../../composables/useDevices'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 import type { ButtonEntity, PageData } from '../../types/streamdeck'
 
@@ -203,10 +354,16 @@ const { t } = useI18nStore()
 interface Props {
   gridCols: number
   gridRows: number
+  /** Tamaño real de tecla; en modo libre una celda mide keySize + 12px. */
+  keySize?: number
+  /** 'classic' = rejilla fija por position; 'gridstack' = redimensionable por x/y/w/h. */
+  layoutMode?: 'classic' | 'gridstack'
   selectedButton: number | null
   executingButtons: number[]
   buttonConfig: any
   getButton: (position: number) => ButtonEntity | undefined
+  /** Todos los botones de la página (para modo gridstack). */
+  allButtons?: ButtonEntity[]
   getButtonData: (position: number) => any
   /** Datos con apariencia condicional ya aplicada (opcional). */
   displayData?: (position: number) => any
@@ -219,6 +376,13 @@ interface Props {
   busy: boolean
   /** Base de la API (puerto 3001): las imágenes `/assets/…` cuelgan de ahí. */
   apiBase?: string
+  /** Dispositivos lógicos + qué pantalla muestra cada uno en este perfil. */
+  devices?: LogicalDevice[]
+  assignments?: Record<string, string>
+  /** Dispositivo simulado en modo uso ("Probar en"). */
+  previewDeviceId?: string | null
+  /** `profiles.data` del perfil actual (herencia del tamaño de página). */
+  profileData?: any
 }
 
 interface Emits {
@@ -231,19 +395,282 @@ interface Emits {
   (e: 'swap', event: any): void
   (e: 'grid-size-change', deltaX: number, deltaY: number): void
   (e: 'mode-change', mode: 'edit' | 'use'): void
+  (e: 'layout-mode-change', mode: 'classic' | 'gridstack'): void
+  /** GridStack: widgets movidos/redimensionados [{id,x,y,w,h}]. */
+  (e: 'layout-change', items: Array<{ id: string; x: number; y: number; w: number; h: number }>): void
+  /** GridStack: pedir una tecla nueva 1×1 en la primera celda libre. */
+  (e: 'gs-add'): void
   (e: 'page-select', pageId: string): void
   (e: 'page-create'): void
   (e: 'page-delete', page: PageData | null): void
   (e: 'page-rename', pageId: string, name: string): void
   (e: 'nav-back'): void
   (e: 'action-drop', position: number, actionType: string): void
+  (e: 'device-assign', deviceId: string, pageId: string | null): void
+  (e: 'preview-device-change', deviceId: string | null): void
+  (e: 'manage-devices'): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  keySize: 76,
+  devices: () => [],
+  assignments: () => ({}),
+  previewDeviceId: null,
+  profileData: undefined,
+})
 const emit = defineEmits<Emits>()
 
 const container = ref<HTMLElement | null>(null)
 const swapy = ref<Swapy | null>(null)
+const gsContainer = ref<HTMLElement | null>(null)
+let gs: any = null
+const gsReady = ref(false)
+
+/** Items GridStack: misma tecla/drawers, geometría x/y/w/h del daemon. */
+const gsItems = computed(() => {
+  const list = (props.allButtons ?? []).slice()
+  const cols = Math.max(1, props.gridCols)
+  return list.map((b) => {
+    // El ancho clásico puede cambiar después de guardar una geometría libre.
+    // GridStack no pinta widgets que empiezan fuera de las columnas actuales.
+    const w = Math.min(cols, Math.max(1, Math.round(Number(b.w) || 1)))
+    const h = Math.max(1, Math.round(Number(b.h) || 1))
+    const rawX = Number.isFinite(b.x) ? Number(b.x) : b.position % cols
+    const rawY = Number.isFinite(b.y) ? Number(b.y) : Math.floor(b.position / cols)
+    const x = Math.min(Math.max(0, Math.floor(rawX)), cols - w)
+    const y = Math.max(0, Math.floor(rawY))
+    return { id: b.id, position: b.position, x, y, w, h }
+  })
+})
+
+const gsTotalRows = computed(() =>
+  Math.max(props.gridRows, 1, ...gsItems.value.map((item) => item.y + item.h))
+)
+
+const isGsMode = computed(() => (props.layoutMode ?? 'classic') === 'gridstack')
+
+// ---- Dispositivos y pantallas por perfil ----
+const devOpen = ref(false)
+const deviceList = computed(() => props.devices ?? [])
+const previewDevice = computed(() =>
+  props.previewDeviceId ? (deviceList.value.find((d) => d.id === props.previewDeviceId) ?? null) : null
+)
+const showNoScreen = computed(() =>
+  props.mode === 'use' && !!previewDevice.value && !props.assignments?.[previewDevice.value.id]
+)
+const unassignedCount = computed(() =>
+  deviceList.value.filter((d) => !props.assignments?.[d.id]).length
+)
+const pageViewOf = (p: PageData): CompatView => ({
+  id: p.id,
+  name: p.name,
+  is_folder: p.is_folder,
+  parent_id: (p as any).parent_id ?? null,
+  grid_cols: (p as any).grid_cols ?? null,
+  grid_rows: (p as any).grid_rows ?? null,
+  data: (p as any).data,
+})
+const compatOf = (p: PageData, d: LogicalDevice) =>
+  checkPageCompatibility(pageViewOf(p), d, props.profileData)
+const pageLayoutOf = (p: PageData) => parseLayoutMode((p as any).data)
+const pageDevices = (p: PageData) =>
+  deviceList.value.filter((d) => props.assignments?.[d.id] === p.id)
+const deviceIcon = (kind: string) =>
+  kind === 'deck' ? Monitor : kind === 'tablet' ? Tablet : Smartphone
+const deckSizeOf = (d: LogicalDevice) => {
+  const s = resolveDeckSize(d)
+  return s ? `${s.cols}×${s.rows}` : ''
+}
+const deviceSub = (d: LogicalDevice) =>
+  d.kind === 'deck'
+    ? t('bd.deviceDeckView', { size: deckSizeOf(d) })
+    : t('bd.deviceAnyView')
+/** Motivo legible de incompatibilidad (o null si es compatible). */
+const reasonText = (p: PageData, d: LogicalDevice): string | null => {
+  const c = compatOf(p, d)
+  if (c.ok) return null
+  if (c.why === 'free-mode') return t('bd.deviceCompatFree')
+  const size = resolvePageSize(pageViewOf(p), props.profileData)
+  const want = resolveDeckSize(d)
+  return t('bd.deviceCompatSize', {
+    size: `${size.cols}×${size.rows}`,
+    want: want ? `${want.cols}×${want.rows}` : '',
+  })
+}
+const pageViewLabel = (p: PageData): string => {
+  if (pageLayoutOf(p) === 'gridstack') return t('bd.layoutGridstack')
+  const size = resolvePageSize(pageViewOf(p), props.profileData)
+  return `${size.cols}×${size.rows}`
+}
+const pageOptionLabel = (p: PageData, d: LogicalDevice): string => {
+  const base = `${p.name} · ${pageViewLabel(p)}`
+  const reason = reasonText(p, d)
+  return reason ? `${base} (${reason})` : base
+}
+/** En modo uso, el dispositivo simulado no puede abrir páginas incompatibles. */
+const pageBlocked = (p: PageData): boolean => {
+  if (props.mode !== 'use' || !previewDevice.value) return false
+  return !compatOf(p, previewDevice.value).ok
+}
+const pageTitle = (p: PageData): string | undefined => {
+  const parts: string[] = []
+  const devs = pageDevices(p)
+  if (devs.length) parts.push(t('bd.shownOn', { devices: devs.map((d) => d.name).join(', ') }))
+  if (props.mode === 'use' && previewDevice.value) {
+    const reason = reasonText(p, previewDevice.value)
+    if (reason) parts.push(reason)
+  }
+  return parts.length ? parts.join(' — ') : undefined
+}
+const noCompatibleTitle = (d: LogicalDevice): string | undefined => {
+  if (d.kind !== 'deck') return undefined
+  const anyOk = props.currentPages.some((p) => compatOf(p, d).ok)
+  return anyOk ? undefined : t('bd.deviceNoCompatible', { size: deckSizeOf(d) })
+}
+
+/** Igual que el ejemplo: unidad = tecla + 12px; margen 6px por lado deja
+ *  el contenido de cada celda cuadrado y del mismo tamaño que la tecla fija. */
+const GS_GUTTER = 12
+const GS_MARGIN = 6
+const gsCellSize = computed(() => Math.max(1, Math.round(props.keySize)) + GS_GUTTER)
+let gsChangeTimer: ReturnType<typeof setTimeout> | null = null
+
+const destroyGs = () => {
+  if (gsChangeTimer) {
+    clearTimeout(gsChangeTimer)
+    gsChangeTimer = null
+  }
+  try { gs?.destroy(false) } catch { /* noop */ }
+  gs = null
+  gsReady.value = false
+}
+
+const emitGsLayout = (items: any[]) => {
+  if (!Array.isArray(items)) return
+  emit(
+    'layout-change',
+    items.map((it: any) => ({
+      id: String(it.id ?? it.el?.getAttribute?.('gs-id') ?? ''),
+      x: Number(it.x ?? 0),
+      y: Number(it.y ?? 0),
+      w: Number(it.w ?? 1),
+      h: Number(it.h ?? 1),
+    }))
+  )
+}
+
+const initGs = async (retries = 2) => {
+  if (!gsContainer.value || !isGsMode.value) return
+  destroyGs()
+  try {
+    const { GridStack } = await import('gridstack')
+    if (!gsContainer.value || !isGsMode.value) return
+    const instance = GridStack.init(
+      {
+        column: Math.max(1, props.gridCols),
+        cellHeight: gsCellSize.value,
+        margin: GS_MARGIN,
+        // float:true = posicionamiento libre: los widgets se quedan donde se
+        // sueltan aunque queden huecos (p. ej. uno en cada esquina). Con
+        // float:false GridStack aplica "gravedad" y los junta.
+        float: true,
+        disableOneColumnMode: true,
+        minRow: Math.max(1, props.gridRows),
+        staticGrid: props.mode !== 'edit',
+        resizable: { handles: 'se' },
+        // GridStack ignora mousedown en <button>; el asa hermana permite mover
+        // la tecla sin interferir con su click para seleccionar/ejecutar.
+        draggable: { handle: '.bd-gs-drag-handle' },
+      } as any,
+      gsContainer.value
+    )
+    if (!instance) throw new Error('GridStack no pudo inicializar la cuadrícula')
+    gs = instance
+    // Algunas versiones no adoptan los hijos que Vue ya había renderizado.
+    // Registrarlos explícitamente evita que el modo Libre quede visualmente vacío
+    // o con widgets a ancho completo ("botón enorme").
+    // OJO: no llamar a gs.compact(): compacta con gravedad y junta los
+    // widgets aunque el usuario los haya separado.
+    if (typeof gs.makeWidget === 'function') {
+      for (const item of gsContainer.value.querySelectorAll<HTMLElement>(':scope > .grid-stack-item')) {
+        if (!(item as any).gridstackNode) gs.makeWidget(item)
+      }
+    }
+    gsReady.value = true
+    // GridStack emite 'change' por cada paso del drag/resize: coalescar a un
+    // solo evento para no acribillar al daemon con PUTs.
+    gs.on('change', (_e: any, items: any[]) => {
+      if (gsChangeTimer) clearTimeout(gsChangeTimer)
+      const snapshot = Array.isArray(items) ? items.slice() : []
+      gsChangeTimer = setTimeout(() => {
+        gsChangeTimer = null
+        emitGsLayout(snapshot)
+      }, 350)
+    })
+  } catch (e) {
+    console.error('[gridstack] init failed:', e)
+    gs = null
+    gsReady.value = false
+    if (retries > 0) setTimeout(() => void initGs(retries - 1), 300)
+  }
+}
+
+/** Adoptar en GridStack los widgets que Vue acaba de renderizar
+ *  (p. ej. tecla recién creada 1×1) sin destruir la instancia.
+ *  Sin compact(): debe respetar la posición libre del usuario. */
+const adoptGsWidgets = () => {
+  if (!gs || !gsContainer.value || !isGsMode.value) return
+  try {
+    if (typeof gs.makeWidget === 'function') {
+      for (const item of gsContainer.value.querySelectorAll<HTMLElement>(':scope > .grid-stack-item')) {
+        if (!(item as any).gridstackNode) gs.makeWidget(item)
+      }
+    }
+  } catch { /* noop */ }
+}
+
+watch([() => props.layoutMode, () => props.mode], () => {
+  if (!isGsMode.value) {
+    destroyGs()
+    return
+  }
+  if (gs) {
+    try { gs.setStatic(props.mode !== 'edit') } catch { /* noop */ }
+    return
+  }
+  void nextTick().then(initGs)
+})
+watch(() => props.gridCols, (cols) => {
+  if (!isGsMode.value) return
+  if (gs && typeof gs.column === 'function') {
+    try {
+      gs.column(Math.max(1, cols))
+      void nextTick().then(adoptGsWidgets)
+      return
+    } catch { /* noop */ }
+  }
+  void nextTick().then(initGs)
+})
+watch(() => props.gridRows, () => {
+  if (!isGsMode.value || !gs) return
+  try {
+    if (typeof gs.updateOptions === 'function') gs.updateOptions({ minRow: Math.max(1, props.gridRows) } as any)
+  } catch { /* noop */ }
+})
+watch(() => props.keySize, () => {
+  if (!isGsMode.value || !gs) return
+  try {
+    if (typeof gs.cellHeight === 'function') gs.cellHeight(gsCellSize.value)
+    else void nextTick().then(initGs)
+  } catch { /* noop */ }
+})
+// Los items los renderiza Vue; GridStack solo adopta nodos nuevos.
+// No re-crear la instancia aquí: eso era lo que dejaba el primer widget
+// a ancho completo y tapaba los "+" de abajo.
+watch(gsItems, () => {
+  if (!isGsMode.value || !gs) return
+  void nextTick().then(adoptGsWidgets)
+})
 // Swapy mueve nodos DOM imperativamente y el patch de Vue sobre esos nodos
 // movidos restaura el orden viejo (probado: ni con :key por item se evita).
 // Por eso al terminar un drag se destruye Swapy, se remonta el plate desde
@@ -258,20 +685,27 @@ const openRename = (pageId: string) => {
   renamingPageId.value = pageId
 }
 
-// Cerrar el menú de página al pulsar fuera o con Escape
+// Cerrar el menú de página y el popover de dispositivos al pulsar fuera o con Escape
 const onDocClick = (e: MouseEvent) => {
   if (!(e.target as HTMLElement).closest?.('.bd-page')) menuPageId.value = null
+  if (!(e.target as HTMLElement).closest?.('.bd-dvwrap')) devOpen.value = false
 }
 
-const caption = computed(() =>
-  t('bd.caption', {
+const caption = computed(() => {
+  if (isGsMode.value) {
+    return t('bd.captionFree', {
+      profile: props.profileName,
+      n: gsItems.value.length,
+    })
+  }
+  return t('bd.caption', {
     profile: props.profileName,
     r: props.gridRows,
     c: props.gridCols,
     used: props.currentPages.length ? countUsed.value : 0,
     total: props.gridCols * props.gridRows
   })
-)
+})
 
 const countUsed = computed(() => {
   let n = 0
@@ -458,8 +892,9 @@ const handleContextMenuItem = (item: any) => {
   hideContextMenu()
 }
 
-// Swapy — sin cambios funcionales respecto a la app anterior
+// Swapy — solo rejilla clásica; GridStack gestiona el modo redimensionable.
 const initializeSwapy = () => {
+  if ((props.layoutMode ?? 'classic') !== 'classic') return
   if (container.value && !swapy.value && props.mode === 'edit') {
     try {
       swapy.value = createSwapy(container.value, { animation: 'dynamic' })
@@ -522,12 +957,14 @@ watch(gridSignature, () => {
 
 onMounted(() => {
   initializeSwapy()
+  void nextTick().then(initGs)
   document.addEventListener('keydown', onEsc)
   document.addEventListener('click', onDocClick)
   window.addEventListener('libredeck:swapy-resync', resyncSwapy)
 })
 onUnmounted(() => {
   swapy.value?.destroy()
+  destroyGs()
   document.removeEventListener('keydown', onEsc)
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('libredeck:swapy-resync', resyncSwapy)
@@ -536,6 +973,7 @@ const onEsc = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
     hideContextMenu()
     menuPageId.value = null
+    devOpen.value = false
   }
 }
 

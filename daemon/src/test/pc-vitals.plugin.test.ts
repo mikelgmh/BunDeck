@@ -31,11 +31,11 @@ const FAKE = {
 }
 
 describe('PCVitalsPlugin', () => {
-    it('expone un manifest válido con la acción monitor (más 5 nuevas)', () => {
+    it('expone un manifest válido (más la acción today-count)', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('pc-vitals')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.2.0')
         expect(manifest.actions.length).toBeGreaterThanOrEqual(6)
         const byId = Object.fromEntries(manifest.actions.map((a: any) => [a.id, a]))
         expect(byId.monitor).toBeDefined()

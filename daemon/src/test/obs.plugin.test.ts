@@ -10,7 +10,7 @@ import { ObsPlugin } from '../plugins/obs.plugin'
 const context = { log: (_level: string, _message: string, _meta?: any) => {} }
 const plugin = new ObsPlugin(context)
 
-const EXPECTED_ACTIONS = ['filter-toggle', 'mute', 'record', 'replay', 'scene', 'scene-list', 'screenshot', 'source', 'stream', 'studio-mode', 'transition']
+const EXPECTED_ACTIONS = ['filter-toggle', 'mute', 'record', 'replay', 'scene', 'scene-list', 'screenshot', 'source', 'status', 'stream', 'studio-mode', 'transition']
 
 /** Returns a localhost port that is guaranteed closed (bound then released). */
 async function closedPort(): Promise<number> {
@@ -32,14 +32,14 @@ async function closedPort(): Promise<number> {
 }
 
 describe('ObsPlugin manifest', () => {
-    it('expone un manifest válido con las 11 acciones', () => {
+    it('expone un manifest válido con las 12 acciones', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('obs')
         expect(manifest.name).toBe('OBS Studio')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.2.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('network')
-        expect(manifest.actions).toHaveLength(11)
+        expect(manifest.actions).toHaveLength(12)
 
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(EXPECTED_ACTIONS)
@@ -70,7 +70,7 @@ describe('ObsPlugin manifest', () => {
         expect(Array.isArray(byId['scene-list'].schema.required)).toBe(true)
     })
 
-    it('getActionHandlers devuelve las 11 claves', () => {
+    it('getActionHandlers devuelve las 12 claves', () => {
         const handlers = plugin.getActionHandlers()
         expect([...handlers.keys()].sort()).toEqual(EXPECTED_ACTIONS)
         for (const key of EXPECTED_ACTIONS) {

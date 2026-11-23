@@ -49,6 +49,15 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     expect(wrapper.find('[data-cy="bd-add-look"]').exists()).toBe(true)
   })
 
+  it('permite volver al degradado predeterminado de la tecla', async () => {
+    const wrapper = mountInspector()
+    await openAppearance(wrapper)
+    const reset = wrapper.find('[data-cy="bd-bg-default"]')
+    expect(reset.attributes('aria-pressed')).toBe('false')
+    await reset.trigger('click')
+    expect(wrapper.emitted('update-field')).toContainEqual(['backgroundColor', ''])
+  })
+
   it('no revienta con looks corruptos (null / no-objetos)', async () => {
     const wrapper = mountInspector({ ...baseConfig, looks: [null, undefined, 123, 'foo', { cond: 'contador > 1', t: 'Hola', i: '', c: 1, bg: 2 }] })
     await openAppearance(wrapper)

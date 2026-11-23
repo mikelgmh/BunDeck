@@ -6,6 +6,7 @@
  */
 
 import { runCommand, isCommandNotFound, missingToolError } from './sysrun'
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
@@ -31,16 +32,19 @@ export class AudioMixerPlugin {
 
     /** Punto de inyección para tests (por defecto runCommand real). */
     protected async run(cmd: string[], opts?: { timeoutMs?: number }): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-        return runCommand(cmd, opts)
+        return runCommand(cmd, { timeoutMs: opts?.timeoutMs ?? 15000, ...opts })
     }
 
     public getManifest() {
         return {
             id: 'audio-mixer',
             name: 'Mezclador de audio',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Volumen por aplicación, dispositivo de salida, silencio de micro y niveles',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'system',
             permissions: ['system'],
             instructions:
                 'Control de audio del sistema.\n\n' +

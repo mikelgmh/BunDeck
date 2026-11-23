@@ -5,6 +5,7 @@
  */
 
 import { openUrl } from './sysrun'
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
 
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
@@ -131,10 +132,16 @@ export class CalendarPlugin {
         return {
             id: 'calendar',
             name: 'Calendario',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Próximo evento, cuenta atrás y apertura (ICS local o Google Calendar)',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'utility',
             permissions: ['filesystem', 'network'],
+            widgets: [
+                { id: 'next-event', kind: 'text', title: 'Próximo evento', description: 'Resumen + cuenta atrás del próximo evento', sourceAction: 'next-event', refreshMs: 60000 }
+            ],
             settingsSchema: {
                 type: 'object',
                 properties: {
@@ -169,6 +176,9 @@ export class CalendarPlugin {
                     name: 'Próximo evento',
                     description: 'Devuelve el próximo evento del calendario',
                     icon: 'CalendarClock',
+                    dynamic: true,
+                    pollMs: 60000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',
                         properties: {
@@ -186,6 +196,9 @@ export class CalendarPlugin {
                     name: 'Cuenta atrás',
                     description: 'Tiempo restante hasta el próximo evento (o el N-ésimo)',
                     icon: 'Hourglass',
+                    dynamic: true,
+                    pollMs: 60000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',
                         properties: {
@@ -210,6 +223,7 @@ export class CalendarPlugin {
                     name: 'Abrir evento',
                     description: 'Abre el enlace del próximo evento (o la URL indicada)',
                     icon: 'ExternalLink',
+                    timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',
                         properties: {
@@ -218,6 +232,25 @@ export class CalendarPlugin {
                                 title: 'URL',
                                 description: 'Si se omite se usa el enlace del próximo evento (hangout/URL del ICS)',
                                 ui: { component: 'input', type: 'text', placeholder: '(próximo evento)' }
+                            }
+                        }
+                    }
+                },
+                {
+                    id: 'today-count',
+                    name: 'Eventos de hoy',
+                    description: 'Cuántos eventos hay hoy (widget/contador, sin abrir nada)',
+                    icon: 'CalendarDays',
+                    dynamic: true,
+                    pollMs: 300000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            icsPath: {
+                                type: 'string',
+                                title: 'Archivo .ics',
+                                ui: { component: 'input', type: 'text', placeholder: '(usa el de ajustes)' }
                             }
                         }
                     }
@@ -231,6 +264,7 @@ export class CalendarPlugin {
         handlers.set('next-event', this.executeNextEvent.bind(this))
         handlers.set('countdown', this.executeCountdown.bind(this))
         handlers.set('open-event', this.executeOpenEvent.bind(this))
+        handlers.set('today-count', this.executeTodayCount.bind(this))
         return handlers
     }
 
@@ -326,6 +360,23 @@ export class CalendarPlugin {
         }
         const countdown = humanCountdown(target.start.getTime())
         return { found: true, countdown, event: this.serialize(target) }
+    }
+
+    /** Contador de eventos de hoy (widget): hoy 00:00 → mañana 00:00 local. */
+    private async executeTodayCount(params: any, _context: any): Promise<any> {
+        const events = await this.loadEvents(params?.icsPath)
+        const now = new Date()
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+        const endOfDay = startOfDay + 24 * 3600 * 1000
+        const todays = events.filter(e => e.start && e.start.getTime() >= startOfDay && e.start.getTime() < endOfDay)
+        const upcoming = upcomingEvents(todays, Date.now(), 1)
+        const [next] = upcoming
+        return {
+            found: todays.length > 0,
+            count: todays.length,
+            next: next ? this.serialize(next) : null,
+            widget: { kind: 'text', value: String(todays.length), label: todays.length === 1 ? 'evento hoy' : 'eventos hoy' },
+        }
     }
 
     private async executeOpenEvent(params: any, _context: any): Promise<any> {

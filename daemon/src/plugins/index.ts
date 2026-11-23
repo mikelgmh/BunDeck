@@ -23,6 +23,7 @@ import { SlackPlugin } from './slack.plugin'
 import { CalendarPlugin } from './calendar.plugin'
 import { TimerPlugin } from './timer.plugin'
 import { ClipboardPlugin } from './clipboard.plugin'
+import { FlowControlPlugin } from './flow-control.plugin'
 import { MultiactionPlugin } from './multiaction.plugin'
 import { ProfileAutoPlugin } from './profile-auto.plugin'
 import { DiscordPlugin } from './discord.plugin'
@@ -42,6 +43,8 @@ import { SteamPlugin } from './steam.plugin'
 import { MinecraftPlugin } from './minecraft.plugin'
 import { HueExtraPlugin } from './hue-extra.plugin'
 import { GoveePlugin } from './govee.plugin'
+import { WeatherPlugin } from './weather.plugin'
+import { EmailPlugin } from './email.plugin'
 
 export interface NativePlugin {
     getManifest(): any
@@ -85,6 +88,7 @@ export function getNativeManifests(): any[] {
     new CalendarPlugin(noop),
     new TimerPlugin(noop),
     new ClipboardPlugin(noop),
+    new FlowControlPlugin(noop),
     new MultiactionPlugin(noop),
     new ProfileAutoPlugin(noop),
     new DiscordPlugin(noop),
@@ -104,6 +108,8 @@ export function getNativeManifests(): any[] {
     new MinecraftPlugin(noop),
     new HueExtraPlugin(noop),
     new GoveePlugin(noop),
+    new WeatherPlugin(noop),
+    new EmailPlugin(noop),
   ].map((p) => {
     try { return p.getManifest(); } catch { return null; }
   }).filter(Boolean);
@@ -138,6 +144,7 @@ export {
     CalendarPlugin,
     TimerPlugin,
     ClipboardPlugin,
+    FlowControlPlugin,
     MultiactionPlugin,
     ProfileAutoPlugin,
     DiscordPlugin,
@@ -156,5 +163,7 @@ export {
     SteamPlugin,
     MinecraftPlugin,
     HueExtraPlugin,
-    GoveePlugin
+    GoveePlugin,
+    WeatherPlugin,
+    EmailPlugin
 }

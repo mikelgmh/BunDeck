@@ -95,6 +95,36 @@ class LibreDeckDaemon {
       // Inicializar auto-profile switching si hay configuración guardada
       await this.initializeAutoProfileSwitching();
 
+      // Servicio daemon de variables + bus de eventos persistente:
+      // el store usa la BD real, el FlowEngine ejecuta flujos del
+      // ActionRunner ante eventos, y el WS puentea el bus a topics.
+      try {
+        const { VariableStore, setVariableStore } = await import('./variables/store');
+        const { getFlowEngine } = await import('./automation/flows');
+        const { getEventBus } = await import('./events/bus');
+        const dbForVars = new DatabaseService();
+        setVariableStore(new VariableStore(dbForVars));
+        const bus = getEventBus();
+        this.wsManager?.attachEventBus(bus);
+        const flows = getFlowEngine().attach(dbForVars, this.actionRunner!);
+        (globalThis as any).__libredeckFlows = getFlowEngine();
+        console.log(`✓ Variables service initialized (${flows.length} flows)`);
+      } catch (e) {
+        console.error('⚠️ Variables service failed to init (sigue sin variables):', e);
+      }
+
+      // Motor de flujos persistente (nodos If/Else/Switch/Repeat, scripts
+      // reutilizables, automatizaciones por evento/timer/variable y triggers
+      // short/long/double/touch): arranca timers, marca runs interrumpidos
+      // y sincroniza reglas load/timer/var de las teclas.
+      (globalThis as any).__libredeckRunner = this.actionRunner;
+      try {
+        await this.actionRunner!.initFlows();
+        console.log('✓ Flow engine initialized');
+      } catch (e) {
+        console.error('⚠️ Flow engine failed to init (sigue sin flujos):', e);
+      }
+
       console.log('✓ Services initialized');
     } catch (error) {
       abortStartup(error);

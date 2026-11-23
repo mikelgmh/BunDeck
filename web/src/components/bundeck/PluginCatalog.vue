@@ -18,8 +18,17 @@
         <option v-for="c in categories" :key="c" :value="c">{{ t(`bd.cat_${c}`) }}</option>
       </select>
       <label class="bd-cat-compat" :title="t('bd.catalogCompatibleOnlyHint')">
-        <input v-model="compatibleOnly" type="checkbox" data-cy="bd-catalog-compatible" />
-        {{ t('bd.catalogCompatibleOnly') }}
+        <span>{{ t('bd.catalogCompatibleOnly') }}</span>
+        <span class="bd-sw">
+          <input
+            v-model="compatibleOnly"
+            type="checkbox"
+            role="switch"
+            :aria-label="t('bd.catalogCompatibleOnly')"
+            data-cy="bd-catalog-compatible"
+          />
+          <span aria-hidden="true"></span>
+        </span>
       </label>
     </div>
 
@@ -31,27 +40,26 @@
     <p v-else-if="!filtered.length" class="bd-hint">{{ t('bd.catalogNoResults') }}</p>
 
     <div v-else class="bd-cat-list">
-      <div v-for="p in filtered" :key="p.id" class="bd-lrow" data-cy="bd-catalog-item">
+      <div v-for="p in filtered" :key="p.id" class="bd-lrow bd-cat-item" data-cy="bd-catalog-item">
         <div class="bd-tile">
           <component :is="iconFor(p)" :size="20" stroke-width="1.75" aria-hidden="true" />
         </div>
-        <div style="flex: 1; min-width: 0">
-          <b>
+        <div class="bd-cat-content">
+          <b class="bd-cat-title">
             {{ p.name }}
-            <span v-if="isPrivileged(p)" :title="t('bd.catalogPrivilegedHint')">⚠️</span>
+            <TriangleAlert v-if="isPrivileged(p)" :size="15" stroke-width="1.75" :title="t('bd.catalogPrivilegedHint')" :aria-label="t('bd.catalogPrivilegedHint')" />
           </b>
           <p class="bd-cat-desc">{{ p.description }}</p>
           <p class="bd-cat-meta">
             <span class="bd-chip" data-cy="bd-catalog-cat">{{ t(`bd.cat_${p.category}`) }}</span>
             <span class="bd-chip" :title="`${p.actions.length} acciones`">v{{ p.version }} · {{ t('bd.actionsCount', { n: p.actions.length }) }}</span>
-            <span v-if="isInstalled(p.id)" class="bd-chip bd-chip-ok" data-cy="bd-catalog-installed">✓ {{ t('bd.catalogInstalled') }}</span>
+            <span v-if="isInstalled(p.id)" class="bd-chip bd-chip-ok" data-cy="bd-catalog-installed"><Check :size="13" aria-hidden="true" />{{ t('bd.catalogInstalled') }}</span>
             <span v-else class="bd-chip" data-cy="bd-catalog-not-installed">{{ t('bd.catalogNotInstalled') }}</span>
             <span v-if="p.compatible === false" class="bd-chip bd-chip-warn" :title="t('bd.catalogIncompatibleHint', { v: p.compatibility?.minVersion })" data-cy="bd-catalog-compat-no">
-              ⚠ {{ t('bd.catalogIncompatible') }}
+              <TriangleAlert :size="13" aria-hidden="true" />{{ t('bd.catalogIncompatible') }}
             </span>
-            <span v-else class="bd-chip bd-chip-ok" data-cy="bd-catalog-compat-ok">✓ {{ t('bd.catalogCompatible') }}</span>
+            <span v-else class="bd-chip bd-chip-ok" data-cy="bd-catalog-compat-ok"><Check :size="13" aria-hidden="true" />{{ t('bd.catalogCompatible') }}</span>
           </p>
-          <p v-if="p.keywords?.length" class="bd-cat-kws">{{ p.keywords.slice(0, 8).join(' · ') }}</p>
         </div>
         <button
           v-if="isInstalled(p.id)"
@@ -70,7 +78,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { Package } from 'lucide-vue-next'
+import { Check, Package, TriangleAlert } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 

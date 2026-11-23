@@ -122,7 +122,7 @@
         @change="emit('update-param', index, 'pageId', ($event.target as HTMLSelectElement).value)"
       >
         <option value="">{{ t('bd.addPage') }}</option>
-        <option v-for="p in availablePages" :key="p.id" :value="p.id">{{ p.name }}</option>
+        <option v-for="p in availablePages" :key="p.id" :value="p.id" :disabled="p.disabled" :title="p.disabledReason ?? p.name">{{ p.name }}{{ p.disabledReason ? ` (${p.disabledReason})` : '' }}</option>
       </select>
     </template>
     <template v-else>
@@ -168,7 +168,7 @@ interface Props {
   index: number
   showWait: boolean
   plugins: any[]
-  availablePages: Array<{ id: string; name: string }>
+  availablePages: Array<{ id: string; name: string; disabled?: boolean; disabledReason?: string }>
 }
 
 interface Emits {

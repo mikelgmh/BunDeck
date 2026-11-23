@@ -28,12 +28,30 @@ export type WorkerOpName =
   | 'get-setting'
   | 'set-setting'
   | 'delete-setting'
+  | 'get-settings'
   | 'log'
   | 'emit-event'
+  | 'button-state'
+  | 'widget-update'
   | 'http-fetch'
   | 'fs-read'
   | 'fs-write'
   | 'fs-exists';
+
+/** Estado de botón emitido por un plugin externo (contrato v2.2). */
+export interface WorkerButtonState {
+  buttonId: string;
+  state: string;
+  label?: string;
+  icon?: string;
+  value?: string | number;
+}
+
+/** Actualización de widget emitida por un plugin externo (contrato v2.2). */
+export interface WorkerWidgetUpdate {
+  widgetId: string;
+  data: unknown;
+}
 
 /** Respuesta serializable de un fetch hecho por el padre */
 export interface ParentFetchResult {

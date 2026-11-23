@@ -12,13 +12,18 @@ import { DatabaseService } from '../db';
 import { jsonResponse, errorResponse } from './http-helpers';
 import type { APIServices, ApiHandler } from './types';
 import { handleProfiles } from './profiles';
+import { handleDevices } from './devices';
 import { handlePages } from './pages';
 import { handleButtons } from './buttons';
 import { handleActions } from './actions';
+import { handleFlows } from './flows';
+import { handleVariables } from './variables';
 import { handleCatalog } from './catalog';
 import { handlePlugins } from './plugins';
 import { handleSystem } from './system';
 import { handleMcp } from './mcp';
+import { handleBackups } from './backups';
+import { handleSessions } from './sessions';
 import { handleJobs } from './jobs';
 import { handleAdmin } from './admin';
 import { handleRemote } from './remote';
@@ -27,13 +32,18 @@ export type { APIServices } from './types';
 
 const HANDLERS: ApiHandler[] = [
   handleSystem, // /api/v1/test, /config, assets, logs, settings, windows, metrics, version, devices, network
+  handleDevices, // ANTES que perfiles: /profiles/:id/assignments matchea su prefijo
   handleProfiles,
   handlePages,
   handleButtons, // incluye /buttons/reorder (antes que /buttons/:id)
   handleActions,
+  handleFlows, // /api/v1/buttons/press, /flows/*, /flow-scripts/*, /flow-automations/*, /flow-vars/*
+  handleVariables, // /api/v1/variables (servicio daemon de variables)
   handleCatalog, // /api/v1/catalog (solo lectura, offline)
   handlePlugins, // incluye /marketplace y /plugins/* (excluye /plugins/actions del prefijo)
   handleMcp,
+  handleBackups, // /api/v1/backups/* (export/validate/restore + progreso WS)
+  handleSessions, // /api/v1/sessions/* + /api/v1/navigate (vistas por dispositivo)
   handleJobs,
   handleAdmin, // /admin/shutdown + /update (501)
   handleRemote, // /api/v1/remote/* (E2E relay client)

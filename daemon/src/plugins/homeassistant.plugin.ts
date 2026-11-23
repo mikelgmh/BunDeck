@@ -3,6 +3,8 @@
  * Controla luces, escenas e interruptores/enchufes de Home Assistant
  */
 
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
+
 export interface PluginContext {
     log: (level: string, message: string, meta?: any) => void
     getSetting?: (key: string) => string | null
@@ -76,9 +78,12 @@ export class HomeAssistantPlugin {
         return {
             id: 'homeassistant',
             name: 'Home Assistant',
-            version: '1.1.0',
+            version: '1.2.0',
             description: 'Controla luces, escenas, interruptores, automatizaciones, persianas, clima y sensores de Home Assistant',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
             permissions: ['http', 'network'],
             settingsSchema: {
                 type: 'object',
@@ -107,6 +112,11 @@ export class HomeAssistantPlugin {
                     name: 'Luz',
                     description: 'Enciende, apaga o alterna una luz',
                     icon: 'Lightbulb',
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'on', label: 'Encendida', icon: 'Lightbulb' },
+                        { value: 'off', label: 'Apagada', icon: 'LightbulbOff' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -196,6 +206,11 @@ export class HomeAssistantPlugin {
                     name: 'Interruptor',
                     description: 'Enciende, apaga o alterna un interruptor o enchufe',
                     icon: 'Plug',
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'on', label: 'Encendido', icon: 'Plug' },
+                        { value: 'off', label: 'Apagado', icon: 'PlugZap' }
+                    ],
                     schema: {
                         type: 'object',
                         properties: {
@@ -393,6 +408,9 @@ export class HomeAssistantPlugin {
                     name: 'Leer sensor',
                     description: 'Lee el estado actual de un sensor (solo lectura, sin modificar nada)',
                     icon: 'Gauge',
+                    dynamic: true,
+                    pollMs: 30000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',
                         properties: {
@@ -407,6 +425,38 @@ export class HomeAssistantPlugin {
                                     component: 'input',
                                     type: 'text',
                                     placeholder: 'sensor.temperatura_salon'
+                                }
+                            }
+                        },
+                        required: ['entityId']
+                    }
+                },
+                {
+                    id: 'get-state',
+                    name: 'Estado de entidad',
+                    description: 'Lee cualquier entidad (luz/interruptor/sensor) y devuelve `state` discreto para iconos dinámicos',
+                    icon: 'Activity',
+                    dynamic: true,
+                    pollMs: 15000,
+                    timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'on', label: 'Encendido', icon: 'ToggleRight' },
+                        { value: 'off', label: 'Apagado', icon: 'ToggleLeft' }
+                    ],
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            baseUrl: baseUrlProp,
+                            token: tokenProp,
+                            entityId: {
+                                type: 'string',
+                                title: 'Entidad',
+                                description: 'Cualquier entidad (ej. light.salon, switch.cafetera, sensor.temperatura)',
+                                examples: ['light.salon'],
+                                ui: {
+                                    component: 'input',
+                                    type: 'text',
+                                    placeholder: 'light.salon'
                                 }
                             }
                         },
@@ -427,6 +477,7 @@ export class HomeAssistantPlugin {
         handlers.set('cover-control', this.executeCoverAction.bind(this))
         handlers.set('climate-set', this.executeClimateAction.bind(this))
         handlers.set('sensor-value', this.executeSensorAction.bind(this))
+        handlers.set('get-state', this.executeGetStateAction.bind(this))
         return handlers
     }
 
@@ -527,7 +578,8 @@ export class HomeAssistantPlugin {
         await this.callService(baseUrl, token, 'light', service, entityId, serviceData)
         this.context.log('info', `Home Assistant: luz ${entityId} -> ${service} OK`)
         const state = await this.readState(baseUrl, token, entityId)
-        return { success: true, entityId, action, service: `light.${service}`, state }
+        const discreteState = state?.state === 'on' ? 'on' : state?.state === 'off' ? 'off' : action
+        return { success: true, entityId, action, state, discreteState, service: `light.${service}` }
     }
 
     private async executeSceneAction(params: any, _context: any): Promise<any> {
@@ -550,7 +602,8 @@ export class HomeAssistantPlugin {
         await this.callService(baseUrl, token, 'switch', service, entityId)
         this.context.log('info', `Home Assistant: interruptor ${entityId} -> ${service} OK`)
         const state = await this.readState(baseUrl, token, entityId)
-        return { success: true, entityId, action, service: `switch.${service}`, state }
+        const discreteState = state?.state === 'on' ? 'on' : state?.state === 'off' ? 'off' : action
+        return { success: true, entityId, action, state, discreteState, service: `switch.${service}` }
     }
 
     private async executeSensorAction(params: any, _context: any): Promise<any> {
@@ -561,6 +614,19 @@ export class HomeAssistantPlugin {
             throw new Error(`No se pudo leer el sensor "${entityId}": no existe o no responde (revisa la entidad)`)
         }
         return { success: true, entityId, state: state.state ?? null, attributes: state.attributes ?? null, action: 'read' }
+    }
+
+    /** Estado genérico de cualquier entidad con `state` discreto (iconos dinámicos). */
+    private async executeGetStateAction(params: any, _context: any): Promise<any> {
+        const { baseUrl, token, entityId } = this.requireBaseParams(params)
+        this.context.log('info', `Home Assistant: estado de ${entityId} en ${baseUrl}`, { token: maskToken(token) })
+        const full = await this.readState(baseUrl, token, entityId)
+        if (!full) {
+            throw new Error(`No se pudo leer "${entityId}": no existe o no responde (revisa la entidad)`)
+        }
+        const raw: string = String(full.state ?? 'unknown')
+        const discreteState = raw === 'on' ? 'on' : raw === 'off' ? 'off' : raw
+        return { success: true, entityId, state: discreteState, rawState: raw, fullState: full, attributes: full.attributes ?? null, action: 'get-state' }
     }
 
     private async executeSceneActivateAction(params: any, _context: any): Promise<any> {

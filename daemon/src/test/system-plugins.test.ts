@@ -64,7 +64,7 @@ describe('manifiestos de sistema', () => {
             'window-manager': ['window-action', 'layout-save', 'layout-restore', 'layout-list'],
             'meetings': ['control', 'join'],
             'slack': ['open-channel', 'open-dm', 'unread-count', 'send-message'],
-            'calendar': ['next-event', 'countdown', 'open-event'],
+            'calendar': ['next-event', 'countdown', 'open-event', 'today-count'],
             'timer': ['start', 'stop', 'status'],
             'clipboard': ['save-slot', 'paste-slot', 'list-slots', 'history'],
             'multiaction': ['run-sequence'],

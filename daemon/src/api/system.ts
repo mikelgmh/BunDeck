@@ -524,24 +524,30 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
         const success = await streamDeckDriver.connect(devicePath);
 
         if (success) {
-          console.log('🎛️ StreamDeck connected successfully, checking for current page...');
+          console.log('🎛️ StreamDeck connected successfully, restoring hardware session...');
 
-          // Update with current page if available (initializeButtons is already called in connect())
-          const currentProfile = db.getCurrentProfile();
-          console.log('🎛️ Current profile:', currentProfile);
+          // El driver restaura su propia sesión (device_sessions) al conectar.
+          // Solo como fallback (sesión vacía) se usa la vista global.
+          const view = streamDeckDriver.getSessionView();
+          console.log('🎛️ Hardware session view:', view);
 
-          if (currentProfile) {
-            const currentPage = db.getCurrentPage(currentProfile.id);
-            console.log('🎛️ Current page:', currentPage);
+          if (!view.pageId) {
+            const currentProfile = db.getCurrentProfile();
+            console.log('🎛️ Current profile (fallback):', currentProfile);
 
-            if (currentPage) {
-              console.log('🎛️ Updating StreamDeck with current page:', currentPage.id);
-              await streamDeckDriver.updateFromPage(currentPage.id);
+            if (currentProfile) {
+              const currentPage = db.getCurrentPage(currentProfile.id);
+              console.log('🎛️ Current page (fallback):', currentPage);
+
+              if (currentPage) {
+                console.log('🎛️ Updating StreamDeck with fallback page:', currentPage.id);
+                await streamDeckDriver.updateFromPage(currentPage.id);
+              } else {
+                console.log('🎛️ No current page found');
+              }
             } else {
-              console.log('🎛️ No current page found');
+              console.log('🎛️ No current profile found');
             }
-          } else {
-            console.log('🎛️ No current profile found');
           }
         }
 
@@ -567,11 +573,14 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
 
   if (path === '/api/v1/devices/streamdeck/status') {
     if (method === 'GET') {
+      const grid = streamDeckDriver.getGridGeometry();
+      const { guessDeckModel } = await import('../devices');
       return jsonResponse({
         isConnected: streamDeckDriver.isConnected(),
         connectedDevice: streamDeckDriver.getConnectedDevice(),
         keyCount: streamDeckDriver.getKeyCount(),
-        grid: streamDeckDriver.getGridGeometry(),
+        grid,
+        modelGuess: guessDeckModel(grid),
       });
     }
   }

@@ -17,6 +17,8 @@ export interface ActionHandler {
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix'
 const REQUEST_TIMEOUT_MS = 15000
 
+import { CONTRACT_API_VERSION, CONTRACT_ENGINE } from './contract'
+
 function credError(): Error {
     return new Error('Falta la configuración de Twitch: pon "Client ID", "Token OAuth" y tu "Broadcaster" en los ajustes del plugin (⋯) o en los parámetros. El token necesita los scopes: channel:manage:broadcast, clips:edit, channel:manage:markers, chat:write, channel:read:commercials según la acción. Consigue el token con tu app de Twitch Developers (flujo Authorization Code + PKCE).')
 }
@@ -49,10 +51,16 @@ export class TwitchPlugin {
         return {
             id: 'twitch',
             name: 'Twitch',
-            version: '1.0.0',
+            version: '1.1.0',
             description: 'Controla tu directo de Twitch: título, categoría, clips, marcadores, chat, anuncios y espectadores',
             author: 'BunDeck',
+            apiVersion: CONTRACT_API_VERSION,
+            engine: CONTRACT_ENGINE,
+            category: 'integrations',
             permissions: ['network'],
+            widgets: [
+                { id: 'viewers', kind: 'text', title: 'Espectadores', description: 'Espectadores actuales del directo', sourceAction: 'viewer-count', refreshMs: 60000 }
+            ],
             settingsSchema: {
                 type: 'object',
                 properties: {
@@ -108,6 +116,11 @@ export class TwitchPlugin {
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve cuántos espectadores tienes ahora (0 si no estás en directo)',
+                    dynamic: true, pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
+                    states: [
+                        { value: 'live', label: 'En directo', icon: 'Radio' },
+                        { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
+                    ],
                     schema: { type: 'object', properties: { ...creds }, required: [] }
                 }
             ]
@@ -276,13 +289,16 @@ export class TwitchPlugin {
         const broadcasterId = await this.resolveBroadcasterId(creds, creds.broadcaster)
         const res = await this.apiFetch(creds, 'espectadores', '/streams', { method: 'GET', query: { user_id: broadcasterId } })
         const stream = res?.data?.[0]
+        const live = Boolean(stream)
         return {
             action: 'viewer-count',
-            live: Boolean(stream),
+            state: live ? 'live' : 'offline',
+            live,
             viewerCount: stream?.viewer_count ?? 0,
             title: stream?.title ?? null,
             gameName: stream?.game_name ?? null,
             broadcasterId,
+            widget: { kind: 'text' as const, value: String(stream?.viewer_count ?? 0), label: live ? 'en directo' : 'offline' },
         }
     }
 

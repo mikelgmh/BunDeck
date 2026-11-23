@@ -30,6 +30,20 @@ export const MCP_SCOPES: McpScopeDef[] = [
   { id: 'settings.read', group: 'system' },
   { id: 'settings.write', group: 'system' },
   { id: 'logs.read', group: 'system' },
+  // Nuevas entidades controlables por MCP (grupos propios; los
+  // anteriores se mantienen intactos para no romper tokens/roles).
+  { id: 'widgets.read', group: 'widgets' },
+  { id: 'widgets.write', group: 'widgets' },
+  { id: 'flows.read', group: 'flows' },
+  { id: 'flows.write', group: 'flows' },
+  { id: 'automations.read', group: 'automations' },
+  { id: 'automations.write', group: 'automations' },
+  { id: 'variables.read', group: 'variables' },
+  { id: 'variables.write', group: 'variables' },
+  // Batch atómico + historial/undo propios (grupo system).
+  { id: 'batch.write', group: 'system' },
+  { id: 'history.read', group: 'system' },
+  { id: 'history.write', group: 'system' },
 ];
 
 /** Todos los ids de scope (acceso total). */

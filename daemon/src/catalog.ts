@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { getNativeManifests } from './plugins/index';
 import { getVersion } from './version';
-import { validateManifest, satisfiesEngine } from './plugin-system/validator';
+import { validateManifest, satisfiesEngine, compareSemver } from './plugin-system/validator';
 
 export interface CatalogActionSummary {
   id: string;
@@ -46,6 +46,10 @@ export interface CatalogEntry {
   /** sha256 (hex) del manifest canónico — verificación de integridad. */
   checksum: string;
   validation: { valid: boolean; errors: string[]; warnings: string[] };
+  /** Contrato público v2.2 (opcionales para no romper consumidores). */
+  apiVersion?: string;
+  engine?: string;
+  widgets?: string[];
 }
 
 export interface CatalogSearchOptions {
@@ -67,10 +71,16 @@ const CATEGORY_BY_ID: Record<string, string> = {
   shell: 'system',
   'open-app': 'system',
   'pc-vitals': 'system',
+  'audio-mixer': 'system',
   homeassistant: 'integrations',
   spotify: 'integrations',
   obs: 'integrations',
+  twitch: 'integrations',
+  youtube: 'integrations',
+  weather: 'integrations',
   http: 'integrations',
+  email: 'utility',
+  calendar: 'utility',
   multimedia: 'media',
   browser: 'media',
   hotkey: 'input',
@@ -174,6 +184,9 @@ export function toCatalogEntry(manifest: any): CatalogEntry {
     keywords: extractKeywords(manifest),
     checksum: manifestChecksum(manifest),
     validation: validateManifest(manifest),
+    apiVersion: typeof manifest?.apiVersion === 'string' ? manifest.apiVersion : undefined,
+    engine: typeof manifest?.engine === 'string' ? manifest.engine : undefined,
+    widgets: Array.isArray(manifest?.widgets) ? manifest.widgets.map((w: any) => String(w?.id ?? '')) : undefined,
   };
   return entry;
 }
@@ -244,4 +257,49 @@ export function searchCatalog(entries: CatalogEntry[], opts: CatalogSearchOption
 export function verifyCatalogChecksum(entry: CatalogEntry, manifest: any): { id: string; algorithm: string; sha256: string; valid: boolean } {
   const sha256 = manifestChecksum(manifest);
   return { id: entry.id, algorithm: 'sha256', sha256, valid: sha256 === entry.checksum };
+}
+
+// --- Instalación versionada (git/zip/directory) ---
+
+/** ¿El `ref` es un rango de versiones (no rama/tag literal)? */
+export function isVersionRangeRef(ref: string): boolean {
+  const r = ref.trim();
+  if (r === '*' || r.toLowerCase() === 'x' || r.toLowerCase() === 'latest') return true;
+  return /^[\^~>=<]/.test(r);
+}
+
+/** Normaliza un tag git a semver (`v1.2.3` → `1.2.3`, ignora sufijos). */
+export function tagToVersion(tag: string): string | null {
+  const clean = tag.trim().replace(/^[=vV\s]+/, '');
+  const m = /^(\d+\.\d+\.\d+)/.exec(clean);
+  return m ? m[1] : null;
+}
+
+/**
+ * Elige el mejor tag para un rango de versión (instalación versionada).
+ * Devuelve el tag ORIGINAL (no normalizado) más alto que satisfaga el rango,
+ * o null si ninguno cuadra. Función pura (testeable).
+ */
+export function pickBestTag(tags: string[], range: string): string | null {
+  let best: string | null = null;
+  let bestVer: string | null = null;
+  for (const tag of tags) {
+    const ver = tagToVersion(tag);
+    if (!ver) continue;
+    let ok = true;
+    try {
+      ok = satisfiesEngine(range.trim() || '*', ver);
+    } catch {
+      ok = true;
+    }
+    // satisfiesEngine(range, ver) chequea ver >= range-base: para elegir tag
+    // hay que invertir → comprobar que el rango se cumple tomando el tag como
+    // "current". OJO: para '^1.2.3' con ver='1.9.0' da true (correcto).
+    if (!ok) continue;
+    if (!bestVer || compareSemver(ver, bestVer) > 0) {
+      best = tag;
+      bestVer = ver;
+    }
+  }
+  return best;
 }

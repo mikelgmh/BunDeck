@@ -1,0 +1,11 @@
+---
+import Layout from '../layouts/Layout.astro';
+import MobileDeck from '../components/bundeck/MobileDeck.vue';
+import '../styles/bundeck.css';
+---
+
+<Layout title="BunDeck Use">
+  <main class="min-h-screen">
+    <MobileDeck client:load />
+  </main>
+</Layout>

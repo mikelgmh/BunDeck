@@ -118,15 +118,17 @@ describe('catalog e2e: filtros combinados q + category + compatible', () => {
 
   it('combinación pura determinista: el incompatible sintético queda excluido', () => {
     const { entries } = getCatalog();
+    // Base garantizada compatible (minVersion 0.0.0): el engine de los
+    // nativos (^1.5.0) los haría incompatibles con appVersion 1.0.0.
+    const compatBase = { ...entries[0], compatibility: { os: ['win32'], minVersion: '0.0.0' } };
     const future = {
-      ...entries[0],
+      ...compatBase,
       id: 'futuro-e2e',
       name: 'Futuro E2E',
-      category: entries[0].category,
       compatibility: { os: ['win32'], minVersion: '99.0.0' },
     };
-    const withFuture = [...entries, future];
-    const needle = entries[0].id; // q que casa con la entrada base
+    const withFuture = [...entries, compatBase, future];
+    const needle = 'futuro-e2e'; // q que solo casa con la entrada sintética
     const found = searchCatalog(withFuture, {
       q: needle,
       category: future.category,
