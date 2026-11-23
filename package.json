@@ -1,6 +1,6 @@
 {
   "name": "libredeck",
-  "version": "1.10.3",
+  "version": "1.10.4",
   "description": "BunDeck - Open Source StreamDeck Alternative",
   "type": "module",
   "scripts": {

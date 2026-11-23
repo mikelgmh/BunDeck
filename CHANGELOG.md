@@ -1,3 +1,10 @@
+## [1.10.4](https://github.com/mikelgmh/libredeck/compare/v1.10.3...v1.10.4) (2026-11-23)
+
+
+### Bug Fixes
+
+* **free-mode:** toggle estable, filas acotadas, icono por defecto y e2e herméticos ([7329049](https://github.com/mikelgmh/libredeck/commit/7329049f8c199381b29d0a14efd0d8d01a7549bc))
+
 ## [1.10.3](https://github.com/mikelgmh/libredeck/compare/v1.10.2...v1.10.3) (2026-11-23)
 
 
