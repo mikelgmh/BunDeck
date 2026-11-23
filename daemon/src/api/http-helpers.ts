@@ -17,6 +17,22 @@ export function jsonResponse(data: any, status: number = 200): Response {
   });
 }
 
+/** Límite anti-corrupción para los JSON de páginas/perfiles.
+ *  Un `data` sano son decenas-centenas de bytes (grid + modo layout).
+ *  El incidente de 2026-11 (una página con 118 MB por `{...string}`)
+ *  bloqueó el event loop de Bun ~16 s y el parse del frontend ~22 s.
+ *  Todo lo que supere el límite se rechaza con 413 antes de tocar la BD. */
+export const MAX_PAGE_PROFILE_DATA_BYTES = 256 * 1024;
+
+export function dataTooLarge(data: unknown, limit: number = MAX_PAGE_PROFILE_DATA_BYTES): boolean {
+  if (data === undefined || data === null) return false;
+  try {
+    return JSON.stringify(data)?.length > limit;
+  } catch {
+    return true;
+  }
+}
+
 export function errorResponse(message: string, error?: any, status: number = 500): Response {
   const details = error
     ? {

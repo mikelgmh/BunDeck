@@ -27,24 +27,57 @@
         data-cy="bd-connection-status"
       ><i aria-hidden="true"></i></span>
       <div class="bd-tabs" role="tablist" :aria-label="t('bd.secProfiles')">
-        <button
+        <div
           v-for="profile in profiles"
           :key="profile.id"
-          role="tab"
-          class="bd-tab"
-          :aria-selected="profile.id === selectedProfile"
-          @click="handleProfileChange(profile.id)"
-          data-cy="bd-profile-tab"
+          class="bd-tabwrap"
+          :class="{ 'bd-active': profile.id === selectedProfile }"
         >
-          {{ profile.name }}
-        </button>
+          <button
+            role="tab"
+            class="bd-tab"
+            :aria-selected="profile.id === selectedProfile"
+            @click="handleProfileChange(profile.id)"
+            data-cy="bd-profile-tab"
+          >
+            {{ profile.name }}
+          </button>
+          <button
+            class="bd-tabmenu-btn"
+            :title="t('bd.profileMenu')"
+            :aria-label="`${t('bd.profileMenu')}: ${profile.name}`"
+            :aria-expanded="profileMenuOpen === profile.id"
+            aria-haspopup="menu"
+            @click.stop="profileMenuOpen = profileMenuOpen === profile.id ? null : profile.id"
+            :data-cy="`bd-profile-menu-${profile.id}`"
+          >
+            <Ellipsis :size="14" stroke-width="2" aria-hidden="true" />
+          </button>
+          <div v-if="profileMenuOpen === profile.id" class="bd-menu" role="menu" data-cy="bd-profile-menu">
+            <button role="menuitem" data-cy="bd-profile-rename" @click="openProfileRename(profile)">
+              <Pencil :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.rename') }}</span>
+            </button>
+            <button role="menuitem" data-cy="bd-profile-duplicate" @click="onProfileDuplicateMenu(profile.id)">
+              <Copy :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.duplicate') }}</span>
+            </button>
+            <button
+              role="menuitem"
+              class="bd-dng"
+              data-cy="bd-profile-delete"
+              :disabled="profiles.length < 2"
+              @click="onProfileDeleteMenu(profile)"
+            >
+              <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.delete') }}</span>
+            </button>
+          </div>
+        </div>
         <button
           role="tab"
           class="bd-tab"
           :aria-selected="false"
           :title="t('bd.newProfile')"
           :aria-label="t('bd.newProfile')"
-          @click="handleProfileCreate()"
+          @click="openProfileCreate()"
           data-cy="bd-profile-add"
         >
           <Plus :size="16" stroke-width="1.75" aria-hidden="true" />
@@ -55,9 +88,9 @@
       </button>
       <button
         class="bd-ibtn"
-        :title="t('bd.secDevice')"
-        :aria-label="t('bd.secDevice')"
-        @click="settingsDialog?.show('device')"
+        :title="t('bd.secDevices')"
+        :aria-label="t('bd.secDevices')"
+        @click="settingsDialog?.show('devices')"
         data-cy="bd-open-device"
         style="position: relative"
       >
@@ -166,6 +199,7 @@
         @layout-mode-change="onLayoutModeChange"
         @layout-change="onGsLayoutChange"
         @gs-add="onGsAdd"
+        @gs-add-volume="onGsAddVolume"
         @page-select="onPageSelectGuard"
         @page-create="onPageCreate"
         @page-delete="onPageDelete"
@@ -193,6 +227,9 @@
             :profile-name="currentProfile?.name ?? ''"
             :page-name="currentPage?.name ?? ''"
              :api-base="API_BASE"
+            :is-free-mode="pageLayoutMode === 'gridstack'"
+            :widget-type="editingWidgetType"
+            @convert-widget="onConvertWidget"
             @update-field="onUpdateField"
             @update-action="onUpdateAction"
             @update-action-param="(i, k, v) => updateActionParameter(i, k, v)"
@@ -240,6 +277,8 @@
       :mcp-secret="mcpNewSecret"
       :mcp-scopes="mcpScopes"
       :install-progress="installProgress"
+      :ws-connected="isConnected"
+      :ws-url="WS_URL"
       @language-changed="switchLanguage"
       @streamdeck-connected="onSdConnected"
       @streamdeck-disconnected="onSdDisconnected"
@@ -261,6 +300,7 @@
       @revoke-mcp-token="onRevokeMcpToken"
       @dismiss-install-progress="clearInstallProgress"
       @notify="(msg, undo) => bdShowToast(msg, undo)"
+      @open-welcome="openWelcome"
     />
 
     <PluginSettingsDialog
@@ -331,12 +371,40 @@
 
     <IosWarningDialog />
 
+    <WelcomeDialog ref="welcomeDialog" />
+
     <dialog ref="confirmDialog" class="bd-confirm" :aria-label="confirmTitle">
       <h2>{{ confirmTitle }}</h2>
       <p>{{ confirmMsg }}</p>
       <div class="bd-confirm-actions">
         <button class="bd-btn" @click="resolveConfirm(false)">{{ t('bd.cancel') }}</button>
         <button class="bd-btn bd-pri" @click="resolveConfirm(true)">{{ confirmOk }}</button>
+      </div>
+    </dialog>
+
+    <dialog ref="profileNameDialog" class="bd-confirm" :aria-label="profileDialogTitle" @close="onProfileDialogClosed">
+      <h2>{{ profileDialogTitle }}</h2>
+      <div class="bd-confirm-body">
+        <label class="bd-fld">
+          <span class="bd-lb">{{ t('bd.profileName') }}</span>
+          <input
+            ref="profileNameInput"
+            class="bd-inp"
+            type="text"
+            :value="profileDialogName"
+            :placeholder="t('bd.profileNamePh')"
+            data-cy="bd-profile-name-input"
+            maxlength="80"
+            @input="profileDialogName = ($event.target as HTMLInputElement).value"
+            @keydown.enter.prevent="confirmProfileDialog()"
+            @keydown.escape.prevent="closeProfileDialog()"
+          />
+        </label>
+        <p v-if="profileDialogError" class="bd-err" role="alert">{{ profileDialogError }}</p>
+      </div>
+      <div class="bd-confirm-actions">
+        <button class="bd-btn" @click="closeProfileDialog()">{{ t('bd.cancel') }}</button>
+        <button class="bd-btn bd-pri" :disabled="!profileDialogName.trim()" data-cy="bd-profile-name-confirm" @click="confirmProfileDialog()">{{ profileDialogMode === 'create' ? t('bd.create') : t('bd.save') }}</button>
       </div>
     </dialog>
 
@@ -349,7 +417,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
-import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown } from 'lucide-vue-next'
+import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2 } from 'lucide-vue-next'
 import { useStreamDeck } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {
@@ -357,6 +425,7 @@ import {
   bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
+import { planFreeCell } from '../../composables/useDeckLayouts'
 import { createKeyEngine, keyUsedVars } from '../../composables/useKeyEngine'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
 import {
@@ -376,6 +445,7 @@ const PluginSettingsDialog = defineAsyncComponent(() => import('./PluginSettings
 const SettingsDialog = defineAsyncComponent(() => import('./SettingsDialog.vue'))
 const IconPickerDialog = defineAsyncComponent(() => import('./IconPickerDialog.vue'))
 const QrDialog = defineAsyncComponent(() => import('./QrDialog.vue'))
+const WelcomeDialog = defineAsyncComponent(() => import('./WelcomeDialog.vue'))
 const UpdateModal = defineAsyncComponent(() => import('../UpdateModal.vue'))
 import type { PageData } from '../../types/streamdeck'
 
@@ -396,6 +466,11 @@ const qrDialog = ref<InstanceType<typeof QrDialog> | null>(null)
 const actionsPanel = ref<InstanceType<typeof ActionsPanel> | null>(null)
 const updateModal = ref<InstanceType<typeof UpdateModal> | null>(null)
 const pluginSettingsDialog = ref<InstanceType<typeof PluginSettingsDialog> | null>(null)
+const welcomeDialog = ref<{ show: (at?: number) => void; shouldAutoShow: () => boolean } | null>(null)
+
+const openWelcome = (at = 0) => {
+  welcomeDialog.value?.show(at)
+}
 
 const openPluginSettings = (pluginId: string, tab: 'settings' | 'instructions') => {
   pluginSettingsDialog.value?.show(pluginId, tab)
@@ -404,7 +479,7 @@ const openPluginSettings = (pluginId: string, tab: 'settings' | 'instructions') 
 const {
   connectionStatus, connectionText, profiles, selectedProfile, currentProfile,
   currentPage, currentPages, currentButtons, plugins, gridCols, gridRows,
-  selectedButton, executingButtons, buttonConfig, buttonConfigVersion, bumpConfigVersion, API_BASE,
+  selectedButton, executingButtons, buttonConfig, buttonConfigVersion, bumpConfigVersion, API_BASE, WS_URL,
   getButtonData, getButton, selectProfile, loadProfiles, loadProfile,
   selectButton, executeButton, deleteButton, saveButtonConfig, addAction, createAction, executeSingleAction,
   removeAction, reorderActions, updateActionParameter, createProfile, updateProfile, deleteProfile,
@@ -641,6 +716,9 @@ const onDocClickHeader = (e: MouseEvent) => {
   if (headerMenuOpen.value && !(e.target as HTMLElement).closest?.('header .bd-menu') && !(e.target as HTMLElement).closest?.('[data-cy="bd-open-key-menu"]')) {
     headerMenuOpen.value = false
   }
+  if (profileMenuOpen.value && !(e.target as HTMLElement).closest?.('.bd-tabwrap')) {
+    profileMenuOpen.value = null
+  }
 }
 
 const availablePages = computed(() =>
@@ -709,7 +787,78 @@ const toggleFullscreen = async () => {
 }
 
 // Perfiles
+const profileMenuOpen = ref<string | null>(null)
+const profileNameDialog = ref<HTMLDialogElement | null>(null)
+const profileNameInput = ref<HTMLInputElement | null>(null)
+const profileDialogMode = ref<'create' | 'rename'>('create')
+const profileDialogName = ref('')
+const profileDialogTarget = ref<string | null>(null)
+const profileDialogError = ref('')
+const profileDialogTitle = computed(() =>
+  profileDialogMode.value === 'create' ? t('bd.createProfileTitle') : t('bd.renameProfileTitle')
+)
+const uniqueProfileName = (base: string, skipId?: string) => {
+  const taken = new Set(profiles.value.filter((p) => p.id !== skipId).map((p) => p.name.trim().toLowerCase()))
+  const clean = base.trim()
+  if (!taken.has(clean.toLowerCase())) return clean
+  let i = 2
+  while (taken.has(`${clean} ${i}`.toLowerCase())) i++
+  return `${clean} ${i}`
+}
+const openProfileCreate = () => {
+  profileMenuOpen.value = null
+  profileDialogMode.value = 'create'
+  profileDialogTarget.value = null
+  profileDialogName.value = ''
+  profileDialogError.value = ''
+  profileNameDialog.value?.showModal()
+  nextTick(() => profileNameInput.value?.focus())
+}
+const openProfileRename = (profile: { id: string; name: string }) => {
+  profileMenuOpen.value = null
+  profileDialogMode.value = 'rename'
+  profileDialogTarget.value = profile.id
+  profileDialogName.value = profile.name
+  profileDialogError.value = ''
+  profileNameDialog.value?.showModal()
+  nextTick(() => {
+    profileNameInput.value?.focus()
+    profileNameInput.value?.select()
+  })
+}
+const closeProfileDialog = () => {
+  profileNameDialog.value?.close()
+}
+const onProfileDialogClosed = () => {
+  profileDialogName.value = ''
+  profileDialogError.value = ''
+  profileDialogTarget.value = null
+}
+const confirmProfileDialog = async () => {
+  const name = profileDialogName.value.trim()
+  if (!name) return
+  try {
+    if (profileDialogMode.value === 'create') {
+      const finalName = uniqueProfileName(name)
+      const created = await createProfile(finalName)
+      bdShowToast(t('bd.profileCreated', { name: finalName }))
+      await selectProfile(created.id)
+      try { await devStore.loadAssignments(created.id) } catch { /* noop */ }
+      navTrail.value = currentPage.value ? [currentPage.value.name] : []
+    } else {
+      const targetId = profileDialogTarget.value
+      if (!targetId) return
+      const finalName = uniqueProfileName(name, targetId)
+      await updateProfile(targetId, { name: finalName })
+      bdShowToast(t('bd.profileRenamed', { name: finalName }))
+    }
+    closeProfileDialog()
+  } catch (e: any) {
+    profileDialogError.value = String(e?.message ?? e)
+  }
+}
 const handleProfileChange = async (profileId: string) => {
+  profileMenuOpen.value = null
   await selectProfile(profileId)
   // Asignaciones del perfil (el GET ya repara incompatibles en el daemon).
   try {
@@ -726,10 +875,7 @@ const handleProfileChange = async (profileId: string) => {
   engine.runLoad(allPositions)
 }
 const handleProfileCreate = async () => {
-  const name = `Perfil ${profiles.value.length + 1}`
-  const created = await createProfile(name)
-  bdShowToast(t('bd.profileCreated', { name }))
-  await selectProfile(created.id)
+  openProfileCreate()
 }
 const handleProfileUpdate = async (profileId: string, updates: any) => {
   await updateProfile(profileId, updates)
@@ -738,6 +884,26 @@ const handleProfileDeleted = async (profileId: string) => {
   const target = profiles.value.find((p) => p.id === profileId)
   await deleteProfile(profileId)
   bdShowToast(t('bd.profileDeleted', { name: target?.name ?? '' }))
+}
+const onProfileDeleteMenu = async (profile: { id: string; name: string }) => {
+  profileMenuOpen.value = null
+  if (profiles.value.length < 2) return
+  const ok = await askConfirm(
+    t('bd.deleteProfileTitle'),
+    t('bd.deleteProfileMsg', { name: profile.name }),
+    t('bd.delete')
+  )
+  if (!ok) return
+  try {
+    await deleteProfile(profile.id)
+    bdShowToast(t('bd.profileDeleted', { name: profile.name }))
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+}
+const onProfileDuplicateMenu = async (profileId: string) => {
+  profileMenuOpen.value = null
+  await handleProfileDuplicate(profileId)
 }
 const handleProfileDuplicate = async (profileId: string) => {
   const orig = profiles.value.find((p) => p.id === profileId)
@@ -751,19 +917,31 @@ const handleProfileDuplicate = async (profileId: string) => {
         data = {}
       }
     }
-    const cleanData = { ...(data ?? {}), isDefault: false }
-    const copyName = `${orig.name} (copia)`
+    // Anti-corrupción: si tras parsear no es objeto plano (string doblemente
+    // codificado), el spread crearía claves numéricas y el payload explotaría
+    // (incidente 118 MB). Igual para pg.data de páginas (string de la API).
+    if (!data || typeof data !== 'object' || Array.isArray(data)) data = {}
+    const cleanData = { ...data, isDefault: false }
+    const baseCopy = t('bd.profileCopyName', { name: orig.name })
+    const copyName = uniqueProfileName(baseCopy)
     const created = await apiPost('/profiles', { name: copyName, data: cleanData })
     // Copia páginas y botones
     const pages = await apiGet(`/pages?profileId=${encodeURIComponent(profileId)}`)
     const pageIdMap = new Map<string, string>()
+    const asPageData = (d: unknown): Record<string, unknown> => {
+      let v: any = d
+      if (typeof v === 'string') {
+        try { v = JSON.parse(v) } catch { return {} }
+      }
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+    }
     for (const pg of pages ?? []) {
       const np = await apiPost('/pages', {
         profile_id: created.id,
         name: pg.name,
         order_idx: pg.order_idx,
         is_folder: pg.is_folder,
-        data: pg.data ?? {}
+        data: asPageData(pg.data)
       })
       pageIdMap.set(pg.id, np.id)
       let buttons: any[] = []
@@ -785,6 +963,11 @@ const handleProfileDuplicate = async (profileId: string) => {
     // Repara referencias cruzadas a páginas creadas después (segunda pasada ligera)
     await loadProfiles()
     bdShowToast(t('bd.profileDuplicated', { name: copyName }))
+    try {
+      await selectProfile(created.id)
+      try { await devStore.loadAssignments(created.id) } catch { /* noop */ }
+      navTrail.value = currentPage.value ? [currentPage.value.name] : []
+    } catch { /* el duplicado ya existe aunque falle la selección */ }
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   }
@@ -1273,58 +1456,93 @@ const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number;
 /** Crear tecla 1×1 en la primera celda libre (modo Libre).
  *  GridStack la adopta vía makeWidget sin re-crear la instancia. */
 const onGsAdd = async () => {
-  if (!currentPage.value || pageBusy.value) return
+  await gsAddWidget('action_button', { w: 1, h: 1, data: {} })
+}
+
+/** Crear control de volumen 1×1 (arco) en la primera celda libre.
+ *  Solo disponible en modo libre: el render adapta arco/slider-h/slider-v
+ *  con container queries según el aspecto de la tecla. */
+const onGsAddVolume = async () => {
+  await gsAddWidget('volume', {
+    w: 1,
+    h: 1,
+    data: { label: 'Volumen', component: 'volume', backgroundColor: '', textColor: '' }
+  })
+}
+
+const gsAddWidget = async (
+  widgetType: string,
+  opts: { w: number; h: number; data: Record<string, any> }
+) => {
+  if (!currentPage.value) return
+  // Si hay una operación de página en curso (p. ej. cambio de página recién
+  // pulsado), esperar a que termine en vez de ignorar el clic en silencio:
+  // era la causa de "le doy a Añadir y no ocurre nada".
+  if (pageBusy.value) {
+    const t0 = Date.now()
+    while (pageBusy.value && Date.now() - t0 < 8000) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    if (pageBusy.value || !currentPage.value) {
+      bdShowToast(t('bd.pageBusyRetry'))
+      return
+    }
+  }
   try {
     pageBusy.value = true
     const cols = Math.max(1, gridCols.value)
     const rows = Math.max(1, gridRows.value)
-    const occupied = new Set<number>()
-    const takenPos = new Set((currentButtons.value ?? []).map((b: any) => b.position))
-    for (const b of currentButtons.value ?? []) {
-      const w = Math.min(cols, Math.max(1, Math.round(Number((b as any).w) || 1)))
-      const rawX = Number.isFinite((b as any).x) ? Number((b as any).x) : (b as any).position % cols
-      const rawY = Number.isFinite((b as any).y) ? Number((b as any).y) : Math.floor((b as any).position / cols)
-      const bx = Math.min(Math.max(0, Math.floor(rawX)), cols - w)
-      const by = Math.max(0, Math.floor(rawY))
-      const bh = Math.max(1, Math.round(Number((b as any).h) || 1))
-      for (let dy = 0; dy < bh; dy++) {
-        for (let dx = 0; dx < w; dx++) {
-          occupied.add((by + dy) * cols + bx + dx)
-        }
-      }
-    }
-    let fx = 0
-    let fy = 0
-    let found = false
-    for (let y = 0; y < rows + 50 && !found; y++) {
-      for (let x = 0; x < cols && !found; x++) {
-        const cell = y * cols + x
-        if (!occupied.has(cell) && !takenPos.has(cell)) {
-          fx = x
-          fy = y
-          found = true
-        }
-      }
-    }
-    if (!found) throw new Error(t('bd.gsNoRoom'))
-    const position = fy * cols + fx
+    // planFreeCell solo mira ocupación geométrica: en libre `position` queda
+    // stale al arrastrar (mover solo persiste x/y/w/h) y antes bloqueaba
+    // huecos visibles — la tecla caía debajo de la cuadrícula o el POST
+    // chocaba con 409. La position devuelta siempre es única.
+    const spot = planFreeCell((currentButtons.value ?? []) as any[], cols, rows)
+    if (!spot) throw new Error(t('bd.gsNoRoom'))
     const created = await apiPost('/buttons', {
       page_id: currentPage.value.id,
-      position,
-      x: fx,
-      y: fy,
-      w: 1,
-      h: 1,
-      data: {},
+      position: spot.position,
+      widget_type: widgetType,
+      x: spot.x,
+      y: spot.y,
+      w: opts.w,
+      h: opts.h,
+      data: opts.data,
     })
     const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
     currentButtons.value = fresh
-    const pos = created?.position ?? position
+    const pos = created?.position ?? spot.position
     await selectButton(pos)
   } catch (e) {
     bdShowToast(String((e as Error)?.message ?? e))
   } finally {
     pageBusy.value = false
+  }
+}
+
+/** widget_type de la tecla en edición (solo relevante en modo libre). */
+const editingWidgetType = computed<string | null>(() => {
+  if (selectedButton.value === null) return null
+  const btn = getButton(selectedButton.value) as any
+  return (btn?.widget_type as string | undefined) ?? null
+})
+
+/** Convertir la tecla seleccionada entre acción estándar y volumen (solo libre). */
+const onConvertWidget = async (widgetType: string) => {
+  if (selectedButton.value === null || !currentPage.value) return
+  if (pageLayoutMode.value !== 'gridstack') return
+  const btn = getButton(selectedButton.value)
+  if (!btn) return
+  try {
+    await apiPut(`/buttons/${encodeURIComponent(btn.id)}`, {
+      widget_type: widgetType,
+      ...(widgetType === 'volume'
+        ? { data: { ...(btn.data ?? {}), label: (btn.data as any)?.label || 'Volumen', component: 'volume' } }
+        : {})
+    })
+    const fresh = await apiGet(`/buttons?pageId=${encodeURIComponent(currentPage.value.id)}`)
+    currentButtons.value = fresh
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
   }
 }
 
@@ -1951,6 +2169,14 @@ onMounted(async () => {
   })
   isIPhone.value = /iphone/.test(window.navigator.userAgent.toLowerCase())
   await requestWakeLock()
+  // Guía de bienvenida: solo hasta que se pulse Saltar o se llegue al final.
+  // Si se recarga a mitad, show() retoma el paso guardado (no se marca vista).
+  // Se difiere un tick para que el chunk async del diálogo esté montado.
+  nextTick(() => {
+    try {
+      if (welcomeDialog.value?.shouldAutoShow()) welcomeDialog.value.show()
+    } catch { /* noop */ }
+  })
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible' && wakeLock.value === null) await requestWakeLock()
   })

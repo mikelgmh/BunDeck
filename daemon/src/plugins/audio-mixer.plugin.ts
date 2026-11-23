@@ -403,6 +403,42 @@ export class AudioMixerPlugin {
                 this.context.log('warn', `Mezclador: pactl no disponible, devolviendo valores de ejemplo: ${this.msg(error)}`)
             }
         }
+        if (process.platform === 'darwin') {
+            try {
+                const v = await this.run(['osascript', '-e', 'output volume of (get volume settings)'])
+                const m = await this.run(['osascript', '-e', 'output muted of (get volume settings)'])
+                const master = Number(v.stdout.trim())
+                const muted = /true/i.test(m.stdout.trim())
+                if (Number.isFinite(master)) {
+                    return { platform: 'darwin', master, muted, simulated: false, source: 'osascript' }
+                }
+            } catch (error) {
+                this.context.log('warn', `Mezclador: osascript no disponible, devolviendo valores de ejemplo: ${this.msg(error)}`)
+            }
+        }
+        if (process.platform === 'win32') {
+            // Sin dependencias: winmm.dll waveOutGetVolume devuelve el nivel
+            // maestro (0-0xFFFF por canal). El silencio no se expone por
+            // winmm: se devuelve muted:false y el frontend lo gestiona.
+            try {
+                const script = [
+                    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices;",
+                    "public class BdVol { [DllImport(\"winmm.dll\")] public static extern int waveOutGetVolume(IntPtr hwo, out uint dwVolume); }';",
+                    '$v = 0; [BdVol]::waveOutGetVolume([IntPtr]::Zero, [ref]$v) | Out-Null;',
+                    '[int]((($v -band 0xFFFF) / 65535) * 100)'
+                ].join(' ')
+                const r = await this.run(['powershell.exe', '-NoProfile', '-Command', script])
+                const master = Number(r.stdout.trim().split(/\\s+/).pop())
+                if (r.exitCode === 0 && Number.isFinite(master)) {
+                    return {
+                        platform: 'windows', master: Math.min(100, Math.max(0, Math.round(master))),
+                        muted: false, simulated: false, source: 'winmm'
+                    }
+                }
+            } catch (error) {
+                this.context.log('warn', `Mezclador: no se pudo leer el volumen maestro: ${this.msg(error)}`)
+            }
+        }
         return {
             platform: process.platform,
             master: 50,

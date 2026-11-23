@@ -8,6 +8,237 @@ import { getVersion } from '../version';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
 
+/** Degradado honesto: nulls + motivo, nunca datos aleatorios. */
+function honestDegraded(reason: string) {
+  return {
+    cpu: { usage: null, temperature: null },
+    ram: { total: null, used: null, usage: null },
+    gpu: { usage: null, temperature: null },
+    fans: [],
+    voltages: [],
+    degraded: true,
+    reason,
+    hint: 'CPU temp / fans / voltajes requieren LibreHardwareMonitor u OpenHardwareMonitor con driver (PawnIO/WinRing0) y admin, igual que el plugin LHM de Macro-Deck. GPU NVIDIA funciona con nvidia-smi sin admin.',
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function runCmd(cmd: string[]): Promise<{ exitCode: number; stdout: string }> {
+  try {
+    const proc = Bun.spawn({ cmd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = await new Response(proc.stdout).text();
+    await proc.exited;
+    return { exitCode: proc.exitCode, stdout };
+  } catch {
+    return { exitCode: 1, stdout: '' };
+  }
+}
+
+/** CPU % en Unix con doble muestra de node:os (200 ms). */
+async function unixCpuUsage(sampleMs = 200): Promise<number | null> {
+  try {
+    const { cpus } = await import('node:os');
+    const snap = () =>
+      cpus().map((c) => {
+        const t = c.times;
+        return { idle: t.idle, total: t.user + t.nice + t.sys + t.idle + t.irq };
+      });
+    const a = snap();
+    await new Promise((r) => setTimeout(r, sampleMs));
+    const b = snap();
+    let idle = 0;
+    let total = 0;
+    for (let i = 0; i < a.length; i++) {
+      idle += b[i].idle - a[i].idle;
+      total += b[i].total - a[i].total;
+    }
+    if (total <= 0) return null;
+    return Math.round(((1 - idle / total) * 100) * 10) / 10;
+  } catch {
+    return null;
+  }
+}
+
+async function unixCpuTemp(): Promise<{ value: number | null; source: string | null }> {
+  // 1) /sys/class/thermal (Raspberry/Intel x86 laptops)
+  try {
+    const { readFile, readdir } = await import('node:fs/promises');
+    const zones = await readdir('/sys/class/thermal').catch(() => [] as string[]);
+    const vals: number[] = [];
+    for (const z of zones.filter((z) => z.startsWith('thermal_zone'))) {
+      try {
+        const raw = await readFile(`/sys/class/thermal/${z}/temp`, 'utf8');
+        const v = Number(raw.trim());
+        if (Number.isFinite(v)) vals.push(v > 1000 ? v / 1000 : v);
+      } catch {}
+    }
+    if (vals.length > 0) return { value: Math.round(Math.max(...vals) * 10) / 10, source: 'sys-thermal-zone' };
+  } catch {}
+  // 2) hwmon
+  try {
+    const { readFile, readdir } = await import('node:fs/promises');
+    const hws = await readdir('/sys/class/hwmon').catch(() => [] as string[]);
+    const vals: number[] = [];
+    for (const h of hws) {
+      for (let i = 1; i <= 5; i++) {
+        try {
+          const raw = await readFile(`/sys/class/hwmon/${h}/temp${i}_input`, 'utf8');
+          const v = Number(raw.trim()) / 1000;
+          if (Number.isFinite(v) && v > -50 && v < 150) vals.push(v);
+        } catch {}
+      }
+    }
+    if (vals.length > 0) return { value: Math.round(Math.max(...vals) * 10) / 10, source: 'sys-hwmon' };
+  } catch {}
+  // 3) `sensors -j` (lm-sensors)
+  try {
+    const out = await runCmd(['sensors', '-j']);
+    if (out.exitCode === 0 && out.stdout.trim().startsWith('{')) {
+      const data = JSON.parse(out.stdout);
+      const vals: number[] = [];
+      const walk = (o: any) => {
+        if (!o || typeof o !== 'object') return;
+        for (const [k, v] of Object.entries(o)) {
+          if (/temp\d*_input/i.test(k) && typeof v === 'number' && v > -50 && v < 150) vals.push(v);
+          else walk(v);
+        }
+      };
+      walk(data);
+      if (vals.length > 0) return { value: Math.round(Math.max(...vals) * 10) / 10, source: 'lm-sensors' };
+    }
+  } catch {}
+  return { value: null, source: null };
+}
+
+async function unixGpu(): Promise<{ usage: number | null; temperature: number | null; source: string | null }> {
+  // NVIDIA (Linux): uso + temp sin admin
+  try {
+    const out = await runCmd(['nvidia-smi', '--query-gpu=utilization.gpu,temperature.gpu', '--format=csv,noheader,nounits']);
+    if (out.exitCode === 0 && out.stdout.trim()) {
+      const [u, t] = out.stdout.trim().split('\n')[0].split(',').map((s) => Number(s.trim()));
+      return {
+        usage: Number.isFinite(u) ? u : null,
+        temperature: Number.isFinite(t) ? t : null,
+        source: 'nvidia-smi',
+      };
+    }
+  } catch {}
+  // AMD (Linux): rocm-smi
+  try {
+    const out = await runCmd(['rocm-smi', '--showtemp', '--showuse']);
+    const tm = out.stdout.match(/Temperature[^0-9]*([\d.]+)\s*c/i);
+    const um = out.stdout.match(/GPU use[^0-9]*([\d.]+)\s*%/i);
+    const t = tm ? Number(tm[1]) : NaN;
+    const u = um ? Number(um[1]) : NaN;
+    if (out.exitCode === 0 && (Number.isFinite(t) || Number.isFinite(u))) {
+      return {
+        usage: Number.isFinite(u) ? u : null,
+        temperature: Number.isFinite(t) ? t : null,
+        source: 'rocm-smi',
+      };
+    }
+  } catch {}
+  return { usage: null, temperature: null, source: null };
+}
+
+/** Recolector Unix (Linux/macOS): CPU/RAM siempre, temps donde el SO lo permite sin driver. */
+async function collectNativeUnixMetrics(): Promise<any> {
+  const os = await import('node:os');
+  const totalGB = Math.round((os.totalmem() / 1024 / 1024 / 1024) * 10) / 10;
+  const freeGB = Math.round((os.freemem() / 1024 / 1024 / 1024) * 10) / 10;
+  const usedGB = Math.round((totalGB - freeGB) * 10) / 10;
+  const cpuUsage = await unixCpuUsage();
+  const { value: cpuTemp, source: cpuTempSource } = await unixCpuTemp();
+  const gpu = await unixGpu();
+  return {
+    cpu: { usage: cpuUsage, temperature: cpuTemp },
+    ram: {
+      total: totalGB,
+      used: usedGB,
+      usage: totalGB > 0 ? Math.round((usedGB / totalGB) * 1000) / 10 : null,
+    },
+    gpu: { usage: gpu.usage, temperature: gpu.temperature },
+    fans: [],
+    voltages: [],
+    sources: { cpuTemp: cpuTempSource, gpuUsage: gpu.source, gpuTemp: gpu.source, hardware: null },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Fase 2 (paridad LHM): si el usuario tiene LibreHardwareMonitor con
+ * Remote Web Server (http://localhost:8085/data.json), fusionar sus
+ * sensores (CPU temp por núcleo, GPU, fans, voltajes) sobre lo nativo.
+ * Nunca bloquea más de ~1.5 s y nunca falla la respuesta base.
+ */
+async function enrichWithLhmRemote(base: any): Promise<any> {
+  const mergeFromLhmJson = (lhm: any) => {
+    try {
+      const temps: number[] = [];
+      const fans: Array<{ name: string; value: number; unit: string }> = [];
+      const voltages: Array<{ name: string; value: number; unit: string }> = [];
+      let gpuTemp: number | null = null;
+      let gpuLoad: number | null = null;
+      const walk = (node: any) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.Type === 'Temperature' && typeof node.Value === 'string') {
+          const v = Number(String(node.Value).replace(/[^0-9.\-]/g, ''));
+          if (Number.isFinite(v) && v > -50 && v < 150) {
+            temps.push(v);
+            if (/gpu/i.test(String(node.Name ?? '') + String(node.Text ?? '')) && gpuTemp == null) gpuTemp = v;
+          }
+        }
+        if (node.Type === 'Load' && /gpu/i.test(String(node.Text ?? '') + String(node.Name ?? ''))) {
+          const v = Number(String(node.Value ?? '').replace(/[^0-9.\-]/g, ''));
+          if (Number.isFinite(v) && v >= 0 && v <= 100 && gpuLoad == null) gpuLoad = v;
+        }
+        if (node.Type === 'Fan' && typeof node.Value === 'string') {
+          const v = Number(String(node.Value).replace(/[^0-9.\-]/g, ''));
+          if (Number.isFinite(v) && fans.length < 8) fans.push({ name: String(node.Text ?? node.Name ?? 'Fan'), value: Math.round(v), unit: 'RPM' });
+        }
+        if (node.Type === 'Voltage' && typeof node.Value === 'string') {
+          const v = Number(String(node.Value).replace(/[^0-9.\-]/g, ''));
+          if (Number.isFinite(v) && voltages.length < 8) voltages.push({ name: String(node.Text ?? node.Name ?? 'V'), value: Math.round(v * 1000) / 1000, unit: 'V' });
+        }
+        if (Array.isArray(node.Children)) node.Children.forEach(walk);
+      };
+      walk(lhm);
+      const out = { ...base };
+      if (base?.cpu?.temperature == null && temps.length > 0) {
+        out.cpu = { ...base.cpu, temperature: Math.round(Math.max(...temps) * 10) / 10 };
+        out.sources = { ...base.sources, cpuTemp: 'lhm-remote' };
+      }
+      if (base?.gpu?.temperature == null && gpuTemp != null) {
+        out.gpu = { ...out.gpu, temperature: gpuTemp };
+        out.sources = { ...out.sources, gpuTemp: 'lhm-remote' };
+      }
+      if (base?.gpu?.usage == null && gpuLoad != null) {
+        out.gpu = { ...out.gpu, usage: gpuLoad };
+        out.sources = { ...out.sources, gpuUsage: 'lhm-remote' };
+      }
+      if ((base?.fans?.length ?? 0) === 0 && fans.length > 0) out.fans = fans;
+      if ((base?.voltages?.length ?? 0) === 0 && voltages.length > 0) out.voltages = voltages;
+      return out;
+    } catch {
+      return base;
+    }
+  };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 1500);
+    try {
+      const res = await fetch('http://localhost:8085/data.json', { signal: ctrl.signal });
+      if (res.ok) {
+        const lhm = await res.json();
+        return mergeFromLhmJson(lhm);
+      }
+    } finally {
+      clearTimeout(t);
+    }
+  } catch {}
+  return base;
+}
+
 export const handleSystem: ApiHandler = async (_req, { url, method, path, db, services }) => {
   // Test endpoint for connectivity
   if (path === '/api/v1/test') {
@@ -350,6 +581,14 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
   if (path === '/api/v1/system/metrics') {
     if (method === 'GET') {
       try {
+        // Linux/macOS: recolector nativo (el .ps1 es solo Windows).
+        if (process.platform !== 'win32') {
+          const native = await collectNativeUnixMetrics();
+          // Enriquecer con LHM Remote Web Server si el usuario lo tiene
+          // (http://localhost:8085/data.json) — igual que el plugin LHM de Macro-Deck.
+          const enriched = await enrichWithLhmRemote(native);
+          return jsonResponse(enriched);
+        }
         const powershellScript = getSystemMetricsScript();
 
         const proc = Bun.spawn({
@@ -372,74 +611,28 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           try {
             const metrics = JSON.parse(output.trim());
 
-            // Check if we got an error response
-            if (metrics.error) {
-              // Return mock data as fallback
-              const mockMetrics = {
-                cpu: {
-                  usage: Math.random() * 100,
-                  temperature: 45 + Math.random() * 30,
+            // El script ya devuelve nulls honestos cuando no hay sensor;
+            // nunca inventar datos aleatorios (antes se devolvía mock).
+            if (metrics.error && metrics.cpu?.usage == null && metrics.ram?.usage == null) {
+              return jsonResponse(
+                {
+                  ...honestDegraded('No se pudieron leer métricas del sistema: ' + String(metrics.error).slice(0, 200)),
                 },
-                ram: {
-                  total: 16,
-                  used: 8 + Math.random() * 8,
-                  usage: Math.random() * 100,
-                },
-                gpu: {
-                  usage: Math.random() * 100,
-                  temperature: 40 + Math.random() * 20,
-                },
-                timestamp: new Date().toISOString(),
-              };
-
-              return jsonResponse(mockMetrics);
+                503
+              );
             }
 
-            return jsonResponse(metrics);
+            const enriched = await enrichWithLhmRemote(metrics);
+            return jsonResponse(enriched);
           } catch (parseError) {
             return jsonResponse({ error: 'Failed to parse system metrics' }, 500);
           }
         } else {
-          // Return mock data as fallback
-          const mockMetrics = {
-            cpu: {
-              usage: Math.random() * 100,
-              temperature: 45 + Math.random() * 30,
-            },
-            ram: {
-              total: 16,
-              used: 8 + Math.random() * 8,
-              usage: Math.random() * 100,
-            },
-            gpu: {
-              usage: Math.random() * 100,
-              temperature: 40 + Math.random() * 20,
-            },
-            timestamp: new Date().toISOString(),
-          };
-
-          return jsonResponse(mockMetrics);
+          // Fallo de PowerShell: degradado honesto, sin datos inventados.
+          return jsonResponse({ ...honestDegraded('PowerShell no devolvió métricas' + (error ? ': ' + String(error).slice(0, 200) : '')) }, 503);
         }
       } catch (error) {
-        // Final fallback to mock data
-        const mockMetrics = {
-          cpu: {
-            usage: Math.random() * 100,
-            temperature: 45 + Math.random() * 30,
-          },
-          ram: {
-            total: 16,
-            used: 8 + Math.random() * 8,
-            usage: Math.random() * 100,
-          },
-          gpu: {
-            usage: Math.random() * 100,
-            temperature: 40 + Math.random() * 20,
-          },
-          timestamp: new Date().toISOString(),
-        };
-
-        return jsonResponse(mockMetrics);
+        return jsonResponse({ ...honestDegraded(String((error as Error)?.message ?? error).slice(0, 200)) }, 503);
       }
     }
   }

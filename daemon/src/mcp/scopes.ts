@@ -44,6 +44,18 @@ export const MCP_SCOPES: McpScopeDef[] = [
   { id: 'batch.write', group: 'system' },
   { id: 'history.read', group: 'system' },
   { id: 'history.write', group: 'system' },
+  // Dispositivos lógicos, asignaciones y sesiones (grupos propios).
+  { id: 'devices.read', group: 'devices' },
+  { id: 'devices.write', group: 'devices' },
+  { id: 'sessions.read', group: 'sessions' },
+  { id: 'sessions.write', group: 'sessions' },
+  // Backups, assets y sistema (grupos propios).
+  { id: 'backups.read', group: 'backups' },
+  { id: 'backups.write', group: 'backups' },
+  { id: 'assets.read', group: 'assets' },
+  { id: 'assets.write', group: 'assets' },
+  { id: 'system.read', group: 'system' },
+  { id: 'system.write', group: 'system' },
 ];
 
 /** Todos los ids de scope (acceso total). */

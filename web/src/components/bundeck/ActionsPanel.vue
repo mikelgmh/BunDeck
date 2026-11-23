@@ -12,6 +12,7 @@
         :placeholder="t('bd.searchActions')"
         autocomplete="off"
         v-model="query"
+        @input="onQueryInput"
       />
     </div>
     <p class="bd-hint">{{ t('bd.actionsHint') }}</p>
@@ -95,6 +96,14 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const query = ref('')
+const debouncedQuery = ref('')
+let queryTimer: ReturnType<typeof setTimeout> | null = null
+const onQueryInput = () => {
+  // La lista se reconstruye (plugins × acciones) por tecla: sin debounce el
+  // filtrado corre en cada keystroke y el hover/listado va con lag.
+  if (queryTimer) clearTimeout(queryTimer)
+  queryTimer = setTimeout(() => { debouncedQuery.value = query.value }, 150)
+}
 const searchInput = ref<HTMLInputElement | null>(null)
 const openMenuFor = ref<string | null>(null)
 
@@ -153,7 +162,7 @@ const flat = computed(() => {
       })
     }
   }
-  const q = query.value.trim().toLowerCase()
+  const q = debouncedQuery.value.trim().toLowerCase()
   if (!q) return list
   return list.filter(
     (a) => a.name.toLowerCase().includes(q) || a.type.toLowerCase().includes(q)

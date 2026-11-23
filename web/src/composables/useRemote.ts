@@ -216,10 +216,11 @@ export function useRemote() {
   const syncConfig = async () => {
     try {
       const tunnelToken = getTunnelToken()
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
       const url = tunnelToken
         ? tunnelConfigUrl(tunnelToken)
         : typeof window !== 'undefined' && window.location.port !== '3001'
-          ? 'http://localhost:3001/config'
+          ? `${window.location.protocol}//${hostname}:3001/config`
           : '/config'
       const res = await fetch(url)
       if (res.ok) {

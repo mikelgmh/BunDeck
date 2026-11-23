@@ -79,6 +79,28 @@
       </div>
     </div>
 
+    <div v-if="hasButton && isFreeMode" class="bd-comp" data-cy="bd-comp-type">
+      <span class="bd-lb">{{ t('bd.compType') }}</span>
+      <div class="bd-seg" role="group" :aria-label="t('bd.compType')">
+        <button
+          :aria-pressed="(widgetType ?? 'action_button') !== 'volume'"
+          data-cy="bd-comp-action"
+          @click="emit('convert-widget', 'action_button')"
+        >
+          {{ t('bd.compAction') }}
+        </button>
+        <button
+          :aria-pressed="(widgetType ?? 'action_button') === 'volume'"
+          data-cy="bd-comp-volume"
+          :title="t('bd.compVolumeHint')"
+          @click="emit('convert-widget', 'volume')"
+        >
+          {{ t('bd.compVolume') }}
+        </button>
+      </div>
+      <p v-if="(widgetType ?? 'action_button') === 'volume'" class="bd-hint">{{ t('bd.compVolumeHint') }}</p>
+    </div>
+
     <div v-if="hasButton" class="bd-itabs" role="tablist">
       <button
         role="tab"
@@ -550,8 +572,12 @@ interface Props {
   availablePages: Array<{ id: string; name: string }>
   profileName?: string
   pageName?: string
-  /** Base de la API (puerto 3001): los assets `/assets/â€¦` cuelgan de ahÃ­. */
+  /** Base de la API (puerto 3001): los assets `/assets/…` cuelgan de ahí. */
   apiBase?: string
+  /** Solo en modo libre se puede cambiar el tipo de componente. */
+  isFreeMode?: boolean
+  /** widget_type actual del botón ('action_button' | 'volume'). */
+  widgetType?: string | null
 }
 
 interface Emits {
@@ -571,9 +597,10 @@ interface Emits {
   (e: 'open-look-icon', index: number): void
   (e: 'clear-image'): void
   (e: 'action-drop-selected', actionType: string): void
+  (e: 'convert-widget', widgetType: string): void
 }
 
-const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '' })
+const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '', isFreeMode: false, widgetType: null })
 const emit = defineEmits<Emits>()
 
 const tab = ref<'actions' | 'rules' | 'appearance' | 'behavior'>('actions')

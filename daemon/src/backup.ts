@@ -89,6 +89,51 @@ function parseMaybeJson(v: any): any {
   try { return JSON.parse(v); } catch { return v; }
 }
 
+function assetEntries(db: DatabaseService, referencedPaths?: Set<string>): any[] {
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  return db.listAssets()
+    .filter((asset) => {
+      if (!referencedPaths) return true;
+      const filename = path.basename(asset.path.replace(/\\/g, '/'));
+      return referencedPaths.has(filename);
+    })
+    .map((a) => {
+      const entry: any = { ...a, contentBase64: null as string | null };
+      try {
+        const full = path.isAbsolute(a.path) ? a.path : path.join(getAssetsDir(), a.path);
+        if (fs.existsSync(full)) {
+          const st = fs.statSync(full);
+          if (st.size <= MAX_ASSET_BYTES) {
+            entry.contentBase64 = fs.readFileSync(full).toString('base64');
+          } else {
+            entry._skipped = `asset demasiado grande (${st.size} bytes, límite ${MAX_ASSET_BYTES})`;
+          }
+        } else {
+          entry._skipped = 'fichero ausente en disco';
+        }
+      } catch (e) {
+        entry._skipped = e instanceof Error ? e.message : String(e);
+      }
+      return entry;
+    });
+}
+
+function collectAssetPaths(value: any, paths: Set<string>, seen = new Set<object>()): void {
+  if (typeof value === 'string') {
+    const match = value.match(/^\/assets\/([^/?#]+)(?:[?#].*)?$/);
+    if (match) paths.add(match[1]);
+    return;
+  }
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectAssetPaths(item, paths, seen);
+    return;
+  }
+  for (const item of Object.values(value)) collectAssetPaths(item, paths, seen);
+}
+
 /** Construye el backup completo (o solo `sections`). */
 export function buildBackup(db: DatabaseService, opts?: { sections?: string[] }): BackupObject {
   const want = new Set(opts?.sections ?? [...BACKUP_SECTIONS]);
@@ -134,28 +179,7 @@ export function buildBackup(db: DatabaseService, opts?: { sections?: string[] })
   }
 
   if (want.has('assets')) {
-    const assets = db.listAssets();
-    data.assets = assets.map((a) => {
-      const entry: any = { ...a, contentBase64: null as string | null };
-      try {
-        const fs = require('fs') as typeof import('fs');
-        const path = require('path') as typeof import('path');
-        const full = path.isAbsolute(a.path) ? a.path : path.join(getAssetsDir(), a.path);
-        if (fs.existsSync(full)) {
-          const st = fs.statSync(full);
-          if (st.size <= MAX_ASSET_BYTES) {
-            entry.contentBase64 = fs.readFileSync(full).toString('base64');
-          } else {
-            entry._skipped = `asset demasiado grande (${st.size} bytes, límite ${MAX_ASSET_BYTES})`;
-          }
-        } else {
-          entry._skipped = 'fichero ausente en disco';
-        }
-      } catch (e) {
-        entry._skipped = e instanceof Error ? e.message : String(e);
-      }
-      return entry;
-    });
+    data.assets = assetEntries(db);
   }
   if (want.has('plugins')) {
     data.plugins = db.getPlugins().map((p: any) => ({
@@ -193,6 +217,38 @@ export function buildBackup(db: DatabaseService, opts?: { sections?: string[] })
     appVersion: safeVersion(),
     createdAt: Date.now(),
     data,
+  };
+}
+
+/** Exportación portable de un perfil con sus pantallas, botones y assets usados. */
+export function buildProfileBackup(db: DatabaseService, profileId: string): BackupObject | null {
+  const profile = db.getProfile(profileId);
+  if (!profile) return null;
+
+  const pages = db.getPagesByProfile(profileId).map((page) => ({
+    ...page,
+    data: parseMaybeJson((page as any).data),
+  }));
+  const pageIds = new Set(pages.map((page) => page.id));
+  const buttons = pages.flatMap((page) => db.getButtonsByPage(page.id));
+  const normalizedProfile = { ...profile, data: parseMaybeJson((profile as any).data) };
+
+  const referencedPaths = new Set<string>();
+  collectAssetPaths(normalizedProfile, referencedPaths);
+  collectAssetPaths(pages, referencedPaths);
+  collectAssetPaths(buttons, referencedPaths);
+
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    appVersion: safeVersion(),
+    createdAt: Date.now(),
+    data: {
+      profiles: [normalizedProfile],
+      pages,
+      buttons: buttons.filter((button) => pageIds.has(button.page_id)),
+      assets: assetEntries(db, referencedPaths),
+    },
   };
 }
 

@@ -7,7 +7,7 @@
  *   (400 si inválido) e importa; progreso por WS (`backup.progress`, topic
  *   `backups`): started → progress* → done/error.
  */
-import { buildBackup, validateBackup, restoreBackup, BACKUP_SECTIONS } from '../backup';
+import { buildBackup, buildProfileBackup, validateBackup, restoreBackup, BACKUP_SECTIONS } from '../backup';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
 
@@ -23,6 +23,15 @@ function parseSections(raw: string | null): string[] | undefined {
 }
 
 export const handleBackups: ApiHandler = async (_req, { url, method, path, db, services }) => {
+  const profileExportMatch = path.match(/^\/api\/v1\/backups\/profiles\/([^/]+)\/export$/);
+  if (profileExportMatch && method === 'GET') {
+    const profileId = decodeURIComponent(profileExportMatch[1]);
+    const backup = buildProfileBackup(db, profileId);
+    return backup
+      ? jsonResponse(backup)
+      : jsonResponse({ error: 'Profile not found' }, 404);
+  }
+
   if (path === '/api/v1/backups/export') {
     if (method === 'GET') {
       const sections = parseSections(url.searchParams.get('sections'));

@@ -40,8 +40,8 @@ export class PCVitalsPlugin {
         return {
             id: 'pc-vitals',
             name: 'PC Vitals',
-            version: '1.2.0',
-            description: 'Muestra el estado del equipo: CPU, RAM, GPU, temperatura, disco, red, uptime y procesos',
+            version: '1.4.0',
+            description: 'Muestra el estado del equipo: CPU, RAM, GPU, temperatura, ventiladores, voltajes, disco, red, uptime y procesos',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
             engine: CONTRACT_ENGINE,
@@ -55,7 +55,7 @@ export class PCVitalsPlugin {
                 {
                     id: 'summary',
                     name: 'Resumen del sistema',
-                    description: 'CPU/RAM/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)',
+                    description: 'CPU/RAM/GPU/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)',
                     icon: 'Gauge',
                     dynamic: true,
                     pollMs: 5000,
@@ -70,7 +70,7 @@ export class PCVitalsPlugin {
                 {
                     id: 'monitor',
                     name: 'Monitor PC Metric',
-                    description: 'Display real-time system metrics on button',
+                    description: 'Métrica CPU/RAM/GPU en botón (uso % o temperatura; cubre lo que antes eran acciones separadas de temperatura/uso)',
                     icon: 'Activity',
                     dynamic: true,
                     pollMs: 2000,
@@ -132,27 +132,23 @@ export class PCVitalsPlugin {
                     }
                 },
                 {
-                    id: 'gpu-temp',
-                    name: 'Temperatura GPU',
-                    description: 'Temperatura de la GPU (nvidia-smi o endpoint del sistema; degradado si no hay sensor)',
-                    icon: 'Thermometer',
-                    schema: {
-                        type: 'object',
-                        properties: {
-                            updateInterval: {
-                                type: 'number', title: 'Intervalo (ms)',
-                                description: 'Reservado para botones dinámicos',
-                                default: 1000, minimum: 500, maximum: 10000,
-                                ui: { component: 'hidden' }
-                            }
-                        },
-                        required: []
-                    }
+                    id: 'fan-speed',
+                    name: 'Ventiladores',
+                    description: 'RPM de ventiladores (requiere LHM/OHM con driver+admin en Windows, hwmon/sensors en Linux; degradado si no hay sensor)',
+                    icon: 'Fan',
+                    schema: { type: 'object', properties: {}, required: [] }
+                },
+                {
+                    id: 'sensors',
+                    name: 'Todos los sensores',
+                    description: 'Catálogo de sensores disponibles (CPU/GPU/RAM/fans/voltajes + fuentes), como el catalog del plugin LHM de Macro-Deck',
+                    icon: 'ListOrdered',
+                    schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
                     id: 'disk-usage',
                     name: 'Uso de disco',
-                    description: 'Espacio usado/libre del disco (df en Linux/macOS, wmic en Windows)',
+                    description: 'Espacio usado/libre del disco (df en Linux/macOS, CIM/wmic en Windows)',
                     icon: 'HardDrive',
                     schema: {
                         type: 'object',
@@ -224,7 +220,14 @@ export class PCVitalsPlugin {
         const handlers = new Map<string, ActionHandler>()
         handlers.set('monitor', this.monitorVitals.bind(this))
         handlers.set('summary', this.systemSummary.bind(this))
+        // Aliases de compatibilidad (no aparecen en el picker desde 1.4.0:
+        // todo eso lo cubre `monitor` con component+metric). Se conservan para
+        // no romper botones ya guardados con esos tipos.
         handlers.set('gpu-temp', this.gpuTemp.bind(this))
+        handlers.set('cpu-temp', this.cpuTemp.bind(this))
+        handlers.set('gpu-usage', this.gpuUsage.bind(this))
+        handlers.set('fan-speed', this.fanSpeed.bind(this))
+        handlers.set('sensors', this.allSensors.bind(this))
         handlers.set('disk-usage', this.diskUsage.bind(this))
         handlers.set('net-speed', this.netSpeed.bind(this))
         handlers.set('uptime', this.uptime.bind(this))
@@ -239,7 +242,9 @@ export class PCVitalsPlugin {
             throw new Error('Component and metric are required for PC vitals monitoring')
         }
 
-        this.context.log('info', `Monitoring ${component} ${metric}`, { component, metric, updateInterval })
+        // Sin log por sondeo: monitor se ejecuta cada updateInterval (p. ej.
+        // 1 s) por cada botón dinámico; loguear cada vez llenaba la BD
+        // (105k+ filas "Monitoring cpu/ram usage"). Solo se loguean errores.
 
         try {
             // Fetch current system metrics — puerto dinámico
@@ -318,9 +323,9 @@ export class PCVitalsPlugin {
     }
 
     /**
-     * Temperatura de la GPU: intenta nvidia-smi, si no existe usa el
-     * endpoint de métricas del daemon, y si tampoco hay sensor devuelve
-     * degradado (sin lanzar) para paneles sin GPU dedicada.
+     * Temperatura de la GPU: nvidia-smi → rocm-smi (AMD Linux) →
+     * endpoint del daemon (GPU Engine / LHM-WMI / LHM-remote) →
+     * degradado honesto (sin lanzar).
      */
     private async gpuTemp(params: any, _context: any): Promise<any> {
         try {
@@ -329,43 +334,273 @@ export class PCVitalsPlugin {
             if (smi.exitCode === 0 && Number.isFinite(value)) {
                 return { action: 'gpu-temp', component: 'gpu', metric: 'temperature', value, unit: '°C', monitored: true, source: 'nvidia-smi' }
             }
-        } catch { /* sin nvidia-smi: prueba el endpoint */ }
-        try {
-            const { API_PORT } = await import('../config')
-            const response = await fetch(`http://localhost:${API_PORT}/api/v1/system/metrics`)
-            if (response.ok) {
-                const metrics = await response.json()
-                const value = metrics?.gpu?.temperature
-                if (typeof value === 'number') {
-                    return { action: 'gpu-temp', component: 'gpu', metric: 'temperature', value: Math.round(value * 10) / 10, unit: '°C', monitored: true, source: 'system-metrics' }
+        } catch { /* sin nvidia-smi: sigue */ }
+        if (process.platform === 'linux') {
+            try {
+                const rocm = await runCommand(['rocm-smi', '--showtemp'])
+                const m = rocm.stdout.match(/([\d.]+)\s*c/i)
+                const value = m ? Number(m[1]) : NaN
+                if (rocm.exitCode === 0 && Number.isFinite(value)) {
+                    return { action: 'gpu-temp', component: 'gpu', metric: 'temperature', value, unit: '°C', monitored: true, source: 'rocm-smi' }
                 }
+            } catch { /* sin rocm-smi */ }
+        }
+        try {
+            const metrics = await this.fetchEndpointMetrics()
+            const value = metrics?.gpu?.temperature
+            if (typeof value === 'number') {
+                return { action: 'gpu-temp', component: 'gpu', metric: 'temperature', value: Math.round(value * 10) / 10, unit: '°C', monitored: true, source: metrics?.sources?.gpuTemp ?? 'system-metrics' }
             }
         } catch { /* sin endpoint: degradado */ }
-        this.context.log('warn', 'gpu-temp: sin sensor de GPU disponible (ni nvidia-smi ni endpoint)')
-        return degraded('gpu-temp', 'Sin sensor de GPU: instala drivers NVIDIA (nvidia-smi) o revisa el endpoint /api/v1/system/metrics')
+        this.context.log('warn', 'gpu-temp: sin sensor de GPU disponible (ni nvidia-smi/rocm-smi ni endpoint)')
+        return degraded('gpu-temp', 'Sin sensor de GPU: en NVIDIA instala drivers (nvidia-smi); en AMD usa LibreHardwareMonitor/HWiNFO o rocm-smi en Linux')
+    }
+
+    /** Lee métricas del endpoint local con timeout corto. Devuelve null si falla. */
+    private async fetchEndpointMetrics(): Promise<any | null> {
+        try {
+            const { API_PORT } = await import('../config')
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 8000)
+            try {
+                const response = await fetch(`http://localhost:${API_PORT}/api/v1/system/metrics`, { signal: ctrl.signal })
+                if (!response.ok) return null
+                return await response.json()
+            } finally {
+                clearTimeout(timer)
+            }
+        } catch {
+            return null
+        }
+    }
+
+    /** Sensores LHM/OHM vía WMI (Windows). Requiere LHM corriendo + driver/admin para CPU/fans. */
+    private async readLhmWmi(): Promise<{ temps: number[]; fans: any[]; voltages: any[]; source: string | null }> {
+        const empty = { temps: [] as number[], fans: [] as any[], voltages: [] as any[], source: null as string | null };
+        if (process.platform !== 'win32') return empty
+        // Un solo spawn de PowerShell que prueba ambos namespaces (antes eran 2).
+        try {
+            const ps = `$s = $null; $nsUsed = $null; ` +
+                `foreach ($ns in @('root/LibreHardwareMonitor','root/OpenHardwareMonitor')) { ` +
+                `try { $s = Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction Stop; $nsUsed = $ns; break } catch {} }; ` +
+                `if (-not $s) { @{} | ConvertTo-Json -Compress }; ` +
+                `$t = @($s | Where-Object { $_.SensorType -eq 'Temperature' } | ForEach-Object { try { [double]$_.Value } catch {} } | Where-Object { $_ -gt -50 -and $_ -lt 150 }); ` +
+                `$f = @($s | Where-Object { $_.SensorType -eq 'Fan' } | Select-Object -First 4 Name, Value); ` +
+                `$v = @($s | Where-Object { $_.SensorType -eq 'Voltage' } | Select-Object -First 4 Name, Value); ` +
+                `@{ temps = $t; fans = @($f | ForEach-Object { @{ name = $_.Name; value = $_.Value } }); volts = @($v | ForEach-Object { @{ name = $_.Name; value = $_.Value } }); ns = $nsUsed } | ConvertTo-Json -Compress -Depth 4`
+            const out = await runCommand(['powershell.exe', '-Command', ps])
+            if (out.exitCode !== 0 || !out.stdout.trim().startsWith('{')) return empty
+            const data = JSON.parse(out.stdout.trim())
+            const temps = (Array.isArray(data.temps) ? data.temps : []).map(Number).filter((n) => Number.isFinite(n))
+            if (temps.length === 0 && (data.fans?.length ?? 0) === 0) return empty
+            return {
+                temps,
+                fans: (data.fans ?? []).map((f: any) => ({ name: String(f.name ?? 'Fan'), value: Math.round(Number(f.value)), unit: 'RPM' })).filter((f: any) => Number.isFinite(f.value)).slice(0, 8),
+                voltages: (data.volts ?? []).map((v: any) => ({ name: String(v.name ?? 'V'), value: Math.round(Number(v.value) * 1000) / 1000, unit: 'V' })).filter((v: any) => Number.isFinite(v.value)).slice(0, 8),
+                source: data.ns === 'root/OpenHardwareMonitor' ? 'openhardwaremonitor-wmi' : 'librehardwaremonitor-wmi',
+            }
+        } catch { return empty }
+    }
+
+    /** Temperatura CPU en Linux/macOS sin driver: sysfs thermal/hwmon o `sensors`. */
+    private async readUnixCpuTemp(): Promise<{ value: number | null; source: string | null }> {
+        if (process.platform === 'win32') return { value: null, source: null }
+        try {
+            const { readFile, readdir } = await import('node:fs/promises')
+            if (process.platform === 'linux') {
+                try {
+                    const zones = await readdir('/sys/class/thermal').catch(() => [] as string[])
+                    const vals: number[] = []
+                    for (const z of zones.filter((z) => z.startsWith('thermal_zone'))) {
+                        try {
+                            const raw = await readFile(`/sys/class/thermal/${z}/temp`, 'utf8')
+                            const v = Number(raw.trim())
+                            if (Number.isFinite(v)) vals.push(v > 1000 ? v / 1000 : v)
+                        } catch {}
+                    }
+                    if (vals.length > 0) return { value: Math.round(Math.max(...vals) * 10) / 10, source: 'sys-thermal-zone' }
+                } catch {}
+                try {
+                    const out = await runCommand(['sensors', '-j'])
+                    if (out.exitCode === 0 && out.stdout.trim().startsWith('{')) {
+                        const data = JSON.parse(out.stdout)
+                        const vals: number[] = []
+                        const walk = (o: any): void => {
+                            if (!o || typeof o !== 'object') return
+                            for (const [k, v] of Object.entries(o)) {
+                                if (/temp\d*_input/i.test(k) && typeof v === 'number' && v > -50 && v < 150) vals.push(v)
+                                else walk(v)
+                            }
+                        }
+                        walk(data)
+                        if (vals.length > 0) return { value: Math.round(Math.max(...vals) * 10) / 10, source: 'lm-sensors' }
+                    }
+                } catch {}
+            }
+        } catch {}
+        return { value: null, source: null }
     }
 
     /**
-     * Uso de disco: df -k en Linux/macOS, wmic en Windows.
-     * Sin comando disponible devuelve degradado.
+     * Temperatura CPU dedicada (Fase 2, paridad Macro-Deck LHM):
+     * LHM/OHM-WMI → endpoint (ACPI/LHM-remote) → sysfs/sensors (Linux) →
+     * degradado honesto explicando PawnIO/admin (igual que Macro-Deck).
+     */
+    private async cpuTemp(_params: any, _context: any): Promise<any> {
+        const lhm = await this.readLhmWmi()
+        if (lhm.temps.length > 0) {
+            const value = Math.round(Math.max(...lhm.temps) * 10) / 10
+            const state = value >= 90 ? 'crit' : value >= 75 ? 'warn' : 'ok'
+            return { action: 'cpu-temp', component: 'cpu', metric: 'temperature', value, unit: '°C', state, monitored: true, source: lhm.source }
+        }
+        const metrics = await this.fetchEndpointMetrics()
+        if (typeof metrics?.cpu?.temperature === 'number') {
+            const value = Math.round(metrics.cpu.temperature * 10) / 10
+            const state = value >= 90 ? 'crit' : value >= 75 ? 'warn' : 'ok'
+            return { action: 'cpu-temp', component: 'cpu', metric: 'temperature', value, unit: '°C', state, monitored: true, source: metrics?.sources?.cpuTemp ?? 'system-metrics' }
+        }
+        const unix = await this.readUnixCpuTemp()
+        if (unix.value != null) {
+            const state = unix.value >= 90 ? 'crit' : unix.value >= 75 ? 'warn' : 'ok'
+            return { action: 'cpu-temp', component: 'cpu', metric: 'temperature', value: unix.value, unit: '°C', state, monitored: true, source: unix.source }
+        }
+        this.context.log('warn', 'cpu-temp: sin sensor (se necesita LHM/OHM + driver con admin en Windows)')
+        return degraded('cpu-temp', 'Sin sensor de CPU: instala LibreHardwareMonitor/OpenHardwareMonitor con driver (PawnIO/WinRing0) y ejecútalo como admin, o activa su Remote Web Server en :8085', { component: 'cpu', metric: 'temperature' })
+    }
+
+    /**
+     * Uso GPU dedicado: endpoint (GPU Engine / nvidia-smi / LHM) →
+     * nvidia-smi directo → rocm-smi (Linux) → degradado.
+     */
+    private async gpuUsage(_params: any, _context: any): Promise<any> {
+        const metrics = await this.fetchEndpointMetrics()
+        if (typeof metrics?.gpu?.usage === 'number') {
+            const value = Math.round(metrics.gpu.usage * 10) / 10
+            const state = value >= 90 ? 'crit' : value >= 75 ? 'warn' : 'ok'
+            return { action: 'gpu-usage', component: 'gpu', metric: 'usage', value, unit: '%', state, monitored: true, source: metrics?.sources?.gpuUsage ?? 'system-metrics' }
+        }
+        try {
+            const smi = await runCommand(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'])
+            const value = parseFloat(smi.stdout.trim().split('\n')[0] ?? '')
+            if (smi.exitCode === 0 && Number.isFinite(value)) {
+                const state = value >= 90 ? 'crit' : value >= 75 ? 'warn' : 'ok'
+                return { action: 'gpu-usage', component: 'gpu', metric: 'usage', value, unit: '%', state, monitored: true, source: 'nvidia-smi' }
+            }
+        } catch {}
+        if (process.platform === 'linux') {
+            try {
+                const rocm = await runCommand(['rocm-smi', '--showuse'])
+                const m = rocm.stdout.match(/([\d.]+)\s*%/)
+                const value = m ? Number(m[1]) : NaN
+                if (rocm.exitCode === 0 && Number.isFinite(value)) {
+                    const state = value >= 90 ? 'crit' : value >= 75 ? 'warn' : 'ok'
+                    return { action: 'gpu-usage', component: 'gpu', metric: 'usage', value, unit: '%', state, monitored: true, source: 'rocm-smi' }
+                }
+            } catch {}
+        }
+        return degraded('gpu-usage', 'Sin sensor de uso GPU: instala drivers NVIDIA (nvidia-smi), LHM/HWiNFO o rocm-smi en Linux', { component: 'gpu', metric: 'usage' })
+    }
+
+    /** Ventiladores: endpoint/LHM-remote → LHM-WMI directo → sensors/hwmon (Linux) → degradado. */
+    private async fanSpeed(_params: any, _context: any): Promise<any> {
+        const metrics = await this.fetchEndpointMetrics()
+        if (Array.isArray(metrics?.fans) && metrics.fans.length > 0) {
+            return { action: 'fan-speed', fans: metrics.fans, value: metrics.fans[0].value, unit: 'RPM', monitored: true, source: metrics?.sources?.hardware ?? 'system-metrics' }
+        }
+        const lhm = await this.readLhmWmi()
+        if (lhm.fans.length > 0) {
+            return { action: 'fan-speed', fans: lhm.fans, value: lhm.fans[0].value, unit: 'RPM', monitored: true, source: lhm.source }
+        }
+        if (process.platform === 'linux') {
+            try {
+                const out = await runCommand(['sensors', '-j'])
+                if (out.exitCode === 0 && out.stdout.trim().startsWith('{')) {
+                    const data = JSON.parse(out.stdout)
+                    const fans: any[] = []
+                    const walk = (o: any, prefix = ''): void => {
+                        if (!o || typeof o !== 'object') return
+                        for (const [k, v] of Object.entries(o)) {
+                            if (/fan\d*_input/i.test(k) && typeof v === 'number' && Number.isFinite(v) && fans.length < 8) fans.push({ name: `${prefix}${k}`, value: Math.round(v), unit: 'RPM' })
+                            else if (v && typeof v === 'object') walk(v, prefix)
+                        }
+                    }
+                    walk(data)
+                    if (fans.length > 0) return { action: 'fan-speed', fans, value: fans[0].value, unit: 'RPM', monitored: true, source: 'lm-sensors' }
+                }
+            } catch {}
+        }
+        return degraded('fan-speed', 'Sin ventiladores visibles: requiere LHM/OHM con driver (PawnIO/WinRing0) y admin en Windows, o lm-sensors/hwmon en Linux', { fans: [] })
+    }
+
+    /** Catálogo de sensores (paridad con el catalog LHM de Macro-Deck): qué hay y de dónde viene. */
+    private async allSensors(_params: any, _context: any): Promise<any> {
+        const metrics = (await this.fetchEndpointMetrics()) ?? {}
+        const lhm = await this.readLhmWmi()
+        const sensors: Array<{ id: string; label: string; value: number | string; unit: string; source: string | null; available: boolean }> = []
+        const push = (id: string, label: string, value: any, unit: string, source: any) => {
+            sensors.push({ id, label, value: typeof value === 'number' ? value : 'N/A', unit, source: source ?? null, available: typeof value === 'number' })
+        };
+        push('cpu.usage', 'CPU uso', metrics?.cpu?.usage, '%', metrics?.sources?.cpuUsage ?? 'system-metrics')
+        push('cpu.temp', 'CPU temperatura', metrics?.cpu?.temperature, '°C', metrics?.sources?.cpuTemp)
+        push('gpu.usage', 'GPU uso', metrics?.gpu?.usage, '%', metrics?.sources?.gpuUsage)
+        push('gpu.temp', 'GPU temperatura', metrics?.gpu?.temperature, '°C', metrics?.sources?.gpuTemp)
+        push('ram.usage', 'RAM uso', metrics?.ram?.usage, '%', 'system-metrics')
+        push('ram.used', 'RAM usada', metrics?.ram?.used, 'GB', 'system-metrics')
+        const fans = (metrics?.fans?.length ?? 0) > 0 ? metrics.fans : lhm.fans
+        fans.slice(0, 8).forEach((f: any, i: number) => push(`fan.${i}`, `Ventilador ${f.name ?? i}`, f.value, 'RPM', metrics?.sources?.hardware ?? lhm.source))
+        const volts = (metrics?.voltages?.length ?? 0) > 0 ? metrics.voltages : lhm.voltages
+        volts.slice(0, 8).forEach((v: any, i: number) => push(`voltage.${i}`, `Voltaje ${v.name ?? i}`, v.value, 'V', metrics?.sources?.hardware ?? lhm.source))
+        return {
+            action: 'sensors',
+            monitored: true,
+            available: sensors.filter((s) => s.available).length,
+            total: sensors.length,
+            sensors,
+            hint: 'CPU temp / fans / voltajes ausentes = instala LHM/OHM con driver y admin (Windows) como en Macro-Deck',
+        }
+    }
+
+    /**
+     * Uso de disco: df -k en Linux/macOS; en Windows wmic (si existe) y si no
+     * PowerShell Get-CimInstance Win32_LogicalDisk (wmic está eliminado en
+     * Windows 11 modernos). Sin comando disponible devuelve degradado.
      */
     private async diskUsage(params: any, _context: any): Promise<any> {
         const target = typeof params?.path === 'string' && params.path.trim() ? params.path.trim() : (process.platform === 'win32' ? 'C:' : '/')
+        const diskResult = (sizeBytes: number, freeBytes: number, path: string, source: string) => {
+            const used = sizeBytes - freeBytes
+            const pct = Math.round((used / sizeBytes) * 1000) / 10
+            return { action: 'disk-usage', path, usedGB: Math.round(used / 1e9 * 10) / 10, totalGB: Math.round(sizeBytes / 1e9 * 10) / 10, value: pct, unit: '%', monitored: true, source }
+        }
         try {
             if (process.platform === 'win32') {
                 const drive = /^[a-zA-Z]:/.test(target) ? target.slice(0, 2).toUpperCase() : 'C:'
-                const out = await runCommand(['wmic', 'logicaldisk', 'where', `DeviceID='${drive}'`, 'get', 'Size,FreeSpace', '/format:csv'])
-                const line = out.stdout.split('\n').map((l) => l.trim()).filter(Boolean).find((l) => /^\S+,\d*,\d*$/.test(l) || /^[^,]+,\d+,\d+/.test(l))
-                if (out.exitCode === 0 && line) {
-                    const parts = line.split(',')
-                    const free = Number(parts[parts.length - 2] || parts[1])
-                    const size = Number(parts[parts.length - 1] || parts[2])
-                    if (Number.isFinite(size) && size > 0 && Number.isFinite(free)) {
-                        const used = size - free
-                        const pct = Math.round((used / size) * 1000) / 10
-                        return { action: 'disk-usage', path: drive, usedGB: Math.round(used / 1e9 * 10) / 10, totalGB: Math.round(size / 1e9 * 10) / 10, value: pct, unit: '%', monitored: true, source: 'wmic' }
+                // 1) wmic (legacy; el binario no existe en Win11 moderno → throw → se sigue con CIM)
+                try {
+                    const out = await runCommand(['wmic', 'logicaldisk', 'where', `DeviceID='${drive}'`, 'get', 'Size,FreeSpace', '/format:csv'])
+                    const line = out.stdout.split('\n').map((l) => l.trim()).filter(Boolean).find((l) => /^\S+,\d*,\d*$/.test(l) || /^[^,]+,\d+,\d+/.test(l))
+                    if (out.exitCode === 0 && line) {
+                        const parts = line.split(',')
+                        const free = Number(parts[parts.length - 2] || parts[1])
+                        const size = Number(parts[parts.length - 1] || parts[2])
+                        if (Number.isFinite(size) && size > 0 && Number.isFinite(free)) {
+                            return diskResult(size, free, drive, 'wmic')
+                        }
                     }
-                }
+                } catch { /* sin wmic: se prueba CIM abajo */ }
+                // 2) CIM vía PowerShell (funciona sin wmic ni admin)
+                try {
+                    const ps = `Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${drive}'" | Select-Object Size,FreeSpace | ConvertTo-Json -Compress`
+                    const cim = await runCommand(['powershell.exe', '-NoProfile', '-Command', ps])
+                    if (cim.exitCode === 0 && cim.stdout.trim().startsWith('{')) {
+                        const data = JSON.parse(cim.stdout.trim())
+                        const size = Number(data.Size)
+                        const free = Number(data.FreeSpace)
+                        if (Number.isFinite(size) && size > 0 && Number.isFinite(free)) {
+                            return diskResult(size, free, drive, 'cim-logicaldisk')
+                        }
+                    }
+                } catch { /* degradado abajo */ }
             } else {
                 const out = await runCommand(['df', '-k', '-P', target])
                 const row = out.stdout.split('\n').slice(1).map((l) => l.trim()).filter(Boolean)[0]
@@ -466,12 +701,16 @@ export class PCVitalsPlugin {
 
     /**
      * Resumen del sistema en una llamada (widgets gauge v2.2).
-     * CPU/RAM vía endpoint del daemon; disco/uptime con los helpers
-     * existentes; `state` discreto por umbrales (ok/warn/crit).
+     * Foto global: CPU/RAM/GPU vía endpoint, disco y uptime con los helpers
+     * propios (rápidos, sin muestreo). `state` por el peor valor: usos en %
+     * y temperaturas en °C comparten umbrales 75/90 (90% de carga o 90 °C
+     * son críticos en ambos casos). El widget gauge muestra el pico.
      */
-    private async systemSummary(_params: any, _context: any): Promise<any> {
+    private async systemSummary(params: any, _context: any): Promise<any> {
         let cpu: number | null = null
         let ram: number | null = null
+        let gpuUsage: number | null = null
+        let gpuTemp: number | null = null
         try {
             const { API_PORT } = await import('../config')
             const ctrl = new AbortController()
@@ -482,6 +721,8 @@ export class PCVitalsPlugin {
                     const metrics = await response.json()
                     if (typeof metrics?.cpu?.usage === 'number') cpu = metrics.cpu.usage
                     if (typeof metrics?.ram?.usage === 'number') ram = metrics.ram.usage
+                    if (typeof metrics?.gpu?.usage === 'number') gpuUsage = metrics.gpu.usage
+                    if (typeof metrics?.gpu?.temperature === 'number') gpuTemp = metrics.gpu.temperature
                 }
             } finally {
                 clearTimeout(timer)
@@ -489,17 +730,31 @@ export class PCVitalsPlugin {
         } catch (e) {
             this.context.log('warn', `summary: sin endpoint de métricas (${e instanceof Error ? e.message : String(e)})`)
         }
-        const peak = Math.max(cpu ?? 0, ram ?? 0)
+        // Disco y uptime con helpers propios (no dependen del endpoint)
+        let disk: any = null
+        let uptimeInfo: any = null
+        try {
+            const d = await this.diskUsage(params?.diskPath ? { path: params.diskPath } : {}, {})
+            if (d?.monitored) disk = { path: d.path, value: d.value, unit: d.unit, usedGB: d.usedGB, totalGB: d.totalGB, source: d.source }
+        } catch { /* summary sigue sin disco */ }
+        try {
+            const u = await this.uptime({}, {})
+            if (u?.monitored) uptimeInfo = { value: u.value, unit: u.unit, human: u.human }
+        } catch { /* summary sigue sin uptime */ }
+        const peak = Math.max(cpu ?? 0, ram ?? 0, gpuUsage ?? 0, gpuTemp ?? 0)
         const state = peak >= 90 ? 'crit' : peak >= 75 ? 'warn' : 'ok'
         return {
             action: 'summary',
             state,
             cpu, ram,
-            monitored: cpu !== null || ram !== null,
+            gpu: { usage: gpuUsage, temperature: gpuTemp },
+            disk,
+            uptime: uptimeInfo,
+            monitored: cpu !== null || ram !== null || gpuUsage !== null || gpuTemp !== null,
             widget: {
                 kind: 'gauge' as const,
-                value: cpu ?? ram ?? 0,
-                label: cpu !== null ? `CPU ${Math.round(cpu)}%` : ram !== null ? `RAM ${Math.round(ram)}%` : 'sin datos',
+                value: cpu ?? ram ?? gpuUsage ?? 0,
+                label: cpu !== null ? `CPU ${Math.round(cpu)}%` : ram !== null ? `RAM ${Math.round(ram)}%` : gpuUsage !== null ? `GPU ${Math.round(gpuUsage)}%` : 'sin datos',
             },
         }
     }

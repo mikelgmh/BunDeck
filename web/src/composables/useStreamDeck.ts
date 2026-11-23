@@ -101,6 +101,27 @@ export function useStreamDeck() {
     buttonConfigVersion.value += 1
   }
 
+  // Snapshot del draft tras la última selección/guardado. El draft está
+  // NORMALIZADO (todas las claves) mientras la BD puede guardar `{}` o
+  // parciales: comparar contra la fila de BD siempre daba "dirty" y el
+  // cambio de selección borraba teclas vacías intactas (o reescribía sin
+  // motivo). El dirty-check real es contra este snapshot.
+  let savedConfigJson = ''
+  const snapshotButtonConfig = () => {
+    try {
+      savedConfigJson = JSON.stringify(buttonConfig.value)
+    } catch {
+      savedConfigJson = ''
+    }
+  }
+  const isButtonConfigDirty = (): boolean => {
+    try {
+      return JSON.stringify(buttonConfig.value) !== savedConfigJson
+    } catch {
+      return false
+    }
+  }
+
   // WebSocket
   let ws: WebSocket | null = null
 
@@ -126,11 +147,15 @@ export function useStreamDeck() {
   const loadConfig = async () => {
     try {
       const tunnelToken = getTunnelToken()
-      // En modo dev, hacer fetch al daemon directamente (API 3001)
+      // En modo dev, hacer fetch al daemon directamente (API 3001).
+      // OJO LAN: usar el hostname actual, NUNCA 'localhost' literal —
+      // desde una tablet/móvil 'localhost' es el propio dispositivo y el
+      // fetch falla → la app arranca sin perfiles/páginas/acciones.
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
       const configUrl = tunnelToken
         ? tunnelConfigUrl(tunnelToken)
         : typeof window !== 'undefined' && window.location.port !== '3001'
-          ? 'http://localhost:3001/config'
+          ? `${window.location.protocol}//${hostname}:3001/config`
           : '/config';
       const res = await fetch(configUrl);
       const data = await res.json();
@@ -409,6 +434,8 @@ export function useStreamDeck() {
         console.log('✅ WebSocket subscribed to topics:', message.payload)
         break
       case 'profile.updated':
+      case 'profile.created':
+      case 'profile.deleted':
         scheduleReload('profiles')
         break
       case 'page.updated':
@@ -620,6 +647,11 @@ export function useStreamDeck() {
             data = {}
           }
         }
+        // Anti-corrupción (incidente 118 MB): si tras parsear sigue sin ser
+        // un objeto plano (p. ej. string doblemente codificado), el spread
+        // `{...data}` crearía claves numéricas y el payload explotaría.
+        // En ese caso se parte de {} y se preserva isDefault.
+        if (!data || typeof data !== 'object' || Array.isArray(data)) data = {}
         const updatedData = { ...data, isDefault: true }
 
         await apiRequest(`/profiles/${firstProfile.id}`, {
@@ -694,7 +726,12 @@ export function useStreamDeck() {
     saveSelectedProfile(selectedProfile.value)
 
     try {
-      currentProfile.value = await apiRequest(`/profiles/${selectedProfile.value}`)
+      // Perfil y lista de páginas son independientes: en paralelo.
+      const [profile, pages] = await Promise.all([
+        apiRequest(`/profiles/${selectedProfile.value}`),
+        apiRequest(`/pages?profileId=${selectedProfile.value}`)
+      ])
+      currentProfile.value = profile
 
       console.log('📂 Loaded profile:', currentProfile.value)
       console.log('📦 Profile data (raw):', currentProfile.value.data)
@@ -726,7 +763,6 @@ export function useStreamDeck() {
         console.log('⚠️ No gridRows found in profile data, using default:', gridRows.value)
       }
 
-      const pages = await apiRequest(`/pages?profileId=${selectedProfile.value}`)
       currentPages.value = pages
 
       // Try to load saved page from database settings, fallback to first non-folder page
@@ -1030,13 +1066,13 @@ export function useStreamDeck() {
       }
     }
 
-    // Save current button before switching (only if there were actual changes)
+    // Save current button before switching (solo si el usuario editó el
+    // draft desde la última selección/guardado; comparar contra la fila de
+    // BD era inválido porque el draft está normalizado y la BD no).
     if (selectedButton.value !== null && selectedButton.value !== position) {
       const currentButton = getButton(selectedButton.value)
       if (currentButton) {
-        // Only save if the button exists and has changes
-        const hasChanges = JSON.stringify(currentButton.data) !== JSON.stringify(buttonConfig.value)
-        if (hasChanges) {
+        if (isButtonConfigDirty()) {
           await saveButtonConfig()
         }
       } else {
@@ -1107,6 +1143,8 @@ export function useStreamDeck() {
         looks: []
       }
     }
+    // El draft recién cargado es el punto limpio: no hay cambios pendientes.
+    snapshotButtonConfig()
 
     // Restart dynamic updates to include/exclude the newly selected button.
     // Sin bloquear: la selección debe ser instantánea aunque haya botones
@@ -1255,6 +1293,7 @@ export function useStreamDeck() {
           // Update local data
           existingButton.data = { ...buttonConfig.value }
           bumpButtonsEpoch()
+          snapshotButtonConfig()
           console.log('✅ Button updated successfully')
 
           // La selección sigue al botón por si se movió (drag & drop).
@@ -1279,6 +1318,7 @@ export function useStreamDeck() {
           }
           bumpButtonsEpoch()
           selectedButtonId.value = null
+          snapshotButtonConfig()
           console.log('✅ Button deleted successfully')
         }
       } else if (hasContent) {
@@ -1298,6 +1338,7 @@ export function useStreamDeck() {
         currentButtons.value.push(newButton)
         selectedButtonId.value = newButton.id
         bumpButtonsEpoch()
+        snapshotButtonConfig()
         console.log('✅ Button created:', newButton.id, 'Data:', newButton)
       } else {
         // No content and no existing button - nothing to do
@@ -1540,19 +1581,19 @@ export function useStreamDeck() {
     // Save selected profile to localStorage
     saveSelectedProfile(selectedProfile.value)
 
-    // Save selected profile to database settings for StreamDeck integration
-    try {
-      await apiRequest('/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          key: 'current.profile_id',
-          value: profileId
-        })
+    // Fuera del camino crítico: persistir el setting y repintar el HW no
+    // deben retrasar el cambio de perfil visible (fire-and-forget).
+    void apiRequest('/settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'current.profile_id',
+        value: profileId
       })
+    }).then(() => {
       console.log('✅ Profile saved to database settings:', profileId)
-    } catch (error) {
+    }).catch((error) => {
       console.error('❌ Failed to save profile to database settings:', error)
-    }
+    })
 
     // Broadcast profile change to other devices (only for local changes)
     if (!isRemoteProfileChange.value) {
@@ -1564,8 +1605,9 @@ export function useStreamDeck() {
       }))
     }
 
-    // Force update StreamDeck after profile change
-    await updateStreamDeckButtons()
+    // Force update StreamDeck after profile change (sin bloquear: el HW
+    // repinta en segundo plano; el perfil ya está visible).
+    void updateStreamDeckButtons()
   }
   const createProfile = async (name: string) => {
     try {
@@ -1669,6 +1711,8 @@ export function useStreamDeck() {
             data = {}
           }
         }
+        // Anti-corrupción: ver comentario en loadProfiles (claves numéricas).
+        if (!data || typeof data !== 'object' || Array.isArray(data)) data = {}
         const updatedData = { ...data, isDefault: true }
 
         await apiRequest(`/profiles/${newDefaultProfile.id}`, {
@@ -1714,14 +1758,12 @@ export function useStreamDeck() {
     // Stop existing dynamic updates
     stopDynamicUpdates()
 
-    // Save current page's button config before switching
+    // Save current page's button config before switching (ver comentario
+    // en selectButton: el dirty-check es contra el snapshot, no la fila BD).
     if (selectedButton.value !== null && currentPage.value) {
       const currentButton = getButton(selectedButton.value)
-      if (currentButton) {
-        const hasChanges = JSON.stringify(currentButton.data) !== JSON.stringify(buttonConfig.value)
-        if (hasChanges) {
-          await saveButtonConfig()
-        }
+      if (currentButton && isButtonConfigDirty()) {
+        await saveButtonConfig()
       }
     }
 
@@ -1746,6 +1788,7 @@ export function useStreamDeck() {
       rules: [],
       looks: []
     }
+    snapshotButtonConfig()
 
     // Nueva época: invalida GETs en vuelo de la página anterior
     bumpButtonsEpoch()
@@ -1754,23 +1797,22 @@ export function useStreamDeck() {
     // Start dynamic updates for PC Vitals buttons (sin bloquear)
     void startDynamicUpdates()
 
-    // Save current page to database settings for StreamDeck integration
-    try {
-      await apiRequest('/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          key: 'current.page_id',
-          value: pageId
-        })
+    // Persistir el setting y repintar el HW fuera del camino crítico: la
+    // página ya está visible; esto no debe retrasar el cambio (fire-and-forget).
+    void apiRequest('/settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'current.page_id',
+        value: pageId
       })
+    }).then(() => {
       console.log('✅ Page saved to database settings:', pageId)
-    } catch (error) {
+    }).catch((error) => {
       console.error('❌ Failed to save page to database settings:', error)
-    }
+    })
 
-    // Update StreamDeck buttons to reflect the current page
-    console.log('📄 Page changed, calling updateStreamDeckButtons...');
-    await updateStreamDeckButtons()
+    // Update StreamDeck buttons to reflect the current page (sin bloquear)
+    void updateStreamDeckButtons()
 
     // Broadcast page change to other devices (only for local changes)
     if (!isRemotePageChange.value) {
@@ -2181,7 +2223,9 @@ export function useStreamDeck() {
             buttonId: button.id,
             pageId: button.page_id,
             profileId: currentProfile.value?.id,
-            position
+            position,
+            // Sondeo periódico (500 ms): sin logs en BD ni broadcasts WS.
+            quiet: true
           }
         })
       })
@@ -2276,25 +2320,17 @@ export function useStreamDeck() {
 
   const updateStreamDeckButtons = async () => {
     try {
-      console.log('🎛️ updateStreamDeckButtons called - checking if StreamDeck is connected...');
-      
       // Verificar si hay un StreamDeck conectado primero
       const statusResponse = await fetch(`${API_BASE.value}/devices/streamdeck/status`);
       const status = await statusResponse.json();
-      
+
       if (!status.isConnected) {
-        console.log('🎛️ StreamDeck not connected, skipping update');
         return;
       }
-      
-      console.log('🎛️ StreamDeck is connected, proceeding with update...');
 
       // Calcular qué posiciones tienen botones configurados
       const buttonStates = [];
       const totalButtons = gridCols.value * gridRows.value;
-
-      console.log(`🎛️ Calculating button states for ${totalButtons} positions (${gridCols.value}x${gridRows.value})`);
-      console.log(`📊 Current buttons in page:`, currentButtons.value.length);
 
       for (let i = 0; i < totalButtons; i++) {
         const button = getButton(i);
@@ -2312,32 +2348,16 @@ export function useStreamDeck() {
             (button.data.rules && button.data.rules.length > 0) ||
             (button.data.looks && button.data.looks.length > 0)
           );
-
-          console.log(`Button ${i}: exists=${!!button}, hasContent=${hasContent}`, {
-            label: button.data.label,
-            textTop: button.data.textTop,
-            textBottom: button.data.textBottom,
-            emoji: button.data.emoji,
-            icon: button.data.icon,
-            actionsCount: button.data.actions?.length || 0
-          });
-        } else {
-          console.log(`Button ${i}: no button data`);
         }
 
         buttonStates.push(hasContent);
       }
 
-      console.log('🎛️ Final button states for StreamDeck:', buttonStates);
-
       // Enviar al daemon
-      console.log('🎛️ Sending button states to daemon...');
       await apiRequest('/devices/streamdeck/update-buttons', {
         method: 'POST',
         body: JSON.stringify({ buttonStates, pageId: currentPage.value?.id })
       });
-
-      console.log('✅ StreamDeck buttons updated successfully');
     } catch (error) {
       console.error('❌ Failed to update StreamDeck buttons:', error);
     }

@@ -38,11 +38,22 @@
           type="button"
           class="bd-btn bd-pri bd-gs-add-tool"
           data-cy="bd-gs-add-tool"
-          :disabled="!currentPage"
-          :title="t('bd.gsAddHint')"
+          :disabled="!currentPage || busy"
+          :title="!currentPage ? t('bd.layoutLoadingPage') : t('bd.gsAddHint')"
           @click="$emit('gs-add')"
         >
           <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.gsAddKey') }}
+        </button>
+        <button
+          v-if="isGsMode && mode === 'edit'"
+          type="button"
+          class="bd-btn bd-gs-add-tool"
+          data-cy="bd-gs-add-vol"
+          :disabled="!currentPage || busy"
+          :title="t('bd.gsAddVolHint')"
+          @click="$emit('gs-add-volume')"
+        >
+          <Volume2 :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.gsAddVol') }}
         </button>
         <label v-if="mode === 'use'" class="bd-usel" data-cy="bd-preview-dev"><span>{{ t('bd.previewAs') }}</span><select :value="previewDeviceId ?? ''" :aria-label="t('bd.previewAs')" @change="$emit('preview-device-change', ($event.target as HTMLSelectElement).value || null)"><option value="">{{ t('bd.deviceNoScreen') }}…</option><option v-for="d in devices" :key="d.id" :value="d.id">{{ d.name }}</option></select></label>
       </div>
@@ -197,7 +208,29 @@
               :data-gs-id="b.id"
             >
               <div class="grid-stack-item-content">
+                <div
+                  v-if="isVolume(b.position)"
+                  class="bd-key vol-key"
+                  :class="{ 'bd-sel': selectedButton === b.position }"
+                  :aria-label="keyAriaLabel(b.position)"
+                  :style="keyColorVar(b.position)"
+                  :data-position="b.position"
+                  data-cy="bd-key-vol"
+                  @click="onKeyClick(b.position)"
+                  @contextmenu.prevent.stop="showContextMenu($event, b.position)"
+                  @dragover.prevent="onDragOver($event, b.position)"
+                  @dragleave="onDragLeave($event)"
+                  @drop.prevent="onDrop($event, b.position)"
+                >
+                  <VolumeRange
+                    :api-base="apiBase ?? ''"
+                    :app="volumeAppOf(b.position)"
+                    :label="keyLabel(b.position) || 'Volumen'"
+                    :readonly="false"
+                  />
+                </div>
                 <button
+                  v-else
                   class="bd-key"
                   :class="{ 'bd-hit': executingButtons.includes(b.position) }"
                   :aria-pressed="selectedButton === b.position"
@@ -341,8 +374,9 @@ import 'gridstack/dist/gridstack.min.css'
 // imports estáticos engordan el chunk inicial y gridstack rompe el SSR
 // de Astro (gridstack-engine sin extensión).
 import {
-  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone
+  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, Volume2
 } from 'lucide-vue-next'
+import VolumeRange from './VolumeRange.vue'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
@@ -401,6 +435,8 @@ interface Emits {
   (e: 'layout-change', items: Array<{ id: string; x: number; y: number; w: number; h: number }>): void
   /** GridStack: pedir una tecla nueva 1×1 en la primera celda libre. */
   (e: 'gs-add'): void
+  /** GridStack: pedir un control de volumen 1×1 en la primera celda libre (solo modo libre). */
+  (e: 'gs-add-volume'): void
   (e: 'page-select', pageId: string): void
   (e: 'page-create'): void
   (e: 'page-delete', page: PageData | null): void
@@ -862,6 +898,21 @@ const onPressCancel = () => {
 const actionCount = (position: number) => {
   const d = bdata(position)
   return (d?.actions?.length ?? 0) + (d?.rules?.length ?? 0)
+}
+
+/** Componente volumen: solo existe en modo libre (widget_type 'volume'). */
+const isVolume = (position: number) => {
+  const btn = props.getButton(position) as any
+  if (!btn) return false
+  if (btn.widget_type === 'volume') return true
+  const d = bdata(position) as any
+  return d?.component === 'volume' || d?.widget === 'volume'
+}
+/** App objetivo del control de volumen (vacío = maestro). */
+const volumeAppOf = (position: number): string | null => {
+  const d = bdata(position) as any
+  const app = d?.volumeApp ?? d?.app
+  return typeof app === 'string' && app.trim() ? app.trim() : null
 }
 
 // Arrastrar acción de la biblioteca sobre una tecla

@@ -51,140 +51,151 @@
         </div>
       </template>
 
-      <!-- Dispositivo -->
-      <template v-else-if="section === 'device'">
-        <h2>{{ t('bd.secDevice') }}</h2>
-        <p class="bd-sub">{{ t('bd.deviceSub') }}</p>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.brightness') }}</b><p>{{ t('bd.brightnessHint') }}</p></div>
-          <div class="bd-ctl">
-            <div class="bd-rg">
-              <input type="range" class="bd-inp" min="0" max="100" step="1" :value="bdBrightness" :aria-label="t('bd.brightness')" @input="bdSetBrightness(+($event.target as HTMLInputElement).value)" />
-              <output>{{ bdBrightness }}%</output>
-            </div>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.streamdeckDevice') }}</b></div>
-          <div class="bd-ctl bd-ctl-device" style="flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; max-width: 280px; width: 100%">
-            <select
-              class="bd-inp bd-device-select"
-              style="width: 100%; max-width: 100%"
-              v-model="selectedDevice"
-              @change="handleDeviceChange"
-              :aria-label="t('bd.selectStreamdeck')"
-              :title="selectedDeviceTitle"
-              data-cy="bd-device-select"
-            >
-              <option value="">{{ t('bd.selectStreamdeck') }}</option>
-              <option v-for="(d, i) in devices" :key="d.path" :value="d.path" :title="deviceTitle(d)">{{ deviceShortLabel(d, i) }}</option>
-            </select>
-            <button class="bd-btn" :disabled="!selectedDevice" @click="testDevice">
-              <Palette :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.testStreamdeck') }}
-            </button>
-            <p v-if="deviceStatus" class="bd-hint bd-device-status" :title="deviceStatus" aria-live="polite">{{ deviceStatusShort }}</p>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.dimAfter') }}</b><p>{{ t('bd.dimAfterHint') }}</p></div>
-          <div class="bd-ctl">
-            <select class="bd-inp" v-model="mock.dim" :aria-label="t('bd.dimAfter')">
-              <option>{{ t('bd.never') }}</option>
-              <option>1 min</option>
-              <option>5 min</option>
-              <option>15 min</option>
-              <option>1 hora</option>
-            </select>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.idleScreen') }}</b><p>{{ t('bd.idleScreenHint') }}</p></div>
-          <div class="bd-ctl">
-            <select class="bd-inp" v-model="mock.idle" :aria-label="t('bd.idleScreen')">
-              <option>{{ t('bd.screenOff') }}</option>
-              <option>{{ t('bd.clock') }}</option>
-              <option>{{ t('bd.lastState') }}</option>
-              <option>{{ t('bd.ownImage') }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.orientation') }}</b><p>{{ t('bd.orientationHint') }}</p></div>
-          <div class="bd-ctl">
-            <div class="bd-seg">
-              <button v-for="o in ['0°', '90°', '180°', '270°']" :key="o" :aria-pressed="mock.orientation === o" @click="mock.orientation = o">{{ o }}</button>
-            </div>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.longPressTime') }}</b><p>{{ t('bd.longPressTimeHint') }}</p></div>
-          <div class="bd-ctl">
-            <div class="bd-rg">
-              <input type="range" class="bd-inp" min="200" max="1200" step="50" v-model.number="mock.longpress" :aria-label="t('bd.longPressTime')" />
-              <output>{{ mock.longpress }} ms</output>
-            </div>
-          </div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.haptic') }}</b><p>{{ t('bd.hapticHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.haptic" :aria-label="t('bd.haptic')" /><span></span></label></div>
-        </div>
-        <div class="bd-srow">
-          <div><b>{{ t('bd.clickSound') }}</b><p>{{ t('bd.clickSoundHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.sound" :aria-label="t('bd.clickSound')" /><span></span></label></div>
-        </div>
-      </template>
-
-      <!-- Dispositivos lógicos (pantallas por perfil) -->
+      <!-- Dispositivos: hardware conectado y pantallas por dispositivo -->
       <template v-else-if="section === 'devices'">
         <h2>{{ t('bd.secDevices') }}</h2>
-        <p class="bd-sub">{{ t('bd.devicesSub') }}</p>
-        <p class="bd-hint" data-cy="bd-hw-hint">{{ hwHint }}</p>
-        <div>
-          <div v-for="d in devStore.devices.value" :key="d.id" class="bd-pr dvrow" :data-cy="`bd-device-${d.id}`">
-            <input
-              type="text"
-              class="bd-inp"
-              :value="d.name"
-              :aria-label="t('bd.secDevices')"
-              @change="renameLogicalDevice(d, ($event.target as HTMLInputElement).value)"
-            />
-            <select
-              class="bd-inp"
-              :value="d.kind"
-              :aria-label="t('bd.secDevices')"
-              @change="changeLogicalKind(d, ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="deck">{{ t('bd.deviceKindDeck') }}</option>
-              <option value="phone">{{ t('bd.deviceKindPhone') }}</option>
-              <option value="tablet">{{ t('bd.deviceKindTablet') }}</option>
-            </select>
-            <select
-              v-if="d.kind === 'deck'"
-              class="bd-inp"
-              :value="d.model ?? ''"
-              :aria-label="t('bd.deviceKindDeck')"
-              @change="changeLogicalModel(d, ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="m in DECK_MODELS" :key="m.id" :value="m.id">{{ m.label }} · {{ m.cols }}×{{ m.rows }}</option>
-            </select>
-            <span v-else class="bd-hint">{{ t('bd.deviceAnyView') }}</span>
-            <button class="bd-ibtn" :aria-label="t('bd.delete')" :title="t('bd.delete')" @click="deleteLogicalDevice(d)">
-              <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
+        <p class="bd-sub">{{ t('bd.devicesIntro') }}</p>
+
+        <section class="bd-settings-group" aria-labelledby="bd-device-hardware-title" data-cy="bd-device-hardware">
+          <h3 id="bd-device-hardware-title" class="bd-settings-group__title">{{ t('bd.deviceHardware') }}</h3>
+          <p class="bd-settings-group__sub">{{ t('bd.deviceHardwareSub') }}</p>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.streamdeckDevice') }}</b><p>{{ t('bd.streamdeckDeviceHint') }}</p></div>
+            <div class="bd-ctl bd-ctl-device">
+              <select
+                class="bd-inp bd-device-select"
+                v-model="selectedDevice"
+                @change="handleDeviceChange"
+                :aria-label="t('bd.selectStreamdeck')"
+                :title="selectedDeviceTitle"
+                data-cy="bd-device-select"
+              >
+                <option value="">{{ t('bd.selectStreamdeck') }}</option>
+                <option v-for="(d, i) in devices" :key="d.path" :value="d.path" :title="deviceTitle(d)">{{ deviceShortLabel(d, i) }}</option>
+              </select>
+              <button class="bd-btn" :disabled="!selectedDevice" @click="testDevice">
+                <Palette :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.testStreamdeck') }}
+              </button>
+              <p v-if="deviceStatus" class="bd-hint bd-device-status" :title="deviceStatus" aria-live="polite">{{ deviceStatusShort }}</p>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.brightness') }}</b><p>{{ t('bd.brightnessHint') }}</p></div>
+            <div class="bd-ctl">
+              <div class="bd-rg">
+                <input type="range" class="bd-inp" min="0" max="100" step="1" :value="bdBrightness" :aria-label="t('bd.brightness')" @input="bdSetBrightness(+($event.target as HTMLInputElement).value)" />
+                <output>{{ bdBrightness }}%</output>
+              </div>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.dimAfter') }}</b><p>{{ t('bd.dimAfterHint') }}</p></div>
+            <div class="bd-ctl">
+              <select class="bd-inp" v-model="mock.dim" :aria-label="t('bd.dimAfter')">
+                <option>{{ t('bd.never') }}</option>
+                <option>1 min</option>
+                <option>5 min</option>
+                <option>15 min</option>
+                <option>1 hora</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.idleScreen') }}</b><p>{{ t('bd.idleScreenHint') }}</p></div>
+            <div class="bd-ctl">
+              <select class="bd-inp" v-model="mock.idle" :aria-label="t('bd.idleScreen')">
+                <option>{{ t('bd.screenOff') }}</option>
+                <option>{{ t('bd.clock') }}</option>
+                <option>{{ t('bd.lastState') }}</option>
+                <option>{{ t('bd.ownImage') }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.orientation') }}</b><p>{{ t('bd.orientationHint') }}</p></div>
+            <div class="bd-ctl">
+              <div class="bd-seg">
+                <button v-for="o in ['0°', '90°', '180°', '270°']" :key="o" :aria-pressed="mock.orientation === o" @click="mock.orientation = o">{{ o }}</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.longPressTime') }}</b><p>{{ t('bd.longPressTimeHint') }}</p></div>
+            <div class="bd-ctl">
+              <div class="bd-rg">
+                <input type="range" class="bd-inp" min="200" max="1200" step="50" v-model.number="mock.longpress" :aria-label="t('bd.longPressTime')" />
+                <output>{{ mock.longpress }} ms</output>
+              </div>
+            </div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.haptic') }}</b><p>{{ t('bd.hapticHint') }}</p></div>
+            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.haptic" :aria-label="t('bd.haptic')" /><span></span></label></div>
+          </div>
+
+          <div class="bd-srow">
+            <div><b>{{ t('bd.clickSound') }}</b><p>{{ t('bd.clickSoundHint') }}</p></div>
+            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.sound" :aria-label="t('bd.clickSound')" /><span></span></label></div>
+          </div>
+        </section>
+
+        <section class="bd-settings-group" aria-labelledby="bd-device-profiles-title" data-cy="bd-device-profiles">
+          <h3 id="bd-device-profiles-title" class="bd-settings-group__title">{{ t('bd.deviceProfiles') }}</h3>
+          <p class="bd-settings-group__sub">{{ t('bd.devicesSub') }}</p>
+          <p class="bd-hint" data-cy="bd-hw-hint">{{ hwHint }}</p>
+          <div>
+            <div v-for="d in devStore.devices.value" :key="d.id" class="bd-pr dvrow" :data-cy="`bd-device-${d.id}`">
+              <input
+                type="text"
+                class="bd-inp"
+                :value="d.name"
+                :aria-label="t('bd.deviceName')"
+                @change="renameLogicalDevice(d, ($event.target as HTMLInputElement).value)"
+              />
+              <select
+                class="bd-inp"
+                :value="d.kind"
+                :aria-label="t('bd.deviceType')"
+                @change="changeLogicalKind(d, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="deck">{{ t('bd.deviceKindDeck') }}</option>
+                <option value="phone">{{ t('bd.deviceKindPhone') }}</option>
+                <option value="tablet">{{ t('bd.deviceKindTablet') }}</option>
+              </select>
+              <select
+                v-if="d.kind === 'deck'"
+                class="bd-inp"
+                :value="d.model ?? ''"
+                :aria-label="t('bd.deviceModel')"
+                @change="changeLogicalModel(d, ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="m in DECK_MODELS" :key="m.id" :value="m.id">{{ m.label }} · {{ m.cols }}×{{ m.rows }}</option>
+              </select>
+              <span v-else class="bd-hint">{{ t('bd.deviceAnyView') }}</span>
+              <button class="bd-ibtn" :aria-label="`${t('bd.delete')} ${d.name}`" :title="t('bd.delete')" @click="deleteLogicalDevice(d)">
+                <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div class="bd-device-add">
+            <button class="bd-btn" data-cy="bd-device-add-deck" @click="addLogicalDevice('deck')">
+              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddDeck') }}
+            </button>
+            <button class="bd-btn" data-cy="bd-device-add-phone" @click="addLogicalDevice('phone')">
+              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddPhone') }}
+            </button>
+            <button class="bd-btn" data-cy="bd-device-add-tablet" @click="addLogicalDevice('tablet')">
+              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddTablet') }}
             </button>
           </div>
-        </div>
-        <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap">
-          <button class="bd-btn" data-cy="bd-device-add-deck" @click="addLogicalDevice('deck')">
-            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddDeck') }}
-          </button>
-          <button class="bd-btn" data-cy="bd-device-add-phone" @click="addLogicalDevice('phone')">
-            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddPhone') }}
-          </button>
-          <button class="bd-btn" data-cy="bd-device-add-tablet" @click="addLogicalDevice('tablet')">
-            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.deviceAddTablet') }}
-          </button>
-        </div>
+        </section>
       </template>
 
       <!-- Perfiles (cableado a datos reales) -->
@@ -214,6 +225,17 @@
               @change="emit('profile-updated', p.id, { name: ($event.target as HTMLInputElement).value })"
             />
             <span v-if="isDefaultProfile(p)" class="bd-tag-def" :title="t('bd.autoDefaultHint')">{{ t('bd.isDefaultTag') }}</span>
+            <button
+              class="bd-ibtn"
+              :aria-label="`${t('bd.exportProfile')} ${p.name}`"
+              :title="t('bd.exportProfile')"
+              :disabled="!!exportingProfileId"
+              :aria-busy="exportingProfileId === p.id"
+              :data-cy="`bd-export-profile-${p.id}`"
+              @click="exportProfile(p)"
+            >
+              <Download :size="16" stroke-width="1.75" aria-hidden="true" />
+            </button>
           </div>
           <button class="bd-chip" :title="t('bd.configure')" @click="openAuto(p.id)" data-cy="bd-profile-windows">
             <AppWindow :size="14" stroke-width="1.75" aria-hidden="true" />{{ ruleCountLabel(p.id) }}
@@ -226,6 +248,38 @@
             <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.newProfileBtn') }}
           </button>
         </div>
+      </template>
+
+      <!-- Exportación de la configuración -->
+      <template v-else-if="section === 'backup'">
+        <h2>{{ t('bd.secBackup') }}</h2>
+        <p class="bd-sub">{{ t('bd.backupSub') }}</p>
+        <section class="bd-settings-group" aria-labelledby="bd-backup-export-title" data-cy="bd-backup-export">
+          <h3 id="bd-backup-export-title" class="bd-settings-group__title">{{ t('bd.backupExportTitle') }}</h3>
+          <p class="bd-settings-group__sub">{{ t('bd.backupExportSub') }}</p>
+          <div class="bd-backup-warning" role="note">
+            <ShieldAlert :size="18" stroke-width="1.75" aria-hidden="true" />
+            <p>{{ t('bd.backupSensitiveWarning') }}</p>
+          </div>
+          <div class="bd-srow">
+            <div>
+              <b>{{ t('bd.backupFullLabel') }}</b>
+              <p>{{ t('bd.backupFullHint') }}</p>
+            </div>
+            <div class="bd-ctl">
+              <button
+                class="bd-btn bd-pri"
+                data-cy="bd-export-full-backup"
+                :disabled="exportingBackup"
+                :aria-busy="exportingBackup"
+                @click="exportFullBackup"
+              >
+                <Download :size="16" stroke-width="1.75" aria-hidden="true" />
+                {{ exportingBackup ? t('bd.backupExporting') : t('bd.exportBackup') }}
+              </button>
+            </div>
+          </div>
+        </section>
       </template>
 
       <!-- Apariencia (funcional) -->
@@ -437,12 +491,26 @@
         </div>
       </template>
 
+      <!-- Registros: estado de servicios + logs del daemon (diagnóstico multi-dispositivo) -->
+      <template v-else-if="section === 'logs'">
+        <DiagnosticsPane
+          :api-base="apiBase()"
+          :ws-url="props.wsUrl"
+          :ws-connected="props.wsConnected"
+          @notify="(msg) => emit('notify', msg)"
+        />
+      </template>
+
       <!-- Acerca de -->
       <template v-else>
         <h2>{{ t('bd.secAbout') }}</h2>
         <div class="bd-srow">
           <div><b>{{ t('bd.aboutTitle') }}</b><p>{{ t('bd.aboutText') }}</p></div>
           <div class="bd-ctl"><span class="bd-mono">{{ versionLine }}</span></div>
+        </div>
+        <div class="bd-srow">
+          <div><b>{{ t('bd.aboutGuideTitle') }}</b><p>{{ t('bd.aboutGuideHint') }}</p></div>
+          <div class="bd-ctl"><button class="bd-btn" data-cy="bd-open-welcome" @click="emit('open-welcome')"><Sparkles :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.aboutGuideBtn') }}</button></div>
         </div>
         <div class="bd-srow">
           <div><b>{{ t('bd.secAbout') }}</b><p>{{ t('bd.aboutReview') }}</p></div>
@@ -467,13 +535,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
 import {
-  SlidersHorizontal, Monitor, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone
+  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, ShieldAlert, Sparkles, ScrollText
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 // Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
 // show('plugins') necesita setTab de forma síncrona tras nextTick.
 const McpPane = defineAsyncComponent(() => import('./McpPane.vue'))
 const RemotePane = defineAsyncComponent(() => import('./RemotePane.vue'))
+const DiagnosticsPane = defineAsyncComponent(() => import('./DiagnosticsPane.vue'))
 const AutoProfileDialog = defineAsyncComponent(() => import('./AutoProfileDialog.vue'))
 import { useI18nStore } from '../../composables/useI18n'
 import {
@@ -491,7 +560,7 @@ import type { ProfileData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
 
-type Section = 'general' | 'device' | 'devices' | 'profiles' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'about'
+type Section = 'general' | 'devices' | 'profiles' | 'backup' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'logs' | 'about'
 
 interface Props {
   currentLocale: string
@@ -506,6 +575,8 @@ interface Props {
   mcpSecret?: string | null
   mcpScopes?: Array<{ id: string; group: string }>
   installProgress?: { key: string; stage: string; message: string } | null
+  wsConnected?: boolean
+  wsUrl?: string
 }
 
 interface Emits {
@@ -530,6 +601,7 @@ interface Emits {
   (e: 'update-mcp-token', id: string, patch: { scopes: string[] }): void
   (e: 'revoke-mcp-token', id: string): void
   (e: 'dismiss-install-progress'): void
+  (e: 'open-welcome'): void
 }
 
 const props = defineProps<Props>()
@@ -542,9 +614,9 @@ const pluginsPane = ref<InstanceType<typeof PluginsPane> | null>(null)
 
 const navItems = computed(() => [
   { id: 'general' as const, label: t('bd.secGeneral'), icon: SlidersHorizontal },
-  { id: 'device' as const, label: t('bd.secDevice'), icon: Monitor },
   { id: 'devices' as const, label: t('bd.secDevices'), icon: MonitorSmartphone },
   { id: 'profiles' as const, label: t('bd.secProfiles'), icon: Users },
+  { id: 'backup' as const, label: t('bd.secBackup'), icon: Database },
   { id: 'appearance' as const, label: t('bd.secAppearance'), icon: Paintbrush },
   { id: 'vars' as const, label: t('bd.secVars'), icon: Variable },
   { id: 'plugins' as const, label: t('bd.secPlugins'), icon: Puzzle },
@@ -552,6 +624,7 @@ const navItems = computed(() => [
   { id: 'remote' as const, label: t('bd.secRemote'), icon: Smartphone },
   { id: 'shortcuts' as const, label: t('bd.secShortcuts'), icon: Command },
   { id: 'advanced' as const, label: t('bd.secAdvanced'), icon: Wrench },
+  { id: 'logs' as const, label: t('bd.secLogs'), icon: ScrollText },
   { id: 'about' as const, label: t('bd.secAbout'), icon: Info }
 ])
 
@@ -682,6 +755,8 @@ const devices = ref<any[]>([])
 const selectedDevice = ref('')
 const deviceStatus = ref('')
 const versionLine = ref('')
+const exportingProfileId = ref<string | null>(null)
+const exportingBackup = ref(false)
 
 // Etiqueta corta para el <select>: solo el modelo (el path HID es larguísimo
 // y desborda el ajuste). El path completo queda en `title` como tooltip.
@@ -716,6 +791,58 @@ const apiBase = () => {
     return `${window.location.protocol}//${window.location.hostname}:${apiPort.value}/api/v1`
   }
   return 'http://localhost:3001/api/v1'
+}
+
+const downloadBackup = async (path: string, filename: string) => {
+  const res = await fetch(`${apiBase()}${path}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    throw new Error(body?.error || `HTTP ${res.status}`)
+  }
+
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(href), 1000)
+}
+
+const safeFilename = (name: string) =>
+  name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'perfil'
+
+const exportProfile = async (profile: ProfileData) => {
+  if (exportingProfileId.value) return
+  exportingProfileId.value = profile.id
+  try {
+    await downloadBackup(
+      `/backups/profiles/${encodeURIComponent(profile.id)}/export`,
+      `libredeck-perfil-${safeFilename(profile.name)}.json`
+    )
+    emit('notify', t('bd.profileExported', { name: profile.name }))
+  } catch (error) {
+    emit('notify', `${t('bd.backupExportFailed')}: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    exportingProfileId.value = null
+  }
+}
+
+const exportFullBackup = async () => {
+  if (exportingBackup.value) return
+  exportingBackup.value = true
+  try {
+    const date = new Date().toISOString().slice(0, 10)
+    await downloadBackup('/backups/export', `libredeck-backup-${date}.json`)
+    emit('notify', t('bd.backupExported'))
+  } catch (error) {
+    emit('notify', `${t('bd.backupExportFailed')}: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    exportingBackup.value = false
+  }
 }
 
 const syncApiPort = async () => {

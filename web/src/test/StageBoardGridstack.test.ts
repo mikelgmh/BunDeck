@@ -117,6 +117,22 @@ describe('StageBoard GridStack por página', () => {
     wrapper.unmount()
   })
 
+  it('deshabilita Añadir tecla mientras hay una operación de página en curso', async () => {
+    const wrapper = mount(StageBoard, {
+      props: { ...baseProps, allButtons: [], layoutMode: 'gridstack', busy: false }
+    })
+    const btn = () => wrapper.find('[data-cy=bd-gs-add-tool]')
+    expect(btn().exists()).toBe(true)
+    expect(btn().attributes('disabled')).toBeUndefined()
+    // Sin pageBusy el clic llega al padre (nada de silent-skip).
+    await btn().trigger('click')
+    expect(wrapper.emitted('gs-add')).toHaveLength(1)
+    // Con pageBusy el botón se deshabilita: el usuario ve por qué no actúa.
+    await wrapper.setProps({ busy: true })
+    expect(btn().attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('conserva una celda cuadrada y placa desplazable como el HTML de referencia', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/styles/bundeck.css'), 'utf8')
     const component = readFileSync(resolve(process.cwd(), 'src/components/bundeck/StageBoard.vue'), 'utf8')

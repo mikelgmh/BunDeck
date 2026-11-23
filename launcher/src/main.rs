@@ -872,11 +872,14 @@ impl Render for LauncherView {
             .child(title_chrome(self, window, cx))
             .child(
                 div()
+                    .id("main-scroll")
                     .flex()
                     .flex_col()
                     .gap_3()
                     .p_4()
-                    .size_full()
+                    .w_full()
+                    .flex_1()
+                    .overflow_y_scroll()
                     .bg(theme::ground())
                     .text_color(theme::primary_text())
                     // Cabecera
@@ -1242,66 +1245,91 @@ impl Render for LauncherView {
             .child(if tab == Tab::Status {
                 div()
                     .flex()
-                    .flex_row()
-                    .gap_2()
+                    .flex_col()
+                    .gap_1()
                     .child(
                         div()
-                            .id("open-dashboard")
-                            .flex_1()
-                            .text_center()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .px_3()
-                            .py_2()
-                            .rounded_lg()
-                            .bg(theme::primary_btn_bg())
-                            .text_color(theme::primary_btn_text())
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme::primary_btn_hover()))
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                if view.open_dashboard() {
-                                    if view.ready_to_close() {
-                                        // Se cierra la ventana, el tray sigue vivo.
-                                        window.remove_window();
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("open-dashboard")
+                                    .flex_1()
+                                    .text_center()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_lg()
+                                    .bg(theme::primary_btn_bg())
+                                    .text_color(theme::primary_btn_text())
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(theme::primary_btn_hover()))
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        if view.open_dashboard() {
+                                            if view.ready_to_close() {
+                                                // Se cierra la ventana, el tray sigue vivo.
+                                                window.remove_window();
+                                            } else {
+                                                view.log.push(
+                                                    "Servicios aún arrancando: dejo la ventana abierta."
+                                                        .to_string(),
+                                                );
+                                                view.truncate_log();
+                                                cx.notify();
+                                            }
+                                        } else {
+                                            cx.notify();
+                                        }
+                                    }))
+                                    .child("Panel web".to_string()),
+                            )
+                            .child(
+                                div()
+                                    .id("open-electrobun")
+                                    .flex_1()
+                                    .text_center()
+                                    .text_sm()
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_lg()
+                                    .bg(theme::surface())
+                                    .border_1()
+                                    .border_color(theme::line())
+                                    // Sin host el texto se atenúa (parece
+                                    // deshabilitado) pero sigue clicable:
+                                    // al pulsar explica que solo existe con
+                                    // `electrobun dev`. Ver `open_electrobun`
+                                    // y `monitor::host_alive` (:3031/ping).
+                                    .text_color(if host_up {
+                                        theme::primary_text()
                                     } else {
-                                        view.log.push(
-                                            "Servicios aún arrancando: dejo la ventana abierta."
-                                                .to_string(),
-                                        );
-                                        view.truncate_log();
+                                        theme::muted_text()
+                                    })
+                                    .cursor_pointer()
+                                    .hover(|s| s.border_color(theme::secondary_text()))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.open_electrobun();
                                         cx.notify();
-                                    }
-                                } else {
-                                    cx.notify();
-                                }
-                            }))
-                            .child("Panel web".to_string()),
+                                    }))
+                                    .child(if host_up {
+                                        "Ventana Electrobun".to_string()
+                                    } else {
+                                        "Ventana Electrobun (sin host)".to_string()
+                                    }),
+                            )
+                            .into_any_element(),
                     )
-                    .child(
+                    .child(if host_up {
+                        div().hidden().into_any_element()
+                    } else {
                         div()
-                            .id("open-electrobun")
-                            .flex_1()
-                            .text_center()
-                            .text_sm()
-                            .px_3()
-                            .py_2()
-                            .rounded_lg()
-                            .bg(theme::surface())
-                            .border_1()
-                            .border_color(theme::line())
-                            .text_color(if host_up {
-                                theme::primary_text()
-                            } else {
-                                theme::muted_text()
-                            })
-                            .cursor_pointer()
-                            .hover(|s| s.border_color(theme::secondary_text()))
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.open_electrobun();
-                                cx.notify();
-                            }))
-                            .child("Ventana Electrobun".to_string()),
-                    )
+                            .text_xs()
+                            .text_color(theme::muted_text())
+                            .child("La ventana nativa solo existe con `electrobun dev`.".to_string())
+                            .into_any_element()
+                    })
                     .into_any_element()
             } else {
                 div().hidden().into_any_element()
@@ -1443,9 +1471,10 @@ fn main_window_options(cx: &mut App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(420.0), px(720.0)),
+            size(px(440.0), px(860.0)),
             cx,
         ))),
+        window_min_size: Some(size(px(400.0), px(600.0))),
         titlebar: Some(gpui::TitlebarOptions {
             title: Some("BunDeck — Panel de control".into()),
             // Sin marco nativo: la barra de título la dibuja la app
@@ -1922,10 +1951,11 @@ fn main() {
         }
         #[cfg(not(windows))]
         {
-            let bounds = Bounds::centered(None, size(px(420.0), px(720.0)), cx);
+            let bounds = Bounds::centered(None, size(px(440.0), px(860.0)), cx);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_min_size: Some(size(px(400.0), px(600.0))),
                     titlebar: Some(gpui::TitlebarOptions {
                         title: Some("BunDeck — Panel de control".into()),
                         ..Default::default()

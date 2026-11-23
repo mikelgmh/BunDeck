@@ -9,9 +9,14 @@ export const handleActions: ApiHandler = async (_req, { method, path, services }
     if (method === 'POST') {
       const body = await _req.json();
       const { action, context } = body;
+      // Polling silencioso (botones dinámicos, cada 500 ms): sin logs en BD
+      // ni broadcasts WS por ejecución; solo errores.
+      const quiet = (context as any)?.quiet === true;
 
       const actionId = uuidv4();
-      services.wsManager.broadcastActionStarted(actionId, { action, context });
+      if (!quiet) {
+        services.wsManager.broadcastActionStarted(actionId, { action, context });
+      }
 
       try {
         const result = await services.actionRunner.executeAction(action, {
@@ -20,7 +25,9 @@ export const handleActions: ApiHandler = async (_req, { method, path, services }
         });
 
         if (result.success) {
-          services.wsManager.broadcastActionFinished(actionId, result);
+          if (!quiet) {
+            services.wsManager.broadcastActionFinished(actionId, result);
+          }
 
           // Check if this is a page navigation action.
           // Dirigida por defecto: solo el dispositivo que ejecuta la acción

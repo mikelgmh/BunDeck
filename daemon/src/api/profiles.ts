@@ -1,6 +1,6 @@
 /** Rutas `/api/v1/profiles*` — CRUD de perfiles. */
 import { v4 as uuidv4 } from 'uuid';
-import { jsonResponse } from './http-helpers';
+import { jsonResponse, dataTooLarge, MAX_PAGE_PROFILE_DATA_BYTES } from './http-helpers';
 import type { ApiHandler } from './types';
 
 export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, services }) => {
@@ -13,6 +13,12 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
 
     if (method === 'POST') {
       const body = await _req.json();
+      if (dataTooLarge(body.data)) {
+        return jsonResponse(
+          { error: `profile data exceeds ${MAX_PAGE_PROFILE_DATA_BYTES} bytes (possible corrupted payload)` },
+          413
+        );
+      }
       const profile = {
         id: uuidv4(),
         name: body.name,
@@ -39,6 +45,12 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
 
     if (method === 'PUT') {
       const body = await _req.json();
+      if (dataTooLarge(body.data)) {
+        return jsonResponse(
+          { error: `profile data exceeds ${MAX_PAGE_PROFILE_DATA_BYTES} bytes (possible corrupted payload)` },
+          413
+        );
+      }
       db.updateProfile(profileId, body);
 
       const updatedProfile = db.getProfile(profileId);
@@ -49,7 +61,9 @@ export const handleProfiles: ApiHandler = async (_req, { url, method, path, db, 
 
     if (method === 'DELETE') {
       db.deleteProfile(profileId);
-      services.wsManager.broadcast('profile.deleted', { profileId });
+      // Con topic 'profiles': los clientes suscritos lo reciben y recargan;
+      // sin topic llegaba a todos pero el frontend lo ignoraba (sin handler).
+      services.wsManager.broadcast('profile.deleted', { profileId }, 'profiles');
       return jsonResponse({ success: true });
     }
   }

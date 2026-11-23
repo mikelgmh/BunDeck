@@ -514,6 +514,12 @@ export async function initDatabase() {
   // Instalar plugins integrados
   await installBuiltInPlugins(db);
 
+  // Retención de logs: el polling dinámico y ejecuciones generaban cientos
+  // de miles de filas (120 MB). Conservar solo las últimas 5000.
+  try {
+    db.exec('DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT 5000)');
+  } catch { /* mejor esfuerzo: la app sigue sin poda */ }
+
   // Dispositivos lógicos de ejemplo (sin ninguno, la barra de Dispositivos
   // de la UI se oculta y la función es invisible). Solo la primera vez:
   // si el usuario los borra, no vuelven solos al reiniciar.

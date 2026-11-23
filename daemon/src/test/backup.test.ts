@@ -16,7 +16,7 @@ process.env.LIBREDECK_DATA_DIR = TMP;
 
 import { initDatabase, DatabaseService } from '../db';
 import { getAssetsDir } from '../paths';
-import { buildBackup, validateBackup, restoreBackup, BACKUP_FORMAT, BACKUP_VERSION } from '../backup';
+import { buildBackup, buildProfileBackup, validateBackup, restoreBackup, BACKUP_FORMAT, BACKUP_VERSION } from '../backup';
 
 let db: DatabaseService;
 
@@ -104,6 +104,58 @@ describe('backups: formato y validación', () => {
     expect(typeof a.contentBase64).toBe('string');
     expect(Buffer.from(a.contentBase64, 'base64').toString()).toBe('hola-assets');
     expect(validateBackup(only).valid).toBe(true);
+  });
+
+  it('buildProfileBackup exporta solo el perfil, sus páginas, botones y assets referenciados', () => {
+    const profile = db.createProfile({ id: 'prof-export-only', name: 'Perfil exportable', data: { theme: 'dark' } });
+    db.createPage({
+      id: 'page-export-only',
+      profile_id: profile.id,
+      name: 'Pantalla',
+      order_idx: 0,
+      is_folder: 0,
+      data: {},
+    } as any);
+    db.createPage({
+      id: 'folder-export-only',
+      profile_id: profile.id,
+      name: 'Carpeta',
+      order_idx: 1,
+      is_folder: 1,
+      data: {},
+    } as any);
+    db.createButton({
+      id: 'button-export-only',
+      page_id: 'page-export-only',
+      position: 0,
+      data: { iconImage: '/assets/profile-export.png', label: 'Imagen' },
+    } as any);
+    const other = db.createProfile({ id: 'prof-not-exported', name: 'Otro perfil', data: {} });
+    db.createPage({
+      id: 'page-not-exported',
+      profile_id: other.id,
+      name: 'Otra pantalla',
+      order_idx: 0,
+      is_folder: 0,
+      data: {},
+    } as any);
+    db.createButton({ id: 'button-not-exported', page_id: 'page-not-exported', position: 0, data: {} } as any);
+
+    const assetsDir = getAssetsDir();
+    fs.mkdirSync(assetsDir, { recursive: true });
+    fs.writeFileSync(path.join(assetsDir, 'profile-export.png'), 'profile asset');
+    fs.writeFileSync(path.join(assetsDir, 'unrelated-export.png'), 'unrelated asset');
+    db.upsertAsset({ id: 'profile-asset', path: 'profile-export.png', hash: 'p', size: 13, created_at: Date.now() });
+    db.upsertAsset({ id: 'unrelated-asset', path: 'unrelated-export.png', hash: 'u', size: 15, created_at: Date.now() });
+
+    const backup = buildProfileBackup(db, profile.id)!;
+    expect(validateBackup(backup).valid).toBe(true);
+    expect(backup.data.profiles.map((p: any) => p.id)).toEqual([profile.id]);
+    expect(backup.data.pages.map((p: any) => p.id).sort()).toEqual(['folder-export-only', 'page-export-only']);
+    expect(backup.data.buttons.map((b: any) => b.id)).toEqual(['button-export-only']);
+    expect(backup.data.assets.map((a: any) => a.id)).toEqual(['profile-asset']);
+    expect(Buffer.from(backup.data.assets[0].contentBase64, 'base64').toString()).toBe('profile asset');
+    expect(buildProfileBackup(db, 'missing-profile')).toBeNull();
   });
 });
 

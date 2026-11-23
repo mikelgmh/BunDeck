@@ -95,6 +95,16 @@
 .bundeck .bd-tab { padding: 4px 12px; height: 32px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
 .bundeck .bd-tab:hover { color: var(--bd-ink); }
 .bundeck .bd-tab[aria-selected='true'] { background: var(--bd-sf); color: var(--bd-ink); box-shadow: 0 0 0 1px var(--bd-ln); }
+.bundeck .bd-tabwrap { position: relative; display: inline-flex; align-items: center; flex: none; border-radius: 8px; }
+.bundeck .bd-tabwrap.bd-active { background: var(--bd-sf); box-shadow: 0 0 0 1px var(--bd-ln); }
+.bundeck .bd-tabwrap.bd-active .bd-tab[aria-selected='true'] { background: transparent; box-shadow: none; }
+.bundeck .bd-tabwrap .bd-tab { padding-right: 4px; }
+.bundeck .bd-tabmenu-btn { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--bd-mu); flex: none; margin-right: 4px; }
+.bundeck .bd-tabmenu-btn:hover { background: rgba(128, 128, 128, 0.25); color: var(--bd-ink); }
+.bundeck .bd-tabwrap .bd-menu { min-width: 180px; }
+.bd-confirm-body { padding: 12px 24px 0; display: flex; flex-direction: column; gap: 8px; }
+.bd-confirm-body .bd-inp { width: 100%; padding: 8px 12px; border: 1px solid var(--bd-ln); border-radius: 8px; background: var(--bd-bg); min-height: 40px; color: var(--bd-ink); }
+.bd-confirm .bd-err { color: #e5806f; font-size: 12px; margin: 0; padding: 0; }
 
 /* — Botones — */
 .bundeck .bd-btn { padding: 4px 12px; min-height: 32px; border-radius: 8px; border: 1px solid var(--bd-ln); background: var(--bd-sf); font-weight: 500; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
@@ -316,6 +326,10 @@
 .bundeck .bd-itabs { display: flex; padding: 0 12px; border-bottom: 1px solid var(--bd-ln); gap: 4px; flex: none; }
 .bundeck .bd-itabs button { padding: 8px 12px; color: var(--bd-mu); font-weight: 500; margin-bottom: -1px; border-bottom: 2px solid transparent; min-height: 40px; display: flex; gap: 8px; align-items: center; }
 .bundeck .bd-itabs button[aria-selected='true'] { color: var(--bd-ink); border-color: var(--bd-ac); }
+/* Selector de componente (solo modo libre): tecla estándar o volumen. */
+.bundeck .bd-comp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px 0; }
+.bundeck .bd-comp .bd-lb { font-size: 12px; font-weight: 600; color: var(--bd-mu); }
+.bundeck .bd-comp .bd-hint { flex-basis: 100%; margin: 0; }
 .bundeck .bd-ibody { flex: 1; min-height: 0; overflow: auto; padding: 20px; overscroll-behavior: contain; }
 .bundeck .bd-ifoot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--bd-ln); flex: none; background: inherit; }
 .bundeck .bd-ifoot .bd-pri { flex: 1; }
@@ -398,14 +412,22 @@
 .bundeck .bd-srow b { font-weight: 500; display: block; }
 .bundeck .bd-srow p { color: var(--bd-mu); font-size: 12px; max-width: 340px; }
 .bundeck .bd-srow.bd-col { flex-direction: column; align-items: stretch; gap: 16px; }
+.bundeck .bd-settings-group { margin-top: 24px; }
+.bundeck .bd-settings-group + .bd-settings-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--bd-ln); }
+.bundeck .bd-settings-group__title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.bundeck .bd-settings-group__sub { margin: 4px 0 8px; max-width: 560px; color: var(--bd-mu); font-size: 13px; line-height: 20px; }
+.bundeck .bd-backup-warning { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; padding: 12px; border: 1px solid color-mix(in srgb, #d28a32 42%, var(--bd-ln)); border-radius: 10px; background: color-mix(in srgb, #d28a32 8%, var(--bd-bg)); color: var(--bd-ink); }
+.bundeck .bd-backup-warning > svg { flex: 0 0 auto; margin-top: 1px; color: #b7791f; }
+.bundeck .bd-backup-warning p { margin: 0; color: var(--bd-mu); font-size: 13px; line-height: 1.5; }
 .bundeck .bd-ctl { display: flex; align-items: center; gap: 12px; flex: none; }
 .bundeck .bd-ctl select.bd-inp { width: 176px; }
 .bundeck .bd-ctl input[type='number'].bd-inp { width: 104px; }
 .bundeck .bd-ctl .bd-rg input { width: 152px; flex: none; }
 /* Selector de Stream Deck: el path HID es larguísimo, no debe ensanchar el diálogo */
-.bundeck .bd-ctl-device { min-width: 0; max-width: 280px; width: 100%; flex: 1 1 auto; }
+.bundeck .bd-ctl-device { flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; max-width: 280px; width: 100%; flex: 1 1 auto; }
 .bundeck .bd-device-select { width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bundeck .bd-device-status { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bundeck .bd-device-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .bundeck .bd-pals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .bundeck .bd-pal { border: 1px solid var(--bd-ln); border-radius: 12px; padding: 8px; text-align: left; display: flex; flex-direction: column; gap: 8px; font-weight: 500; }
 .bundeck .bd-pal:hover { border-color: var(--bd-mu); }
@@ -729,6 +751,10 @@
 .bundeck .bd-gs { width: 100%; min-width: 0; min-height: calc(var(--bd-r, 3) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px))); background-color: transparent; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1.2px, transparent 1.8px); background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px)); background-position: center; border: 0; border-radius: 12px; padding: 0; }
 .bundeck .bd-gs .grid-stack-item-content { overflow: visible; }
 .bundeck .bd-gs .bd-key { width: 100%; height: 100%; min-height: 0; }
+/* Control de volumen (solo modo libre): misma tecla, pero el contenido
+   interactivo rellena toda la superficie para las container queries. */
+.bundeck .bd-gs .bd-key.vol-key { padding: 2px; cursor: default; overflow: hidden; }
+.bundeck .bd-gs .bd-key.vol-key.bd-sel { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 -2px 0 rgba(0, 0, 0, 0.35) inset, 0 8px 8px -4px rgba(0, 0, 0, 0.6), 0 0 0 2px var(--bd-p2), 0 0 0 4px var(--bd-ac); }
 .bundeck .bd-gs .grid-stack-item { min-width: 0; }
 .bundeck .bd-gs-drag-handle { position: absolute; z-index: 102; top: 10px; right: 10px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--bd-kt); background: rgba(0, 0, 0, .45); opacity: 0; cursor: grab; transition: opacity .12s; }
 .bundeck .grid-stack-item:hover .bd-gs-drag-handle, .bundeck .bd-gs-drag-handle:focus-visible { opacity: 1; }
@@ -788,3 +814,20 @@
 .bundeck .bd-dv select { border: 1px solid var(--bd-ln); background: var(--bd-sf); color: var(--bd-ink); width: 158px; flex: none; min-height: 32px; padding: 4px 8px; font-size: 12px; border-radius: 8px; }
 .bundeck .bd-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .bundeck .bd-dvs { display: inline-flex; gap: 3px; margin-left: 4px; color: var(--bd-ac); align-items: center; }
+
+/* — Diálogo de bienvenida (réplica del mockup #wlc) — */
+.bundeck dialog.bd-dlg.bd-wlc { width: min(600px, 94vw); height: fit-content; max-height: calc(100dvh - 32px); overflow: hidden; }
+.bundeck dialog.bd-dlg.bd-wlc[open] { display: flex; flex-direction: column; }
+.bundeck .bd-wlc-art, .bundeck .bd-wlc-body, .bundeck .bd-wlc-foot { flex: none; }
+.bundeck .bd-wlc-art { background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); border-bottom: 1px solid var(--bd-ln); padding: 28px 24px 20px; display: grid; place-items: center; }
+.bundeck .bd-wlc-art svg { width: 100%; max-width: 360px; height: 164px; display: block; }
+.bundeck .bd-wlc-body { padding: 24px 28px 16px; text-align: center; display: flex; flex-direction: column; gap: 10px; }
+.bundeck .bd-wlc-body h2 { font-size: 22px; line-height: 28px; letter-spacing: -0.01em; }
+.bundeck .bd-wlc-body p { color: var(--bd-mu); font-size: 14px; line-height: 21px; max-width: 460px; margin: 0 auto; }
+.bundeck .bd-wlc-pills { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.bundeck .bd-wlc-pill { font-size: 12px; background: var(--bd-bg); border: 1px solid var(--bd-ln); border-radius: 99px; padding: 4px 12px; color: var(--bd-ink); display: inline-flex; align-items: center; gap: 6px; }
+.bundeck .bd-wlc-pill svg { color: var(--bd-ac); }
+.bundeck .bd-wlc-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--bd-ln); background: var(--bd-bg); }
+.bundeck .bd-wlc-dots { display: flex; gap: 6px; align-items: center; }
+.bundeck .bd-wlc-dots button { width: 8px; height: 8px; border-radius: 99px; background: var(--bd-ln); transition: width 0.2s, background 0.2s; padding: 0; }
+.bundeck .bd-wlc-dots button[aria-selected='true'] { width: 22px; background: var(--bd-ac); }

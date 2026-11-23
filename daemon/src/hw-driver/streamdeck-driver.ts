@@ -849,7 +849,25 @@ export class StreamDeckDriver {
       const action = button.data?.actions?.find((a: any) => a.type?.includes('pc-vitals'));
       if (!action) return null;
       const { component = 'cpu', metric = 'usage' } = action.parameters || {};
+      const type: string = action.type ?? '';
       if (!metrics) return null;
+      // Acciones dedicadas nuevas (sin component/metric): mapear al endpoint.
+      if (type.endsWith('cpu-temp')) {
+        const v = metrics.cpu?.temperature;
+        return v == null || isNaN(v) ? null : `${Math.round(v * 10) / 10}°C`;
+      }
+      if (type.endsWith('gpu-usage')) {
+        const v = metrics.gpu?.usage;
+        return v == null || isNaN(v) ? null : `${Math.round(v * 10) / 10}%`;
+      }
+      if (type.endsWith('gpu-temp')) {
+        const v = metrics.gpu?.temperature;
+        return v == null || isNaN(v) ? null : `${Math.round(v * 10) / 10}°C`;
+      }
+      if (type.endsWith('fan-speed')) {
+        const v = metrics.fans?.[0]?.value;
+        return v == null || isNaN(v) ? null : `${Math.round(v)} RPM`;
+      }
       let value: number | null = null;
       let unit = '';
       if (component === 'cpu' && metric === 'usage') { value = metrics.cpu?.usage; unit = '%'; }

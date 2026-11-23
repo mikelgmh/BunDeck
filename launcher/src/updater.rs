@@ -266,9 +266,44 @@ fn write_active(root: &Path, version: &str) -> Result<(), String> {
     };
     let tmp = root.join("active.json.tmp");
     let data = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, data).map_err(|e| format!("escribir active.json: {e}"))?;
-    std::fs::rename(&tmp, active_file(root)).map_err(|e| format!("activar versión: {e}"))?;
+    std::fs::write(&tmp, data).map_err(|e| friendly_fs_error(root, "activar versión", e))?;
+    std::fs::rename(&tmp, active_file(root)).map_err(|e| friendly_fs_error(root, "activar versión", e))?;
     Ok(())
+}
+
+/// Error de E/S con pista accionable en Windows: el caso típico es
+/// `C:\Program Files\BunDeck` (instalación con Inno en `{commonpf}`),
+/// donde un launcher sin elevar no puede escribir y sale
+/// `os error 5 (Acceso denegado)`. Se traduce a instrucciones en vez
+/// de dejar el escueto "crear tmp: Acceso denegado".
+fn friendly_fs_error(root: &Path, ctx: &str, e: std::io::Error) -> String {
+    if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(5) {
+        return format!(
+            "{ctx}: sin permiso de escritura en {}. Ejecuta el launcher como administrador \
+             (clic derecho → Ejecutar como administrador) y reintenta la descarga",
+            root.display()
+        );
+    }
+    format!("{ctx}: {e}")
+}
+
+/// Comprueba que `<install>/versions` sea escribible antes de descargar.
+/// Crea el directorio si falta; si falla por permisos devuelve el mensaje
+/// accionable de `friendly_fs_error` en vez de descargar para luego fallar.
+fn ensure_install_writable(root: &Path) -> Result<(), String> {
+    if let Err(e) = std::fs::create_dir_all(versions_dir(root)) {
+        return Err(friendly_fs_error(root, "preparar carpeta de versiones", e));
+    }
+    // Prueba de escritura real (create_dir_all triunfa aunque el dir ya
+    // exista sin permiso de escritura). Se borra al instante.
+    let probe = versions_dir(root).join(".write-test.tmp");
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(e) => Err(friendly_fs_error(root, "preparar carpeta de versiones", e)),
+    }
 }
 
 fn daemon_file_name() -> String {
@@ -422,8 +457,15 @@ fn verify_signature(version: &str, target: &str, sha256: &str, sig_hex: &str) ->
     Ok(())
 }
 
-/// Descarga el bundle a `<install>/versions/.tmp/` con progreso, verifica
-/// sha256 (+ firma si hay clave) y lo extrae a `versions/<ver>/`.
+/// Descarga el bundle a un temporal de usuario (siempre escribible) con
+/// progreso, verifica sha256 (+ firma si hay clave) y lo extrae a
+/// `versions/<ver>/`.
+///
+/// Nota Windows: `<install>` suele ser `C:\Program Files\BunDeck` y exige
+/// admin para escribir. El `.zip` se baja a `%TEMP%` para no fallar con
+/// `crear tmp: Acceso denegado (os error 5)` antes siquiera de descargar;
+/// si el stage/activación tampoco tiene permiso se devuelve un error
+/// accionable (re-ejecutar como administrador) en vez del escueto os error 5.
 ///
 pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgress>>) -> Result<PathBuf, String> {
     let set = |stage: &str| {
@@ -433,9 +475,19 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
     };
     set(&format!("Descargando {}…", check.asset.bundle));
     let root = install_root();
-    let tmp_dir = versions_dir(&root).join(".tmp");
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("crear tmp: {e}"))?;
-    let tmp_file = tmp_dir.join(&check.asset.bundle);
+    // Falla rápido con mensaje claro si el destino final no es escribible,
+    // antes de descargar decenas de MB que luego no se podrían instalar.
+    ensure_install_writable(&root)?;
+
+    // Temporal de usuario, no `<install>/versions/.tmp` (protegido en
+    // Program Files). Nombre único por versión+pid para no chocar entre
+    // reintentos o procesos concurrentes.
+    let tmp_file = std::env::temp_dir().join(format!(
+        "bundeck-{}-{}-{}.zip",
+        check.latest,
+        current_target(),
+        std::process::id()
+    ));
 
     let res = agent()
         .get(&check.asset.url)
@@ -463,7 +515,10 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
     }
     {
         let mut reader = res.into_reader();
-        let mut out = std::fs::File::create(&tmp_file).map_err(|e| format!("crear tmp: {e}"))?;
+        let mut out = std::fs::File::create(&tmp_file).map_err(|e| {
+            // %TEMP% casi siempre es escribible; si falla, igual se informa claro.
+            format!("crear temporal en {}: {e}", std::env::temp_dir().display())
+        })?;
         let mut buf = [0u8; 65536];
         loop {
             let n = reader.read(&mut buf).map_err(|e| format!("leer red: {e}"))?;
@@ -471,7 +526,7 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
                 break;
             }
             out.write_all(&buf[..n])
-                .map_err(|e| format!("escribir tmp: {e}"))?;
+                .map_err(|e| format!("escribir temporal: {e}"))?;
             if let Ok(mut p) = progress.lock() {
                 p.downloaded += n as u64;
             }
@@ -498,9 +553,9 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
     set("Extrayendo archivos…");
     let dest = versions_dir(&root).join(&check.latest);
     if dest.is_dir() {
-        std::fs::remove_dir_all(&dest).map_err(|e| format!("limpiar stage previo: {e}"))?;
+        std::fs::remove_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "limpiar stage previo", e))?;
     }
-    std::fs::create_dir_all(&dest).map_err(|e| format!("crear stage: {e}"))?;
+    std::fs::create_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "crear stage", e))?;
     extract_bundle(&tmp_file, &dest)?;
     let _ = std::fs::remove_file(&tmp_file);
 
@@ -599,7 +654,8 @@ pub fn backup_database() -> Result<Option<PathBuf>, String> {
     let dest = install_root()
         .join("backups")
         .join(format!("db-{ts}"));
-    std::fs::create_dir_all(&dest).map_err(|e| format!("crear backup: {e}"))?;
+    let root = install_root();
+    std::fs::create_dir_all(&dest).map_err(|e| friendly_fs_error(&root, "crear backup", e))?;
     for suffix in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm", "db.sqlite-journal"] {
         let src = data.join(suffix);
         if src.is_file() {
@@ -910,6 +966,24 @@ mod tests {
         assert!(active_version(&dir).is_none());
         write_active(&dir, "9.9.9").unwrap();
         assert_eq!(active_version(&dir).as_deref(), Some("9.9.9"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn permission_error_suggests_admin() {
+        let root = PathBuf::from(r"C:\Program Files\BunDeck");
+        let e = std::io::Error::from_raw_os_error(5);
+        let msg = friendly_fs_error(&root, "preparar carpeta de versiones", e);
+        assert!(msg.contains("administrador"), " debe sugerir elevar: {msg}");
+        assert!(msg.contains("Program Files"), " debe mostrar la ruta: {msg}");
+    }
+
+    #[test]
+    fn install_writable_ok_in_temp() {
+        let dir = std::env::temp_dir().join(format!("bundeck-writable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ensure_install_writable(&dir).is_ok());
+        assert!(versions_dir(&dir).is_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

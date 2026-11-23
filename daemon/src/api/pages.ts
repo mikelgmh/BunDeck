@@ -1,6 +1,6 @@
 /** Rutas `/api/v1/pages*` — CRUD de páginas. */
 import { v4 as uuidv4 } from 'uuid';
-import { jsonResponse } from './http-helpers';
+import { jsonResponse, dataTooLarge, MAX_PAGE_PROFILE_DATA_BYTES } from './http-helpers';
 import type { ApiHandler } from './types';
 
 export const handlePages: ApiHandler = async (_req, { url, method, path, db, services }) => {
@@ -17,6 +17,12 @@ export const handlePages: ApiHandler = async (_req, { url, method, path, db, ser
 
     if (method === 'POST') {
       const body = await _req.json();
+      if (dataTooLarge(body.data)) {
+        return jsonResponse(
+          { error: `page data exceeds ${MAX_PAGE_PROFILE_DATA_BYTES} bytes (possible corrupted payload)` },
+          413
+        );
+      }
       const page = {
         id: uuidv4(),
         profile_id: body.profile_id,
@@ -72,6 +78,12 @@ export const handlePages: ApiHandler = async (_req, { url, method, path, db, ser
 
     if (method === 'PUT') {
       const body = await _req.json();
+      if (dataTooLarge(body.data)) {
+        return jsonResponse(
+          { error: `page data exceeds ${MAX_PAGE_PROFILE_DATA_BYTES} bytes (possible corrupted payload)` },
+          413
+        );
+      }
       const page = db.getPage(pageId);
       if (!page) {
         return jsonResponse({ error: 'Page not found' }, 404);

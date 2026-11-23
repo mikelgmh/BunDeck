@@ -335,13 +335,17 @@ export class ActionRunner {
         };
       }
 
-      // Log action start
-      this.db.addLog({
-        level: 'info',
-        message: `Action started: ${action.type}`,
-        meta: { action, context },
-        ts: startTime
-      });
+      // Log action start (se omite en polling silencioso: los botones
+      // dinámicos ejecutan cada 500 ms y cada ejecución escribía 2 filas en
+      // SQLite + broadcasts WS → 348k filas / 120 MB de spam).
+      if (!(context as any)?.quiet) {
+        this.db.addLog({
+          level: 'info',
+          message: `Action started: ${action.type}`,
+          meta: { action, context },
+          ts: startTime
+        });
+      }
 
       // Create execution promise
       const executionPromise = this.doExecuteAction(action, context);
@@ -358,13 +362,22 @@ export class ActionRunner {
       // Update last execution time
       this.lastExecution.set(actionId, startTime);
 
-      // Log result
-      this.db.addLog({
-        level: result.success ? 'info' : 'error',
-        message: `Action ${result.success ? 'completed' : 'failed'}: ${action.type}`,
-        meta: { action, context, result, duration },
-        ts: Date.now()
-      });
+      // Log result (se omite en polling silencioso; los errores siempre).
+      if (!(context as any)?.quiet) {
+        this.db.addLog({
+          level: result.success ? 'info' : 'error',
+          message: `Action ${result.success ? 'completed' : 'failed'}: ${action.type}`,
+          meta: { action, context, result, duration },
+          ts: Date.now()
+        });
+      } else if (!result.success) {
+        this.db.addLog({
+          level: 'error',
+          message: `Action failed: ${action.type}`,
+          meta: { action, context, result, duration },
+          ts: Date.now()
+        });
+      }
 
       return {
         ...result,

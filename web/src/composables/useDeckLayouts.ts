@@ -91,6 +91,59 @@ export function firstFreeSpot(widgets: DeckWidget[], cols: number, rows: number,
   return null
 }
 
+/** Plan de celda para "Añadir tecla" en modo Libre (1×1).
+ *
+ *  OJO: solo cuenta la ocupación GEOMÉTRICA (x/y/w/h). `position` es un
+ *  orden legacy que queda stale al arrastrar widgets en libre (al mover solo
+ *  se persiste x/y/w/h), así que no debe bloquear celdas: si no, un hueco
+ *  visible se salta y la tecla cae debajo de la cuadrícula (o el POST choca
+ *  con 409 por UNIQUE(page_id, position)).
+ *  `position` devuelta es la celda si su slot está libre, o max+1 si el slot
+ *  lo retiene un widget movido (siempre única → sin 409). null = sin hueco
+ *  en `rows + maxExtraRows` filas.
+ */
+export interface FreeCellPlan { x: number; y: number; position: number }
+
+export function planFreeCell(
+  buttons: Array<{ position?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>,
+  cols: number,
+  rows: number,
+  maxExtraRows = 50
+): FreeCellPlan | null {
+  const c = Math.max(1, Math.floor(Number(cols)) || 1)
+  const r = Math.max(1, Math.floor(Number(rows)) || 1)
+  const occupied = new Set<number>()
+  const taken = new Set<number>()
+  let maxPos = -1
+  for (const b of buttons ?? []) {
+    const pos = (b as any)?.position
+    if (Number.isInteger(pos)) {
+      taken.add(pos)
+      if (pos > maxPos) maxPos = pos
+    }
+    const w = Math.min(c, Math.max(1, Math.round(Number((b as any)?.w) || 1)))
+    // Sin geometría (tecla clásica): deriva de position, como el render.
+    const rawX = Number.isFinite((b as any)?.x) ? Number((b as any).x) : (Number.isInteger(pos) ? pos % c : 0)
+    const rawY = Number.isFinite((b as any)?.y) ? Number((b as any).y) : (Number.isInteger(pos) ? Math.floor(pos / c) : 0)
+    const bx = Math.min(Math.max(0, Math.floor(rawX)), c - w)
+    const by = Math.max(0, Math.floor(rawY))
+    const bh = Math.max(1, Math.round(Number((b as any)?.h) || 1))
+    for (let dy = 0; dy < bh; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        occupied.add((by + dy) * c + bx + dx)
+      }
+    }
+  }
+  for (let y = 0; y < r + maxExtraRows; y++) {
+    for (let x = 0; x < c; x++) {
+      const cell = y * c + x
+      if (occupied.has(cell)) continue
+      return { x, y, position: taken.has(cell) ? maxPos + 1 : cell }
+    }
+  }
+  return null
+}
+
 /** Migración suave: el grid fijo legacy (cols×rows, N teclas) se convierte en un layout. */
 export function migrateLegacyGrid(opts: {
   name: string

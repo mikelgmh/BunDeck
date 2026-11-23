@@ -110,8 +110,13 @@ test('crea una página, activa Libre y conserva las teclas visibles al recargar'
 
   await page.reload();
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
+  // El boot tras reload es secuencial (perfiles → página → botones → plugins):
+  // esperar a la chip activa prueba que terminó en la página del test.
+  await expect(
+    page.locator('.bd-page .bd-chip[aria-pressed="true"]').filter({ hasText: created.name }).first(),
+  ).toBeVisible({ timeout: 30000 });
   const plateAfter = page.locator('[data-cy=bd-gs-plate]');
-  await expect(plateAfter).toBeVisible({ timeout: 15000 });
+  await expect(plateAfter).toBeVisible({ timeout: 30000 });
   await expect(plateAfter.locator('.grid-stack-item')).toHaveCount(2);
   await expect(plateAfter.getByText(LABEL_A)).toBeVisible();
   await expect(plateAfter.getByText(LABEL_B)).toBeVisible();
@@ -143,14 +148,13 @@ test('permite crear y redimensionar la primera tecla desde una página vacía en
   const plate = page.locator('[data-cy=bd-gs-plate]');
   await expect(plate).toBeVisible({ timeout: 10000 });
   await expect(plate.locator('.grid-stack-item')).toHaveCount(0);
-  // Modelo B: sin rejilla de "+" por celda; CTA de estado vacío + botón Añadir.
-  await expect(page.locator('[data-cy=bd-gs-empty-state]')).toBeVisible();
-  await expect(page.locator('[data-cy=bd-gs-add]')).toBeVisible();
+  // Un solo botón "Añadir tecla" en la barra (sin CTA de estado vacío).
+  await expect(page.locator('[data-cy=bd-gs-add-tool]')).toBeVisible();
 
   const createBtnPromise = page.waitForResponse(
     (res) => res.url().includes('/api/v1/buttons') && res.request().method() === 'POST',
   );
-  await page.locator('[data-cy=bd-gs-add]').click();
+  await page.locator('[data-cy=bd-gs-add-tool]').click();
   const createBtnRes = await createBtnPromise;
   expect(createBtnRes.status()).toBe(201);
   const createdBtn = await createBtnRes.json();
@@ -187,7 +191,10 @@ test('permite crear y redimensionar la primera tecla desde una página vacía en
   const y2 = y1 + itemBox!.height + 16;
 
   const resizePromise = page.waitForResponse(
-    (res) => res.url().includes(`/api/v1/buttons/${buttonAId}`) && res.request().method() === 'PUT',
+    // Solo el PUT geométrico (x/y/w/h): el autosave del título también hace
+    // PUT /buttons/:id y resolvería la espera antes del resize real.
+    (res) => res.url().includes(`/api/v1/buttons/${buttonAId}`) && res.request().method() === 'PUT' &&
+      (res.request().postData()?.includes('"w"') ?? false),
     { timeout: 15000 },
   );
   await page.mouse.move(x1, y1);
@@ -213,6 +220,56 @@ test('permite crear y redimensionar la primera tecla desde una página vacía en
   await expect(page.locator('[data-cy=bd-gs-plate]')).toBeVisible({ timeout: 15000 });
   await expect(page.locator(`[data-gs-id="${buttonAId}"]`)).not.toHaveAttribute('gs-w', '1');
   await expect(page.locator(`[data-gs-id="${buttonAId}"]`)).not.toHaveAttribute('gs-h', '1');
+});
+
+test('Añadir usa el hueco visible aunque haya positions stale por arrastres', async ({
+  page,
+  request,
+}) => {
+  const createPagePromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/pages') && res.request().method() === 'POST',
+  );
+  await page.locator('[data-cy=bd-page-add]').click();
+  const createPageRes = await createPagePromise;
+  expect(createPageRes.status()).toBe(201);
+  const created = await createPageRes.json();
+  testPageId = created.id;
+  const pageName: string = created.name;
+
+  await expect(
+    page.locator('.bd-page .bd-chip[aria-pressed="true"]').filter({ hasText: pageName }).first(),
+  ).toBeVisible({ timeout: 10000 });
+  await page.waitForTimeout(250);
+
+  // B ocupa la celda (1,0) pero conserva position 2 (stale: simula un arrastre
+  // en Libre, que solo persiste x/y/w/h). La celda (2,0) queda visible y libre.
+  for (const [pos, x, label] of [[0, 0, 'E2E Hueco A'], [2, 1, 'E2E Hueco B']] as const) {
+    const res = await request.post(`${API}/buttons`, {
+      data: { page_id: testPageId, position: pos, x, y: 0, w: 1, h: 1, data: { label, actions: [] } },
+    });
+    expect(res.status()).toBe(201);
+  }
+
+  await collapseLeftPanel(page);
+  await page.locator('[data-cy=bd-layout-gridstack]').click();
+  const plate = page.locator('[data-cy=bd-gs-plate]');
+  await expect(plate).toBeVisible({ timeout: 10000 });
+  await expect(plate.locator('.grid-stack-item')).toHaveCount(2);
+
+  const createBtnPromise = page.waitForResponse(
+    (res) => res.url().includes('/api/v1/buttons') && res.request().method() === 'POST',
+  );
+  await page.locator('[data-cy=bd-gs-add-tool]').click();
+  const createBtnRes = await createBtnPromise;
+  expect(createBtnRes.status()).toBe(201);
+  const createdBtn = await createBtnRes.json();
+  // Va al hueco visible (2,0) y NO debajo de la cuadrícula; la position no
+  // colisiona con el slot 2 retenido por el widget movido (antes: 409 o y=3).
+  expect(createdBtn.x, 'new key lands in the visible gap').toBe(2);
+  expect(createdBtn.y, 'new key lands in the visible gap').toBe(0);
+  expect(createdBtn.position, 'position stays unique (no 409)').toBe(3);
+
+  await expect(plate.locator('.grid-stack-item')).toHaveCount(3);
 });
 
 test('permite separar dos teclas y conserva la separación al recargar', async ({
@@ -245,7 +302,7 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
     const post = page.waitForResponse(
       (res) => res.url().includes('/api/v1/buttons') && res.request().method() === 'POST',
     );
-    await page.locator('[data-cy=bd-gs-add]').click();
+    await page.locator('[data-cy=bd-gs-add-tool]').click();
     const res = await post;
     expect(res.status()).toBe(201);
     ids.push((await res.json()).id);
@@ -263,7 +320,9 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
   expect(hb, 'drag handle has a box').not.toBeNull();
 
   const putPromise = page.waitForResponse(
-    (res) => res.url().includes('/api/v1/buttons/') && res.request().method() === 'PUT',
+    // Solo el PUT geométrico del drag (ver comentario del test anterior).
+    (res) => res.url().includes('/api/v1/buttons/') && res.request().method() === 'PUT' &&
+      (res.request().postData()?.includes('"x"') ?? false),
     { timeout: 15000 },
   );
   await page.mouse.move(hb!.x + hb!.width / 2, hb!.y + hb!.height / 2);
@@ -288,7 +347,13 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
   expect(btnB?.x ?? 0, 'dragged key stays separated').toBeGreaterThan((btnA?.x ?? 0) + 1);
 
   await page.reload();
-  await expect(page.locator('[data-cy=bd-gs-plate]')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
+  await expect(
+    page.locator('.bd-page .bd-chip[aria-pressed="true"]').filter({ hasText: pageName }).first(),
+  ).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('[data-cy=bd-gs-plate]')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(`[data-gs-id="${idA}"]`)).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(`[data-gs-id="${idB}"]`)).toBeVisible({ timeout: 30000 });
   const boxA = await page.locator(`[data-gs-id="${idA}"]`).boundingBox();
   const boxB = await page.locator(`[data-gs-id="${idB}"]`).boundingBox();
   expect(boxA).not.toBeNull();
