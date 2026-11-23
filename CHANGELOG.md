@@ -1,3 +1,15 @@
+# [1.10.0](https://github.com/mikelgmh/libredeck/compare/v1.9.0...v1.10.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **launcher:** skip automatic updates in dev mode ([28e9cc3](https://github.com/mikelgmh/libredeck/commit/28e9cc34c2b612c212e3ef3405b6c2863a85ce52))
+
+
+### Features
+
+* **updater:** download updates automatically ([cab58d7](https://github.com/mikelgmh/libredeck/commit/cab58d7bee41c0ef9baae7689096a987f495fa44))
+
 # [1.9.0](https://github.com/mikelgmh/libredeck/compare/v1.8.1...v1.9.0) (2026-11-23)
 
 
