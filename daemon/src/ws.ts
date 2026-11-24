@@ -681,12 +681,46 @@ export class WebSocketManager {
     }
 
     // Repintar HW solo si un dispositivo hardware es objetivo.
-    const hwTargeted = deviceIds.some((id) =>
+    const isHwId = (id: string): boolean =>
       this.clientsOfDevice(id).some((c) => c.kind === 'hardware') ||
-        id === (streamDeckDriver as any)?.getDeviceId?.() ||
-        id.startsWith('streamdeck') || id.startsWith('hw:') || id.startsWith('hardware:'),
-    );
-    if (hwTargeted || expanded === 'all') {
+      id === (streamDeckDriver as any)?.getDeviceId?.() ||
+      id.startsWith('streamdeck') || id.startsWith('hw:') || id.startsWith('hardware:');
+    const hwTargeted = deviceIds.some((id) => isHwId(id));
+    if (hwTargeted && expanded !== 'all') {
+      // Navegación EXPLÍCITA al HW (asignación, MCP, flujos): fijar su
+      // sesión (memoria + tabla) y repintar con chequeo de compatibilidad.
+      // Solo repintar (repaintHw) dejaba la sesión en memoria obsoleta y
+      // los siguientes repintados por edición se saltaban por no coincidir.
+      // El chequeo previo es síncrono para mantener el feedback inmediato
+      // (`page.blocked`) que ya emitía repaintHw.
+      let reason: string | null = null;
+      try {
+        reason = this.hwBlockReason(page);
+      } catch {
+        reason = null;
+      }
+      if (reason) {
+        this.broadcast('page.blocked', {
+          pageId: page.id,
+          reason,
+          pageName: opts.pageName ?? (page as any)?.name ?? null,
+        }, 'pages');
+      } else {
+        try {
+          const p = (streamDeckDriver as any)?.setSessionView?.call?.(streamDeckDriver, {
+            profileId: page.profile_id,
+            pageId: page.id,
+          });
+          if (p && typeof p.catch === 'function') {
+            p.catch(() => {
+              try { this.repaintHw(page.id, opts.pageName); } catch { /* noop */ }
+            });
+          }
+        } catch {
+          try { this.repaintHw(page.id, opts.pageName); } catch { /* noop */ }
+        }
+      }
+    } else if (hwTargeted || expanded === 'all') {
       this.repaintHw(page.id, opts.pageName);
     }
 

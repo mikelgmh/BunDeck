@@ -152,6 +152,36 @@ describe('PUT assignments empuja page.navigate dirigido', () => {
     (mgr as any).handleClientMessage('c-re', { type: 'hello', payload: { deviceId: 'dev-off', kind: 'browser', name: 'iPad' } });
     expect(lastOfType(inbox, 'session.state')?.payload.pageId).toBe(pageB);
   });
+
+  it('navigatePageTo dirigido al HW fija su sesión aunque esté en otro perfil (MCP/flujos)', async () => {
+    const { streamDeckDriver } = await import('../hw-driver/streamdeck-driver');
+    const prev = streamDeckDriver.getSessionView();
+    const mgr = makeManager();
+    try {
+      const profX = db.createProfile({ id: uid('prof'), name: 'NX', data: {} }).id;
+      const profY = db.createProfile({ id: uid('prof'), name: 'NY', data: {} }).id;
+      const gx = uid('page'); db.createPage({ id: gx, profile_id: profX, name: 'GX', order_idx: 0, is_folder: 0, data: {} });
+      const gy = uid('page'); db.createPage({ id: gy, profile_id: profY, name: 'GY', order_idx: 0, is_folder: 0, data: {} });
+      await streamDeckDriver.setSessionView({ profileId: profY, pageId: gy });
+      const res = (mgr as any).navigatePageTo({
+        pageId: gx,
+        originDeviceId: null,
+        targets: { kind: 'devices', ids: [streamDeckDriver.getDeviceId()] },
+        context: { via: 'mcp' },
+      });
+      expect(res.ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(streamDeckDriver.getSessionView()).toEqual({ profileId: profX, pageId: gx });
+    } finally {
+      try {
+        if (prev.profileId && prev.pageId) await streamDeckDriver.setSessionView({ profileId: prev.profileId, pageId: prev.pageId });
+        else {
+          (streamDeckDriver as any).sessionProfileId = prev.profileId;
+          (streamDeckDriver as any).sessionPageId = prev.pageId;
+        }
+      } catch { /* mejor esfuerzo */ }
+    }
+  });
 });
 
 describe('PUT assignments: el HW sigue la asignación explícita aunque su sesión esté en otro perfil', () => {
