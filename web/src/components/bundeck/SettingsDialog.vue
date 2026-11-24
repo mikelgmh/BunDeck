@@ -177,6 +177,54 @@
       <template v-else-if="section === 'profiles'">
         <h2>{{ t('bd.secProfiles') }}</h2>
         <p class="bd-sub">{{ t('bd.profilesSub') }}</p>
+        <div class="bd-pauto-banner" data-setting="streamdeck-import">
+          <div class="bd-pauto-info">
+            <div class="bd-tile"><Import :size="20" stroke-width="1.75" aria-hidden="true" /></div>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                <b>{{ t('bd.sdImportTitle') }}</b>
+              </div>
+              <p class="bd-cap" style="margin-top: 2px">{{ t('bd.sdImportHint') }}</p>
+              <div v-if="sdProfiles.length" class="bd-sdimport-list" data-cy="bd-sdimport-list">
+                <label v-for="p in sdProfiles" :key="p.uuid" class="bd-sdimport-item">
+                  <input
+                    type="checkbox"
+                    :checked="sdChecked.includes(p.uuid)"
+                    :data-cy="`bd-sdimport-check-${p.uuid}`"
+                    @change="sdToggle(p.uuid, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span>{{ p.name }}</span>
+                </label>
+              </div>
+              <p v-if="sdStatus" class="bd-cap" data-cy="bd-sdimport-status" aria-live="polite">{{ sdStatus }}</p>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <button class="bd-btn" data-cy="bd-sdimport-detect" :disabled="sdBusy" @click="sdDetect">
+              <Search :size="16" stroke-width="1.75" aria-hidden="true" />{{ sdBusy ? t('bd.sdDetecting') : t('bd.sdDetect') }}
+            </button>
+            <button class="bd-btn" data-cy="bd-sdimport-upload" :disabled="sdBusy" @click="sdFileInput?.click()">
+              <Upload :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.sdUpload') }}
+            </button>
+            <button
+              class="bd-btn bd-pri"
+              data-cy="bd-sdimport-go"
+              :disabled="sdBusy || !sdChecked.length"
+              @click="sdImportSelected"
+            >
+              <Download :size="16" stroke-width="1.75" aria-hidden="true" />{{ sdBusy ? t('bd.sdImporting') : t('bd.sdImport') }}
+            </button>
+            <input
+              ref="sdFileInput"
+              type="file"
+              accept=".streamDeckProfile,.zip"
+              style="display: none"
+              aria-hidden="true"
+              tabindex="-1"
+              @change="sdUpload(($event.target as HTMLInputElement).files?.[0] ?? null); ($event.target as HTMLInputElement).value = ''"
+            />
+          </div>
+        </div>
         <div class="bd-pauto-banner">
           <div class="bd-pauto-info">
             <div class="bd-tile"><AppWindow :size="20" stroke-width="1.75" aria-hidden="true" /></div>
@@ -251,6 +299,20 @@
               >
                 <Download :size="16" stroke-width="1.75" aria-hidden="true" />
                 {{ exportingBackup ? t('bd.backupExporting') : t('bd.exportBackup') }}
+              </button>
+            </div>
+          </div>
+        </section>
+        <section class="bd-settings-group" aria-labelledby="bd-backup-sdimport-title" data-cy="bd-backup-sdimport">
+          <h3 id="bd-backup-sdimport-title" class="bd-settings-group__title">{{ t('bd.sdImportTitle') }}</h3>
+          <div class="bd-srow" data-setting="backup-streamdeck">
+            <div>
+              <b>{{ t('bd.sdImportTitle') }}</b>
+              <p>{{ t('bd.sdFromBackup') }}</p>
+            </div>
+            <div class="bd-ctl">
+              <button class="bd-btn" data-cy="bd-backup-goto-sdimport" @click="section = 'profiles'">
+                <Import :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.sdGoToImport') }}
               </button>
             </div>
           </div>
@@ -519,7 +581,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
 import {
-  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, ShieldAlert, Sparkles, ScrollText, Search, X
+  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, Upload, Import, ShieldAlert, Sparkles, ScrollText, Search, X
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 // Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
@@ -535,6 +597,10 @@ import {
 } from '../../composables/useBunDeckUi'
 import { useAutoProfile } from '../../composables/useAutoProfile'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
+import {
+  fetchDetectedProfiles, importDetectedProfiles, importStreamDeckFile, summarizeImportPlan,
+  type DetectedSDProfile,
+} from '../../composables/useStreamDeckImport'
 import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
 import { IDRE, RES } from '../../composables/useExpressions'
 import type { ProfileData } from '../../types/streamdeck'
@@ -570,6 +636,7 @@ interface Emits {
   (e: 'profile-created'): void
   (e: 'profile-duplicated', profileId: string): void
   (e: 'activate-profile', profileId: string): void
+  (e: 'streamdeck-imported'): void
   (e: 'notify', message: string, undo?: () => void): void
   (e: 'toggle-plugin', pluginId: string, on: boolean): void
   (e: 'remove-plugin', pluginId: string, name: string): void
@@ -644,6 +711,9 @@ const searchIndex = computed<SearchEntry[]>(() => {
     L('devices', 'longpress', t('bd.longPressTime'), t('bd.longPressTimeHint')),
     // Copias
     L('backup', 'backup-export', t('bd.backupExportTitle'), t('bd.backupExportSub')),
+    L('backup', 'backup-streamdeck', t('bd.sdImportTitle'), t('bd.sdFromBackup')),
+    // Perfiles
+    L('profiles', 'streamdeck-import', t('bd.sdImportTitle'), t('bd.sdImportHint')),
     // Apariencia (incluye el idioma movido desde General)
     L('appearance', 'language', t('bd.language'), t('bd.interfaceLang')),
     L('appearance', 'palette', t('bd.palette'), t('bd.paletteHint')),
@@ -911,6 +981,86 @@ const exportFullBackup = async () => {
     emit('notify', `${t('bd.backupExportFailed')}: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     exportingBackup.value = false
+  }
+}
+
+// Importar perfiles de Stream Deck (Elgato): detectados o .streamDeckProfile.
+// Siempre crea perfiles nuevos «(importado)»; al terminar se avisa al padre
+// para recargar la lista de perfiles.
+const sdProfiles = ref<DetectedSDProfile[]>([])
+const sdChecked = ref<string[]>([])
+const sdBusy = ref(false)
+const sdStatus = ref('')
+const sdFileInput = ref<HTMLInputElement | null>(null)
+
+const sdDescribe = (r: { counts: { native: number; bridge: number; placeholder: number; buttons: number } }) => {
+  const s = summarizeImportPlan({ counts: r.counts, warnings: [] })
+  return t('bd.sdSummary', { total: s.total, native: s.native, bridge: s.bridge, pending: s.pending })
+}
+
+const sdDetect = async () => {
+  if (sdBusy.value) return
+  sdBusy.value = true
+  sdStatus.value = ''
+  try {
+    sdProfiles.value = await fetchDetectedProfiles(apiBase())
+    sdChecked.value = sdProfiles.value.map((p) => p.uuid)
+    sdStatus.value = sdProfiles.value.length === 0
+      ? t('bd.sdImportNotFound')
+      : sdProfiles.value.length === 1
+        ? t('bd.sdImportDetectedOne')
+        : t('bd.sdImportDetected', { n: sdProfiles.value.length })
+  } catch (error) {
+    sdStatus.value = `${t('bd.sdImportFailed')}: ${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    sdBusy.value = false
+  }
+}
+
+const sdToggle = (uuid: string, on: boolean) => {
+  sdChecked.value = on
+    ? [...new Set([...sdChecked.value, uuid])]
+    : sdChecked.value.filter((u) => u !== uuid)
+}
+
+const sdImportSelected = async () => {
+  if (sdBusy.value || !sdChecked.value.length) {
+    if (!sdChecked.value.length) emit('notify', t('bd.sdNoSelection'))
+    return
+  }
+  sdBusy.value = true
+  sdStatus.value = t('bd.sdImporting')
+  try {
+    const results = await importDetectedProfiles(apiBase(), sdChecked.value)
+    for (const r of results) {
+      emit('notify', `${t('bd.sdImported', { name: r.profileName ?? r.name })} — ${sdDescribe(r)}`)
+    }
+    sdStatus.value = results.map((r) => `${t('bd.sdImported', { name: r.profileName ?? r.name })} — ${sdDescribe(r)}`).join(' · ')
+    emit('streamdeck-imported')
+  } catch (error) {
+    const msg = `${t('bd.sdImportFailed')}: ${error instanceof Error ? error.message : String(error)}`
+    sdStatus.value = msg
+    emit('notify', msg)
+  } finally {
+    sdBusy.value = false
+  }
+}
+
+const sdUpload = async (file: File | null) => {
+  if (!file || sdBusy.value) return
+  sdBusy.value = true
+  sdStatus.value = t('bd.sdImporting')
+  try {
+    const r = await importStreamDeckFile(apiBase(), file)
+    emit('notify', `${t('bd.sdImported', { name: r.profileName ?? r.name })} — ${sdDescribe(r)}`)
+    sdStatus.value = `${t('bd.sdImported', { name: r.profileName ?? r.name })} — ${sdDescribe(r)}`
+    emit('streamdeck-imported')
+  } catch (error) {
+    const msg = `${t('bd.sdImportFailed')}: ${error instanceof Error ? error.message : String(error)}`
+    sdStatus.value = msg
+    emit('notify', msg)
+  } finally {
+    sdBusy.value = false
   }
 }
 

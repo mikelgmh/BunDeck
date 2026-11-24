@@ -398,6 +398,7 @@
       @profile-created="() => handleProfileCreate()"
       @profile-duplicated="(id) => handleProfileDuplicate(id)"
       @activate-profile="(id) => handleAutoActivate(id)"
+      @streamdeck-imported="() => loadProfiles().catch(() => {})"
       @toggle-plugin="onTogglePlugin"
       @remove-plugin="(id, name) => onRemovePlugin(id, name)"
       @install-file="onInstallFile"
@@ -483,7 +484,7 @@
 
     <StreamDeckConflictDialog />
 
-    <WelcomeDialog ref="welcomeDialog" />
+    <WelcomeDialog ref="welcomeDialog" @imported="loadProfiles().catch(() => {})" />
 
     <dialog ref="confirmDialog" class="bd-confirm" :aria-label="confirmTitle">
       <h2>{{ confirmTitle }}</h2>

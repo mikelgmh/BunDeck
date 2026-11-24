@@ -23,6 +23,7 @@ import { handlePlugins } from './plugins';
 import { handleSystem } from './system';
 import { handleMcp } from './mcp';
 import { handleBackups } from './backups';
+import { handleStreamDeck } from './streamdeck';
 import { handleSessions } from './sessions';
 import { handleJobs } from './jobs';
 import { handleAdmin } from './admin';
@@ -43,6 +44,7 @@ const HANDLERS: ApiHandler[] = [
   handlePlugins, // incluye /marketplace y /plugins/* (excluye /plugins/actions del prefijo)
   handleMcp,
   handleBackups, // /api/v1/backups/* (export/validate/restore + progreso WS)
+  handleStreamDeck, // /api/v1/streamdeck/* (detect/validate/import + progreso WS)
   handleSessions, // /api/v1/sessions/* + /api/v1/navigate (vistas por dispositivo)
   handleJobs,
   handleAdmin, // /admin/shutdown + /update (501)
