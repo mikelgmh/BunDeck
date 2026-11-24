@@ -101,6 +101,10 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
   .hero-actions { align-items: flex-start; flex-direction: column; gap: 16px; }
   .download-button { width: min(100%, 340px); }
   .github-button { width: min(100%, 340px); justify-content: center; }
+  .features-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 22px 8px; }
+  .features-section h2 { font-size: clamp(40px, 10vw, 48px); letter-spacing: -2.8px; }
+  .feature-list { margin-top: 20px; }
+  .feature-row { grid-template-columns: 1fr; gap: 6px; padding: 18px 0; }
   .mascot-wrap { min-height: 320px; }
   .mascot-svg { width: min(62vmin, 300px); }
   .workflow-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 22px 24px; }
@@ -119,9 +123,18 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
   .mascot-spark { opacity: .8; transform: scale(.8); }
 }
 
-/* Single-column hero (features page): same rhythm, centered narrow copy. */
-.hero-single { grid-template-columns: 1fr; max-width: 820px; min-height: 0; padding: 64px 0 56px; }
+/* Single-column hero (features page): full container width, copy aligned to its left edge. */
+.hero-single { grid-template-columns: 1fr; min-height: 0; padding: 64px 0 56px; }
 .hero-single .hero-copy { padding-left: 0; max-width: 620px; }
+
+/* Features index: editorial numbered rows, deliberately not the home cards. */
+.features-section { width: min(1180px, calc(100% - 96px)); margin: 0 auto 54px; padding: 46px 48px 12px; border-radius: 14px; background: var(--feature-surface); color: var(--feature-foreground); }
+.features-section h2 { margin: 0; font-size: clamp(42px, 5vw, 58px); font-weight: 650; letter-spacing: -3.8px; line-height: .98; }
+.feature-list { list-style: none; margin: 30px 0 0; padding: 0; }
+.feature-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px; align-items: baseline; padding: 24px 0; border-top: 1px solid var(--feature-divider); }
+.feature-num { font-size: 13px; font-weight: 700; color: var(--feature-muted); letter-spacing: .5px; }
+.feature-row h3 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.45px; }
+.feature-row p { margin: 0; color: var(--feature-muted); font-size: 13px; line-height: 1.7; max-width: 440px; }
 
 /* Second row of cards (features grid): same divider rhythm as the first. */
 @media (min-width: 761px) {
