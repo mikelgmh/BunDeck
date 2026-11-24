@@ -7,12 +7,9 @@ WORKDIR /app
 FROM base AS release
 COPY site/package.json ./
 RUN bun install --production
-COPY site/server.ts ./
-COPY site/index.html ./
-COPY site/features.html ./
-COPY site/styles.css ./
-COPY site/app.js ./
-COPY site/assets ./assets
+# Todo site/ (index, features, assets, _redirects/_headers de Pages...):
+# copiar explícito por fichero ya nos dejó fuera features.html una vez.
+COPY site/ ./
 
 ENV NODE_ENV=production
 # Openship/openpanel inject $PORT; fallback 8080.
