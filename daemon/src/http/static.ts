@@ -43,18 +43,23 @@ export function getContentType(filePath: string): string {
 
 /**
  * Candidatos donde puede estar la UI compilada, en orden de prioridad.
- * - `daemon/web-dist` y `web-dist` junto al ejecutable/CWD: prod (build.sh
- *   copia web/dist → daemon/web-dist; el binario compilado usa CWD/execDir).
- * - `web/dist` (CWD o relativo a daemon/src): dev (`npm run build` en web/).
+ * - Prod (`bun run start`, binario compilado): `web-dist` junto al CWD o al
+ *   ejecutable, y `daemon/web-dist` (build.sh copia web/dist → daemon/web-dist).
+ * - Dev (`npm run dev` en web/): `web/dist` (build en vivo).
+ * - En DEV_MODE `web/dist` va primero: `daemon/web-dist` suele ser una copia
+ *   vieja que si no taparía al build fresco y el móvil vería una UI antigua.
  */
 export function resolveWebDistCandidates(): string[] {
-  return [
-    path.join(process.cwd(), 'web-dist'), // Desde CWD (prod)
-    path.join(path.dirname(process.execPath), 'web-dist'), // Junto al ejecutable
-    path.join(import.meta.dir, '..', 'web-dist'), // daemon/web-dist (build.sh)
-    path.join(process.cwd(), 'web', 'dist'), // Astro dev/prod (web/dist)
-    path.join(import.meta.dir, '..', '..', 'web', 'dist'), // Relativo a daemon/src
-  ];
+  const fromCwd = path.join(process.cwd(), 'web-dist');
+  const nearExec = path.join(path.dirname(process.execPath), 'web-dist');
+  // OJO: este fichero vive en daemon/src/http/, no en daemon/src.
+  const inDaemon = path.join(import.meta.dir, '..', '..', 'web-dist'); // daemon/web-dist (build.sh)
+  const cwdWeb = path.join(process.cwd(), 'web', 'dist');
+  const repoWeb = path.join(import.meta.dir, '..', '..', '..', 'web', 'dist'); // repo web/dist
+  if (process.env.DEV_MODE === 'true') {
+    return [cwdWeb, repoWeb, fromCwd, nearExec, inDaemon];
+  }
+  return [fromCwd, nearExec, inDaemon, cwdWeb, repoWeb];
 }
 
 /** Candidatos para el `index.html` de fallback SPA (mismo orden). */

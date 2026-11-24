@@ -10,7 +10,7 @@ import { describe, expect, test, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { webDistCacheHeaders, webDistStale, newestMtimeMs } from '../http/static';
+import { webDistCacheHeaders, webDistStale, newestMtimeMs, resolveWebDistCandidates } from '../http/static';
 import {
   createDaemonFetch,
   maybeRebuildWebDist,
@@ -81,6 +81,28 @@ describe('webDistCacheHeaders', () => {
 
   test('resto sin cabecera (favicon, etc.)', () => {
     expect(webDistCacheHeaders('/favicon.ico')).toEqual({});
+  });
+});
+
+describe('resolveWebDistCandidates', () => {
+  test('en DEV web/dist va antes que daemon/web-dist (la copia vieja no tapa al build fresco)', () => {
+    process.env.DEV_MODE = 'true';
+    const dev = resolveWebDistCandidates();
+    const firstWebDist = dev.findIndex((p) => p.endsWith(join('web', 'dist')));
+    const firstDaemonDist = dev.findIndex((p) => p.endsWith(join('daemon', 'web-dist')));
+    expect(firstWebDist).toBeGreaterThanOrEqual(0);
+    expect(firstDaemonDist).toBeGreaterThanOrEqual(0);
+    expect(firstWebDist).toBeLessThan(firstDaemonDist);
+  });
+
+  test('en prod daemon/web-dist mantiene prioridad', () => {
+    delete process.env.DEV_MODE;
+    const prod = resolveWebDistCandidates();
+    const firstWebDist = prod.findIndex((p) => p.endsWith(join('web', 'dist')));
+    const firstDaemonDist = prod.findIndex((p) => p.endsWith(join('daemon', 'web-dist')));
+    expect(firstWebDist).toBeGreaterThanOrEqual(0);
+    expect(firstDaemonDist).toBeGreaterThanOrEqual(0);
+    expect(firstDaemonDist).toBeLessThan(firstWebDist);
   });
 });
 
