@@ -256,6 +256,10 @@
 .bundeck .bd-menu button:hover:not(:disabled) { background: var(--bd-bg); }
 .bundeck .bd-menu button.bd-dng { color: #e5806f; }
 .bundeck .bd-menu button:disabled { opacity: 0.4; cursor: default; }
+/* Menú de perfil: vive en el header con position:fixed (fuera del scroll de
+   .bd-tabs, que recortaba el absolute). Al seguir bajo .bundeck hereda el
+   aspecto de .bd-menu y las variables del tema (oscuro / automático). */
+.bundeck .bd-profile-menu-portal { position: fixed; top: auto; left: auto; z-index: 200; min-width: 180px; }
 .bundeck .bd-cap { color: var(--bd-mu); font-size: 12px; }
 .bundeck .bd-emp { text-align: center; padding: 48px 8px; color: var(--bd-mu); }
 .bundeck .bd-emp h2 { font-size: 18px; color: var(--bd-ink); margin-bottom: 8px; }
@@ -938,6 +942,30 @@
 .bundeck .bd-kiosk-exit .bd-kiosk-exit-btn {
   border-radius: 99px;
   min-height: 44px;
+}
+/* Puntito de "pantalla siempre encendida" en el kiosco:
+   verde = Wake Lock, ámbar = fallback de vídeo, gris = apagado. */
+.bundeck .bd-kiosk-wake {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+}
+.bundeck .bd-kiosk-wake i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b7280;
+  display: block;
+}
+.bundeck .bd-kiosk-wake[data-wake='wake-lock'] i {
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+}
+.bundeck .bd-kiosk-wake[data-wake='video'] i {
+  background: #fbbf24;
+  box-shadow: 0 0 6px #fbbf24;
 }
 @media (max-width: 640px) {
   .bundeck.bd-kiosk .bd-key {

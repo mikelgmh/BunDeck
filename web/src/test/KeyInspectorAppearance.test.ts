@@ -162,4 +162,75 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     expect(wrapper.html()).toContain('bd-ibody')
     expect(wrapper.findAll('.bd-rl').length).toBe(1)
   })
+
+  it('muestra las variables que usa la tecla', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [{ id: 'a1', type: 'local.toggle-var', parameters: { name: 'micSilenciado' } }],
+    })
+    await openAppearance(wrapper)
+    expect(wrapper.find('[data-cy="bd-key-vars"]').exists()).toBe(true)
+    expect(wrapper.html()).toContain('micSilenciado')
+  })
+
+  it('el wizard crea Alternar variable en click + look', async () => {
+    const wrapper = mountInspector({ ...baseConfig, actions: [], looks: [] })
+    await openAppearance(wrapper)
+    const input = wrapper.find('[data-cy="bd-toggle-var-input"]')
+    await input.setValue('playingToggleTest')
+    await wrapper.find('[data-cy="bd-toggle-apply"]').trigger('click')
+    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    expect(emitted).toBeTruthy()
+    const actionsEmit = emitted!.find(([k]) => k === 'actions')
+    expect(actionsEmit?.[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'local.toggle-var', parameters: { name: 'playingToggleTest' } }),
+      ])
+    )
+    const looksEmit = emitted!.find(([k]) => k === 'looks')
+    expect(looksEmit?.[1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ cond: 'playingToggleTest' })])
+    )
+  })
+
+  it('N estados: añadir estado crea look `V == N`', async () => {
+    const wrapper = mountInspector({ ...baseConfig, actions: [], looks: [], stateVar: 'estadoTest' })
+    await openAppearance(wrapper)
+    expect(wrapper.find('[data-cy="bd-states"]').exists()).toBe(true)
+    await wrapper.find('[data-cy="bd-state-add"]').trigger('click')
+    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const looksEmit = emitted!.find(([k]) => k === 'looks')
+    expect(looksEmit?.[1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ cond: 'estadoTest == 1' })])
+    )
+  })
+
+  it('transición por pulsación: siguiente añade set-var al click', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [],
+      looks: [{ cond: 'estadoTest2 == 1', t: '', i: 'Pause', c: null, bg: 0 }],
+      stateVar: 'estadoTest2',
+    })
+    await openAppearance(wrapper)
+    const sel = wrapper.find('[data-cy="bd-trans-click"]')
+    expect(sel.exists()).toBe(true)
+    await sel.setValue('next')
+    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const paEmit = emitted!.find(([k]) => k === 'pressActions')
+    expect(paEmit?.[1]?.click).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'local.set-var',
+          parameters: { name: 'estadoTest2', expr: '(estadoTest2 + 1) % 2' },
+        }),
+      ])
+    )
+  })
+
+  it('la variable de estados aparece en la lista de variables', async () => {
+    const wrapper = mountInspector({ ...baseConfig, stateVar: 'estadoTest3' })
+    await openAppearance(wrapper)
+    expect(wrapper.find('[data-cy="bd-key-vars"]').html()).toContain('estadoTest3')
+  })
 })

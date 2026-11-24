@@ -1,4 +1,7 @@
 import { ref, computed } from 'vue'
+import { getTunnelToken, tunnelApiBase } from './useTunnel'
+import { getStoredLanSession } from '../utils/lanInvite'
+import { getOrCreateDeviceId } from '../utils/sessionRouting'
 
 export type BdPalette = 'auto' | 'grafito' | 'papel' | 'medianoche' | 'bosque' | 'arena'
 export type BdLabelMode = 'a' | 'h' | 'n'
@@ -10,6 +13,8 @@ interface BdToast {
 }
 
 const LS_KEY = 'bundeck:ui'
+/** Clave de ajustes en el daemon: fuente compartida host ↔ remotos. */
+export const UI_APPEARANCE_KEY = 'ui.appearance'
 
 function loadPrefs() {
   try {
@@ -35,6 +40,7 @@ export const bdLongPressMs = ref<number>(
   Number.isFinite(+prefs.longPressMs) ? Math.min(1200, Math.max(200, Math.round(+prefs.longPressMs))) : 500,
 )
 // En pantallas estrechas (<1360px) la biblioteca arranca plegada para que el grid respire.
+// OJO: los paneles son layout local de cada pantalla y NO se sincronizan.
 export const bdShowLeft = ref<boolean>(prefs.showLeft ?? wideEnough)
 export const bdShowRight = ref<boolean>(prefs.showRight ?? true)
 
@@ -43,14 +49,50 @@ const prefersLight =
     ? matchMedia('(prefers-color-scheme: light)')
     : null
 const systemLight = ref(prefersLight?.matches ?? false)
+/**
+ * `systemLight` del HOST (llega por el servidor). Cuando la paleta es `auto`,
+ * los remotos resuelven con este valor en vez del suyo propio: si el `auto`
+ * del host cayó en oscuro, el iPad se queda en oscuro aunque su sistema esté
+ * en claro. El host siempre usa su propio matchMedia.
+ */
+const hostSystemLight = ref<boolean | null>(
+  typeof prefs.hostSystemLight === 'boolean' ? prefs.hostSystemLight : null
+)
+/** Marca de la última apariencia aplicada/enviada (evita ecos y pisados). */
+let lastSyncAt = Number.isFinite(+prefs.updatedAt) ? +prefs.updatedAt : 0
+/** Mientras se aplica un cambio remoto no se re-emite al servidor. */
+let applyingRemote = false
+
+/** ¿Somos el host? localhost (o sin ventana = SSR/tests → se trata como host local). */
+export function isHostClient(): boolean {
+  try {
+    if (typeof window === 'undefined') return true
+    if (getTunnelToken()) return false
+    const h = String(window.location?.hostname ?? '').toLowerCase()
+    return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '::1'
+  } catch {
+    return true
+  }
+}
+
 prefersLight?.addEventListener('change', (e) => {
   systemLight.value = e.matches
+  // El host difunde también los cambios del SO: con `auto` el remoto debe
+  // seguir al host sin que nadie toque los ajustes.
+  if (isHostClient()) schedulePush()
 })
 
-/** Paleta resuelta: 'auto' → papel/grafito según el sistema */
-export const bdResolvedPalette = computed(() =>
-  bdPalette.value === 'auto' ? (systemLight.value ? 'papel' : 'grafito') : bdPalette.value
-)
+/**
+ * Paleta resuelta: 'auto' → papel/grafito según el sistema.
+ * En remotos con `auto`, manda el sistema del HOST (si se conoce).
+ */
+export const bdResolvedPalette = computed(() => {
+  if (bdPalette.value !== 'auto') return bdPalette.value
+  const light = !isHostClient() && hostSystemLight.value !== null
+    ? hostSystemLight.value
+    : systemLight.value
+  return light ? 'papel' : 'grafito'
+})
 
 function persist() {
   try {
@@ -65,11 +107,221 @@ function persist() {
         animations: bdAnimations.value,
         longPressMs: bdLongPressMs.value,
         showLeft: bdShowLeft.value,
-        showRight: bdShowRight.value
+        showRight: bdShowRight.value,
+        hostSystemLight: hostSystemLight.value,
+        updatedAt: lastSyncAt
       })
     )
   } catch {
     /* noop */
+  }
+  schedulePush()
+}
+
+/** Foto sincronizable (sin paneles: layout local de cada pantalla). */
+function snapshot(now: number) {
+  return {
+    palette: bdPalette.value,
+    labelMode: bdLabelMode.value,
+    keySize: bdKeySize.value,
+    radius: bdRadius.value,
+    brightness: bdBrightness.value,
+    animations: bdAnimations.value,
+    longPressMs: bdLongPressMs.value,
+    // El sistema que manda con `auto` es el del HOST. Los remotos nunca
+    // pisan este campo con el suyo propio: lo preservan.
+    systemLight: isHostClient() ? systemLight.value : hostSystemLight.value,
+    updatedAt: now,
+    updatedBy: getOrCreateDeviceId(),
+  }
+}
+
+export type SharedAppearance = ReturnType<typeof snapshot>
+
+let cachedApiPort: number | null = null
+
+async function appearanceApiBase(): Promise<string> {
+  if (typeof window !== 'undefined') {
+    try {
+      const token = getTunnelToken()
+      if (token) return tunnelApiBase(token)
+      const protocol = window.location.protocol
+      const hostname = window.location.hostname
+      if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        return 'http://localhost:3001/api/v1'
+      }
+      if (cachedApiPort) return `${protocol}//${hostname}:${cachedApiPort}/api/v1`
+      try {
+        const res = await fetch(`${protocol}//${hostname}:3001/config`)
+        if (res.ok) {
+          const cfg = await res.json().catch(() => ({}))
+          if (Number.isFinite(+cfg?.apiPort)) cachedApiPort = +cfg.apiPort
+        }
+      } catch {
+        /* puerto por defecto */
+      }
+      return `${protocol}//${hostname}:${cachedApiPort ?? 3001}/api/v1`
+    } catch {
+      /* fallback local */
+    }
+  }
+  return 'http://localhost:3001/api/v1'
+}
+
+function appearanceHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  try {
+    if (!getTunnelToken()) {
+      const sess = getStoredLanSession()
+      if (sess) h['Authorization'] = `Bearer ${sess}`
+    }
+  } catch {
+    /* sin sesión LAN */
+  }
+  return h
+}
+
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Emite la apariencia al daemon (debounced, best-effort). */
+function schedulePush() {
+  if (applyingRemote) return
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return
+  if (pushTimer) return
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void pushAppearance()
+  }, 400)
+}
+
+async function pushAppearance(): Promise<void> {
+  if (applyingRemote) return
+  try {
+    const now = Date.now()
+    // Solo el host refresca `systemLight` con su matchMedia; el remoto
+    // preserva el que ya conoce para no pisar al host con su propio SO.
+    if (isHostClient()) hostSystemLight.value = systemLight.value
+    const body = snapshot(now)
+    lastSyncAt = now
+    persistLocal()
+    const base = await appearanceApiBase()
+    await fetch(`${base}/settings`, {
+      method: 'POST',
+      headers: appearanceHeaders(),
+      body: JSON.stringify({ key: UI_APPEARANCE_KEY, value: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null)
+  } catch {
+    /* best-effort: el tema local sigue funcionando */
+  }
+}
+
+function persistLocal() {
+  try {
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify({
+        palette: bdPalette.value,
+        labelMode: bdLabelMode.value,
+        keySize: bdKeySize.value,
+        radius: bdRadius.value,
+        brightness: bdBrightness.value,
+        animations: bdAnimations.value,
+        longPressMs: bdLongPressMs.value,
+        showLeft: bdShowLeft.value,
+        showRight: bdShowRight.value,
+        hostSystemLight: hostSystemLight.value,
+        updatedAt: lastSyncAt
+      })
+    )
+  } catch {
+    /* noop */
+  }
+}
+
+function parseAppearance(raw: unknown): SharedAppearance | null {
+  try {
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!obj || typeof obj !== 'object') return null
+    return obj as SharedAppearance
+  } catch {
+    return null
+  }
+}
+
+const VALID_PALETTES: BdPalette[] = ['auto', 'grafito', 'papel', 'medianoche', 'bosque', 'arena']
+const VALID_LABELS: BdLabelMode[] = ['a', 'h', 'n']
+const num = (v: unknown, min: number, max: number, fb: number): number => {
+  const n = + (v as number)
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fb
+}
+
+/**
+ * Aplica una apariencia llegada del servidor (boot o broadcast WS).
+ * Solo avanza (updatedAt mayor): nunca pisa un cambio local más reciente.
+ */
+export function applyRemoteAppearance(raw: unknown): boolean {
+  const body = parseAppearance(raw)
+  if (!body) return false
+  const at = Number.isFinite(+body.updatedAt) ? +body.updatedAt : 0
+  if (at <= lastSyncAt) return false
+  applyingRemote = true
+  try {
+    if (VALID_PALETTES.includes(body.palette as BdPalette)) bdPalette.value = body.palette as BdPalette
+    if (VALID_LABELS.includes(body.labelMode as BdLabelMode)) bdLabelMode.value = body.labelMode as BdLabelMode
+    bdKeySize.value = num(body.keySize, 56, 128, bdKeySize.value)
+    bdRadius.value = num(body.radius, 8, 32, bdRadius.value)
+    bdBrightness.value = num(body.brightness, 0, 100, bdBrightness.value)
+    if (typeof body.animations === 'boolean') bdAnimations.value = body.animations
+    const lp = +(body.longPressMs as number)
+    if (Number.isFinite(lp)) bdLongPressMs.value = Math.min(1200, Math.max(200, Math.round(lp)))
+    if (typeof body.systemLight === 'boolean') hostSystemLight.value = body.systemLight
+    lastSyncAt = at
+    persistLocal()
+    return true
+  } finally {
+    applyingRemote = false
+  }
+}
+
+let syncStarted = false
+
+/**
+ * Sincronización inicial con el daemon: si el servidor ya tiene apariencia
+ * (la del host), se adopta; si no, se publica la local para sembrar.
+ * Llamar una vez al arrancar la app (BunDeckApp onMounted).
+ */
+export async function initAppearanceSync(): Promise<void> {
+  if (syncStarted) return
+  syncStarted = true
+  try {
+    const base = await appearanceApiBase()
+    const res = await fetch(`${base}/settings?key=${encodeURIComponent(UI_APPEARANCE_KEY)}`, {
+      headers: appearanceHeaders(),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null)
+    if (!res || !res.ok) return
+    const data = await res.json().catch(() => null)
+    const applied = applyRemoteAppearance(data?.value)
+    if (!applied && (data?.value == null || data?.value === '')) {
+      // Servidor virgen: sembrar con lo local (normalmente el host).
+      if (isHostClient()) hostSystemLight.value = systemLight.value
+      const now = Date.now()
+      // No pisar un updatedAt local más nuevo con el arranque.
+      if (now > lastSyncAt) {
+        lastSyncAt = now
+        persistLocal()
+        const base2 = await appearanceApiBase()
+        await fetch(`${base2}/settings`, {
+          method: 'POST',
+          headers: appearanceHeaders(),
+          body: JSON.stringify({ key: UI_APPEARANCE_KEY, value: JSON.stringify(snapshot(now)) }),
+          signal: AbortSignal.timeout(10000),
+        }).catch(() => null)
+      }
+    }
+  } catch {
+    /* sin daemon: tema local */
   }
 }
 

@@ -308,8 +308,11 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
         const value = db.getSetting(key);
         return jsonResponse({ key, value });
       }
-      // TODO: Return all settings (needs implementation in DB)
-      return jsonResponse({});
+      try {
+        return jsonResponse(db.getAllSettings());
+      } catch {
+        return jsonResponse({});
+      }
     }
 
     if (method === 'POST') {
@@ -321,6 +324,13 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
       }
 
       db.setSetting(key, value);
+      // Difusión en vivo para sincronizar clientes (p. ej. `ui.appearance`
+      // entre host y dispositivos remotos). Best-effort: nunca rompe el POST.
+      try {
+        services.wsManager?.broadcast('settings.changed', { key, value }, 'settings');
+      } catch {
+        /* noop */
+      }
       return jsonResponse({ key, value });
     }
   }

@@ -62,6 +62,8 @@ export interface SharedButtonData {
   }
   rules?: SharedRule[]
   looks?: SharedLook[]
+  /** Variable numérica de N estados (`variable == i`). */
+  stateVar?: string
   [k: string]: any
 }
 
@@ -214,7 +216,8 @@ export function cleanKey(k: any): SharedButtonData {
     actions: click.length ? click : actions,
     pressActions: cleanPa,
     rules: (Array.isArray(k?.rules) ? k.rules : []).slice(0, 16).map(cleanRule),
-    looks: (Array.isArray(k?.looks) ? k.looks : []).slice(0, 16).map(cleanLook)
+    looks: (Array.isArray(k?.looks) ? k.looks : []).slice(0, 16).map(cleanLook),
+    stateVar: str(k?.stateVar ?? '', 40)
   }
 }
 

@@ -81,3 +81,50 @@ export function shouldShowIosFullscreenWarning(): boolean {
     navigator.maxTouchPoints
   )
 }
+
+/** Clave de localStorage para recordar cuándo se mostró el aviso por última vez. */
+export const IOS_FULLSCREEN_WARNING_STORAGE_KEY =
+  'bundeck:ios-fullscreen-warning-last-seen'
+
+/** Clave del día local (`YYYY-MM-DD`) para limitar el aviso a 1 vez al día. */
+export function getIosWarningDayKey(date: Date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
+ * ¿Hay que mostrar el aviso hoy? Devuelve `false` si ya se mostró en el día
+ * actual (según `localStorage`). No marca nada: usa
+ * `markIosFullscreenWarningShown()` tras mostrarlo.
+ */
+export function shouldShowIosFullscreenWarningToday(
+  now: Date = new Date()
+): boolean {
+  if (!shouldShowIosFullscreenWarning()) return false
+  try {
+    if (typeof localStorage === 'undefined') return true
+    return (
+      localStorage.getItem(IOS_FULLSCREEN_WARNING_STORAGE_KEY) !==
+      getIosWarningDayKey(now)
+    )
+  } catch {
+    // localStorage no disponible (SSR, modo privado...): no bloquear el aviso.
+    return true
+  }
+}
+
+/** Recuerda que el aviso ya se mostró hoy (para no repetirlo hasta mañana). */
+export function markIosFullscreenWarningShown(
+  date: Date = new Date()
+): void {
+  try {
+    localStorage?.setItem(
+      IOS_FULLSCREEN_WARNING_STORAGE_KEY,
+      getIosWarningDayKey(date)
+    )
+  } catch {
+    // Ignorar: el aviso simplemente volverá a salir.
+  }
+}

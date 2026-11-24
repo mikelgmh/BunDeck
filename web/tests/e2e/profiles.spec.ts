@@ -102,9 +102,11 @@ test.describe('Perfiles en la barra superior', () => {
     await gotoBoard(page);
 
     const wrap = await openMenuFor(page, base);
-    await expect(wrap.locator('[data-cy=bd-profile-rename]')).toBeVisible();
-    await expect(wrap.locator('[data-cy=bd-profile-duplicate]')).toBeVisible();
-    await expect(wrap.locator('[data-cy=bd-profile-delete]')).toBeVisible();
+    // El menú vive teletransportado en <body> (fixed): localizarlo a nivel
+    // de página, no dentro del tab (dentro quedaba recortado por el scroll).
+    await expect(page.getByTestId('bd-profile-rename')).toBeVisible();
+    await expect(page.getByTestId('bd-profile-duplicate')).toBeVisible();
+    await expect(page.getByTestId('bd-profile-delete')).toBeVisible();
     // Cerrar con Escape para no dejar el menú abierto al siguiente paso.
     await page.keyboard.press('Escape');
   });

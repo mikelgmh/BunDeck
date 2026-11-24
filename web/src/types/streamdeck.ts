@@ -61,6 +61,8 @@ export interface ButtonData {
     confirm?: boolean
     rules?: KeyRule[]
     looks?: KeyLook[]
+    /** Variable numérica que gobierna los N estados (`variable == i`). */
+    stateVar?: string
 }
 
 export interface ActionConfig {

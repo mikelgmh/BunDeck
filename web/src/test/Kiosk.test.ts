@@ -188,6 +188,14 @@ describe('BunDeckApp en kiosco', () => {
       json: async () => fetchPayload(url),
       text: async () => '',
     } as any)))
+    // Sin Wake Lock real en jsdom: el fallback de vídeo del kiosco llama a
+    // play()/pause(); se simulan para no ensuciar la salida del test.
+    try {
+      HTMLMediaElement.prototype.play = (async () => {}) as never
+      HTMLMediaElement.prototype.pause = (() => {}) as never
+    } catch {
+      /* noop */
+    }
     // Sin WS real en jsdom: el connectWebSocket del composable queda en noop.
     vi.stubGlobal('WebSocket', class {
       onopen: ((...args: any[]) => void) | null = null

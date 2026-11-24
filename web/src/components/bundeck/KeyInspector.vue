@@ -411,6 +411,136 @@
           </div>
         </div>
 
+        <h3 class="bd-sh">{{ t('bd.keyVarsTitle') }}</h3>
+        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.keyVarsHint') }}</p>
+        <div v-if="keyVarNames.length" class="bd-al" data-cy="bd-key-vars">
+          <div v-for="n in keyVarNames" :key="n" class="bd-ac" style="display: flex; align-items: center; gap: 8px">
+            <span class="bd-mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis">{{ n }}</span>
+            <span v-if="keyVarState(n).exists" class="bd-cnt">{{ keyVarState(n).value }}</span>
+            <span v-else class="bd-cnt" :title="t('bd.varBadName')">{{ t('bd.keyVarMissing') }}</span>
+            <button
+              v-if="!keyVarState(n).exists"
+              class="bd-btn"
+              style="padding: 4px 10px"
+              @click="createMissingVar(n)"
+            >{{ t('bd.keyVarCreate') }}</button>
+          </div>
+        </div>
+        <p v-else class="bd-hint" data-cy="bd-key-vars-empty">{{ t('bd.keyVarsEmpty') }}</p>
+
+        <h3 class="bd-sh">{{ t('bd.toggleTitle') }}</h3>
+        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.toggleHint') }}</p>
+        <div class="bd-fld">
+          <label class="bd-sr" for="bd-toggle-var">{{ t('bd.toggleVarPh') }}</label>
+          <div style="display: flex; gap: 8px">
+            <input
+              id="bd-toggle-var"
+              type="text"
+              class="bd-inp bd-mono"
+              style="flex: 1; min-width: 0"
+              v-model="toggleVarName"
+              :placeholder="t('bd.toggleVarPh')"
+              spellcheck="false"
+              autocomplete="off"
+              data-cy="bd-toggle-var-input"
+            />
+            <button class="bd-btn bd-pri" @click="applyToggleWizard" data-cy="bd-toggle-apply">
+              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.toggleApply') }}
+            </button>
+          </div>
+          <p v-if="toggleMsg === 'ok'" class="bd-hint" style="margin: 8px 0 0">{{ t('bd.toggleOk') }}</p>
+          <p v-if="toggleMsg === 'bad'" class="bd-err" style="margin: 8px 0 0">{{ t('bd.varBadName') }}</p>
+        </div>
+
+        <h3 class="bd-sh">{{ t('bd.statesTitle') }}</h3>
+        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.statesHint') }}</p>
+        <div class="bd-fld">
+          <div style="display: flex; gap: 8px">
+            <input
+              type="text"
+              class="bd-inp bd-mono"
+              style="flex: 1; min-width: 0"
+              v-model="stateVarDraft"
+              :placeholder="t('bd.statesVarPh')"
+              spellcheck="false"
+              autocomplete="off"
+              data-cy="bd-state-var-input"
+            />
+            <button class="bd-btn" @click="applyStateVar" data-cy="bd-state-var-apply">{{ t('bd.statesUse') }}</button>
+            <button v-if="stateVar" class="bd-btn" @click="clearStateVar">{{ t('bd.statesClear') }}</button>
+          </div>
+        </div>
+        <div v-if="stateVar" data-cy="bd-states">
+          <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.statesBaseHint') }}</p>
+          <div v-for="s in stateEntries" :key="s.i" class="bd-rl">
+            <div class="bd-ah">
+              <b>{{ t('bd.stateN', { n: s.i }) }}</b>
+              <span class="bd-mono" style="font-size: 11px; opacity: 0.7">{{ stateVar }} == {{ s.i }}</span>
+              <button :aria-label="t('bd.delete')" :title="t('bd.delete')" @click="delState(s.i)">
+                <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
+              </button>
+            </div>
+            <div class="bd-rg3">
+              <input
+                type="text"
+                class="bd-inp"
+                :value="s.look.t ?? ''"
+                :placeholder="t('bd.lookTitlePh')"
+                :aria-label="t('bd.keyTitle')"
+                style="flex: 1; min-width: 120px"
+                @input="setStateVisual(s.i, { t: ($event.target as HTMLInputElement).value })"
+              />
+              <button class="bd-btn" @click="openStateIcon(s.i)">
+                <component :is="stateIcon(s.i)" :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.icon') }}…
+              </button>
+            </div>
+            <div class="bd-cols" style="margin-bottom: 12px" role="group" :aria-label="t('bd.iconColor')">
+              <button
+                v-for="(hex, j) in SWATCHES"
+                :key="hex"
+                class="bd-cs"
+                :style="{ '--bd-s': hex }"
+                :aria-pressed="s.look.c === j"
+                :aria-label="`Color ${j + 1}`"
+                @click="setStateVisual(s.i, { c: s.look.c === j ? null : j })"
+              ></button>
+            </div>
+            <div class="bd-cols" role="group" :aria-label="t('bd.keyBackground')">
+              <button
+                v-for="(hex, j) in LOOK_BGS"
+                :key="String(hex)"
+                class="bd-cs"
+                :style="{ '--bd-s': hex ?? '#2d3036' }"
+                :aria-pressed="(s.look.bg ?? 0) === j"
+                :aria-label="`${t('bd.background')} ${j + 1}`"
+                @click="setStateVisual(s.i, { bg: j })"
+              ></button>
+            </div>
+          </div>
+          <button class="bd-btn bd-wide" @click="addState" data-cy="bd-state-add">
+            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.stateAdd') }}
+          </button>
+
+          <h4 class="bd-sh">{{ t('bd.transTitle') }}</h4>
+          <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.transHint') }}</p>
+          <div v-for="k in pressKinds" :key="k" class="bd-fld">
+            <label class="bd-lb" :for="`bd-trans-${k}`">{{ t(pressKindLabel[k]) }}</label>
+            <select
+              :id="`bd-trans-${k}`"
+              class="bd-inp"
+              :value="transOf(k).key"
+              :data-cy="`bd-trans-${k}`"
+              @change="setTrans(k, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="none">{{ t('bd.transNone') }}</option>
+              <option value="next">{{ t('bd.transNext') }}</option>
+              <option value="prev">{{ t('bd.transPrev') }}</option>
+              <option v-for="i in transTargets" :key="i" :value="`go:${i}`">{{ t('bd.transGo', { n: i }) }}</option>
+              <option v-if="transOf(k).key === 'custom'" value="custom" disabled>{{ t('bd.transCustom') }}</option>
+            </select>
+          </div>
+        </div>
+
         <h3 class="bd-sh">{{ t('bd.looksTitle') }}</h3>
         <p class="bd-hint" style="margin: 0 0 12px">{{ t('bd.looksHint') }}</p>
         <div v-for="(l, li) in lookList" :key="li" class="bd-rl">
@@ -551,11 +681,12 @@ import ActionCard from './ActionCard.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import {
   normalizePressActions,
+  getActionsForKind,
   setActionsForKind,
   type PressKind,
 } from '../../composables/usePressActions'
-import { ev, fmt, intp, usedVarNames } from '../../composables/useExpressions'
-import { vars, getVar, getEnv, displayTick } from '../../composables/useVars'
+import { ev, fmt, intp, usedVarNames, IDRE, RES } from '../../composables/useExpressions'
+import { vars, getVar, getEnv, addVar, persistVars, coerceVal, displayTick } from '../../composables/useVars'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
@@ -928,6 +1059,310 @@ const lookIcon = (li: number) => {
     ? lookList.value[li].i
     : (typeof props.buttonConfig?.icon === 'string' ? props.buttonConfig.icon : '')
   return (n ? dynamicIcon(n) : null) ?? Zap
+}
+
+/** Variables que lee o escribe esta tecla (acciones + reglas + apariencia). */
+const keyVarNames = computed<string[]>(() => {
+  const names = new Set<string>()
+  const pushAction = (a: any) => {
+    if (a?.type === 'local.set-var' || a?.type === 'local.toggle-var') {
+      const n = String(a?.parameters?.name ?? '').trim()
+      if (n) names.add(n)
+    }
+  }
+  for (const a of asList(props.buttonConfig?.actions)) pushAction(a)
+  const pa = props.buttonConfig?.pressActions
+  if (pa && typeof pa === 'object') {
+    for (const k of ['click', 'double', 'triple', 'long'] as const) {
+      for (const a of asList((pa as any)[k])) pushAction(a)
+    }
+  }
+  for (const r of ruleList.value) {
+    if (r?.vn) names.add(String(r.vn))
+    for (const side of ['then', 'else'] as const) {
+      for (const a of asList((r as any)?.[side])) pushAction(a)
+    }
+  }
+  const sv = String(props.buttonConfig?.stateVar ?? '').trim()
+  if (sv) names.add(sv)
+  try {
+    const all = vars.value.map((v) => v.n)
+    for (const n of usedVarNames(JSON.stringify(props.buttonConfig ?? {}), all)) names.add(n)
+  } catch { /* noop */ }
+  return [...names].sort((a, b) => a.localeCompare(b))
+})
+const keyVarState = (n: string) => {
+  const v = getVar(n)
+  if (!v) return { exists: false as const }
+  return { exists: true as const, type: v.t, value: fmt(v.v) }
+}
+const createMissingVar = (n: string) => {
+  if (getVar(n)) return
+  if (!IDRE.test(n) || RES.includes(n.toLowerCase())) return
+  addVar(n)
+}
+
+/** Wizard: toggle play/pause = variable sí/no + Alternar en click + look. */
+const toggleVarName = ref('playing')
+const toggleMsg = ref<'' | 'ok' | 'bad'>('')
+const ensureBoolVar = (name: string): string => {
+  const v = getVar(name)
+  if (!v) {
+    const created = addVar(name)
+    // addVar genera otro nombre si el pedido no era válido; solo forzar
+    // bool cuando se creó exactamente el pedido.
+    const refV = getVar(created.n)
+    if (refV && refV.n === name) {
+      refV.t = 'bool'
+      refV.v = false
+      persistVars()
+    }
+    return created.n
+  }
+  if (v.t !== 'bool') {
+    v.t = 'bool'
+    v.v = !!v.v
+    persistVars()
+  }
+  return v.n
+}
+const uid = () => 'g' + Math.random().toString(36).slice(2, 7)
+const applyToggleWizard = () => {
+  const raw = toggleVarName.value.trim()
+  if (!IDRE.test(raw) || RES.includes(raw.toLowerCase())) {
+    toggleMsg.value = 'bad'
+    return
+  }
+  const name = ensureBoolVar(raw)
+  toggleVarName.value = name
+  const curClick = getActionsForKind(props.buttonConfig, 'click')
+  const hasToggle = curClick.some(
+    (a: any) => a?.type === 'local.toggle-var' && String(a?.parameters?.name ?? '') === name
+  )
+  if (!hasToggle) {
+    const nextClick = [...curClick, { id: uid(), type: 'local.toggle-var', parameters: { name } }]
+    const nextData = setActionsForKind(props.buttonConfig, 'click', nextClick)
+    emit('update-field', 'pressActions', nextData.pressActions)
+    emit('update-field', 'actions', nextData.actions)
+  }
+  const looks = [...lookList.value]
+  if (!looks.some((l: any) => String(l?.cond ?? '').trim() === name)) {
+    const baseIcon = String(props.buttonConfig?.icon ?? '')
+    // Si la base es Pause, el estado activado vuelve a Play; si no, a Pause.
+    const onIcon = baseIcon.toLowerCase() === 'pause' ? 'Play' : 'Pause'
+    if (!baseIcon) emit('update-field', 'icon', 'Play')
+    looks.push({ cond: name, t: '', i: onIcon, c: null, bg: 0 })
+    emit('update-field', 'looks', looks)
+  }
+  toggleMsg.value = 'ok'
+}
+
+/* N estados: una variable numérica gobierna N iconos.
+ * Estado 0 = base de la tecla; estados i>=1 = looks con cond `V == i`.
+ * Las transiciones por pulsación son acciones `local.set-var` sobre V
+ * en la lista de esa pulsación (visibles en la pestaña Acciones). */
+const stateVar = computed(() => String(props.buttonConfig?.stateVar ?? '').trim())
+const stateVarDraft = ref('')
+watch(
+  () => props.buttonConfig?.stateVar,
+  (v) => { stateVarDraft.value = String(v ?? '') },
+  { immediate: true }
+)
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const stateCondOf = (v: string, i: number) => `${v} == ${i}`
+const parseStateCond = (cond: unknown, v: string): number | null => {
+  if (!v) return null
+  const m = new RegExp(`^\\s*${escRe(v)}\\s*==\\s*(\\d+)\\s*$`).exec(String(cond ?? ''))
+  if (!m) return null
+  const i = parseInt(m[1], 10)
+  return Number.isFinite(i) ? i : null
+}
+const rawLooks = computed(() => (Array.isArray(props.buttonConfig?.looks) ? props.buttonConfig.looks : []))
+/** Estados i>=1 con su índice real en looks[] (para el selector de icono). */
+const stateEntries = computed(() => {
+  const v = stateVar.value
+  if (!v) return []
+  const out: Array<{ i: number; li: number; look: any }> = []
+  rawLooks.value.forEach((l: any, li: number) => {
+    const i = parseStateCond(l?.cond, v)
+    if (i !== null && i >= 1) out.push({ i, li, look: l })
+  })
+  return out.sort((a, b) => a.i - b.i)
+})
+const stateCount = computed(() => {
+  if (!stateVar.value) return 0
+  let m = 0
+  for (const s of stateEntries.value) m = Math.max(m, s.i)
+  return stateEntries.value.length ? m + 1 : 1
+})
+const transTargets = computed(() => Array.from({ length: stateCount.value }, (_, i) => i))
+const ensureNumVar = (name: string): string => {
+  const v = getVar(name)
+  if (!v) {
+    const created = addVar(name)
+    const refV = getVar(created.n)
+    if (refV && refV.n === name) {
+      refV.t = 'num'
+      refV.v = 0
+      persistVars()
+    }
+    return created.n
+  }
+  if (v.t !== 'num') {
+    v.t = 'num'
+    v.v = coerceVal('num', v.v)
+    persistVars()
+  }
+  return v.n
+}
+const applyStateVar = () => {
+  const raw = stateVarDraft.value.trim()
+  if (!IDRE.test(raw) || RES.includes(raw.toLowerCase())) return
+  const name = ensureNumVar(raw)
+  stateVarDraft.value = name
+  if (name !== stateVar.value) emit('update-field', 'stateVar', name)
+}
+/** Quita la variable de estados; los looks gestionados pasan a ser
+ *  condiciones normales (el usuario puede borrarlos). */
+const clearStateVar = () => {
+  emit('update-field', 'stateVar', '')
+}
+/** Emite listas por pulsación de una sola vez (un solo update-field por
+ *  clave: varias llamadas seguidas con la misma base rancia se pisarían). */
+const emitKindLists = (lists: Partial<Record<PressKind, any[]>>) => {
+  let draft: any = props.buttonConfig
+  for (const k of pressKinds) {
+    if (lists[k] !== undefined) draft = setActionsForKind(draft, k, lists[k]!)
+  }
+  emit('update-field', 'pressActions', draft.pressActions)
+  if (lists.click !== undefined) emit('update-field', 'actions', draft.actions)
+}
+const setKindList = (kind: PressKind, list: any[]) => emitKindLists({ [kind]: list } as Partial<Record<PressKind, any[]>>)
+const stateIcon = (i: number) => {
+  const s = stateEntries.value.find((e) => e.i === i)
+  const n = typeof s?.look?.i === 'string' && s.look.i
+    ? s.look.i
+    : (typeof props.buttonConfig?.icon === 'string' ? props.buttonConfig.icon : '')
+  return (n ? dynamicIcon(n) : null) ?? Zap
+}
+const openStateIcon = (i: number) => {
+  const s = stateEntries.value.find((e) => e.i === i)
+  if (s && s.li >= 0) emit('open-look-icon', s.li)
+}
+const setStateVisual = (i: number, patch: Record<string, any>) => {
+  const v = stateVar.value
+  if (!v) return
+  const next = [...rawLooks.value]
+  const li = next.findIndex((l: any) => parseStateCond(l?.cond, v) === i)
+  if (li < 0) return
+  const { cond, ...safe } = patch
+  void cond
+  next[li] = { ...next[li], ...safe }
+  emit('update-field', 'looks', next)
+}
+/** Reescribe las transiciones afectadas al cambiar N (añadir/borrar).
+ *  next/prev se regeneran con el nuevo módulo; los "ir a" fuera de rango
+ *  o al estado borrado se eliminan; el resto se renumera. */
+const fixTransitions = (newN: number, deleted?: number) => {
+  const v = stateVar.value
+  if (!v) return
+  const lists: Partial<Record<PressKind, any[]>> = {}
+  let touched = false
+  for (const k of pressKinds) {
+    const cur = getActionsForKind(props.buttonConfig, k)
+    let changed = false
+    const next = cur.map((a: any) => {
+      if (a?.type !== 'local.set-var' || String(a?.parameters?.name ?? '') !== v) return a
+      const expr = String(a?.parameters?.expr ?? '').trim()
+      const norm = expr.replace(/\s+/g, '')
+      if (/^\d+$/.test(expr)) {
+        const j = parseInt(expr, 10)
+        if (deleted !== undefined && j === deleted) { changed = true; return null }
+        if (deleted !== undefined && j > deleted) {
+          changed = true
+          return { ...a, parameters: { ...(a.parameters ?? {}), expr: String(j - 1) } }
+        }
+        if (j >= newN) { changed = true; return null }
+        return a
+      }
+      if (norm === `(${v}+1)%${stateCount.value}` || norm === `(${v}+${stateCount.value}-1)%${stateCount.value}`) {
+        const isNext = norm === `(${v}+1)%${stateCount.value}`
+        changed = true
+        const nexpr = isNext ? `(${v} + 1) % ${newN}` : `(${v} + ${newN} - 1) % ${newN}`
+        return { ...a, parameters: { ...(a.parameters ?? {}), expr: nexpr } }
+      }
+      return a
+    }).filter((a: any) => a !== null)
+    if (changed) {
+      lists[k] = next
+      touched = true
+    }
+  }
+  if (touched) emitKindLists(lists)
+}
+const addState = () => {
+  const v = stateVar.value
+  if (!v) return
+  const n = stateEntries.value.reduce((m, s) => Math.max(m, s.i), 0) + 1
+  const looks = [...rawLooks.value]
+  looks.push({ cond: stateCondOf(v, n), t: '', i: '', c: null, bg: 0 })
+  emit('update-field', 'looks', looks)
+  fixTransitions(n + 1)
+}
+const delState = (i: number) => {
+  const v = stateVar.value
+  if (!v || i < 1) return
+  const kept = rawLooks.value.filter((l: any) => parseStateCond(l?.cond, v) !== i)
+  for (const l of kept) {
+    if (l && typeof l === 'object') {
+      const j = parseStateCond(l?.cond, v)
+      if (j !== null && j > i) l.cond = stateCondOf(v, j - 1)
+    }
+  }
+  emit('update-field', 'looks', kept)
+  const newMax = kept.reduce((m: number, l: any) => {
+    const j = parseStateCond(l?.cond, v)
+    return j !== null && j > m ? j : m
+  }, 0)
+  fixTransitions(Math.max(1, newMax + 1), i)
+}
+/** Clasifica la transición de una pulsación: none/next/prev/go:i/custom. */
+const transOf = (kind: PressKind): { key: string } => {
+  const v = stateVar.value
+  if (!v) return { key: 'none' }
+  const list = getActionsForKind(props.buttonConfig, kind)
+  const found = [...list].reverse().find(
+    (a: any) => a?.type === 'local.set-var' && String(a?.parameters?.name ?? '') === v
+  )
+  if (!found) return { key: 'none' }
+  const expr = String(found?.parameters?.expr ?? '').trim()
+  const n = Math.max(stateCount.value, 1)
+  if (/^\d+$/.test(expr)) {
+    const i = parseInt(expr, 10)
+    return i >= 0 && i < n ? { key: `go:${i}` } : { key: 'custom' }
+  }
+  const norm = expr.replace(/\s+/g, '')
+  if (norm === `(${v}+1)%${n}`) return { key: 'next' }
+  if (norm === `(${v}+${n}-1)%${n}`) return { key: 'prev' }
+  return { key: 'custom' }
+}
+const setTrans = (kind: PressKind, sel: string) => {
+  const v = stateVar.value
+  if (!v || sel === 'custom') return
+  const n = Math.max(stateCount.value, 1)
+  const cur = getActionsForKind(props.buttonConfig, kind)
+  const next = cur.filter(
+    (a: any) => !(a?.type === 'local.set-var' && String(a?.parameters?.name ?? '') === v)
+  )
+  if (sel !== 'none') {
+    let expr = ''
+    if (sel === 'next') expr = `(${v} + 1) % ${n}`
+    else if (sel === 'prev') expr = `(${v} + ${n} - 1) % ${n}`
+    else if (sel.startsWith('go:') && /^\d+$/.test(sel.slice(3))) expr = sel.slice(3)
+    else return
+    next.push({ id: uid(), type: 'local.set-var', parameters: { name: v, expr } })
+  }
+  setKindList(kind, next)
 }
 
 const onDrop = (event: DragEvent) => {

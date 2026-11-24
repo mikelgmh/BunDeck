@@ -18,7 +18,10 @@
 import { ref, onMounted } from 'vue'
 import { TriangleAlert } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
-import { shouldShowIosFullscreenWarning } from '../../composables/useIosBrowser'
+import {
+  markIosFullscreenWarningShown,
+  shouldShowIosFullscreenWarningToday
+} from '../../composables/useIosBrowser'
 
 const { t } = useI18nStore()
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -32,7 +35,10 @@ onMounted(() => {
       close()
     }
   })
-  if (shouldShowIosFullscreenWarning()) dialog.value?.showModal()
+  if (shouldShowIosFullscreenWarningToday()) {
+    markIosFullscreenWarningShown()
+    dialog.value?.showModal()
+  }
 })
 
 defineExpose({ close })
