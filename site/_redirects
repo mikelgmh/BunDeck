@@ -1,2 +1,0 @@
-# Cloudflare Pages: clean URL for the features page (same file, no redirect).
-/features /features.html 200
