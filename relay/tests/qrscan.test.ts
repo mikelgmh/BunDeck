@@ -102,7 +102,7 @@ describe('qrscan parser (classifyQrText)', () => {
 });
 
 describe('landing: sección escáner QR', () => {
-  test('ES contiene sección, vídeo+canvas, pegado manual y nota jsqr', () => {
+  test('ES contiene sección, vídeo+canvas, pegado manual y fallback jsqr auto-hospedado', () => {
     const html = renderLanding(landingData('es'));
     expect(html).toContain('Escanear un QR de BunDeck');
     expect(html).toContain('id="qrscan-open"');
@@ -115,9 +115,10 @@ describe('landing: sección escáner QR', () => {
     expect(html).toContain('id="qrscan-openurl"');
     expect(html).toContain('BarcodeDetector');
     expect(html).toContain('facingMode');
-    // Documenta por qué no se incrusta jsqr.
-    expect(html).toContain('jsqr');
-    expect(html).toContain('no-store');
+    // Fallback auto-hospedado bajo demanda (no incrusta el decoder en la landing).
+    expect(html).toContain('vendor/jsqr-1.4.0.js');
+    expect(html).toContain('window.jsQR');
+    expect(html).toContain('Cargando detector QR compatible');
   });
 
   test('EN contiene la misma estructura con sus cadenas', () => {
@@ -127,7 +128,8 @@ describe('landing: sección escáner QR', () => {
     expect(html).toContain('id="qrscan-video"');
     expect(html).toContain('id="qrscan-paste"');
     expect(html).toContain('BarcodeDetector');
-    expect(html).toContain('jsqr');
+    expect(html).toContain('vendor/jsqr-1.4.0.js');
+    expect(html).toContain('window.jsQR');
   });
 
   test('JS inline sin eval/new Function/handlers inline (CSP-compatible)', () => {
@@ -196,5 +198,21 @@ describe('landing servida: no-store intacto con la nueva sección', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
     const html = await res.text();
     expect(html).toContain('qrscan-video');
+  });
+
+  test('GET /vendor/jsqr-1.4.0.js sirve el decoder con cache immutable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-vendor-test-'));
+    const store = new DeviceStore(dir);
+    stores.push(store);
+    const relay = new RelayServer({ store, pairing: new PairingStore(), version: '0.1.0' });
+    relay.listen(0, '127.0.0.1');
+    servers.push(relay);
+    const res = await fetch(`http://127.0.0.1:${relay.port}/vendor/jsqr-1.4.0.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/javascript');
+    expect(res.headers.get('cache-control')).toContain('immutable');
+    const js = await res.text();
+    expect(js.length).toBeGreaterThan(100_000);
+    expect(js).toContain('jsQR');
   });
 });

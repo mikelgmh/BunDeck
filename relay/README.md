@@ -92,8 +92,10 @@ por mensaje). Límite: **64 KB** por mensaje; **60 msg/min por IP**.
 
 `GET /` es una página pública sin auth: título, badge (online/versión/
 conectados), qué es el relay, pasos de conexión, botón de copiar URL y
-enlace a docs. Sin dependencias (CSS/JS inline), ES+EN según
-`Accept-Language` (default ES).
+enlace a docs. Sin dependencias salvo el decoder QR bajo demanda
+(`GET /vendor/jsqr-1.4.0.js`, jsQR 1.4.0 UMD con cache immutable, solo se
+descarga si el navegador no tiene BarcodeDetector nativo como Safari),
+ES+EN según `Accept-Language` (default ES).
 
 ```bash
 # La URL visible será wss://bundeck.mikelgranero.com

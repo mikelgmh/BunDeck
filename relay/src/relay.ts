@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { DeviceStore } from './store';
 import type { PairingStore } from './pairing';
 import { pickLang, publicHostname, relayWsUrl, renderLanding } from './landing';
+import JSQR_VENDOR_JS from './vendor/jsqr-1.4.0.js' with { type: 'text' };
 import { RateLimiter } from './ratelimit';
 import {
   TunnelState,
@@ -276,6 +277,19 @@ export class RelayServer {
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
         });
       }
+    }
+
+    if (url.pathname === '/vendor/jsqr-1.4.0.js' && req.method === 'GET') {
+      // Detector QR compatible (jsQR 1.4.0 UMD, MIT) para navegadores sin
+      // BarcodeDetector nativo (p. ej. Safari en iPad). La landing lo carga
+      // bajo demanda con <script>; cache immutable: se versiona en la URL.
+      return new Response(JSQR_VENDOR_JS, {
+        status: 200,
+        headers: {
+          'content-type': 'text/javascript; charset=utf-8',
+          'cache-control': 'public, max-age=31536000, immutable',
+        },
+      });
     }
 
     if (url.pathname === '/health' && req.method === 'GET') {

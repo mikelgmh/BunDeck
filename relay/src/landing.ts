@@ -83,7 +83,8 @@ const STR = {
     scanClose: 'Detener cámara',
     scanAgain: 'Escanear otro',
     scanNoCam: 'Sin cámara o permiso denegado. Pega el contenido del QR abajo.',
-    scanNoNative: 'Este navegador no detecta QR por sí solo: pega el contenido del QR abajo.',
+    scanNoNative: 'No se pudo cargar el detector QR en este navegador: pega el contenido del QR abajo.',
+    scanLoadingFallback: 'Cargando detector QR compatible…',
     scanPastePh: '…o pega aquí el texto del QR',
     scanValidate: 'Validar',
     scanCopy: 'Copiar',
@@ -97,7 +98,7 @@ const STR = {
     scanHttpHint: 'Enlace web incluido en el QR.',
     scanOtherHint: 'Texto sin formato reconocido: cópialo donde lo necesites.',
     scanExpired: 'Aviso: este QR ya caducó; genera uno nuevo.',
-    scanJsqrNote: 'Sin dependencias: la cámara usa BarcodeDetector nativo. jsqr no se incrusta porque pesaría ~60 KB en cada visita (esta página se sirve con no-store); si tu navegador no lo soporta, usa el pegado manual.',
+    scanJsqrNote: 'La cámara usa BarcodeDetector nativo cuando existe (Chrome/Edge). En otros navegadores como Safari se carga bajo demanda un detector compatible auto-hospedado (/vendor, cacheado); si falla la carga, usa el pegado manual.',
     scanKindPairQr: 'QR de emparejamiento',
     scanKindPairCode: 'Código de emparejamiento',
     scanKindRelayUrl: 'URL de relay',
@@ -138,7 +139,8 @@ const STR = {
     scanClose: 'Stop camera',
     scanAgain: 'Scan another',
     scanNoCam: 'No camera or permission denied. Paste the QR content below.',
-    scanNoNative: 'This browser does not detect QR codes by itself: paste the QR content below.',
+    scanNoNative: 'Could not load the QR detector in this browser: paste the QR content below.',
+    scanLoadingFallback: 'Loading compatible QR detector…',
     scanPastePh: '…or paste the QR text here',
     scanValidate: 'Validate',
     scanCopy: 'Copy',
@@ -152,7 +154,7 @@ const STR = {
     scanHttpHint: 'Web link contained in the QR.',
     scanOtherHint: 'Unrecognized plain text: copy it wherever you need it.',
     scanExpired: 'Warning: this QR already expired; generate a new one.',
-    scanJsqrNote: 'No dependencies: the camera uses the native BarcodeDetector. jsqr is not embedded because it would add ~60 KB to every visit (this page is served with no-store); if your browser lacks support, use manual paste.',
+    scanJsqrNote: 'The camera uses the native BarcodeDetector when available (Chrome/Edge). On other browsers like Safari a self-hosted compatible detector (/vendor, cached) loads on demand; if loading fails, use manual paste.',
     scanKindPairQr: 'Pairing QR',
     scanKindPairCode: 'Pairing code',
     scanKindRelayUrl: 'Relay URL',
@@ -173,6 +175,8 @@ export function renderLanding(d: LandingData): string {
     close: t.scanClose,
     again: t.scanAgain,
     noCam: t.scanNoCam,
+    noNative: t.scanNoNative,
+    loading: t.scanLoadingFallback,
     copy: t.scanCopy,
     copied: t.copied,
     kinds: {
@@ -289,9 +293,11 @@ a{color:#4ade80}
 /* Escáner QR del lado cliente (misma estrategia que RemoteQrScan.vue de BunDeck):
    getUserMedia con facingMode environment + BarcodeDetector nativo (solo si
    declara qr_code) con loop cada 400ms sobre frames de <video> vía <canvas>,
-   más pegado manual como fallback. Sin dependencias npm: jsqr NO se incrusta
-   porque añadiría ~60 KB a cada visita y esta página se sirve con
-   cache-control: no-store; nativo + pegado cubren los navegadores modernos.
+   más pegado manual como fallback. Sin nativo (p. ej. Safari en iPad/iPhone,
+   que no expone BarcodeDetector) se carga bajo demanda el detector compatible
+   auto-hospedado vendor/jsqr-1.4.0.js (jsQR 1.4.0 UMD, MIT; cache immutable,
+   solo se descarga si hace falta: la landing sigue siendo ligera con
+   cache-control: no-store). Si la carga falla, se muestra aviso + pegado manual.
    Sin eval ni handlers inline (compatible con CSP estricta). */
 (function(){
 var openBtn=document.getElementById('qrscan-open'),panel=document.getElementById('qrscan-panel'),
@@ -304,10 +310,24 @@ codeEl=document.getElementById('qrscan-code'),hintEl=document.getElementById('qr
 copyBtn=document.getElementById('qrscan-copy'),openUrl=document.getElementById('qrscan-openurl');
 if(!openBtn||!panel||!video||!validateBtn||!copyBtn) return;
 var L=${L};
-var stream=null,timer=null,stopped=true,detector=null;
+var stream=null,timer=null,stopped=true,detector=null,jsqrFn=null,jsqrPromise=null;
 function show(el,on){ if(el) el.hidden=!on; }
 function setErr(m){ if(!errEl) return; if(m){ errEl.textContent=m; show(errEl,true); } else show(errEl,false); }
 function trim(s){ return String(s==null?'':s).replace(/^\\s+|\\s+$/g,''); }
+/* Carga bajo demanda del detector compatible (solo sin BarcodeDetector nativo).
+   Relativa para funcionar tras reverse proxy; cache immutable en el servidor. */
+function loadJsqr(){
+  if(window.jsQR) return Promise.resolve(window.jsQR);
+  if(jsqrPromise) return jsqrPromise;
+  jsqrPromise=new Promise(function(res,rej){
+    var s=document.createElement('script');
+    s.src='vendor/jsqr-1.4.0.js'; s.async=true;
+    s.addEventListener('load',function(){ if(window.jsQR) res(window.jsQR); else rej(new Error('no jsQR')); });
+    s.addEventListener('error',function(){ rej(new Error('load')); });
+    document.head.appendChild(s);
+  });
+  return jsqrPromise;
+}
 /* Espejo de classifyQrText (relay/src/qrscan.ts): misma clasificación sin dependencias. */
 function classify(s){
   s=trim(s);
@@ -361,21 +381,28 @@ function onDecoded(text){ stopAll(); openBtn.textContent=L.again; render(classif
 function loop(){ if(stopped) return; timer=setTimeout(function(){ tick(); },400); }
 async function tick(){
   if(stopped) return;
-  if(detector){
-    try{
-      var w=video.videoWidth,h=video.videoHeight;
-      if(w&&h&&canvas){
-        canvas.width=w; canvas.height=h;
-        var ctx=canvas.getContext('2d');
-        if(ctx){
-          ctx.drawImage(video,0,0,w,h);
+  try{
+    var w=video.videoWidth,h=video.videoHeight;
+    if(w&&h&&canvas){
+      // 640px basta para QR y alivia CPU en móviles (iPad).
+      var MAX=640,sw=w,sh=h;
+      if(w>MAX||h>MAX){ var k=Math.min(MAX/w,MAX/h); sw=Math.max(1,Math.round(w*k)); sh=Math.max(1,Math.round(h*k)); }
+      if(canvas.width!==sw||canvas.height!==sh){ canvas.width=sw; canvas.height=sh; }
+      var ctx=canvas.getContext('2d');
+      if(ctx){
+        ctx.drawImage(video,0,0,sw,sh);
+        if(detector){
           var found=await detector.detect(canvas);
           var raw=found&&found[0]?found[0].rawValue:'';
           if(raw){ onDecoded(String(raw)); return; }
+        } else if(jsqrFn){
+          var out=null;
+          try{ out=jsqrFn(ctx.getImageData(0,0,sw,sh).data,sw,sh); }catch(je){}
+          if(out&&out.data){ onDecoded(String(out.data)); return; }
         }
       }
-    }catch(e){}
-  }
+    }
+  }catch(e){}
   loop();
 }
 async function start(){
@@ -401,7 +428,18 @@ async function start(){
     }
   }catch(e4){ det=null; }
   detector=det;
-  if(!det) show(nonative,true);
+  if(det){ show(nonative,false); loop(); return; }
+  // Sin nativo (p. ej. Safari en iPad): detector compatible auto-hospedado bajo demanda.
+  if(nonative){ nonative.textContent=L.loading; show(nonative,true); }
+  try{
+    var fn=await loadJsqr();
+    if(stopped) return;
+    jsqrFn=fn;
+    show(nonative,false);
+  }catch(le){
+    if(stopped) return;
+    if(nonative){ nonative.textContent=L.noNative; show(nonative,true); }
+  }
   loop();
 }
 openBtn.addEventListener('click',function(){
