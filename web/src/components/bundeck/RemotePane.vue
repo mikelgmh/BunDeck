@@ -29,6 +29,7 @@
             </div>
           </dl>
           <p class="bd-hint">{{ t('bd.remoteUiApprovalWarning') }}</p>
+          <p class="bd-hint" data-cy="remote-ui-transport-notice">{{ t('bd.remoteUiTransportNotice') }}</p>
           <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
         </div>
         <div class="bd-remote-approval__actions">
@@ -192,6 +193,14 @@
                 <span class="bd-mono">{{ s.ip }}</span>
                 <span>{{ t('bd.remoteUiSessionCreated', { date: formatDateTime(s.createdAt) }) }}</span>
                 <span>{{ t('bd.remoteUiSessionExpires', { date: formatDateTime(s.exp) }) }}</span>
+              </p>
+              <p class="bd-remote-meta">
+                <span
+                  class="bd-tag-def"
+                  :data-transport="transportOf(s.tokenPrefix)"
+                  :title="t('bd.remoteUiTransportTitle')"
+                  data-cy="remote-ui-session-transport"
+                >{{ transportLabel(transportOf(s.tokenPrefix)) }}</span>
               </p>
               <span v-if="s.revoked" class="bd-tag-def">{{ t('bd.remoteUiRevoked') }}</span>
             </div>
@@ -569,6 +578,12 @@ const approvalDialog = ref<HTMLDialogElement | null>(null)
 const seenApprovalRequests = new Set<string>()
 const approvalQueue = ref<string[]>([])
 const activeApprovalId = ref('')
+// Transporte real por sesión (prefijo → 'p2p' | 'relay'). Por defecto relay:
+// todo el tráfico pasa por él hasta que el DataChannel P2P avisa.
+const sessionTransports = ref<Record<string, 'p2p' | 'relay'>>({})
+const transportOf = (prefix: string): 'p2p' | 'relay' => sessionTransports.value[prefix] ?? 'relay'
+const transportLabel = (tr: 'p2p' | 'relay'): string =>
+  tr === 'p2p' ? t('bd.remoteUiTransportP2p') : t('bd.remoteUiTransportRelay')
 const activeApproval = computed<UiPendingItem | null>(() =>
   uiPending.value.find((item) => item.reqId === activeApprovalId.value) ?? null
 )
@@ -1029,7 +1044,20 @@ onMounted(() => {
     if (typeof onRemoteEvent === 'function') {
       uiUnsub = onRemoteEvent((msg) => {
         if (!uiEnabled.value || uiUnsupported.value) return
-        if (typeof msg?.type === 'string' && msg.type.startsWith('remote.')) {
+        const type = typeof msg?.type === 'string' ? msg.type : ''
+        const payload = (msg as { payload?: { tokenPrefix?: unknown } })?.payload
+        const prefix = typeof payload?.tokenPrefix === 'string' ? payload.tokenPrefix : ''
+        if (type === 'rtc-connected' || type === 'remote.rtc-connected') {
+          if (prefix) sessionTransports.value = { ...sessionTransports.value, [prefix]: 'p2p' }
+          loadUiSessions().catch(() => {})
+          return
+        }
+        if (type === 'rtc-closed' || type === 'remote.rtc-closed') {
+          if (prefix) sessionTransports.value = { ...sessionTransports.value, [prefix]: 'relay' }
+          loadUiSessions().catch(() => {})
+          return
+        }
+        if (type.startsWith('remote.')) {
           loadUiPending().catch(() => {})
           loadUiSessions().catch(() => {})
         }

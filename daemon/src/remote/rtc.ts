@@ -162,6 +162,17 @@ export class RtcManager {
     if (!entry) return;
     this.peers.delete(bridgeId);
     entry.closed = true;
+    if (entry.sessionToken) {
+      try {
+        (this.deps.wsManager as unknown as { broadcast?: (e: string, p: unknown, t?: string) => void })?.broadcast?.(
+          'rtc-closed',
+          { tokenPrefix: entry.sessionToken.slice(0, 8), bridgeId, ts: Date.now() },
+          'remote',
+        );
+      } catch {
+        /* broadcast opcional */
+      }
+    }
     if (entry.rtcClientId) {
       try {
         this.deps.wsManager?.removeTunnelClient?.(entry.rtcClientId);
@@ -249,6 +260,16 @@ export class RtcManager {
       }
       entry.sessionToken = token;
       this.sendDc(entry, { t: 'welcome', bridgeId: entry.bridgeId });
+      // Avisa al host (panel remoto): esta sesión ya habla P2P.
+      try {
+        (this.deps.wsManager as unknown as { broadcast?: (e: string, p: unknown, t?: string) => void })?.broadcast?.(
+          'rtc-connected',
+          { tokenPrefix: token.slice(0, 8), bridgeId: entry.bridgeId, ts: Date.now() },
+          'remote',
+        );
+      } catch {
+        /* broadcast opcional */
+      }
       return;
     }
     if (!entry.sessionToken) {

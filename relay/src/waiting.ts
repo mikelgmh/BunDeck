@@ -184,7 +184,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     expiredBody:
       'El enlace ya no está disponible: puede haber caducado, haberse usado o haberse revocado. Pide un QR nuevo al anfitrión.',
     privacy:
-      'El equipo anfitrión debe aprobar tu acceso. El operador del relay puede ver el tráfico (protegido con TLS entre tu navegador y el relay).',
+      'El equipo anfitrión debe aprobar tu acceso. Tu navegador intentará primero una conexión directa P2P (WebRTC) cifrada; si la red no lo permite usará el relay (el operador del relay puede ver el tráfico, protegido con TLS entre tu navegador y el relay).',
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
   },
   en: {
@@ -205,7 +205,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     expiredTitle: 'Expired or invalid link',
     expiredBody: 'This link is no longer available. It may have expired, been used, or been revoked. Ask the host for a new QR code.',
     privacy:
-      'The host machine must approve your access. The relay operator can see the traffic (protected with TLS between your browser and the relay).',
+      'The host machine must approve your access. Your browser will first try a direct encrypted P2P (WebRTC) connection; if the network does not allow it, it will use the relay (the relay operator can see the traffic, protected with TLS between your browser and the relay).',
     noCredentials: 'This page will never ask for your username or password.',
   },
 };

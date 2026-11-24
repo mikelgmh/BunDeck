@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 /**
- * Smoke checks contra el relay en producción (MODO PÚBLICO: sin token).
+ * Smoke checks contra el relay en producción (MODO PRIVADO: con RELAY_TOKEN).
  * Solo 4 peticiones, sin reintentos agresivos. Si no hay red (DNS/fetch
  * falla), cada test hace skip silencioso (early return) en vez de fallar,
  * para no romper `bun test` en local/CI sin internet.
  *
- * El modo privado (con RELAY_TOKEN) se testea en local en `auth.test.ts`.
+ * Tras la rotación del token el relay exige auth: sin token el upgrade WS
+ * se rechaza y POST /pair da 401. El modo con token se testea en local
+ * en `auth.test.ts`.
  */
 const PROD = (process.env.RELAY_PROD_URL ?? 'https://bundeck.mikelgranero.com').replace(/\/$/, '');
 
@@ -59,68 +61,27 @@ describe('relay producción (deploy-check)', () => {
     expect(body).toMatchObject({ ok: true, service: 'libredeck-relay' });
   });
 
-  test('relay público: WS sin token → upgrade aceptado', async () => {
+  test('relay privado: WS sin token → upgrade rechazado (401)', async () => {
     const outcome = await tryOpenWs(`${toWsUrl(PROD)}/`);
     if (outcome === 'nored') {
       console.warn('[deploy-check] sin red hasta PROD, skip WS');
       return; // skip sin fallar
     }
-    // En modo público el upgrade se acepta; el registro lo valida el protocolo.
-    expect(outcome).toBe('open');
+    // Con RELAY_TOKEN el upgrade sin auth se rechaza.
+    expect(outcome).toBe('rejected');
   });
 
-  test('relay público: register sin token → registered', async () => {
-    const url = `${toWsUrl(PROD)}/`;
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(url);
-    } catch {
+  test('relay privado: register sin token → no registra (upgrade rechazado)', async () => {
+    const outcome = await tryOpenWs(`${toWsUrl(PROD)}/`);
+    if (outcome === 'nored') {
       console.warn('[deploy-check] sin red hasta PROD, skip register');
       return;
     }
-    const got = await new Promise<string>((resolve) => {
-      const timer = setTimeout(() => resolve('TIMEOUT'), 8000);
-      ws.addEventListener('open', () => {
-        ws.send(
-          JSON.stringify({
-            v: 1,
-            type: 'register',
-            from: 'deploy-check-probe',
-            nonce: 'probe1',
-            exp: Date.now() + 60_000,
-            payload: { deviceId: 'deploy-check-probe', pubKey: 'eA==' },
-          }),
-        );
-      });
-      ws.addEventListener('message', (e) => {
-        const text = String((e as MessageEvent).data);
-        if (text.includes('"registered"')) {
-          clearTimeout(timer);
-          resolve('registered');
-        }
-      });
-      ws.addEventListener('close', () => {
-        clearTimeout(timer);
-        resolve('closed');
-      });
-      ws.addEventListener('error', () => {
-        clearTimeout(timer);
-        resolve('error');
-      });
-    });
-    try {
-      ws.close();
-    } catch {
-      /* noop */
-    }
-    if (got === 'TIMEOUT' || got === 'closed' || got === 'error') {
-      console.warn(`[deploy-check] sin red útil hasta PROD (got=${got}), skip register`);
-      return; // skip sin fallar: no podemos distinguir red de rechazo aquí
-    }
-    expect(got).toBe('registered');
+    // Sin upgrade no hay registro posible.
+    expect(outcome).toBe('rejected');
   });
 
-  test('relay público: POST /pair sin token → 200 con code', async () => {
+  test('relay privado: POST /pair sin token → 401', async () => {
     let res: Response;
     try {
       res = await fetch(`${PROD}/pair`, { method: 'POST', signal: AbortSignal.timeout(8000) });
@@ -128,8 +89,6 @@ describe('relay producción (deploy-check)', () => {
       console.warn('[deploy-check] sin red hasta PROD, skip /pair');
       return; // skip sin fallar
     }
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(typeof body.code).toBe('string');
+    expect(res.status).toBe(401);
   });
 });
