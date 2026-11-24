@@ -515,11 +515,10 @@ const isGsMode = computed(() => (props.layoutMode ?? 'classic') === 'gridstack')
 // ---- Dispositivos y pantallas por perfil ----
 const devOpen = ref(false)
 const deviceList = computed(() => props.devices ?? [])
-/** El desplegable gestiona pantallas de TODOS los dispositivos (online
- *  primero): asignar a un desconectado lo deja guardado y se aplica al
- *  reconectar (el daemon lo empuja en `hello`). Ocultar los offline rompía
- *  la asignación y los tests que aprovisionan por API. */
-const visibleDevices = computed(() => [...deviceList.value].sort((a, b) => Number(!!b.online) - Number(!!a.online)))
+/** El desplegable solo gestiona pantallas: únicamente lo que está en línea.
+ *  Los desconectados (otro origen, invitados idos, hardware apagado) se
+ *  gestionan en Acceso remoto y no ensucian la asignación. */
+const visibleDevices = computed(() => deviceList.value.filter((d) => !!d.online))
 const previewDevice = computed(() =>
   props.previewDeviceId ? (deviceList.value.find((d) => d.id === props.previewDeviceId) ?? null) : null
 )

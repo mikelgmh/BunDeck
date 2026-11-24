@@ -90,24 +90,49 @@ test.beforeEach(async ({ page, request }) => {
   await currentProfileAndPage(request, page);
 });
 
-async function ensurePhoneDevice(request: any) {
+async function ensurePhoneDevice(request: any, page: any) {
   if (phoneId) return phoneId;
   const res = await request.post(`${API}/devices`, {
     data: { name: 'E2E Navegador', kind: 'browser' },
   });
   expect(res.status()).toBe(201);
   phoneId = (await res.json()).id;
+  await bringOnline(page, request, phoneId, 'browser', 'E2E Navegador');
   return phoneId;
 }
 
-async function ensureDeckDevice(request: any) {
+async function ensureDeckDevice(request: any, page: any) {
   if (deckId) return deckId;
   const res = await request.post(`${API}/devices`, {
     data: { name: 'E2E Deck', kind: 'deck', model: 'mk2' },
   });
   expect(res.status()).toBe(201);
   deckId = (await res.json()).id;
+  await bringOnline(page, request, deckId, 'hardware', 'E2E Deck');
   return deckId;
+}
+
+/**
+ * El desplegable solo lista dispositivos online: abrir un WS efímero
+ * identificado como ese dispositivo (como haría el iPad al conectar) para
+ * que aparezca. Loopback = exento de invitación.
+ */
+async function bringOnline(page: any, request: any, deviceId: string, kind: string, name: string) {
+  await page.evaluate(async ({ deviceId, kind, name }: any) => {
+    try { (window as any).__e2eWs?.close(); } catch { /* noop */ }
+    const cfg = await (await fetch(`http://${window.location.hostname}:3001/config`)).json().catch(() => ({ wsPort: 3003 }));
+    const ws = new WebSocket(`ws://${window.location.hostname}:${cfg.wsPort ?? 3003}`);
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', payload: { deviceId, kind, name } }));
+    (window as any).__e2eWs = ws;
+  }, { deviceId, kind, name });
+  for (let i = 0; i < 40; i++) {
+    try {
+      const res = await request.get(`${API}/devices`, { failOnStatusCode: false });
+      if (res.ok() && (await res.json()).some((d: any) => d.id === deviceId && d.online)) return;
+    } catch { /* reintentar */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`el dispositivo ${deviceId} no aparece online`);
 }
 
 test.afterEach(async ({ request }) => {
@@ -133,8 +158,9 @@ test.afterEach(async ({ request }) => {
 
 test('asignar una página a un dispositivo persiste tras recargar', async ({ page, request }) => {
   const created = await createTestPage(page);
-  // Navegador aprovisionado por API (ya no hay seed).
-  const pid = await ensurePhoneDevice(request);
+  // Navegador aprovisionado por API + WS efímero para que salga online en
+  // el desplegable (solo lista lo online).
+  const pid = await ensurePhoneDevice(request, page);
   await openDevicesPopover(page);
 
   const select = page.locator(`[data-cy=bd-device-page-${pid}]`);
@@ -151,9 +177,10 @@ test('asignar una página a un dispositivo persiste tras recargar', async ({ pag
   // Toast de confirmación visible.
   await expect(page.locator('.bd-toast')).toBeVisible({ timeout: 5000 });
 
-  // Persiste tras recargar.
+  // Persiste tras recargar (el WS efímero muere con la recarga: reactivar).
   await page.reload();
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
+  await bringOnline(page, request, pid, 'browser', 'E2E Navegador');
   await openDevicesPopover(page);
   await expect(page.locator(`[data-cy=bd-device-page-${pid}]`)).toHaveValue(testPageId);
 
@@ -168,6 +195,7 @@ test('una página libre no se puede asignar a un deck (solo fijas compatibles)',
   const created = await createTestPage(page);
 
   // Pasar la página actual a Libre (aceptando el aviso de desasignación).
+  await dismissWelcome(page);
   await page.locator('[data-cy=bd-layout-gridstack]').click();
   const okBtn = page.locator('dialog.bd-confirm[open] .bd-confirm-actions .bd-pri');
   try {
@@ -179,7 +207,10 @@ test('una página libre no se puede asignar a un deck (solo fijas compatibles)',
   await expect(page.locator('[data-cy=bd-gs-plate]')).toBeVisible({ timeout: 10000 });
 
   // En el desplegable del deck la opción de la página libre está deshabilitada.
-  const did = await ensureDeckDevice(request);
+  // Deck aprovisionado por API + WS efímero (kind hardware) para que salga
+  // online en el desplegable (solo lista lo online).
+  const did = await ensureDeckDevice(request, page);
+  await dismissWelcome(page);
   await openDevicesPopover(page);
   const option = page.locator(
     `[data-cy=bd-device-page-${did}] option[value="${created.id}"]`,

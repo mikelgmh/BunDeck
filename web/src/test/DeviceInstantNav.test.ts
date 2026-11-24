@@ -38,22 +38,19 @@ const baseProps = {
   busy: false,
 } as any
 
-describe('StageBoard: el desplegable lista también offline (asignación + reconexión)', () => {
-  it('muestra online y offline, online primero', async () => {
-    const online = { id: 'm-on', name: 'iPad', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
-    const offline = { id: 'm-off', name: 'Móvil apagado', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
-    const on = { ...online, online: true }
+describe('StageBoard: el desplegable solo lista lo online', () => {
+  it('muestra online y oculta offline (van a Acceso remoto)', async () => {
+    const on = { id: 'm-on', name: 'iPad', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: true, source: 'browser' }
+    const off = { id: 'm-off', name: 'Móvil apagado', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
     const wrapper = mount(StageBoard, {
-      props: { ...baseProps, devices: [offline, on], assignments: {} },
+      props: { ...baseProps, devices: [off, on], assignments: {} },
     })
     await wrapper.find('[data-cy=bd-devices-btn]').trigger('click')
-    // Ambos visibles (el offline también se puede asignar: aplica al reconectar).
+    // Solo el online; el offline se gestiona en Acceso remoto.
     expect(wrapper.find('[data-cy=bd-device-row-m-on]').exists()).toBe(true)
-    expect(wrapper.find('[data-cy=bd-device-row-m-off]').exists()).toBe(true)
-    expect(wrapper.find('[data-cy=bd-devices-badge]').text()).toContain('2')
-    // Online primero.
-    const rows = wrapper.findAll('[data-cy^=bd-device-row-]')
-    expect(rows[0].attributes('data-cy')).toBe('bd-device-row-m-on')
+    expect(wrapper.find('[data-cy=bd-device-row-m-off]').exists()).toBe(false)
+    // El badge cuenta solo lo visible.
+    expect(wrapper.find('[data-cy=bd-devices-badge]').text()).toContain('1')
     wrapper.unmount()
   })
 })
