@@ -36,6 +36,14 @@
         :aria-label="isConnected ? t('bd.connected') : t('bd.disconnected')"
         data-cy="bd-connection-status"
       ><i aria-hidden="true"></i></span>
+      <span
+        v-if="isTunnelRoute"
+        class="bd-status"
+        :class="{ 'bd-on': rtcStatus === 'connected' }"
+        role="status"
+        :title="rtcStatus === 'connected' ? 'WebRTC P2P conectado' : rtcStatus === 'signaling' ? 'WebRTC conectando…' : 'Relay (fallback)'"
+        data-cy="bd-rtc-status"
+      >{{ rtcStatus === 'connected' ? 'P2P' : rtcStatus === 'signaling' ? '…' : 'Relay' }}</span>
       <div class="bd-tabs" role="tablist" :aria-label="t('bd.secProfiles')">
         <div
           v-for="profile in profiles"
@@ -58,28 +66,11 @@
             :aria-label="`${t('bd.profileMenu')}: ${profile.name}`"
             :aria-expanded="profileMenuOpen === profile.id"
             aria-haspopup="menu"
-            @click.stop="profileMenuOpen = profileMenuOpen === profile.id ? null : profile.id"
+            @click.stop="toggleProfileMenu($event, profile.id)"
             :data-cy="`bd-profile-menu-${profile.id}`"
           >
             <Ellipsis :size="14" stroke-width="2" aria-hidden="true" />
           </button>
-          <div v-if="profileMenuOpen === profile.id" class="bd-menu" role="menu" data-cy="bd-profile-menu">
-            <button role="menuitem" data-cy="bd-profile-rename" @click="openProfileRename(profile)">
-              <Pencil :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.rename') }}</span>
-            </button>
-            <button role="menuitem" data-cy="bd-profile-duplicate" @click="onProfileDuplicateMenu(profile.id)">
-              <Copy :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.duplicate') }}</span>
-            </button>
-            <button
-              role="menuitem"
-              class="bd-dng"
-              data-cy="bd-profile-delete"
-              :disabled="profiles.length < 2"
-              @click="onProfileDeleteMenu(profile)"
-            >
-              <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.delete') }}</span>
-            </button>
-          </div>
         </div>
         <button
           role="tab"
@@ -91,6 +82,33 @@
           data-cy="bd-profile-add"
         >
           <Plus :size="16" stroke-width="1.75" aria-hidden="true" />
+        </button>
+      </div>
+      <!-- El menú vive en el header, FUERA de .bd-tabs (overflow-x:auto):
+        dentro, el absolute quedaba recortado y el clic parecía no hacer
+        nada. Al seguir bajo .bundeck hereda las variables del tema. -->
+      <div
+        v-if="profileMenuOpen && profileMenuProfile && profileMenuPos"
+        class="bd-menu bd-profile-menu-portal"
+        role="menu"
+        data-cy="bd-profile-menu"
+        :style="{ position: 'fixed', left: profileMenuPos.left + 'px', top: profileMenuPos.top + 'px', zIndex: 200 }"
+        @keydown="onProfileMenuKey"
+      >
+        <button role="menuitem" data-cy="bd-profile-rename" @click="openProfileRename(profileMenuProfile)">
+          <Pencil :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.rename') }}</span>
+        </button>
+        <button role="menuitem" data-cy="bd-profile-duplicate" @click="onProfileDuplicateMenu(profileMenuProfile.id)">
+          <Copy :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.duplicate') }}</span>
+        </button>
+        <button
+          role="menuitem"
+          class="bd-dng"
+          data-cy="bd-profile-delete"
+          :disabled="profiles.length < 2"
+          @click="onProfileDeleteMenu(profileMenuProfile)"
+        >
+          <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.delete') }}</span>
         </button>
       </div>
       <button class="bd-ibtn" :title="t('bd.plugins')" :aria-label="t('bd.plugins')" @click="settingsDialog?.show('plugins')" data-cy="bd-open-plugins">
@@ -285,6 +303,13 @@
         @click="onKioskCornerTap"
       ></div>
       <div class="bd-kiosk-exit" role="group" :aria-label="t('bd.kioskExit')">
+        <span
+          class="bd-kiosk-wake"
+          data-cy="bd-kiosk-wake"
+          :data-wake="wakeStatus"
+          :title="wakeTitle"
+          aria-hidden="true"
+        ><i></i></span>
         <button
           class="bd-ibtn"
           :title="t('bd.kioskFullscreen')"
@@ -467,7 +492,7 @@ import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDec
 import { useI18nStore } from '../../composables/useI18n'
 import {
   bdResolvedPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs,
-  bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast
+  bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast, initAppearanceSync
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
 import { planFreeCell, clampDropCell, gridResizeFits } from '../../composables/useDeckLayouts'
@@ -484,7 +509,9 @@ import {
   requestFullscreen,
   type KioskExitReason,
 } from '../../composables/useKiosk'
+import { useKioskWakeLock } from '../../composables/useKioskWakeLock'
 import { getTunnelToken } from '../../composables/useTunnel'
+import { getRtcSingleton } from '../../composables/useRemoteRtc'
 import {
   getActionsForKind,
   setActionsForKind,
@@ -523,6 +550,16 @@ const mode = ref<'edit' | 'use'>('edit')
 // el modo `edit` queda bloqueado y no se renderizan header/drawers/toolbars.
 const kiosk = ref(false)
 let kioskCornerTaps: number[] = []
+// Pantalla siempre encendida en kiosco: Wake Lock + fallback de vídeo
+// para iPads antiguos / HTTP local. Solo actúa con kiosco activo.
+const { wakeStatus, ensureKioskWake, releaseKioskWake } = useKioskWakeLock(kiosk)
+const wakeTitle = computed(() =>
+  wakeStatus.value === 'wake-lock'
+    ? t('bd.kioskKeepAwake')
+    : wakeStatus.value === 'video'
+      ? t('bd.kioskKeepAwakeFallback')
+      : t('bd.kioskKeepAwakeOff')
+)
 const setMode = (m: 'edit' | 'use') => {
   mode.value = guardModeChange(kiosk.value, m)
   selectedButton.value = null
@@ -541,10 +578,13 @@ const enterKiosk = () => {
   } catch {
     /* sin history: el estado interno ya entró en kiosco */
   }
+  // Dentro del gesto del clic: en iOS el fallback de vídeo lo exige.
+  void ensureKioskWake()
 }
 
 /** Pide salir del kiosco (con confirmación) y limpia el param de la URL. */
 const exitKiosk = () => {
+  releaseKioskWake()
   kiosk.value = false
   kioskCornerTaps = []
   try {
@@ -615,6 +655,12 @@ const {
   lanDenied, redeemLanInviteFromUrl,
   installProgress, clearInstallProgress
 } = useStreamDeck()
+
+// WebRTC P2P en modo túnel: badge + autoconexión en background (fallback intacto).
+const rtc = getRtcSingleton()
+const rtcStatus = rtc.status
+const rtcDetail = rtc.detail
+const isTunnelRoute = computed(() => getTunnelToken() !== null)
 
 const pluginBusyId = ref<string | null>(null)
 const pluginUploading = ref(false)
@@ -842,9 +888,17 @@ const onDocClickHeader = (e: MouseEvent) => {
   if (headerMenuOpen.value && !(e.target as HTMLElement).closest?.('header .bd-menu') && !(e.target as HTMLElement).closest?.('[data-cy="bd-open-key-menu"]')) {
     headerMenuOpen.value = false
   }
-  if (profileMenuOpen.value && !(e.target as HTMLElement).closest?.('.bd-tabwrap')) {
-    profileMenuOpen.value = null
+  if (profileMenuOpen.value && !(e.target as HTMLElement).closest?.('.bd-tabwrap') && !(e.target as HTMLElement).closest?.('.bd-profile-menu-portal')) {
+    closeProfileMenu()
   }
+}
+const onDocKeyProfile = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && profileMenuOpen.value) closeProfileMenu()
+}
+// El menú ya no recalcula su posición al hacer scroll/resize: se cierra para
+// no quedar descolgado del botón ··· que lo abrió.
+const onViewportChangeCloseProfile = () => {
+  if (profileMenuOpen.value) closeProfileMenu()
 }
 
 const availablePages = computed(() =>
@@ -914,6 +968,49 @@ const toggleFullscreen = async () => {
 
 // Perfiles
 const profileMenuOpen = ref<string | null>(null)
+const profileMenuPos = ref<{ left: number; top: number } | null>(null)
+const profileMenuProfile = computed(() =>
+  profiles.value.find((p) => p.id === profileMenuOpen.value) ?? null
+)
+const closeProfileMenu = () => {
+  profileMenuOpen.value = null
+  profileMenuPos.value = null
+}
+const toggleProfileMenu = (e: MouseEvent, profileId: string) => {
+  if (profileMenuOpen.value === profileId) {
+    closeProfileMenu()
+    return
+  }
+  const rect = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+  // Ancla bajo el botón ···, acotado al viewport para que no se salga.
+  const menuW = 200
+  const menuH = 140
+  const left = rect
+    ? Math.max(8, Math.min(rect.left, window.innerWidth - menuW - 8))
+    : 8
+  const top = rect
+    ? Math.min(rect.bottom + 4, window.innerHeight - menuH - 8)
+    : 8
+  profileMenuOpen.value = profileId
+  profileMenuPos.value = { left, top }
+  nextTick(() =>
+    document.querySelector<HTMLElement>('.bd-profile-menu-portal button')?.focus()
+  )
+}
+const onProfileMenuKey = (e: KeyboardEvent) => {
+  const items = [...document.querySelectorAll<HTMLElement>('.bd-profile-menu-portal button:not(:disabled)')]
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    items[(i + 1) % items.length]?.focus()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    items[(i - 1 + items.length) % items.length]?.focus()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    closeProfileMenu()
+  }
+}
 const profileNameDialog = ref<HTMLDialogElement | null>(null)
 const profileNameInput = ref<HTMLInputElement | null>(null)
 const profileDialogMode = ref<'create' | 'rename'>('create')
@@ -932,7 +1029,7 @@ const uniqueProfileName = (base: string, skipId?: string) => {
   return `${clean} ${i}`
 }
 const openProfileCreate = () => {
-  profileMenuOpen.value = null
+  closeProfileMenu()
   profileDialogMode.value = 'create'
   profileDialogTarget.value = null
   profileDialogName.value = ''
@@ -941,7 +1038,7 @@ const openProfileCreate = () => {
   nextTick(() => profileNameInput.value?.focus())
 }
 const openProfileRename = (profile: { id: string; name: string }) => {
-  profileMenuOpen.value = null
+  closeProfileMenu()
   profileDialogMode.value = 'rename'
   profileDialogTarget.value = profile.id
   profileDialogName.value = profile.name
@@ -984,7 +1081,7 @@ const confirmProfileDialog = async () => {
   }
 }
 const handleProfileChange = async (profileId: string) => {
-  profileMenuOpen.value = null
+  closeProfileMenu()
   await selectProfile(profileId)
   // Asignaciones del perfil (el GET ya repara incompatibles en el daemon).
   try {
@@ -1012,7 +1109,7 @@ const handleProfileDeleted = async (profileId: string) => {
   bdShowToast(t('bd.profileDeleted', { name: target?.name ?? '' }))
 }
 const onProfileDeleteMenu = async (profile: { id: string; name: string }) => {
-  profileMenuOpen.value = null
+  closeProfileMenu()
   if (profiles.value.length < 2) return
   const ok = await askConfirm(
     t('bd.deleteProfileTitle'),
@@ -1028,7 +1125,7 @@ const onProfileDeleteMenu = async (profile: { id: string; name: string }) => {
   }
 }
 const onProfileDuplicateMenu = async (profileId: string) => {
-  profileMenuOpen.value = null
+  closeProfileMenu()
   await handleProfileDuplicate(profileId)
 }
 const handleProfileDuplicate = async (profileId: string) => {
@@ -1406,7 +1503,8 @@ const onClearKey = async () => {
     emoji: '',
     actions: [],
     rules: [],
-    looks: []
+    looks: [],
+    stateVar: ''
   }
   // Guardado inmediato: sin esto el vaciado dependía del autoguardado
   // (800 ms) y dos mutaciones seguidas podían cancelar el timeout y dejar
@@ -2322,18 +2420,8 @@ const startUpdate = async () => {
   }
 }
 
-// Wake lock
-const wakeLock = ref<any>(null)
-const requestWakeLock = async () => {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock.value = await (navigator as any).wakeLock.request('screen')
-      wakeLock.value.addEventListener('release', () => {})
-    }
-  } catch (err) {
-    console.error('Error al activar Wake Lock:', err)
-  }
-}
+// Pantalla encendida en kiosco: ver `useKioskWakeLock` (Wake Lock API con
+// fallback de vídeo para iPads antiguos / HTTP local). Sin bloque propio aquí.
 
 // Autoguardado (igual que antes)
 watch(selectedButton, (newVal, oldVal) => {
@@ -2355,7 +2443,8 @@ watch(selectedButton, (newVal, oldVal) => {
       confirm: false,
       actions: [],
       rules: [],
-      looks: []
+      looks: [],
+      stateVar: ''
     }
   }
   nextTick(() => {
@@ -2427,8 +2516,10 @@ onMounted(async () => {
   } catch {
     /* sin location (SSR/tests): se queda en edición como antes */
   }
-  loadProfiles().then(async () => {
-    // Reglas «load» de la página inicial.
+  // Apariencia compartida host ↔ remotos: adoptar el tema del servidor
+  // (el remoto sigue al host, incluido el `auto` resuelto por el host).
+  initAppearanceSync().catch(() => {})
+  loadProfiles().then(async () => {    // Reglas «load» de la página inicial.
     try { engine.runLoad(allPositions) } catch { /* noop */ }
     // Asignaciones del perfil inicial (el GET repara incompatibles).
     try {
@@ -2444,8 +2535,23 @@ onMounted(async () => {
   loadMcpScopes().catch(() => {})
   refreshDeviceStatus().catch(() => {})
   connectWebSocket()
+  // WebRTC P2P en túnel: intenta en background sin bloquear la carga (el
+  // transporte relay sigue funcionando aunque P2P falle por NAT).
+  try {
+    if (getTunnelToken()) {
+      setTimeout(() => {
+        rtc.connect().catch(() => {})
+      }, 1500)
+    }
+  } catch {
+    /* RTC opcional */
+  }
   window.addEventListener('keydown', onKeyDown)
   document.addEventListener('click', onDocClickHeader)
+  document.addEventListener('keydown', onDocKeyProfile)
+  window.addEventListener('resize', onViewportChangeCloseProfile)
+  // Capture para pillar también el scroll interno de .bd-tabs.
+  window.addEventListener('scroll', onViewportChangeCloseProfile, true)
   // Motor de reglas: tic de 1 s (temporizadores + reevaluar apariencia).
   ruleTimer = setInterval(() => {
     try { engine.onTick(allPositions) } catch { /* noop */ }
@@ -2458,7 +2564,6 @@ onMounted(async () => {
     isFullscreen.value = !!document.fullscreenElement
   })
   isIPhone.value = /iphone/.test(window.navigator.userAgent.toLowerCase())
-  await requestWakeLock()
   // Guía de bienvenida: solo hasta que se pulse Saltar o se llegue al final.
   // Si se recarga a mitad, show() retoma el paso guardado (no se marca vista).
   // Se difiere un tick para que el chunk async del diálogo esté montado.
@@ -2466,9 +2571,6 @@ onMounted(async () => {
     try {
       if (welcomeDialog.value?.shouldAutoShow()) welcomeDialog.value.show()
     } catch { /* noop */ }
-  })
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && wakeLock.value === null) await requestWakeLock()
   })
   if (hasElectrobunUpdater) {
     try {
@@ -2491,6 +2593,9 @@ onUnmounted(() => {
   cleanup()
   window.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('click', onDocClickHeader)
+  document.removeEventListener('keydown', onDocKeyProfile)
+  window.removeEventListener('resize', onViewportChangeCloseProfile)
+  window.removeEventListener('scroll', onViewportChangeCloseProfile, true)
   window.removeEventListener('libredeck:devices-changed', onDevicesChanged)
   window.removeEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   if (ruleTimer) {

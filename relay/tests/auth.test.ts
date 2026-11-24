@@ -186,17 +186,18 @@ describe('relay auth (token compartido)', () => {
     }
   });
 
-  test('rate-limit HTTP: 61 POST /pair desde la misma IP → el 61º es 429', async () => {
+  test('rate-limit HTTP: 31 POST /pair desde la misma IP → el 31º es 429 con retry-after', async () => {
     const relay = startRelay();
     const base = `http://127.0.0.1:${relay.port}`;
     const headers = { Authorization: `Bearer ${TOKEN}` };
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 30; i++) {
       const res = await fetch(`${base}/pair`, { method: 'POST', headers });
       expect(res.status).toBe(200);
       await res.arrayBuffer(); // drena el body antes de la siguiente
     }
     const limited = await fetch(`${base}/pair`, { method: 'POST', headers });
     expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBe('5');
     const body = (await limited.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ error: 'rate-limited' });
   });

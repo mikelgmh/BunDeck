@@ -19,6 +19,12 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024; // 64 KB
 export const EXP_SKEW_MS = 5 * 60 * 1000; // acepta exp hasta 5 min en el pasado
 export const RATE_LIMIT_PER_MIN = 60;
+// Nuevos defaults diferenciados: el plano de datos /t/* necesita ráfagas de
+// carga inicial (HTML + assets + API), el resto sigue estricto.
+export const RATE_LIMIT_T_PER_MIN = 600;
+export const RATE_LIMIT_UI_PER_MIN = 120;
+export const RATE_LIMIT_WS_PER_MIN = 120;
+export const RATE_LIMIT_PAIR_PER_MIN = 30;
 
 type WsData = { ip: string; tunnelBridge?: { id: string; token: string; deviceId: string } };
 type AnyWs = ServerWebSocket<WsData>;
@@ -39,6 +45,12 @@ export interface RelayServerOptions {
   /** Secreto compartido. Vacío = sin auth (solo dev local). */
   token?: string;
   rateLimitPerMin?: number;
+  rateLimitT?: number;
+  rateLimitUi?: number;
+  rateLimitWs?: number;
+  rateLimitPair?: number;
+  /** Si true, respeta X-Forwarded-For / X-Real-IP para rate-limit (proxy confiable). */
+  trustProxy?: boolean;
   store: DeviceStore;
   pairing: PairingStore;
   version?: string;
@@ -50,6 +62,39 @@ export interface RelayServerOptions {
   uiRequestTimeoutMs?: number;
   /** Respuesta del daemon a `http-req` en este tiempo o 504 (defecto 30 s). */
   httpTimeoutMs?: number;
+}
+
+function rateLimitedResponse(): Response {
+  return Response.json({ error: 'rate-limited' }, { status: 429, headers: { 'retry-after': '5' } });
+}
+
+/** IP real del cliente: directa salvo trustProxy, donde se respeta el proxy. */
+export function getClientIp(req: Request, server: Server<WsData>, trustProxy: boolean): string {
+  if (trustProxy) {
+    const xff = req.headers.get('x-forwarded-for');
+    if (xff) {
+      const first = xff.split(',')[0]?.trim();
+      if (first) return first;
+    }
+    const real = req.headers.get('x-real-ip')?.trim();
+    if (real) return real;
+    const cf = req.headers.get('cf-connecting-ip')?.trim();
+    if (cf) return cf;
+  }
+  try {
+    return server.requestIP(req)?.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Extrae sessionToken de /t/<token>/... si parece token hex (32+ chars). */
+export function extractTunnelToken(pathname: string): string | null {
+  const m = /^\/t\/([^/]+)/.exec(pathname);
+  if (!m) return null;
+  const tok = m[1];
+  if (/^[0-9a-fA-F]{32,}$/.test(tok)) return tok;
+  return null;
 }
 
 function serverEnvelope(to: unknown, reason: string, detail?: string, now = Date.now()): string {
@@ -91,7 +136,10 @@ export class RelayServer {
   private byDevice = new Map<string, AnyWs>();
   /** socket -> deviceId. */
   private deviceByWs = new Map<AnyWs, string>();
-  private limiter: RateLimiter;
+  private pairLimiter: RateLimiter;
+  private uiLimiter: RateLimiter;
+  private tLimiter: RateLimiter;
+  private wsLimiter: RateLimiter;
   private now: () => number;
   readonly startedAt: number;
   /** Núcleo del túnel inverso (estado + decisiones; el E2E sigue aparte). */
@@ -99,11 +147,21 @@ export class RelayServer {
   private readonly httpTimeoutMs: number;
 
   constructor(private opts: RelayServerOptions) {
-    this.limiter = new RateLimiter(opts.rateLimitPerMin ?? RATE_LIMIT_PER_MIN);
+    const legacy = opts.rateLimitPerMin;
+    const nowFn = opts.now ?? Date.now;
+    this.pairLimiter = new RateLimiter(opts.rateLimitPair ?? legacy ?? RATE_LIMIT_PAIR_PER_MIN, 60_000, nowFn);
+    this.uiLimiter = new RateLimiter(opts.rateLimitUi ?? legacy ?? RATE_LIMIT_UI_PER_MIN, 60_000, nowFn);
+    this.tLimiter = new RateLimiter(opts.rateLimitT ?? legacy ?? RATE_LIMIT_T_PER_MIN, 60_000, nowFn);
+    this.wsLimiter = new RateLimiter(opts.rateLimitWs ?? legacy ?? RATE_LIMIT_WS_PER_MIN, 60_000, nowFn);
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.startedAt ?? this.now();
     this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs });
     this.httpTimeoutMs = opts.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
+  }
+
+  /** Compat: expone el limiter de datos para tests antiguos. */
+  get limiter(): RateLimiter {
+    return this.tLimiter;
   }
 
   get authorized(): boolean {
@@ -241,9 +299,9 @@ export class RelayServer {
 
     if (url.pathname === '/pair' && req.method === 'POST') {
       if (!this.isAuthorized(req)) return new Response('unauthorized', { status: 401 });
-      const ip = server.requestIP(req)?.address ?? 'unknown';
-      if (!this.limiter.allow(`pair:${ip}`)) {
-        return Response.json({ error: 'rate-limited' }, { status: 429 });
+      const ip = getClientIp(req, server, this.opts.trustProxy ?? false);
+      if (!this.pairLimiter.allow(`pair:${ip}`)) {
+        return rateLimitedResponse();
       }
       const entry = this.opts.pairing.create();
       return Response.json({
@@ -253,25 +311,28 @@ export class RelayServer {
     }
 
     // Túnel inverso (público, sin RELAY_TOKEN: el navegador no lo tiene).
-    // Rate-limit propio con la misma ventana que el resto (`ui:<ip>`, `t:<ip>`).
+    // /ui/* por IP, /t/* por sessionToken (cuota por sesión aprobada) con
+    // fallback a IP cuando aún no hay token válido.
     if (url.pathname === '/ui' || url.pathname.startsWith('/ui/')) {
-      const ipUi = server.requestIP(req)?.address ?? 'unknown';
-      if (!this.limiter.allow(`ui:${ipUi}`)) {
-        return Response.json({ error: 'rate-limited' }, { status: 429 });
+      const ipUi = getClientIp(req, server, this.opts.trustProxy ?? false);
+      if (!this.uiLimiter.allow(`ui:${ipUi}`)) {
+        return rateLimitedResponse();
       }
       return this.handleUiFetch(req, server);
     }
     if (url.pathname === '/t' || url.pathname.startsWith('/t/')) {
-      const ipT = server.requestIP(req)?.address ?? 'unknown';
-      if (!this.limiter.allow(`t:${ipT}`)) {
-        return Response.json({ error: 'rate-limited' }, { status: 429 });
+      const ipT = getClientIp(req, server, this.opts.trustProxy ?? false);
+      const tok = extractTunnelToken(url.pathname);
+      const key = tok ? `t:tok:${tok}` : `t:${ipT}`;
+      if (!this.tLimiter.allow(key)) {
+        return rateLimitedResponse();
       }
       return this.handleTunnelFetch(req, server);
     }
 
     // Todo lo demás: WebSocket (wss en prod tras reverse proxy; local ws).
     if (!this.isAuthorized(req)) return new Response('unauthorized', { status: 401 });
-    const ip = server.requestIP(req)?.address ?? 'unknown';
+    const ip = getClientIp(req, server, this.opts.trustProxy ?? false);
     const ok = server.upgrade(req, { data: { ip } });
     if (!ok) return new Response('websocket only', { status: 426 });
     return undefined;
@@ -298,7 +359,7 @@ export class RelayServer {
     const urlCode = parts[0];
     const ensured = this.tunnel.ensureRequest(urlCode, {
       ua: req.headers.get('user-agent') ?? '',
-      ip: server.requestIP(req)?.address ?? 'unknown',
+      ip: getClientIp(req, server, this.opts.trustProxy ?? false),
     });
     if ('error' in ensured) {
       return Response.json({ error: ensured.error }, { status: 404 });
@@ -355,7 +416,7 @@ export class RelayServer {
       }
       const id = this.tunnel.nextId('ws');
       const ok = server.upgrade(req, {
-        data: { ip: server.requestIP(req)?.address ?? 'unknown', tunnelBridge: { id, token, deviceId: sess.deviceId } },
+        data: { ip: getClientIp(req, server, this.opts.trustProxy ?? false), tunnelBridge: { id, token, deviceId: sess.deviceId } },
       });
       if (!ok) return Response.json({ error: 'upgrade-failed' }, { status: 500 });
       return undefined;
@@ -456,7 +517,7 @@ export class RelayServer {
       typeof (parsed as Record<string, unknown>).kind === 'string' &&
       (parsed as Record<string, unknown>).type === undefined
     ) {
-      if (!this.limiter.allow(`ws:${ws.data.ip}`)) {
+      if (!this.wsLimiter.allow(`ws:${ws.data.ip}`)) {
         ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error: 'rate-limited' }));
         return;
       }
@@ -508,7 +569,7 @@ export class RelayServer {
         return;
       }
       case 'ui-bind': {
-        const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp);
+        const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
         if (r !== 'ok') err(r);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode }));
         return;
@@ -676,7 +737,7 @@ export class RelayServer {
   private handleSocketMessage(ws: AnyWs, raw: string): void {
     const ip = ws.data.ip;
 
-    if (!this.limiter.allow(`ws:${ip}`)) {
+    if (!this.wsLimiter.allow(`ws:${ip}`)) {
       ws.send(serverEnvelope(undefined, 'rate-limited', undefined, this.now()));
       return;
     }

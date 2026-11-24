@@ -1,5 +1,6 @@
 import { ref, computed, nextTick } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
+import { rtcFetchIfConnected, getRtcSingleton } from './useRemoteRtc'
 import {
   parseLanInviteFromUrl, stripLanInviteFromUrl,
   getStoredLanSession, setStoredLanSession, clearStoredLanSession,
@@ -117,7 +118,8 @@ export function useStreamDeck() {
     confirm: false,
     actions: [],
     rules: [],
-    looks: []
+    looks: [],
+    stateVar: ''
   })
 
   // Contador ligero de ediciones locales del borrador (autosave): cada
@@ -402,6 +404,31 @@ export function useStreamDeck() {
     if (!getTunnelToken() && lanSession.value && !headers['Authorization']) {
       headers['Authorization'] = `Bearer ${lanSession.value}`
     }
+    // P2P WebRTC primero cuando estamos en túnel y el DataChannel está listo:
+    // evita rate-limit del relay y baja latencia. Fallback a fetch si no.
+    if (getTunnelToken()) {
+      try {
+        const rtcRes = await rtcFetchIfConnected(endpoint, { ...rest, headers })
+        if (rtcRes) {
+          if (!rtcRes.ok) {
+            let detail = ''
+            try {
+              const txt = await rtcRes.text()
+              try {
+                const j = JSON.parse(txt)
+                detail = String((j as any)?.error ?? (j as any)?.code ?? txt)
+              } catch { detail = txt }
+            } catch {}
+            throw new Error(detail || `API Error: ${rtcRes.status}`)
+          }
+          return rtcRes.json()
+        }
+      } catch (e) {
+        // Si el error viene de rtcFetchIfConnected con Response, ya lanzado arriba.
+        // Si es error de transporte, cae al fetch clásico.
+        if (e instanceof Error && e.message.startsWith('API Error:')) throw e
+      }
+    }
     const response = await fetch(`${API_BASE.value}${endpoint}`, {
       ...rest,
       headers,
@@ -513,7 +540,7 @@ export function useStreamDeck() {
         }))
         ws?.send(JSON.stringify({
           type: 'subscribe',
-          payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote'] }
+          payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings'] }
         }))
       }
 
@@ -530,6 +557,23 @@ export function useStreamDeck() {
         } catch (error) {
           console.error('Invalid WebSocket message:', error)
         }
+      }
+
+      // WebRTC P2P: los eventos que lleguen por DataChannel se procesan
+      // con el mismo handler que los del WS (fallback intacto).
+      try {
+        if (getTunnelToken()) {
+          const rtc = getRtcSingleton()
+          rtc.onEvent((raw: string) => {
+            try {
+              handleWebSocketMessage(JSON.parse(raw))
+            } catch {
+              /* noop */
+            }
+          })
+        }
+      } catch {
+        /* RTC opcional: nunca rompe el WS clásico */
       }
     } catch (error) {
       console.error('Failed to connect WebSocket:', error)
@@ -774,6 +818,19 @@ export function useStreamDeck() {
         // El HW físico rechazó una navegación incompatible: avisar
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('libredeck:page-blocked', { detail: message.payload }))
+        }
+        break
+      }
+      case 'settings.changed': {
+        // Apariencia compartida host ↔ remotos (ver useBunDeckUi):
+        // otro cliente cambió el tema → aplicarlo en vivo.
+        try {
+          if ((message.payload as any)?.key === 'ui.appearance') {
+            const { applyRemoteAppearance } = await import('./useBunDeckUi')
+            applyRemoteAppearance((message.payload as any)?.value)
+          }
+        } catch {
+          /* best-effort */
         }
         break
       }
@@ -1355,6 +1412,7 @@ export function useStreamDeck() {
         actions: button.data?.actions ? JSON.parse(JSON.stringify(button.data.actions)) : [],
         rules: button.data?.rules ? JSON.parse(JSON.stringify(button.data.rules)) : [],
         looks: button.data?.looks ? JSON.parse(JSON.stringify(button.data.looks)) : [],
+        stateVar: typeof button.data?.stateVar === 'string' ? button.data.stateVar : '',
         pressActions: button.data?.pressActions ? JSON.parse(JSON.stringify(button.data.pressActions)) : undefined
       }
 
@@ -1387,7 +1445,8 @@ export function useStreamDeck() {
         confirm: false,
         actions: [],
         rules: [],
-        looks: []
+        looks: [],
+        stateVar: ''
       })
     }
     // El draft recién cargado es el punto limpio: no hay cambios pendientes.
@@ -2047,7 +2106,8 @@ export function useStreamDeck() {
       confirm: false,
       actions: [],
       rules: [],
-      looks: []
+      looks: [],
+      stateVar: ''
     })
     snapshotButtonConfig()
 

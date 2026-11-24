@@ -1,6 +1,6 @@
 {
   "name": "libredeck-relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "BunDeck E2E relay server — opaque message router, never sees plaintext",
   "type": "module",
   "main": "src/index.ts",

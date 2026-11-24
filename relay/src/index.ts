@@ -9,12 +9,22 @@ const config = loadConfig();
 
 if (!config.token) {
   console.warn('[relay] RELAY_TOKEN vacío: aceptando conexiones sin auth (solo para dev local).');
+} else {
+  console.log('[relay] RELAY_TOKEN configurado (len=%d).', config.token.length);
 }
+console.log(
+  `[relay] env present: PORT=${process.env.PORT ? 'yes' : 'no'} RELAY_PORT=${process.env.RELAY_PORT ? 'yes' : 'no'} DATA_DIR=${process.env.DATA_DIR ? 'yes' : 'no'} RELAY_DOMAIN=${process.env.RELAY_DOMAIN ? 'yes' : 'no'} TRUST_PROXY=${process.env.TRUST_PROXY ?? '(unset)'}`,
+);
 
 const store = new DeviceStore(config.dataDir);
 const pairing = new PairingStore(PAIRING_TTL_MS);
 const relay = new RelayServer({
   token: config.token,
+  rateLimitT: config.rateLimitT,
+  rateLimitUi: config.rateLimitUi,
+  rateLimitWs: config.rateLimitWs,
+  rateLimitPair: config.rateLimitPair,
+  trustProxy: config.trustProxy,
   store,
   pairing,
   version: config.version,

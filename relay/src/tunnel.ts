@@ -130,12 +130,22 @@ interface CodeBinding {
   sessionToken: string;
   exp: number;
   consumed: boolean;
+  turn?: TurnCreds | null;
 }
 
 interface SessionEntry {
   deviceId: string;
   exp: number;
   urlCode: string;
+  turn?: TurnCreds | null;
+}
+
+/** Credenciales TURN efímeras para WebRTC (las genera el daemon, el relay solo las pasa). */
+export interface TurnCreds {
+  urls: string[];
+  username: string;
+  credential: string;
+  ttl?: number;
 }
 
 export interface TunnelStateOptions {
@@ -177,6 +187,19 @@ function rewriteAssetUrls(val: string, prefix: string): string {
 
 export function isHexToken(s: unknown, min = MIN_TOKEN_LEN): s is string {
   return typeof s === 'string' && s.length >= min && /^[0-9a-fA-F]+$/.test(s);
+}
+
+/** Valida credenciales TURN del daemon: urls + username + credential, límites duros. */
+function sanitizeTurnCreds(input: unknown): TurnCreds | null {
+  if (!input || typeof input !== 'object') return null;
+  const t = input as Record<string, unknown>;
+  if (!Array.isArray(t.urls)) return null;
+  const urls = t.urls.filter((u): u is string => typeof u === 'string' && u.length > 0 && u.length <= 256).slice(0, 8);
+  if (urls.length === 0) return null;
+  if (typeof t.username !== 'string' || t.username.length === 0 || t.username.length > 128) return null;
+  if (typeof t.credential !== 'string' || t.credential.length === 0 || t.credential.length > 256) return null;
+  const ttl = typeof t.ttl === 'number' && Number.isFinite(t.ttl) ? Math.min(Math.max(Math.floor(t.ttl), 60), 86400) : undefined;
+  return { urls, username: t.username, credential: t.credential, ...(ttl !== undefined ? { ttl } : {}) };
 }
 
 export type TunnelStatus = 'pending' | 'approved' | 'denied' | 'expired';
@@ -342,7 +365,7 @@ export class TunnelState {
     return 'ok';
   }
 
-  bind(urlCode: unknown, sessionToken: unknown, exp: unknown): 'ok' | string {
+  bind(urlCode: unknown, sessionToken: unknown, exp: unknown, turn?: unknown): 'ok' | string {
     if (!isHexToken(sessionToken)) return 'bad-token';
     if (typeof exp !== 'number' || !Number.isFinite(exp)) return 'bad-exp';
     if (typeof urlCode !== 'string') return 'unknown-code';
@@ -352,10 +375,11 @@ export class TunnelState {
       this.dropCode(urlCode);
       return 'expired';
     }
+    const turnCreds = sanitizeTurnCreds(turn);
     const prev = this.bindings.get(urlCode);
     if (prev && prev.sessionToken !== sessionToken) this.dropSession(prev.sessionToken);
-    this.sessions.set(sessionToken, { deviceId: entry.deviceId, exp, urlCode });
-    this.bindings.set(urlCode, { sessionToken, exp, consumed: false });
+    this.sessions.set(sessionToken as string, { deviceId: entry.deviceId, exp: exp as number, urlCode, turn: turnCreds });
+    this.bindings.set(urlCode, { sessionToken: sessionToken as string, exp: exp as number, consumed: false, turn: turnCreds });
     this.usedCodes.set(urlCode, entry.exp);
     const pendingId = this.pendingByCode.get(urlCode);
     if (pendingId) {
@@ -389,7 +413,7 @@ export class TunnelState {
     return true;
   }
 
-  status(urlCode: string): { status: TunnelStatus; sessionToken?: string } {
+  status(urlCode: string): { status: TunnelStatus; sessionToken?: string; turn?: TurnCreds | null; rtc?: boolean } {
     const now = this.now();
     const b = this.bindings.get(urlCode);
     if (b) {
@@ -397,7 +421,7 @@ export class TunnelState {
       if (s && s.exp > now) {
         if (!b.consumed) {
           b.consumed = true;
-          return { status: 'approved', sessionToken: b.sessionToken };
+          return { status: 'approved', sessionToken: b.sessionToken, ...(b.turn ? { turn: b.turn, rtc: true } : {}) };
         }
         return { status: 'approved' };
       }

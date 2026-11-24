@@ -28,6 +28,7 @@
  */
 
 import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
+import { RtcManager, buildTurnCreds } from './rtc';
 
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
@@ -176,6 +177,7 @@ export class TunnelClient {
 
   private httpHandler: HttpHandler | null = null;
   private now: () => number;
+  private rtc: RtcManager | null = null;
 
   constructor(
     private db: DbLike,
@@ -254,6 +256,11 @@ export class TunnelClient {
     this.reconnectTimer = null;
     this.heartbeatTimer = null;
     this.sweepTimer = null;
+    try {
+      this.rtc?.closeAll();
+    } catch {
+      /* noop */
+    }
     // Limpia puentes WS virtuales.
     for (const id of [...this.bridges.keys()]) this.closeBridge(id);
     try {
@@ -397,6 +404,8 @@ export class TunnelClient {
    * Aprueba/deniega una petición pendiente. Si el túnel está caído o la UI
    * remota está deshabilitada, la decisión es deny aunque se pida allow.
    * Al aprobar genera sessionToken (32 bytes hex) y emite ui-bind.
+   * Incluye credenciales TURN efímeras si TURN_SECRET está configurado
+   * (para WebRTC P2P; el relay las entrega en el primer poll approved).
    */
   decideUiRequest(reqId: string, allow: boolean, exp?: number): { ok: boolean; allowed: boolean; sessionToken?: string; error?: string } {
     const entry = this.pending.get(reqId);
@@ -412,7 +421,15 @@ export class TunnelClient {
     const sessionToken = randomSessionToken();
     const bindExp = exp ?? this.now() + 24 * 3600 * 1000;
     this.bindings.set(sessionToken, { sessionToken, urlCode: entry.urlCode, exp: bindExp });
-    this.send({ v: 1, kind: 'ui-bind', urlCode: entry.urlCode, sessionToken, exp: bindExp });
+    const turn = buildTurnCreds(sessionToken);
+    this.send({
+      v: 1,
+      kind: 'ui-bind',
+      urlCode: entry.urlCode,
+      sessionToken,
+      exp: bindExp,
+      ...(turn ? { turn } : {}),
+    });
     return { ok: true, allowed: true, sessionToken };
   }
 
@@ -612,6 +629,34 @@ export class TunnelClient {
     this.bridges.set(id, { subs: new Set() });
   }
 
+  private rtcManager(): RtcManager | null {
+    try {
+      if ((process.env.RTC_ENABLED ?? '1').trim().toLowerCase() === '0') return null;
+    } catch {
+      /* noop */
+    }
+    if (!this.rtc) {
+      if (!this.httpHandler) return null;
+      this.rtc = new RtcManager({
+        handleApi: (req) => this.httpHandler!(req),
+        wsManager: this.wsManager,
+        db: this.db,
+      });
+    } else {
+      // Refresca deps vivas (httpHandler/wsManager pueden inyectarse tarde).
+      try {
+        (this.rtc as unknown as { deps: unknown }).deps = {
+          handleApi: (req: Request) => this.httpHandler!(req),
+          wsManager: this.wsManager,
+          db: this.db,
+        };
+      } catch {
+        /* noop */
+      }
+    }
+    return this.rtc;
+  }
+
   private onWsMsg(msg: any): void {
     const id = String(msg.id ?? '');
     if (!id || !this.bridges.has(id)) return;
@@ -622,6 +667,20 @@ export class TunnelClient {
       text = Buffer.from(bytes).toString('utf8');
     } catch {
       return;
+    }
+    // Señalización WebRTC por el mismo puente (no pasa al wsManager).
+    try {
+      const probe = JSON.parse(text) as { type?: unknown; payload?: unknown };
+      if (probe?.type === 'rtc-offer' || probe?.type === 'rtc-ice') {
+        void this.onRtcSignal(id, probe as { type: string; payload?: Record<string, unknown> });
+        return;
+      }
+      if (probe?.type === 'rtc-ping') {
+        this.send({ v: 1, kind: 'ws-msg', id, dataB64: b64encodeText(JSON.stringify({ type: 'rtc-pong' })), isBinary: false });
+        return;
+      }
+    } catch {
+      /* no JSON: sigue al wsManager */
     }
     const mgr: any = this.wsManager;
     if (mgr && typeof mgr.handleTunnelMessage === 'function') {
@@ -649,6 +708,25 @@ export class TunnelClient {
     } catch { /* noop */ }
   }
 
+  private async onRtcSignal(id: string, parsed: { type: string; payload?: Record<string, unknown> }): Promise<void> {
+    const mgr = this.rtcManager();
+    if (!mgr) return;
+    if (parsed.type === 'rtc-offer') {
+      const sdp = typeof parsed.payload?.sdp === 'string' ? (parsed.payload.sdp as string) : '';
+      const res = await mgr.handleOffer(id, sdp);
+      if ('sdp' in res) {
+        this.send({ v: 1, kind: 'ws-msg', id, dataB64: b64encodeText(JSON.stringify({ type: 'rtc-answer', payload: { sdp: res.sdp } })), isBinary: false });
+      } else {
+        this.send({ v: 1, kind: 'ws-msg', id, dataB64: b64encodeText(JSON.stringify({ type: 'rtc-answer', payload: { error: res.error } })), isBinary: false });
+      }
+      return;
+    }
+    if (parsed.type === 'rtc-ice') {
+      await mgr.handleIce(id, parsed.payload?.candidate);
+      return;
+    }
+  }
+
   private onWsClose(msg: any): void {
     const id = String(msg.id ?? '');
     if (!id) return;
@@ -657,6 +735,11 @@ export class TunnelClient {
 
   private closeBridge(id: string): void {
     this.bridges.delete(id);
+    try {
+      this.rtc?.close(id);
+    } catch {
+      /* noop */
+    }
     try {
       (this.wsManager as any)?.removeTunnelClient?.(id);
     } catch { /* noop */ }
