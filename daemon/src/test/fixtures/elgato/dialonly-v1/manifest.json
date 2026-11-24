@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Encoder"], "Name": "Knob", "UUID": "com.ld.dialonly.knob"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "Dial-only: debe rechazarse en el shim", "Name": "LD Dial Only", "Nodejs": {"Version": "20"}, "UUID": "com.ld.dialonly", "Version": "1.0.0.0"}

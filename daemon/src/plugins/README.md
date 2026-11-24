@@ -100,20 +100,34 @@ plugin puede importar APIs del runtime. Los permisos (`shell`,
 del API mediado, no contención OS. Instala solo plugins de autores
 de confianza y revisa lo que piden.
 
-## Importación Elgato (.sdPlugin) — fase 2 operativa
+## Importación Elgato (.sdPlugin) — shim en-Worker (sin procesos extra)
 
 `daemon/src/elgato/`: detecta paquetes Elgato (repo git, `.streamDeckPlugin`
 o carpeta), convierte el manifest, compila desde fuentes si el repo no trae
-`bin/` (caso DeckCal: `bun install + bun run build`, con fallback a npm),
-instala dependencias runtime y deja el plugin habilitado por defecto como
-`elgato-stopped` con auto-arranque del runtime en segundo plano. `needs-runtime` queda solo para binarios nativos o CodePath ausente.
-El host (`host.ts`: `Bun.serve` WS + `node <CodePath> -port -pluginUUID
--registerEvent -info`) traduce `willAppear/keyDown/keyUp/didReceiveSettings`
-y `setTitle/setImage/setState/settings/openUrl/logMessage`. La instalación
+`bin/` (DeckCal vía rollup, SEMS vía `rollup -c`, AUS-UV vía esbuild:
+`bun install + bun run build` con fallback a `scripts.bundle` y reintento con
+npm), instala solo dependencias JS puras (las nativas dejan el plugin en
+`needs-manual` con motivo) y genera el bridge del shim (`shim-bridge.js` +
+falso `@elgato/streamdeck` en `node_modules/`). El plugin corre en el
+`ExternalPluginWorker` actual: cero procesos `node`, cero `Bun.serve` por
+plugin, arranque perezoso (el Worker se crea en la primera pulsación) y
+parada tras 60s sin uso. `needs-manual` (apagado) queda para binarios
+nativos, dial-only o CodePath ausente. El contexto es único por botón
+(`ld:<plugin>:<acción>:<buttonId>`); el hold largo de LibreDeck es el delay
+real entre `keyDown` y `keyUp`. `switchToProfile`/`sendToPropertyInspector`
+son emulados y avisados (log + evento). Dos estilos de CodePath
+(`detectElgatoCodeStyle`): `sdk` (importa `@elgato/streamdeck`, bridge
+clásico) y `raw` (protocolo WebSocket en crudo sin SDK, como AUS-UV: bridge
+con transporte virtual en memoria, `WebSocket` global + `process.argv`
+virtuales y copia generada `shim-raw-entry.js` con `ws` reescrito, sin tocar
+las fuentes; si el CodePath es un bundle opaco se prefiere la fuente raw del
+paquete). El estilo queda en `x-elgato.codeStyle`/`bridgeEntry`. La instalación
 normal (`POST /api/v1/plugins/install`) autodetecta Elgato y deriva al
 importador; `POST /api/v1/plugins/import-elgato` permite dry-run.
 Nuevos endpoints: `GET /api/v1/plugins/:id/elgato-state` y
-`POST /api/v1/plugins/:id/key` (pulso sin hardware); WS emite `elgato.state`.
+`POST /api/v1/plugins/:id/key` (pulso sin hardware, con `pressType`/`holdMs`);
+WS emite `elgato.state`. El runtime por proceso (`host.ts`/`runtime.ts`)
+queda deprecated (solo con `LIBREDECK_ELGATO_SHIM=0`).
 
 ## Progreso en vivo
 

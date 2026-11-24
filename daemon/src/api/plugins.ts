@@ -115,8 +115,8 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
             ? {
                 elgato: true,
                 note:
-                  status?.status === 'elgato-stopped'
-                    ? 'Plugin Elgato habilitado por defecto (arrancando runtime en segundo plano).'
+                  status?.status === 'active'
+                    ? 'Plugin Elgato habilitado por defecto (shim en-Worker, arranque perezoso).'
                     : `Plugin Elgato: ${status?.status ?? 'instalado'}`,
               }
             : {};
@@ -127,11 +127,12 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
     }
   }
 
-  // ---- Importación Elgato (.sdPlugin / repo git). Fase 2: convierte,
+  // ---- Importación Elgato (.sdPlugin / repo git). Modo shim: convierte,
   // compila desde fuentes si hace falta (DeckCal trae src/, no bin/),
-  // instala dependencias con bun (fallback npm) y habilita por defecto
-  // (elgato-stopped + auto-arranque). needs-runtime solo si es nativo
-  // o falta CodePath. Con dryRun solo informe.
+  // instala dependencias JS puras con bun (fallback npm, no bloqueante) y
+  // genera el bridge en-Worker (shim-bridge.js). Habilitado por defecto con
+  // arranque perezoso (sin procesos node). needs-manual si es nativo,
+  // dial-only o falta CodePath. Con dryRun solo informe.
   if (path === '/api/v1/plugins/import-elgato') {
     if (method === 'POST') {
       try {
@@ -151,11 +152,11 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
             'plugins'
           );
         } else {
-          // Habilitado por defecto: arranca el runtime en segundo plano
-          // (sin bloquear la respuesta; el progreso va por WS).
+          // Habilitado por defecto: registro perezoso del shim en segundo
+          // plano (sin bloquear la respuesta; el progreso va por WS).
           try {
             const rec = db.getPlugin(result.pluginId) as any;
-            if (rec && Number(rec.enabled) === 1 && rec.status === 'elgato-stopped') {
+            if (rec && Number(rec.enabled) === 1 && (rec.status === 'active' || rec.status === 'elgato-stopped')) {
               void services.pluginLoader.loadElgatoPlugin(result.pluginId).catch(() => {});
             }
           } catch {}
@@ -350,15 +351,18 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
       }
     }
     // Pulso Elgato (keyDown+keyUp) para probar sin hardware: emula pulsar la tecla.
+    // `pressType: 'long'` (o `holdMs`) produce hold real (delay keyDown→keyUp).
     if (sub === 'key' && method === 'POST') {
       try {
         const body = await _req.json().catch(() => ({}));
-        const { action, context } = body ?? {};
+        const { action, context, pressType, holdMs } = body ?? {};
         if (!action) return jsonResponse({ error: 'action (id corto o UUID Elgato) requerido' }, 400);
         const fullId = action.includes('.') ? action : `${pluginId}.${action}`;
+        const pt = pressType === 'long' ? 'long' : 'short';
+        const hold = Number(holdMs) > 0 ? Math.min(Number(holdMs), 10_000) : undefined;
         const res = await services.actionRunner.executeAction(
           { type: fullId, parameters: {} },
-          { buttonId: typeof context === 'string' ? context : undefined, timestamp: Date.now(), pressType: 'short' } as any
+          { buttonId: typeof context === 'string' ? context : undefined, timestamp: Date.now(), pressType: pt, ...(hold !== undefined ? { holdMs: hold } : {}) } as any
         );
         return jsonResponse({ success: res.success, result: res.result, error: res.error });
       } catch (e) {

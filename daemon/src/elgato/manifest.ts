@@ -47,11 +47,14 @@ export type ElgatoRuntime = 'node' | 'native' | 'unknown';
 
 export type StagedKind = 'elgato' | 'libredeck' | 'none';
 
-/** ¿Tiene forma de manifest Elgato (UUID + Actions[] + CodePath)? */
+/** ¿Tiene forma de manifest Elgato (UUID + Actions[] + algún CodePath)? */
 export function isElgatoManifest(m: any): boolean {
-  return !!m && typeof m === 'object'
-    && typeof m.UUID === 'string' && Array.isArray(m.Actions)
-    && typeof m.CodePath === 'string';
+  if (!m || typeof m !== 'object') return false;
+  if (typeof m.UUID !== 'string' || !Array.isArray(m.Actions)) return false;
+  // Acepta CodePath genérico O específicos por plataforma (algunos paquetes
+  // solo traen CodePathMac/CodePathWin). Sin ninguno no es ejecutable.
+  const code = m.CodePath ?? m.CodePathMac ?? m.CodePathWin;
+  return typeof code === 'string' && code.length > 0;
 }
 
 function readJsonSafe(p: string): any | null {

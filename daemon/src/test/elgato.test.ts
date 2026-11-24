@@ -123,7 +123,7 @@ describe('importElgatoPlugin (local)', () => {
     expect(db.getPlugin('com.ejemplo.demo')).toBeNull();
   });
 
-  it('instala habilitado como elgato-stopped sin stub (auto-arranque del runtime)', async () => {
+  it('instala habilitado con shim en-Worker (bridge + arranque perezoso)', async () => {
     const dir = makeSdPlugin();
     const res = await importElgatoPlugin(db, { dir }, {});
     expect(res.installed).toBe(true);
@@ -131,19 +131,24 @@ describe('importElgatoPlugin (local)', () => {
     expect(rec).not.toBeNull();
     expect(Number(rec.enabled)).toBe(1);
     expect(rec.source_type).toBe('elgato');
-    expect(rec.status).toBe('elgato-stopped');
+    expect(rec.status).toBe('active');
     const folder = path.join(TMP, 'plugins', 'com.ejemplo.demo');
     expect(fs.existsSync(path.join(folder, 'manifest.json'))).toBe(true);
     expect(fs.existsSync(path.join(folder, 'elgato-manifest.json'))).toBe(true);
     expect(fs.existsSync(path.join(folder, 'elgato', 'bin', 'plugin.js'))).toBe(true);
-    // Ya no hay stub main.js: la ejecución es el bridge loader→runtime Elgato.
+    // Shim: bridge + SDK en-Worker, sin stub main.js legacy ni procesos node.
+    expect(fs.existsSync(path.join(folder, 'shim-bridge.js'))).toBe(true);
+    expect(fs.existsSync(path.join(folder, 'elgato-shim-sdk.js'))).toBe(true);
+    expect(fs.existsSync(path.join(folder, 'elgato', 'node_modules', '@elgato', 'streamdeck', 'index.js'))).toBe(true);
     expect(fs.existsSync(path.join(folder, 'main.js'))).toBe(false);
     const ours = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8'));
     expect(ours['x-elgato']).toBeDefined();
+    expect(ours['x-elgato'].shim?.mode).toBe('worker-lazy');
+    expect(ours.main).toBe('shim-bridge.js');
     expect(ours.actions.map((a: any) => a.id)).toEqual(['contar']);
   });
 
-  it('CodePath ausente queda needs-runtime (compatible pero no ejecutable)', async () => {
+  it('CodePath ausente queda needs-manual (diagnóstico apagado)', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-elg-src-'));
     const dir = path.join(root, 'com.ejemplo.falta.sdPlugin');
     fs.mkdirSync(dir, { recursive: true });
@@ -164,6 +169,6 @@ describe('importElgatoPlugin (local)', () => {
     const rec = db.getPlugin('com.ejemplo.falta') as any;
     expect(rec).not.toBeNull();
     expect(Number(rec.enabled)).toBe(0);
-    expect(rec.status).toBe('needs-runtime');
+    expect(rec.status).toBe('needs-manual');
   });
 });

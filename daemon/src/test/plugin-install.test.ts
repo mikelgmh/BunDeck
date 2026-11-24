@@ -137,7 +137,7 @@ describe('Instalación de plugins', () => {
     const id = await loader.installPluginFromDirectory(path.join(TMP, 'src-elgato-auto'));
     expect(id).toBe('com.auto.demo');
     const st = loader.getStatus('com.auto.demo');
-    expect(st.status).toBe('needs-runtime');
+    expect(st.status).toBe('needs-manual');
     expect(st.enabled).toBe(false);
     // Deshabilitado: no carga handlers reales
     expect(loader.getPlugin('com.auto.demo')).toBeUndefined();

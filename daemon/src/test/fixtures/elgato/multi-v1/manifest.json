@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Alpha", "UUID": "com.ld.multi.alpha"}, {"Controllers": ["Keypad"], "Name": "Beta", "UUID": "com.ld.multi.beta"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "Dos acciones Keypad para E2E del shim", "Name": "LD Multi", "Nodejs": {"Version": "20"}, "UUID": "com.ld.multi", "Version": "1.1.0.0"}

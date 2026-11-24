@@ -1,5 +1,9 @@
 /**
- * host.ts — Emulador de host Elgato Stream Deck (fase 2).
+ * host.ts — Emulador de host Elgato Stream Deck (fase 2, POR PROCESO).
+ *
+ * @deprecated El shim en-Worker (`elgato/shim/`) es el camino por defecto:
+ * cero procesos `node`, cero `Bun.serve` por plugin. Este host solo se usa
+ * con `LIBREDECK_ELGATO_SHIM=0` y no recibe mantenimiento.
  *
  * Por cada plugin Elgato Node se levanta un `Bun.serve` WebSocket dedicado
  * en un puerto libre y se spawnea `node <CodePath> -port <p> -pluginUUID

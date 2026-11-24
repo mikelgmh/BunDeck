@@ -1,17 +1,20 @@
 /**
  * Importación de plugins Elgato (.sdPlugin / .streamDeckPlugin / repo git).
  *
- * Fase 2: la instalación deja el paquete listo para ejecutar, no un stub:
- * tras copiar a dest/elgato + elgato-manifest.json + manifest.json se
- * resuelve el CodePath real (CodePathWin en win32, CodePathMac en darwin,
- * CodePath genérico), se verifica el fichero bajo elgato/ y, si hay
- * package.json, se instalan dependencias con `bun install` (fallback a
- * `npm install --omit=dev`, no bloqueante).
- * El manifest convertido se guarda habilitado por defecto cuando es
- * ejecutable: enabled=1 y status 'elgato-stopped' (el runtime fase 2 lo
- * arranca al importar); 'needs-runtime' + enabled=0 solo si el runtime es
- * nativo o falta el CodePath.
- * El runtime de compatibilidad (host Elgato, fase 2) lo activa.
+ * Modo shim (sin emulación por proceso): la instalación deja el paquete
+ * listo para ejecutar DENTRO del Worker actual — tras copiar a dest/elgato
+ * + elgato-manifest.json + manifest.json se genera el bridge
+ * (`shim-bridge.js` + falso `@elgato/streamdeck`, ver `shim/loader-shim.ts`)
+ * y el plugin corre en el `ExternalPluginWorker` estándar. Cero procesos
+ * `node`, cero `Bun.serve` por plugin.
+ *
+ * - JS Keypad ejecutable: enabled=1, status 'active' (arranque perezoso:
+ *   el Worker se crea en la primera pulsación).
+ * - Nativo / dial-only / sin CodePath: se importa para diagnóstico con
+ *   enabled=0 y status 'needs-manual' + motivo en `last_error`.
+ * - Las dependencias solo se instalan si hay package.json con deps JS
+ *   puras; si requiere nativas se deja needs-manual con motivo (la
+ *   instalación nunca tumba la importación).
  */
 import path from 'path';
 import fs from 'fs';
@@ -139,11 +142,31 @@ export function resolveElgatoCodePath(elgato: any): string | null {
 }
 
 /**
- * Instala dependencias con bun (`bun install --production`, fallback a
- * `npm install --omit=dev`) si el paquete trae package.json
- * (en elgato/ o en la raíz del destino). Nunca tumba la importación:
- * devuelve un aviso para `last_error` o null si no hizo falta / fue bien.
+ * Instala dependencias SOLO si el paquete trae package.json con dependencias
+ * JS puras. Heurística de nativas: si alguna dep es conocida por requerir
+ * compilación (o hay binding.gyp / .gyp), NO se instala y se devuelve el
+ * motivo (el plugin quedará needs-manual). Nunca tumba la importación.
  */
+
+/** Heurística de dependencias nativas (requieren compilación fuera del Worker). */
+function hasNativeRequirement(target: string, deps: Record<string, string>): string | null {
+  const KNOWN_NATIVE = [
+    'node-gyp', 'prebuild-install', 'bindings', 'node-addon-api', 'nan',
+    'node-hid', 'usb', 'serialport', 'sqlite3', 'better-sqlite3', 'sharp',
+    'canvas', 'robotjs', 'iohook', 'uiohook-napi', 'electron',
+  ];
+  const names = Object.keys(deps);
+  const hit = names.find((n) => KNOWN_NATIVE.some((k) => n === k || n.startsWith(`${k}-`)));
+  if (hit) return `dependencia nativa '${hit}'`;
+  try {
+    const files = fs.readdirSync(target);
+    if (files.some((f) => f === 'binding.gyp' || f.endsWith('.gyp') || f.endsWith('.gypi'))) {
+      return 'binding.gyp presente (módulo nativo)';
+    }
+  } catch {}
+  return null;
+}
+
 async function npmInstallIfNeeded(elgatoDir: string, destRoot: string, prog?: ElgatoProgress): Promise<string | null> {
   let target: string | null = null;
   try {
@@ -151,6 +174,15 @@ async function npmInstallIfNeeded(elgatoDir: string, destRoot: string, prog?: El
     else if (fs.existsSync(path.join(destRoot, 'package.json'))) target = destRoot;
   } catch { target = null; }
   if (!target) return null;
+  // Sin deps declaradas no hay nada que instalar.
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8'));
+    const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.optionalDependencies ?? {}) };
+    if (Object.keys(deps).length === 0) return null;
+    // Nativas: no instalables por el shim → needs-manual con motivo.
+    const nativeHint = hasNativeRequirement(target, deps);
+    if (nativeHint) return `Sin instalar dependencias (${nativeHint}); el shim solo ejecuta JS puro.`;
+  } catch { /* si no se puede leer, se intenta instalar (no bloqueante) */ }
   const cwd = target;
   const pm = await pickPackageManager();
   const bin = pmBin(pm);
@@ -164,19 +196,19 @@ async function npmInstallIfNeeded(elgatoDir: string, destRoot: string, prog?: El
     });
     if (r.cancelled) return `${label} cancelado por el usuario (no bloqueante).`;
     if (r.timedOut) {
-      const msg = `${label} excedió 5min (timeout anti-cuelgue): dependencias parciales; listo para activar con runtime Elgato pero puede fallar al arrancar.`;
+      const msg = `${label} excedió 5min (timeout anti-cuelgue): dependencias parciales; el shim puede fallar al arrancar.`;
       prog?.('deps', msg);
       return msg;
     }
     if (r.exitCode !== 0) {
-      const msg = `${label} falló (no bloqueante, listo para activar con runtime Elgato): ${r.stderrTail.slice(0, 300)}`;
+      const msg = `${label} falló (no bloqueante, el shim puede fallar al arrancar): ${r.stderrTail.slice(0, 300)}`;
       prog?.('deps', msg);
       return msg;
     }
     prog?.('deps', 'Dependencias instaladas.');
     return null;
   } catch (e) {
-    const msg = `${label} no ejecutado (no bloqueante, listo para activar con runtime Elgato): ${e instanceof Error ? e.message : String(e)}`;
+    const msg = `${label} no ejecutado (no bloqueante, el shim puede fallar al arrancar): ${e instanceof Error ? e.message : String(e)}`;
     prog?.('deps', msg);
     return msg;
   }
@@ -201,8 +233,62 @@ export async function importElgatoPlugin(
   });
 }
 
-async function doImportElgatoPlugin(
+/**
+ * Instalación de diagnóstico para paquetes Elgato NO ejecutables en el shim
+ * (nativo, dial-only, manifest roto): copia el paquete + manifest mínimo con
+ * `x-elgato.unsupported`, APAGADO (enabled=0) y status 'needs-manual' con el
+ * motivo en `last_error`. Nunca lanza por el contenido del paquete.
+ */
+async function installNeedsManual(
   db: DatabaseService,
+  pluginsDir: string,
+  stage: string,
+  origin: string,
+  elgato: any,
+  report: ElgatoReport,
+  prog?: ElgatoProgress,
+): Promise<ElgatoImportResult> {
+  const { needsManualReason } = await import('./shim/loader-shim');
+  const uuid = typeof report.uuid === 'string' && report.uuid ? report.uuid : 'desconocido';
+  const reason = needsManualReason(report);
+  const pluginId = uuid === 'desconocido' ? `elgato-desconocido-${Date.now()}` : uuid;
+  const folder = folderForId(pluginId);
+  const dest = path.join(pluginsDir, folder);
+  if (fs.existsSync(dest)) throw new Error(`Plugin ${pluginId} ya existe`);
+  prog?.('activate', 'Paquete no ejecutable en el shim: instalando para diagnóstico…');
+  fs.mkdirSync(dest, { recursive: true });
+  const codeRoot = path.dirname(findManifestRecursive(stage) ?? stage);
+  const elgatoDir = path.join(dest, 'elgato');
+  fs.mkdirSync(elgatoDir, { recursive: true });
+  try { copyRecursive(codeRoot, elgatoDir); } catch {}
+  try { fs.writeFileSync(path.join(dest, 'elgato-manifest.json'), JSON.stringify(elgato ?? {}, null, 2)); } catch {}
+  const manifest = {
+    id: pluginId,
+    name: (elgato as any)?.Name ?? pluginId,
+    version: report.semver ?? '0.0.0',
+    description: (elgato as any)?.Description ?? 'Plugin Elgato no ejecutable en el shim (diagnóstico)',
+    author: (elgato as any)?.Author ?? 'desconocido',
+    engine: '>=1.5.0',
+    apiVersion: '2.1',
+    permissions: [],
+    actions: [],
+    'x-elgato': {
+      uuid, elgatoVersion: report.elgatoVersion ?? null, runtime: report.runtime,
+      codePath: report.codePath ?? null, controllers: report.controllers ?? [],
+      originalActions: [], unsupported: report.reasons, shim: { version: 2, mode: 'needs-manual' },
+    },
+  };
+  fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  db.upsertPluginRecord({
+    id: pluginId, name: manifest.name, version: manifest.version, manifest,
+    enabled: 0, source_type: 'elgato', origin, status: 'needs-manual', last_error: reason,
+  } as any);
+  prog?.('done', `Importado ${pluginId} para diagnóstico (needs-manual)`);
+  try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
+  return { pluginId, report, installed: true, dryRun: false, path: dest };
+}
+
+async function doImportElgatoPlugin(  db: DatabaseService,
   src: ElgatoImportSource,
   opts: { dryRun?: boolean; onProgress?: ElgatoProgress } = {}
 ): Promise<ElgatoImportResult> {
@@ -218,14 +304,16 @@ async function doImportElgatoPlugin(
     }
     const elgato = JSON.parse(fs.readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, ''));
     const report = analyzeElgatoManifest(elgato);
-    if (!report.compatible || !report.uuid) {
-      return { pluginId: report.uuid ?? 'desconocido', report, installed: false, dryRun: !!opts.dryRun };
-    }
     if (opts.dryRun) {
-      return { pluginId: report.uuid, report, installed: false, dryRun: true };
+      return { pluginId: report.uuid ?? 'desconocido', report, installed: false, dryRun: true };
+    }
+    // Incompatible (nativo / dial-only / manifest roto): se instala igual
+    // para diagnóstico pero APAGADO y en needs-manual con el motivo.
+    if (!report.compatible || !report.uuid) {
+      return installNeedsManual(db, pluginsDir, stage, origin, elgato, report, prog);
     }
     prog?.('validate', `Manifest Elgato válido: ${report.uuid} v${report.semver}`);
-    // CodePath efectivo para esta plataforma (el runtime fase 2 lo usará).
+    // CodePath efectivo para esta plataforma (el shim lo usará).
     const codePathRel = resolveElgatoCodePath(elgato);
     // Si el CodePath no existe en el staging (p.ej. DeckCal en git sin compilar:
     // el repo trae src/ + package.json y bin/plugin.js se genera con build),
@@ -256,7 +344,7 @@ async function doImportElgatoPlugin(
     if (fs.existsSync(dest)) throw new Error(`Plugin ${report.uuid} ya existe`);
     prog?.('activate', 'Instalando paquete Elgato…');
     fs.mkdirSync(dest, { recursive: true });
-    // Copiar el paquete original bajo elgato/ para ejecución en fase 2
+    // Copiar el paquete original bajo elgato/ para ejecución en el Worker
     const codeRoot = path.dirname(manifestPath);
     const elgatoDir = path.join(dest, 'elgato');
     fs.mkdirSync(elgatoDir, { recursive: true });
@@ -264,7 +352,7 @@ async function doImportElgatoPlugin(
     // Si el build fue desde fuentes, el package.json con las deps runtime
     // (@elgato/streamdeck, @googleapis/...) está en el build-root (raíz del
     // repo), no bajo elgato/. Copiarlo a dest/ para que `bun install` deje
-    // node_modules donde Node lo resuelve (dest/node_modules ← elgato/bin/).
+    // node_modules donde el bridge lo resuelve (dest/node_modules).
     // También se copia el lockfile que exista (bun.lock o package-lock.json).
     try {
       const top = path.resolve(stage);
@@ -296,10 +384,6 @@ async function doImportElgatoPlugin(
       }
     } catch {}
     fs.writeFileSync(path.join(dest, 'elgato-manifest.json'), JSON.stringify(elgato, null, 2));
-    // NOTA: ya no se escribe ningún stub main.js. La ejecución la hace el
-    // runtime Elgato (host fase 2) sobre elgato/<CodePath>; el loader delega
-    // ahí cuando el manifest trae x-elgato (bridge en plugin-loader).
-    fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
     // Verificar que el CodePath existe bajo elgato/ (relativo, sin escapes).
     let codeOk = false;
@@ -313,18 +397,64 @@ async function doImportElgatoPlugin(
     let lastError: string | null;
     let doneMsg: string;
     if (!runnable) {
-      status = 'needs-runtime';
+      // Sin ejecutable JS: diagnóstico apagado en needs-manual.
+      const { needsManualReason } = await import('./shim/loader-shim');
+      status = 'needs-manual';
       lastError = isNative
-        ? `CodePath nativo no ejecutable en LibreDeck (${codePathRel ?? report.codePath ?? 'desconocido'}): solo los plugins JS/Node se activan con runtime Elgato. Importado para diagnóstico.`
+        ? `CodePath nativo no ejecutable en el shim (${codePathRel ?? report.codePath ?? 'desconocido'}): solo JS puro corre en el Worker. ${needsManualReason(report)}`
         : `CodePath ausente bajo elgato/ (${codePathRel ?? 'sin CodePath'}): no se encontró el fichero. Revisa el paquete.`;
-      doneMsg = `Importado ${report.uuid} v${report.semver} (needs-runtime: ${!codeOk ? 'CodePath no encontrado' : 'runtime nativo'})`;
+      manifest.main = undefined as any;
+      delete (manifest as any).main;
+      fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2));
+      doneMsg = `Importado ${report.uuid} v${report.semver} (needs-manual: ${!codeOk ? 'CodePath no encontrado' : 'runtime nativo'})`;
     } else {
-      // JS válido: dependencias con bun (fallback npm, no bloqueante),
-      // habilitado por defecto; el runtime fase 2 lo arranca al importar.
+      // JS válido: deps puras con bun (fallback npm, no bloqueante), bridge
+      // del shim y habilitado por defecto (arranque perezoso en el Worker).
       const npmWarn = await npmInstallIfNeeded(elgatoDir, dest, prog);
-      status = 'elgato-stopped';
+      const { writeShimFiles, resolveCodePathFor, isShimCapable, detectElgatoCodeStyle, SHIM_BRIDGE_VERSION } = await import('./shim/loader-shim');
+      const { buildSettingsSchema } = await import('./shim/sdk');
+      // El estilo (sdk vs raw) se detecta del CodePath instalado: el raw
+      // también es capaz (adaptador en-Worker) si hay CodePath tras el build.
+      let codeText: string | null = null;
+      try {
+        const abs = codePathRel && !codePathRel.includes('..') && !path.isAbsolute(codePathRel)
+          ? path.join(elgatoDir, codePathRel)
+          : null;
+        if (abs && fs.statSync(abs).isFile() && fs.statSync(abs).size <= 2 * 1024 * 1024) {
+          codeText = fs.readFileSync(abs, 'utf8');
+        }
+      } catch { codeText = null; }
+      if (!isShimCapable(report, codeText)) {
+        throw new Error(`Plugin no ejecutable en el shim: ${report.reasons.join('; ')}`);
+      }
+      if (codeText) prog?.('validate', `Estilo Elgato detectado: ${detectElgatoCodeStyle(codeText)} (bridge ${codeText && detectElgatoCodeStyle(codeText) === 'raw' ? 'raw en-Worker' : 'SDK'})`);
+      // 1 acción LibreDeck por acción Elgato Keypad (del informe, no por
+      // índice: las omitidas —dial— romperían la alineación por posición).
+      const actions = report.actions
+        .filter((a) => a.status === 'ok')
+        .map((a) => ({ shortId: String(a.id), uuid: String(a.uuid) }));
+      const { bridgeFile, codeStyle: bridgeStyle, entryRel } = writeShimFiles({
+        dest, elgatoDir, pluginId: report.uuid,
+        codeRel: resolveCodePathFor(elgato) ?? codePathRel, actions,
+        elgatoUuid: report.uuid,
+      });
+      manifest.main = bridgeFile;
+      // Settings mínimos: schema generado desde defaults del paquete.
+      const schema = buildSettingsSchema((elgato as any).SettingsDefaults ?? null);
+      if (schema) manifest.settingsSchema = schema;
+      manifest.permissions = Array.from(new Set([...(manifest.permissions ?? []), 'network', 'filesystem']));
+      manifest['x-elgato'] = {
+        ...(manifest['x-elgato'] ?? {}),
+        codePath: codePathRel,
+        platform: process.platform,
+        codeStyle: bridgeStyle,
+        bridgeEntry: entryRel,
+        shim: { version: SHIM_BRIDGE_VERSION, mode: 'worker-lazy' },
+      };
+      fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2));
+      status = 'active';
       lastError = npmWarn;
-      doneMsg = `Importado ${report.uuid} v${report.semver} (habilitado, arrancando runtime Elgato…)`;
+      doneMsg = `Importado ${report.uuid} v${report.semver} (shim activo, arranque perezoso)`;
     }
 
     db.upsertPluginRecord({
@@ -357,13 +487,15 @@ function copyRecursive(src: string, dest: string) {
 }
 
 /**
- * Fallback fase 2: compilar el plugin desde fuentes cuando el repo git no
- * trae el binario (DeckCal: `bin/plugin.js` se genera con `bun run build`
- * desde `src/` vía rollup; el manifest vive en `<root>/com.x.sdPlugin/`).
- * Busca el build-root (package.json con scripts.build) entre codeRoot y
- * stage, ejecuta `bun install` (con devDeps, necesarias para compilar) +
- * `bun run build` (fallback a npm si bun no está disponible), y devuelve
- * true si el CodePath aparece bajo codeRoot.
+ * Fallback: compilar el plugin desde fuentes cuando el repo git no trae el
+ * binario (DeckCal: `bin/plugin.js` se genera con build desde `src/` vía
+ * rollup; AUS-UV: `bin/plugin.js` se genera con `npm run bundle` vía
+ * esbuild; SEMS: `bin/plugin.js` vía `rollup -c`).
+ * Busca el build-root (package.json con scripts.build/bundle) entre codeRoot
+ * y stage, ejecuta install (con devDeps, necesarias para compilar) + el
+ * script de build (`build`, con fallback a `bundle` para repos solo-esbuild
+ * como AUS-UV; si el gestor principal falla se reintenta una vez con npm),
+ * y devuelve true SOLO si el CodePath aparece bajo codeRoot.
  * Nunca lanza: devuelve false si no hay build-root o falla.
  */
 async function tryBuildElgatoFromSource(stage: string, codeRoot: string, prog?: ElgatoProgress): Promise<boolean> {
@@ -376,7 +508,7 @@ async function tryBuildElgatoFromSource(stage: string, codeRoot: string, prog?: 
       const pkgPath = path.join(cur, 'package.json');
       if (fs.existsSync(pkgPath)) {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        const hasBuild = typeof pkg?.scripts?.build === 'string';
+        const hasBuild = typeof pkg?.scripts?.build === 'string' || typeof pkg?.scripts?.bundle === 'string';
         const looksElgato = JSON.stringify(pkg?.dependencies ?? {}).includes('streamdeck') ||
           JSON.stringify(pkg?.devDependencies ?? {}).includes('elgato');
         if (hasBuild || looksElgato) { buildRoot = cur; break; }
@@ -388,32 +520,63 @@ async function tryBuildElgatoFromSource(stage: string, codeRoot: string, prog?: 
     cur = parent;
   }
   if (!buildRoot) return false;
-  // Sin gestor de paquetes no hay build.
-  const pm = await pickPackageManager();
-  const bin = pmBin(pm);
-  const instLabel = pm === 'bun' ? 'bun install' : 'npm install';
-  const buildLabel = pm === 'bun' ? 'bun run build' : 'npm run build';
-  prog?.('deps', `Fuentes detectadas en ${path.basename(buildRoot)}: compilando (${instLabel} + ${buildLabel})…`);
-  const { spawnJob } = await import('../jobs/manager');
-  const runPm = async (args: string[], timeoutMs: number, label: string): Promise<{ ok: boolean; err: string }> => {
-    const r = await spawnJob([bin, ...args], {
-      cwd: buildRoot, timeoutMs,
-      beatOnOutput: (s, m) => prog?.(s, `${label}: ${m.slice(-120)}`),
-    });
-    if (r.cancelled) return { ok: false, err: 'cancelado por el usuario' };
-    if (r.timedOut) return { ok: false, err: `timeout anti-cuelgue ${Math.round(timeoutMs / 1000)}s` };
-    if (r.exitCode !== 0) return { ok: false, err: r.stderrTail.slice(-500) || `exit ${r.exitCode}` };
-    return { ok: true, err: '' };
+  // CodePath esperado (relativo a codeRoot): solo éxito si aparece tras compilar.
+  let codeRel: string | null = null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(codeRoot, 'manifest.json'), 'utf8'));
+    codeRel = resolveElgatoCodePath(raw);
+  } catch { codeRel = 'bin/plugin.js'; }
+  const normRoot = norm(codeRoot);
+  const codeExists = (): boolean => {
+    if (!codeRel || codeRel.includes('..') || path.isAbsolute(codeRel)) return false;
+    try { return fs.statSync(path.join(normRoot, codeRel)).isFile(); }
+    catch { return false; }
   };
-  const inst = await runPm(installAllArgs(pm), 8 * 60 * 1000, instLabel);
-  if (!inst.ok) {
-    prog?.('deps', `${instLabel} (build) falló, se importa sin compilar: ${inst.err.slice(0, 200)}`);
-    return false;
+  if (codeExists()) return true;
+  let pkgScripts: Record<string, string> = {};
+  try {
+    pkgScripts = JSON.parse(fs.readFileSync(path.join(buildRoot, 'package.json'), 'utf8'))?.scripts ?? {};
+  } catch { pkgScripts = {}; }
+  // `build` primero (rollup/esbuild/test+bundle), `bundle` como fallback
+  // directo (repos solo-esbuild como AUS-UV cuyo `build` exige tests con red).
+  const scripts = ['build', 'bundle'].filter((s) => typeof pkgScripts[s] === 'string');
+  if (scripts.length === 0) return false;
+  const firstPm = await pickPackageManager();
+  const pms: PackageManager[] = firstPm === 'bun' ? ['bun', 'npm'] : ['npm'];
+  const { spawnJob } = await import('../jobs/manager');
+  for (const pm of pms) {
+    const bin = pmBin(pm);
+    const instLabel = pm === 'bun' ? 'bun install' : 'npm install';
+    const runPm = async (args: string[], timeoutMs: number, label: string): Promise<{ ok: boolean; err: string }> => {
+      const r = await spawnJob([bin, ...args], {
+        cwd: buildRoot, timeoutMs,
+        beatOnOutput: (s, m) => prog?.(s, `${label}: ${m.slice(-120)}`),
+      });
+      if (r.cancelled) return { ok: false, err: 'cancelado por el usuario' };
+      if (r.timedOut) return { ok: false, err: `timeout anti-cuelgue ${Math.round(timeoutMs / 1000)}s` };
+      if (r.exitCode !== 0) return { ok: false, err: r.stderrTail.slice(-500) || `exit ${r.exitCode}` };
+      return { ok: true, err: '' };
+    };
+    prog?.('deps', `Fuentes detectadas en ${path.basename(buildRoot)}: compilando (${instLabel} + ${scripts.map((s) => `${pm === 'bun' ? 'bun' : 'npm'} run ${s}`).join(' → ')})…`);
+    const inst = await runPm(installAllArgs(pm), 8 * 60 * 1000, instLabel);
+    if (!inst.ok) {
+      prog?.('deps', `${instLabel} (build) falló, se importa sin compilar: ${inst.err.slice(0, 200)}`);
+      continue; // probar con el siguiente gestor antes de rendirse
+    }
+    for (const script of scripts) {
+      const label = `${pm === 'bun' ? 'bun' : 'npm'} run ${script}`;
+      const built = await runPm(['run', script], 5 * 60 * 1000, label);
+      if (!built.ok) {
+        prog?.('deps', `${label} falló, se prueba siguiente: ${built.err.slice(0, 200)}`);
+        continue;
+      }
+      if (codeExists()) {
+        prog?.('deps', `${label}: CodePath generado (${codeRel}).`);
+        return true;
+      }
+      prog?.('deps', `${label} OK pero sin ${codeRel}: se prueba siguiente.`);
+    }
+    if (codeExists()) return true;
   }
-  const build = await runPm(['run', 'build'], 5 * 60 * 1000, buildLabel);
-  if (!build.ok) {
-    prog?.('deps', `${buildLabel} falló, se importa sin compilar: ${build.err.slice(0, 200)}`);
-    return false;
-  }
-  return true;
+  return codeExists();
 }

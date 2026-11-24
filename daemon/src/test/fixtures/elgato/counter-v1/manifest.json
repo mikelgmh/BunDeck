@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Count", "Tooltip": "Incrementa y muestra el contador", "UUID": "com.ld.counter.count"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "Contador Keypad para E2E del shim", "Name": "LD Counter", "Nodejs": {"Version": "20"}, "SDKVersion": 3, "UUID": "com.ld.counter", "Version": "1.0.0.0"}

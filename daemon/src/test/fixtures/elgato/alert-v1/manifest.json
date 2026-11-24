@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Flash", "Tooltip": "Alterna alerta/ok", "UUID": "com.ld.alert.flash"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "showAlert/showOk para E2E del shim", "Name": "LD Alert", "Nodejs": {"Version": "20"}, "UUID": "com.ld.alert", "Version": "2.0.0.0"}

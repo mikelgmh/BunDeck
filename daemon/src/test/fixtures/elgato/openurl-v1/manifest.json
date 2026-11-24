@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Open", "Tooltip": "Abre URL", "UUID": "com.ld.openurl.open"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "system.openUrl para E2E del shim", "Name": "LD Open URL", "Nodejs": {"Version": "20"}, "UUID": "com.ld.openurl", "Version": "1.0.0.0"}

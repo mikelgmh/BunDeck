@@ -1,10 +1,14 @@
 /**
- * runtime.ts — Fachada del runtime de compatibilidad Elgato (fase 2).
+ * runtime.ts — Fachada del runtime de compatibilidad Elgato (fase 2, por proceso).
+ *
+ * @deprecated Ver `elgato/shim/`: el shim en-Worker es el camino por defecto
+ * (cero procesos `node`, cero `Bun.serve` por plugin). Este manager solo se
+ * usa con `LIBREDECK_ELGATO_SHIM=0` y no recibe mantenimiento.
  *
  * Mantiene un `ElgatoHost` por plugin y normaliza el `CodePath` del
  * manifest Elgato según la plataforma (`CodePathWin` / `CodePathMac` /
  * `CodePath`). El `PluginLoader` (otro agente) la integrará para arrancar
- * plugins `needs-runtime` habilitados.
+ * plugins `needs-manual` habilitados.
  */
 
 import { ElgatoHost, type ElgatoActionState, type ElgatoStateCallback } from './host';
@@ -66,6 +70,10 @@ export class ElgatoRuntimeManager {
 
   /** Arranca el plugin Elgato (idempotente si ya corre). */
   public async start(pluginId: string, elgatoManifest: ElgatoManifest | any): Promise<void> {
+    console.warn(
+      `[DEPRECATED] ElgatoRuntimeManager.start(${pluginId}): runtime por proceso en desuso; ` +
+      `el shim en-Worker (elgato/shim/) es el camino. Solo con LIBREDECK_ELGATO_SHIM=0.`
+    );
     const code = resolveCodePath(elgatoManifest);
     if (!code) throw new Error(`Plugin Elgato ${pluginId} sin CodePath ejecutable`);
     await this.hostFor(pluginId).startPlugin(pluginId, elgatoManifest);

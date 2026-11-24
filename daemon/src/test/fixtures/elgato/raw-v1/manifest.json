@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Ping", "Tooltip": "Responde raw! al pulsar (protocolo crudo)", "UUID": "com.ld.raw.ping"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "Fixture raw mínima (estilo AUS-UV) para E2E del shim", "Name": "LD Raw", "Nodejs": {"Version": "20"}, "UUID": "com.ld.raw", "Version": "1.0.0.0"}

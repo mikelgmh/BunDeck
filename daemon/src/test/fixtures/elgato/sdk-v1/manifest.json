@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Name": "Ping", "Tooltip": "Responde pong al pulsar", "UUID": "com.ld.sdk.ping"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "Fixture SDK mínima para E2E del shim", "Name": "LD SDK", "Nodejs": {"Version": "20"}, "UUID": "com.ld.sdk", "Version": "1.0.0.0"}

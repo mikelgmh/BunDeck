@@ -1,0 +1,1 @@
+{"Actions": [{"Controllers": ["Keypad"], "Icon": "imgs/icon", "Name": "Badge", "Tooltip": "Muestra icono relativo", "UUID": "com.ld.image.badge"}], "Author": "LibreDeck", "Category": "Demo", "CodePath": "plugin.js", "Description": "setImage relativo para E2E del shim", "Name": "LD Image", "Nodejs": {"Version": "20"}, "UUID": "com.ld.image", "Version": "1.0.0.0"}

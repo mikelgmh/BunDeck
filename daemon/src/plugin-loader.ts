@@ -11,6 +11,7 @@ import type { PluginManifestV2, PluginActionV2, LoadedPluginV2 } from './plugin-
 import { getNativeManifests } from './plugins/index';
 import { isVersionRangeRef, pickBestTag, invalidateCatalog } from './catalog';
 import { getPluginConfiguredStatus } from './plugins/connection-status';
+import { ensureShimBridge, isShimEnabled, SHIM_IDLE_MS } from './elgato/shim/loader-shim';
 
 // Re-export para compatibilidad
 export interface PluginManifest extends PluginManifestV2 {}
@@ -70,7 +71,11 @@ function isTempEntry(name: string): boolean {
     || name.startsWith('.tmp_') || name.startsWith('.download_');
 }
 
-export interface LoadOptions { force?: boolean }
+export interface LoadOptions {
+  force?: boolean;
+  /** Interno: el shim lo usa para activar el Worker sin re-delegar. */
+  skipElgatoDelegation?: boolean;
+}
 export interface InstallOptions {
   force?: boolean; // permite engine incompatible o downgrade
   enabled?: boolean; // por defecto true
@@ -91,7 +96,17 @@ export class PluginLoader {
   // Un Worker por plugin externo (aislamiento real; ver plugin-system/plugin-worker.ts)
   private externalWorkers: Map<string, ExternalPluginWorker> = new Map();
   // Plugins Elgato con runtime fase 2 en marcha (host Elgato, sin Worker).
-  private elgatoRunning: Set<string> = new Set();
+  // LEGACY (deprecated): solo se usa con LIBREDECK_ELGATO_SHIM=0. El shim
+  // ejecuta los plugins en el Worker actual (ver elgato/shim/).
+  private elgatoRunning: Set<string> = new Set<string>();
+  // Shim: última pulsación por plugin (parada por inactividad), visuales
+  // cacheados por contexto (para getElgatoState sin canal extra) y
+  // activaciones en curso (evita doble spawn en pulsaciones concurrentes).
+  private elgatoLastUsed: Map<string, number> = new Map();
+  private elgatoIdleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private elgatoVisuals: Map<string, Map<string, any>> = new Map();
+  private elgatoLazy: Set<string> = new Set();
+  private elgatoActivating: Map<string, Promise<void>> = new Map();
   // Plugins externos que fallaron al registrarse/crashearon (fullActionId -> error)
   private pluginErrors: Map<string, string> = new Map();
   private broadcaster: PluginEventBroadcaster | null = null;
@@ -281,8 +296,9 @@ export class PluginLoader {
       return false;
     }
     if (rec && !isBuiltIn(pluginId)) {
-      // Delegación Elgato fase 2: manifest con x-elgato arranca el runtime,
-      // no el Worker. Lee DB y, si no cuadra, el manifest en disco.
+      // Delegación Elgato: manifest con x-elgato → shim en el Worker actual
+      // (loadElgatoPlugin; legacy por proceso solo con SHIM=0). Lee DB y,
+      // si no cuadra, el manifest en disco.
       try {
         let m: any = null;
         try { m = typeof rec.manifest === 'string' ? JSON.parse(rec.manifest) : rec.manifest; } catch {}
@@ -379,8 +395,9 @@ export class PluginLoader {
       } catch {}
     }
 
-    // Delegación Elgato fase 2 antes de buscar main.js (los Elgato no usan Worker).
-    if (this.isElgatoPlugin(manifest)) {
+    // Delegación Elgato al shim (antes de buscar main.js). El shim activa el
+    // Worker directamente con skipElgatoDelegation para no re-entrar aquí.
+    if (this.isElgatoPlugin(manifest) && !opts.skipElgatoDelegation) {
       return this.loadElgatoPlugin(manifest.id ?? pluginId);
     }
 
@@ -513,10 +530,210 @@ export class PluginLoader {
   }
 
   /**
-   * Arranca un plugin Elgato con el runtime fase 2 y registra cada acción
-   * como handler que envía keyDown+keyUp al runtime. Sin import estático.
+   * Arranca un plugin Elgato.
+   *
+   * Con el shim (por defecto): registro perezoso en el Worker actual, sin
+   * procesos `node` ni `Bun.serve`. El Worker se crea en la primera
+   * pulsación y se libera tras 60s sin uso. El contexto es único por botón
+   * (`ld:<plugin>:<acción>:<buttonId>`), sin divergencia `:deck` vs botón.
+   *
+   * Con `LIBREDECK_ELGATO_SHIM=0`: delega al runtime legacy por proceso
+   * (host Elgato, deprecated).
    */
   public async loadElgatoPlugin(pluginId: string): Promise<boolean> {
+    if (isShimEnabled()) {
+      return this.loadElgatoPluginShim(pluginId);
+    }
+    return this.loadElgatoPluginLegacy(pluginId);
+  }
+
+  /**
+   * Registro perezoso del shim: publica el índice de acciones + handlers
+   * que activan el Worker en la primera pulsación (sin spawnear nada).
+   */
+  public async loadElgatoPluginShim(pluginId: string): Promise<boolean> {
+    let manifest = this.readDiskManifest(pluginId);
+    if (!manifest || !this.isElgatoPlugin(manifest)) return false;
+    const id = manifest.id ?? pluginId;
+    const pluginsDir = getPluginsDir();
+    const pluginDir = path.join(pluginsDir, folderForId(id));
+    // Migración perezosa: instalación de la era host sin bridge → regenerar.
+    if (manifest.main !== 'shim-bridge.js') {
+      this.emitProgress(id, 'load', 'Migrando plugin Elgato al shim…');
+      try {
+        if (!ensureShimBridge(pluginDir)) throw new Error('sin bridge regenerable');
+        manifest = this.readDiskManifest(id) ?? manifest;
+      } catch (e) {
+        const msg = `Plugin Elgato ${id} sin bridge ejecutable: ${e instanceof Error ? e.message : String(e)} (needs-manual)`;
+        try { this.db.setPluginStatus(id, 'needs-manual', msg); } catch {}
+        try {
+          this.broadcaster?.broadcast('plugin.status', { pluginId: id, status: 'needs-manual', error: msg }, 'plugins');
+          this.broadcaster?.broadcast('elgato.state', { pluginId: id, running: false, reason: 'no-shim-bridge' }, 'plugins');
+        } catch {}
+        this.emitProgress(id, 'error', msg);
+        this.registerErrorHandlers(id, manifest, msg);
+        this.loadedPlugins.set(id, this.makeLoadedPlugin(id, manifest, pluginDir));
+        return false;
+      }
+    }
+    for (const [k] of [...this.pluginActions.keys()]) {
+      if (k.startsWith(`${id}.`)) this.pluginActions.delete(k);
+    }
+    manifest.actions.forEach((action: PluginAction) => {
+      const fullActionId = `${id}.${action.id}`;
+      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+    });
+    this.registerLazyHandlers(id, manifest);
+    this.elgatoLazy.add(id);
+    this.elgatoVisuals.set(id, new Map());
+    this.elgatoLastUsed.set(id, Date.now());
+    this.loadedPlugins.set(id, this.makeLoadedPlugin(id, manifest, pluginDir));
+    this.pluginErrors.delete(id);
+    try { this.db.setPluginStatus(id, 'active', null); } catch {}
+    try {
+      this.broadcaster?.broadcast('plugin.status', { pluginId: id, status: 'active', runtime: 'elgato-shim' }, 'plugins');
+      this.broadcaster?.broadcast('plugin.install-progress', { key: id, stage: 'done', message: 'Elgato listo (shim perezoso)', ts: Date.now() }, 'plugins');
+      this.broadcaster?.broadcast('elgato.state', { pluginId: id, running: false, loaded: true, lazy: true }, 'plugins');
+    } catch {}
+    console.log(`✓ Loaded Elgato plugin (shim perezoso): ${manifest.name} v${manifest.version}`);
+    return true;
+  }
+
+  /** Handlers que activan el Worker en la primera pulsación. */
+  private registerLazyHandlers(id: string, manifest: any): void {
+    for (const action of (manifest?.actions ?? []) as any[]) {
+      const fullActionId = `${id}.${(action as any).id}`;
+      if (this.externalHandlers.has(fullActionId)) {
+        this.externalHandlers.delete(fullActionId);
+        this.onExternalActionUnregistered?.(fullActionId);
+      }
+      const lazy = async (params: any, context: any) => {
+        if (this.elgatoLazy.has(id)) {
+          await this.activateElgatoWorker(id);
+        }
+        const current = this.externalHandlers.get(fullActionId);
+        if (!current || (current as any).__ldLazy) {
+          throw new Error(`Plugin Elgato ${id} no disponible (Worker sin activar)`);
+        }
+        return (current as Function)(params, context);
+      };
+      (lazy as any).__ldLazy = true;
+      this.externalHandlers.set(fullActionId, lazy);
+      this.onExternalActionRegistered?.(fullActionId, lazy);
+      console.log(`Registered Elgato (shim) lazy action handler: ${fullActionId}`);
+    }
+  }
+
+  /** Crea el Worker del shim (una vez; concurrentes comparten el vuelo). */
+  private async activateElgatoWorker(id: string): Promise<void> {
+    const inflight = this.elgatoActivating.get(id);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+    const p = this.doActivateElgatoWorker(id);
+    this.elgatoActivating.set(id, p);
+    try {
+      await p;
+    } finally {
+      this.elgatoActivating.delete(id);
+    }
+  }
+
+  private async doActivateElgatoWorker(id: string): Promise<void> {
+    this.elgatoLazy.delete(id);
+    const ok = await this.loadExternalPlugin(id, { force: true, skipElgatoDelegation: true });
+    if (!ok) {
+      // El worker falló: loadExternalPlugin ya registró handlers de error.
+      throw new Error(this.getPluginError(id) ?? `No se pudo activar el Worker de ${id}`);
+    }
+    this.wrapElgatoHandlers(id);
+    this.touchElgato(id);
+    try {
+      this.broadcaster?.broadcast('elgato.state', { pluginId: id, running: true, lazy: false }, 'plugins');
+    } catch {}
+  }
+
+  /** Envuelve los handlers reales: toque de actividad + caché de visuales. */
+  private wrapElgatoHandlers(id: string): void {
+    const plugin = this.loadedPlugins.get(id);
+    const actions = plugin?.manifest.actions ?? this.readDiskManifest(id)?.actions ?? [];
+    for (const action of actions as any[]) {
+      const fullActionId = `${id}.${(action as any).id}`;
+      const real = this.externalHandlers.get(fullActionId);
+      if (!real || (real as any).__ldLazy || (real as any).__ldWrapped) continue;
+      const wrapped = async (params: any, context: any) => {
+        this.touchElgato(id);
+        let res: any;
+        try {
+          res = await (real as Function)(params, context);
+        } finally {
+          this.touchElgato(id);
+        }
+        try {
+          // El bridge devuelve { visuals, context }: caché para elgato-state
+          // sin canal extra con el Worker.
+          if (res && typeof res === 'object' && (res as any).visuals && (res as any).context) {
+            let byCtx = this.elgatoVisuals.get(id);
+            if (!byCtx) {
+              byCtx = new Map();
+              this.elgatoVisuals.set(id, byCtx);
+            }
+            byCtx.set(String((res as any).context), (res as any).visuals);
+          }
+        } catch {}
+        return res;
+      };
+      (wrapped as any).__ldWrapped = true;
+      this.externalHandlers.delete(fullActionId);
+      this.onExternalActionUnregistered?.(fullActionId);
+      this.externalHandlers.set(fullActionId, wrapped);
+      this.onExternalActionRegistered?.(fullActionId, wrapped);
+    }
+  }
+
+  /** Actividad: rearma la parada por inactividad (60s sin uso). */
+  private touchElgato(id: string): void {
+    this.elgatoLastUsed.set(id, Date.now());
+    const prev = this.elgatoIdleTimers.get(id);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      this.elgatoIdleTimers.delete(id);
+      void this.reapElgatoWorker(id);
+    }, SHIM_IDLE_MS);
+    try { (timer as any)?.unref?.(); } catch {}
+    this.elgatoIdleTimers.set(id, timer);
+  }
+
+  /**
+   * Parada por inactividad: termina el Worker y vuelve a handlers
+   * perezosos (el índice y los visuales se conservan). La próxima
+   * pulsación reactiva sin intervención.
+   */
+  private async reapElgatoWorker(id: string): Promise<void> {
+    try {
+      if (Date.now() - (this.elgatoLastUsed.get(id) ?? 0) < SHIM_IDLE_MS) return;
+      const worker = this.externalWorkers.get(id);
+      if (!worker) return;
+      try { worker.terminate(); } catch {}
+      this.externalWorkers.delete(id);
+      this.elgatoLazy.add(id);
+      const manifest = this.readDiskManifest(id);
+      if (manifest) this.registerLazyHandlers(id, manifest);
+      try {
+        this.broadcaster?.broadcast('elgato.state', { pluginId: id, running: false, idle: true }, 'plugins');
+      } catch {}
+      console.log(`Elgato shim ${id}: Worker liberado por inactividad`);
+    } catch (e) {
+      console.error(`reapElgatoWorker ${id} falló:`, e);
+    }
+  }
+
+  /**
+   * Arranque legacy por proceso (host Elgato fase 2). DEPRECATED: solo con
+   * `LIBREDECK_ELGATO_SHIM=0`. Sin mantenimiento: el shim es el camino.
+   */
+  public async loadElgatoPluginLegacy(pluginId: string): Promise<boolean> {
     const manifest = this.readDiskManifest(pluginId);
     if (!manifest || !this.isElgatoPlugin(manifest)) return false;
     const id = manifest.id ?? pluginId;
@@ -643,10 +860,49 @@ export class PluginLoader {
     return true;
   }
 
-  /** Detiene un plugin Elgato (runtime fase 2) y limpia su índice. No tumba si el runtime falta. */
+  /** Detiene un plugin Elgato y limpia su índice. No tumba si el runtime falta. */
   public unloadElgatoPlugin(pluginId: string): void {
     const id = this.resolveCanonicalId(pluginId);
-    // Parada del runtime en segundo plano (best-effort, sin import si no hay manager).
+    if (isShimEnabled()) {
+      // Shim: parar el temporizador, terminar el Worker si existe y quitar
+      // el índice. Sin manager por proceso.
+      const timer = this.elgatoIdleTimers.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        this.elgatoIdleTimers.delete(id);
+      }
+      const worker = this.externalWorkers.get(id);
+      if (worker) {
+        try { worker.terminate(); } catch (e) { console.error(`Error terminating Elgato worker ${id}:`, e); }
+        this.externalWorkers.delete(id);
+      }
+      this.elgatoLazy.delete(id);
+      this.elgatoLastUsed.delete(id);
+      this.elgatoVisuals.delete(id);
+      this.elgatoActivating.delete(id);
+      try {
+        const plugin = this.loadedPlugins.get(id);
+        const actions = plugin?.manifest.actions ?? this.readDiskManifest(id)?.actions ?? [];
+        for (const action of actions as any[]) {
+          const fullActionId = `${id}.${(action as any).id}`;
+          this.pluginActions.delete(fullActionId);
+          if (this.externalHandlers.has(fullActionId)) {
+            this.externalHandlers.delete(fullActionId);
+            this.onExternalActionUnregistered?.(fullActionId);
+          }
+        }
+      } catch {}
+      this.pluginErrors.delete(id);
+      this.elgatoRunning.delete(id);
+      this.loadedPlugins.delete(id);
+      try {
+        this.broadcaster?.broadcast('plugin.status', { pluginId: id, status: 'elgato-stopped' }, 'plugins');
+        this.broadcaster?.broadcast('elgato.state', { pluginId: id, running: false }, 'plugins');
+      } catch {}
+      console.log(`✓ Unloaded Elgato plugin (shim): ${id}`);
+      return;
+    }
+    // Parada legacy del runtime por proceso (best-effort, sin import si no hay manager).
     const m = this.elgatoManager;
     if (m && typeof m.stop === 'function') {
       void (async () => { try { await m.stop(id); } catch {} })();
@@ -674,11 +930,33 @@ export class PluginLoader {
   }
 
   /**
-   * Estado Elgato para la UI (running + snapshot del runtime si existe).
+   * Estado Elgato para la UI.
+   * - Shim: `running` = Worker vivo (perezoso/inactividad), `state` =
+   *   visuales cacheados por contexto de la última pulsación (sin canal
+   *   extra con el Worker).
+   * - Legacy (`LIBREDECK_ELGATO_SHIM=0`): snapshot del manager por proceso.
    * Solo lee el manager ya creado: sin efectos laterales ni imports nuevos.
    */
   public async getElgatoState(pluginId: string, actionUUID?: string): Promise<any> {
     const id = this.resolveCanonicalId(pluginId);
+    if (isShimEnabled()) {
+      const byCtx = this.elgatoVisuals.get(id) ?? new Map<string, any>();
+      const running = this.externalWorkers.has(id) && !this.elgatoLazy.has(id);
+      const contexts = [...byCtx.entries()].map(([context, state]) => ({ context, state }));
+      let manifest: any = null;
+      try { manifest = this.readDiskManifest(id); } catch {}
+      return {
+        pluginId: id,
+        elgato: this.isElgatoPlugin(manifest),
+        running,
+        loaded: this.loadedPlugins.has(id),
+        lazy: this.elgatoLazy.has(id),
+        shim: true,
+        lastUsed: this.elgatoLastUsed.get(id) ?? null,
+        action: actionUUID ?? null,
+        state: { contexts },
+      };
+    }
     const manager = this.elgatoManager;
     let running = this.elgatoRunning.has(id);
     let runtimeState: any = null;
@@ -818,7 +1096,8 @@ export class PluginLoader {
     }
     const rec = this.db.getPlugin(pluginId) as any;
     if (!rec) throw new Error(`Plugin desconocido: ${pluginId}`);
-    // Delegación Elgato fase 2: arranca el runtime, no el Worker.
+    // Delegación Elgato: el shim usa el Worker actual (legacy por proceso
+    // solo con LIBREDECK_ELGATO_SHIM=0).
     try {
       let m: any = null;
       try { m = typeof rec.manifest === 'string' ? JSON.parse(rec.manifest) : rec.manifest; } catch {}
@@ -1130,13 +1409,15 @@ export class PluginLoader {
         });
         try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
         this.emitProgress(res.pluginId, 'done', `Importado ${res.pluginId} (habilitado por defecto)`, opts.onProgress);
-        // Auto-arranque en segundo plano (sin bloquear la respuesta HTTP):
-        // el progreso real (load → done/error) llega por WS. Solo si es
-        // ejecutable; needs-runtime queda habilitado=0 para diagnóstico.
+        // Auto-registro en segundo plano (sin bloquear la respuesta HTTP):
+        // el progreso real (load → done/error) llega por WS. Con el shim el
+        // registro es perezoso (sin Worker hasta la primera pulsación);
+        // needs-manual queda habilitado=0 para diagnóstico.
         try {
           const rec = this.db.getPlugin(res.pluginId) as any;
-          if (rec && Number(rec.enabled) === 1 && rec.status === 'elgato-stopped') {
-            void this.loadElgatoPlugin(res.pluginId).catch(() => {});
+          if (rec && Number(rec.enabled) === 1 && (rec.status === 'active' || rec.status === 'elgato-stopped')) {
+            const m = this.readDiskManifest(res.pluginId);
+            if (m && this.isElgatoPlugin(m)) void this.loadElgatoPlugin(res.pluginId).catch(() => {});
           }
         } catch {}
         return res.pluginId;
