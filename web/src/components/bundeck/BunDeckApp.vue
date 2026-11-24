@@ -114,6 +114,22 @@
         </button>
         <button
           role="menuitem"
+          data-cy="bd-profile-export"
+          :disabled="profileBackupBusy"
+          @click="onProfileExportMenu(profileMenuProfile)"
+        >
+          <Download :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.exportProfile') }}</span>
+        </button>
+        <button
+          role="menuitem"
+          data-cy="bd-profile-import"
+          :disabled="profileBackupBusy"
+          @click="onProfileImportMenu()"
+        >
+          <Upload :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.importProfile') }}</span>
+        </button>
+        <button
+          role="menuitem"
           class="bd-dng"
           data-cy="bd-profile-delete"
           :disabled="profiles.length < 2"
@@ -122,6 +138,16 @@
           <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.delete') }}</span>
         </button>
       </div>
+      <input
+        ref="profileImportInput"
+        type="file"
+        accept=".json,application/json"
+        class="bd-hidden-file"
+        data-cy="bd-profile-import-input"
+        aria-hidden="true"
+        tabindex="-1"
+        @change="onProfileImportFile"
+      />
       <button class="bd-ibtn" :title="t('bd.plugins')" :aria-label="t('bd.plugins')" @click="settingsDialog?.show('plugins')" data-cy="bd-open-plugins">
         <Puzzle :size="20" stroke-width="1.75" aria-hidden="true" />
       </button>
@@ -504,7 +530,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
-import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2 } from 'lucide-vue-next'
+import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2, Download, Upload } from 'lucide-vue-next'
 import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {
@@ -512,6 +538,10 @@ import {
   bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast, initAppearanceSync
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
+import {
+  fetchProfileBackup, triggerJsonDownload, safeProfileFilename, isProfileBackup,
+  cloneBackupAsCopy, validateProfileBackup, restoreProfileBackup,
+} from '../../composables/useProfileBackup'
 import { planFreeCell, clampDropCell, gridResizeFits } from '../../composables/useDeckLayouts'
 import {
   actionTypeSurfaceKind, findActionAdata, findControlAction, isControlAction
@@ -1020,7 +1050,7 @@ const toggleProfileMenu = (e: MouseEvent, profileId: string) => {
   const rect = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect()
   // Ancla bajo el botón ···, acotado al viewport para que no se salga.
   const menuW = 200
-  const menuH = 140
+  const menuH = 220
   const left = rect
     ? Math.max(8, Math.min(rect.left, window.innerWidth - menuW - 8))
     : 8
@@ -1163,6 +1193,70 @@ const onProfileDeleteMenu = async (profile: { id: string; name: string }) => {
 const onProfileDuplicateMenu = async (profileId: string) => {
   closeProfileMenu()
   await handleProfileDuplicate(profileId)
+}
+// ---- Exportar / importar perfiles (menú ··· de cada tab) ----
+const profileBackupBusy = ref(false)
+const profileImportInput = ref<HTMLInputElement | null>(null)
+const onProfileExportMenu = async (profile: { id: string; name: string }) => {
+  closeProfileMenu()
+  if (profileBackupBusy.value) return
+  profileBackupBusy.value = true
+  try {
+    const backup = await fetchProfileBackup(API_BASE.value, profile.id)
+    triggerJsonDownload(backup, `libredeck-perfil-${safeProfileFilename(profile.name)}.json`)
+    bdShowToast(t('bd.profileExported', { name: profile.name }))
+  } catch (e) {
+    bdShowToast(`${t('bd.backupExportFailed')}: ${String((e as Error)?.message ?? e)}`)
+  } finally {
+    profileBackupBusy.value = false
+  }
+}
+const onProfileImportMenu = () => {
+  closeProfileMenu()
+  if (profileBackupBusy.value) return
+  // Reset para que elegir el mismo archivo dos veces dispare `change`.
+  if (profileImportInput.value) profileImportInput.value.value = ''
+  profileImportInput.value?.click()
+}
+const onProfileImportFile = async (e: Event) => {
+  const file = (e.target as HTMLInputElement | null)?.files?.[0]
+  if (!file) return
+  if (profileBackupBusy.value) return
+  profileBackupBusy.value = true
+  try {
+    const text = await file.text()
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      throw new Error(t('bd.invalidBackup'))
+    }
+    if (!isProfileBackup(parsed)) throw new Error(t('bd.invalidBackup'))
+    // Nombre único + ids nuevos: nunca se sobrescribe el original (merge por id).
+    const wanted = uniqueProfileName(String(parsed.data.profiles[0]?.name ?? file.name))
+    const copy = cloneBackupAsCopy(parsed, { newName: wanted })
+    const checked = await validateProfileBackup(API_BASE.value, copy)
+    if (!checked.valid) {
+      const errs = Array.isArray(checked.errors) ? checked.errors.join('; ') : ''
+      throw new Error(errs || t('bd.invalidBackup'))
+    }
+    await restoreProfileBackup(API_BASE.value, copy)
+    await loadProfiles()
+    const created = profiles.value.find((p) => p.id === copy.data.profiles[0]?.id)
+    if (created) {
+      try {
+        await selectProfile(created.id)
+        try { await devStore.loadAssignments(created.id) } catch { /* noop */ }
+        navTrail.value = currentPage.value ? [currentPage.value.name] : []
+      } catch { /* el perfil ya existe aunque falle la selección */ }
+    }
+    bdShowToast(t('bd.profileImported', { name: wanted }))
+  } catch (err) {
+    bdShowToast(`${t('bd.profileImportFailed')}: ${String((err as Error)?.message ?? err)}`)
+  } finally {
+    profileBackupBusy.value = false
+    if (profileImportInput.value) profileImportInput.value.value = ''
+  }
 }
 const handleProfileDuplicate = async (profileId: string) => {
   const orig = profiles.value.find((p) => p.id === profileId)

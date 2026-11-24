@@ -101,6 +101,7 @@
 .bundeck .bd-tabwrap .bd-tab { padding-right: 4px; }
 .bundeck .bd-tabmenu-btn { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--bd-mu); flex: none; margin-right: 4px; }
 .bundeck .bd-tabmenu-btn:hover { background: rgba(128, 128, 128, 0.25); color: var(--bd-ink); }
+.bundeck .bd-hidden-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .bundeck .bd-tabwrap .bd-menu { min-width: 180px; }
 .bd-confirm-body { padding: 12px 24px 0; display: flex; flex-direction: column; gap: 8px; }
 .bd-confirm-body .bd-inp { width: 100%; padding: 8px 12px; border: 1px solid var(--bd-ln); border-radius: 8px; background: var(--bd-bg); min-height: 40px; color: var(--bd-ink); }
