@@ -14,6 +14,7 @@ import {
   findWebDistFile,
   findWebDistIndex,
   resolveWebDistIndexCandidates,
+  webDistCacheHeaders,
 } from './http/static';
 import { stopServers, requestShutdown, abortStartup, installSignalHandlers } from './lifecycle';
 
@@ -275,6 +276,7 @@ class LibreDeckDaemon {
                 headers: {
                   ...corsHeaders,
                   'Content-Type': getContentType(filePath),
+                  ...webDistCacheHeaders(filePath),
                 },
               }));
             }
@@ -289,6 +291,7 @@ class LibreDeckDaemon {
               headers: {
                 ...corsHeaders,
                 'Content-Type': 'text/html',
+                'Cache-Control': 'no-store',
               },
             }));
           }

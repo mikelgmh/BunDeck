@@ -61,6 +61,20 @@ export function resolveWebDistIndexCandidates(): string[] {
   return resolveWebDistCandidates().map((base) => path.join(base, 'index.html'));
 }
 
+/**
+ * Cache para la UI embebida:
+ * - HTML (shell SPA): `no-store` — iOS/Safari cachea agresivo y sin esto el
+ *   móvil se queda en una versión vieja aunque haya un build nuevo.
+ * - `/_astro/*` (build con hash en el nombre): immutable 1 año.
+ * - Resto: sin cabecera (heurística del navegador).
+ */
+export function webDistCacheHeaders(filePath: string): Record<string, string> {
+  const p = filePath.toLowerCase();
+  if (p.endsWith('.html')) return { 'Cache-Control': 'no-store' };
+  if (p.includes('/_astro/')) return { 'Cache-Control': 'public, max-age=31536000, immutable' };
+  return {};
+}
+
 /** Busca `requestPath` (p. ej. `/js/app.js`) en los candidatos web-dist. */
 export async function findWebDistFile(requestPath: string): Promise<string | null> {
   const relative = requestPath.replace(/^\/+/, '');

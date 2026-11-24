@@ -119,6 +119,11 @@
           <p v-else-if="uiCode && uiExpired" class="bd-err" role="alert" style="text-align: center" data-cy="qr-internet-exp">
             {{ t('bd.remoteUiExpired') }}
           </p>
+          <!-- Sin cámara: pegar este enlace equivale a escanear el QR. -->
+          <div v-if="uiCode" class="bd-lan-link-row">
+            <label class="bd-sr" for="bd-qr-internet-url">{{ t('bd.remoteUiUrlLabel') }}</label>
+            <input type="text" id="bd-qr-internet-url" data-cy="qr-internet-url" class="bd-inp bd-mono" readonly :value="uiShareUrl" :title="t('bd.remoteUiUrlLabel')" @focus="($event.target as HTMLInputElement).select()" />
+          </div>
           <div v-if="uiCode" class="bd-r2" style="justify-content: center">
             <button class="bd-btn" data-cy="qr-internet-copy" @click="onCopyUiUrl">
               {{ urlCopied ? t('bd.remoteUiCopied') : t('bd.remoteUiCopy') }}
@@ -329,6 +334,11 @@ const uiSecsLeft = computed(() =>
 )
 const uiExpired = computed(() => !!uiCode.value && uiSecsLeft.value <= 0)
 
+// Lo que codifica el QR y se copia: el enlace lleva ?kiosk=1 para que el
+// escaneo aterrice en kiosco. Mostrarlo en texto permite conectarse sin
+// cámara (igual que la pestaña Local).
+const uiShareUrl = computed(() => (uiCode.value?.url ? withKioskParam(uiCode.value.url) : ''))
+
 const fmtMMSS = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`
 
 const startSecTick = () => {
@@ -459,10 +469,10 @@ const onRegen = async () => {
 }
 
 const onCopyUiUrl = async () => {
-  if (!uiCode.value?.url) return
+  if (!uiShareUrl.value) return
   try {
     // El enlace copiado también pide kiosco, como el QR.
-    await navigator.clipboard.writeText(withKioskParam(uiCode.value.url))
+    await navigator.clipboard.writeText(uiShareUrl.value)
     urlCopied.value = true
     window.setTimeout(() => {
       urlCopied.value = false
