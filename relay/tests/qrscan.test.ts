@@ -142,6 +142,9 @@ describe('landing: sección escáner QR', () => {
       // Auto-ir tras escanear enlaces de acceso (solo https del propio relay).
       expect(html).toContain('autoGoUrl');
       expect(html).toContain('location.assign');
+      // Sin regex con barras escapadas en el inline: `\/` colapsaría en el
+      // template y partiría el literal (bug real: navegaba a /%5Ehttps:/).
+      expect(html).not.toContain('https:///');
       // Sin URLs absolutas en el escáner: funciona tras reverse proxy.
       expect(html).not.toContain('http://localhost');
       expect(html).not.toContain('127.0.0.1:3');
@@ -150,6 +153,98 @@ describe('landing: sección escáner QR', () => {
         expect(html).toContain(`id="${id}"`);
       }
     }
+  });
+});
+
+/**
+ * Extrae una `function name(...) {...}` del JS inline de la landing,
+ * contando llaves y saltando strings. Las probadas son puras (sin DOM).
+ */
+function extractInlineFn(html: string, name: string): string {
+  const marker = `function ${name}(`;
+  const start = html.indexOf(marker);
+  if (start < 0) throw new Error(`no se encontró ${marker}`);
+  const open = html.indexOf('{', start);
+  if (open < 0) throw new Error(`sin cuerpo en ${name}`);
+  let depth = 0;
+  let quote: string | null = null;
+  for (let j = open; j < html.length; j++) {
+    const ch = html[j];
+    if (quote) {
+      if (ch === '\\') {
+        j++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return html.slice(start, j + 1);
+    }
+  }
+  throw new Error(`llaves sin cerrar en ${name}`);
+}
+
+interface InlineClassified {
+  kind: string;
+  text: string;
+  url?: string;
+  expired?: boolean;
+  code?: string;
+}
+
+/** Evalúa el clasificador + auto-ir TAL CUAL viajan en el HTML servido. */
+function loadInlineScanner(html: string): {
+  classify: (s: string) => InlineClassified;
+  autoGoUrl: (c: unknown) => unknown;
+} {
+  const src = [extractInlineFn(html, 'trim'), extractInlineFn(html, 'classify'), extractInlineFn(html, 'autoGoUrl')].join(
+    '\n',
+  );
+  const factory = new Function(`${src}\nreturn { classify, autoGoUrl };`) as () => {
+    classify: (s: string) => InlineClassified;
+    autoGoUrl: (c: unknown) => unknown;
+  };
+  return factory();
+}
+
+describe('landing: auto-ir ejecuta el JS inline real', () => {
+  const { classify, autoGoUrl } = loadInlineScanner(renderLanding(landingData('es')));
+
+  test('ui-url https → navega a la URL tal cual', () => {
+    const u = 'https://bundeck.mikelgranero.com/ui/AbC123xYz';
+    const c = classify(u);
+    expect(c.kind).toBe('ui-url');
+    expect(autoGoUrl(c)).toBe(u);
+  });
+
+  test('tunnel-url y http-url https → navegan; http:// no', () => {
+    const t = 'https://relay.example.test/t/abcdef1234567890abcdef1234567890/api/v1/config';
+    expect(autoGoUrl(classify(t))).toBe(t);
+    expect(autoGoUrl(classify('https://example.test/panel'))).toBe('https://example.test/panel');
+    expect(autoGoUrl(classify('http://192.168.1.50:3002'))).toBe('');
+  });
+
+  test('pareo/código/texto nunca navegan (consentimiento explícito)', () => {
+    expect(autoGoUrl(classify('482913'))).toBe('');
+    const pair = classify(
+      JSON.stringify({ v: 1, relay: 'wss://x', code: '482913', dev: 'd', pub: 'p', fp: 'f', exp: Date.now() + 60000 }),
+    );
+    expect(pair.kind).toBe('pair-qr');
+    expect(autoGoUrl(pair)).toBe('');
+    expect(autoGoUrl(classify('hola mundo'))).toBe('');
+  });
+
+  test('caducado no navega', () => {
+    const pair = classify(JSON.stringify({ v: 1, relay: '', code: '000001', dev: 'd', pub: 'p', fp: 'f', exp: 1 }));
+    expect(pair.expired).toBe(true);
+    expect(autoGoUrl(pair)).toBe('');
   });
 });
 
