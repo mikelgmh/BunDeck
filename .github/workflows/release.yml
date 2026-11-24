@@ -1,5 +1,12 @@
 name: Release
 
+# Los pushes a master son frecuentes; sin esto, dos runs solapados hacen que
+# semantic-release aborte la publicación ("branch is behind the remote").
+# Se serializan (cola FIFO, sin cancelar) para que cada push publique su versión en orden.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [ master ]
