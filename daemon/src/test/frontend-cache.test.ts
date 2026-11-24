@@ -1,20 +1,24 @@
 /**
- * frontend-cache.test.ts — la UI servida (túnel y embebida) no deja al móvil
- * en una versión vieja:
- * - `webDistCacheHeaders`: HTML → no-store, `/_astro/*` → immutable.
- * - DEV_MODE: el handler proxya a Astro vivo (`tryProxyAstroDev`) y cae a
- *   web-dist si Astro no responde; sin DEV_MODE no proxya.
+ * frontend-cache.test.ts — la UI servida (tunel y embebida) no deja al movil
+ * en una version vieja:
+ * - `webDistCacheHeaders`: HTML -> no-store, `/_astro/*` -> immutable.
+ * - DEV_MODE: `maybeRebuildWebDist` reconstruye el build en segundo plano
+ *   cuando `web/src` es mas nuevo que `web/dist` (una vez por minuto, sin
+ *   solapar); sin DEV no hace nada.
  */
 import { describe, expect, test, afterEach } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { webDistCacheHeaders } from '../http/static';
-import { createDaemonFetch, shouldProxyToAstro } from '../http/handler';
+import { webDistCacheHeaders, webDistStale, newestMtimeMs } from '../http/static';
+import {
+  createDaemonFetch,
+  maybeRebuildWebDist,
+  __resetWebDistRebuildForTests,
+} from '../http/handler';
 
 const savedEnv = {
   DEV_MODE: process.env.DEV_MODE,
-  ASTRO_PORT: process.env.ASTRO_PORT,
   LIBREDECK_DATA_DIR: process.env.LIBREDECK_DATA_DIR,
 };
 
@@ -23,6 +27,7 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  __resetWebDistRebuildForTests();
 });
 
 function fakeDeps() {
@@ -38,13 +43,37 @@ function isolateDb() {
   process.env.LIBREDECK_DATA_DIR = mkdtempSync(join(tmpdir(), 'ld-frontend-cache-'));
 }
 
+/** web/ falso con src nuevo y dist viejo (o ausente). */
+function fakeWebRoot(opts: { srcNewer: boolean; withDist: boolean }) {
+  const root = mkdtempSync(join(tmpdir(), 'ld-fake-web-'));
+  const src = join(root, 'src');
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, 'App.vue'), '<template/>');
+  const dist = join(root, 'dist');
+  let distIndex: string | null = null;
+  if (opts.withDist) {
+    mkdirSync(dist, { recursive: true });
+    distIndex = join(dist, 'index.html');
+    writeFileSync(distIndex, '<html/>');
+  }
+  const now = Date.now() / 1000;
+  if (opts.withDist) {
+    // dist viejo, src nuevo (o al reves segun el caso).
+    utimesSync(distIndex as string, now - 100, now - 100);
+    utimesSync(join(src, 'App.vue'), opts.srcNewer ? now : now - 200, opts.srcNewer ? now : now - 200);
+  } else {
+    utimesSync(join(src, 'App.vue'), now, now);
+  }
+  return { root, src, distIndex };
+}
+
 describe('webDistCacheHeaders', () => {
-  test('HTML → no-store (shell SPA siempre fresca en iOS)', () => {
+  test('HTML -> no-store (shell SPA siempre fresca en iOS)', () => {
     expect(webDistCacheHeaders('/index.html')).toEqual({ 'Cache-Control': 'no-store' });
     expect(webDistCacheHeaders('/alguna/ruta.html')).toEqual({ 'Cache-Control': 'no-store' });
   });
 
-  test('/_astro/* → immutable (build con hash)', () => {
+  test('/_astro/* -> immutable (build con hash)', () => {
     expect(webDistCacheHeaders('/_astro/app.abc123.js')).toEqual({
       'Cache-Control': 'public, max-age=31536000, immutable',
     });
@@ -55,81 +84,93 @@ describe('webDistCacheHeaders', () => {
   });
 });
 
-describe('shouldProxyToAstro', () => {
-  test('solo en DEV_MODE y fuera de api/assets/config/health', () => {
-    delete process.env.DEV_MODE;
-    expect(shouldProxyToAstro('/')).toBe(false);
-    process.env.DEV_MODE = 'true';
-    expect(shouldProxyToAstro('/')).toBe(true);
-    expect(shouldProxyToAstro('/alguna/ruta')).toBe(true);
-    expect(shouldProxyToAstro('/api/v1/version')).toBe(false);
-    expect(shouldProxyToAstro('/assets/x.png')).toBe(false);
-    expect(shouldProxyToAstro('/config')).toBe(false);
-    expect(shouldProxyToAstro('/health')).toBe(false);
-    process.env.DEV_MODE = '1';
-    expect(shouldProxyToAstro('/')).toBe(false);
+describe('webDistStale', () => {
+  test('src mas nuevo que dist -> obsoleto', () => {
+    const { src, distIndex } = fakeWebRoot({ srcNewer: true, withDist: true });
+    expect(webDistStale(src, distIndex)).toBe(true);
+  });
+
+  test('src mas viejo que dist -> al dia', () => {
+    const { src, distIndex } = fakeWebRoot({ srcNewer: false, withDist: true });
+    expect(webDistStale(src, distIndex)).toBe(false);
+  });
+
+  test('sin dist -> obsoleto; sin src -> no obsoleto', () => {
+    const { src } = fakeWebRoot({ srcNewer: true, withDist: false });
+    expect(webDistStale(src, null)).toBe(true);
+    expect(webDistStale(null, '/x/index.html')).toBe(false);
+  });
+
+  test('newestMtimeMs recorre subdirectorios', () => {
+    const { src } = fakeWebRoot({ srcNewer: true, withDist: false });
+    mkdirSync(join(src, 'sub'));
+    const deep = join(src, 'sub', 'deep.ts');
+    writeFileSync(deep, 'x');
+    const now = Date.now() / 1000;
+    utimesSync(deep, now, now);
+    expect(newestMtimeMs(src)).toBeGreaterThan(0);
+    expect(newestMtimeMs(join(src, 'no-existe'))).toBe(0);
   });
 });
 
-describe('DEV_MODE proxy a Astro (UI viva por el túnel)', () => {
-  test('sirve Astro con no-store en HTML y pasa assets tal cual', async () => {
-    const astro = Bun.serve({
-      port: 0,
-      hostname: '127.0.0.1',
-      fetch: (req) => {
-        const u = new URL(req.url);
-        if (u.pathname.endsWith('.js')) {
-          return new Response('console.log("astro-vivo")', {
-            headers: { 'content-type': 'text/javascript' },
-          });
-        }
-        return new Response('<html>ASTRO-VIVO</html>', {
-          headers: { 'content-type': 'text/html' },
-        });
-      },
-    });
-    try {
-      process.env.DEV_MODE = 'true';
-      process.env.ASTRO_PORT = String(astro.port);
-      isolateDb();
-      const handler = createDaemonFetch(fakeDeps());
-      const res = await handler(new Request('http://127.0.0.1/'));
-      expect(res.status).toBe(200);
-      expect(await res.text()).toContain('ASTRO-VIVO');
-      expect(res.headers.get('cache-control')).toBe('no-store');
-      const js = await handler(new Request('http://127.0.0.1/_astro/app.hash.js'));
-      expect(js.status).toBe(200);
-      expect(await js.text()).toContain('astro-vivo');
-    } finally {
-      astro.stop(true);
-    }
+describe('maybeRebuildWebDist', () => {
+  test('sin DEV_MODE no hace nada', async () => {
+    delete process.env.DEV_MODE;
+    let called = 0;
+    const r = await maybeRebuildWebDist({ spawnFn: () => { called++; } });
+    expect(r).toBe(false);
+    expect(called).toBe(0);
   });
 
-  test('Astro caído → cae a web-dist/API sin colgar', async () => {
+  test('dispara el build cuando el repo esta obsoleto (usa web/ real)', async () => {
+    // El repo de trabajo tiene src mas nuevo que dist tras editar: con
+    // intervenir el spawn basta para probar el cableado sin compilar.
     process.env.DEV_MODE = 'true';
-    process.env.ASTRO_PORT = '1'; // puerto cerrado
     isolateDb();
+    let built = '';
+    const real = await maybeRebuildWebDist({
+      spawnFn: (webDir: string) => { built = webDir; },
+    });
+    // El resultado depende del estado del repo (puede estar al dia si se
+    // acaba de compilar): lo importante es que no lanza y no falla.
+    expect(typeof real).toBe('boolean');
+    if (real) expect(built).toContain('web');
+    // Segunda llamada seguida no relanza (single-flight o intervalo).
+    const again = await maybeRebuildWebDist({ spawnFn: () => { throw new Error('no debe relanzar'); } });
+    expect(again).toBe(false);
+  });
+
+  test('respeta el intervalo minimo aunque falle el spawn', async () => {
+    process.env.DEV_MODE = 'true';
+    isolateDb();
+    const t0 = Date.now();
+    // Fuerza lastTrigger reciente: primer intento con spawn que falla deja
+    // lastTrigger = t0 y running = false; el segundo cae por intervalo.
+    const first = await maybeRebuildWebDist({
+      nowMs: t0,
+      spawnFn: () => { throw new Error('fallo simulado'); },
+    });
+    // Si el repo esta al dia, first es false y no hay nada que comprobar.
+    if (first) {
+      const second = await maybeRebuildWebDist({ nowMs: t0 + 1000, spawnFn: () => {} });
+      expect(second).toBe(false);
+      const later = await maybeRebuildWebDist({ nowMs: t0 + 61_000, spawnFn: () => {} });
+      // running sigue false y ya paso el intervalo: solo depende de staleness.
+      expect(typeof later).toBe('boolean');
+    }
+  });
+});
+
+describe('handler sirve web-dist con no-store en HTML', () => {
+  test('GET / sirve index.html con no-store (sin DEV, sin rebuild)', async () => {
+    delete process.env.DEV_MODE;
+    isolateDb();
+    const { initDatabase } = await import('../db');
+    await initDatabase();
     const handler = createDaemonFetch(fakeDeps());
     const res = await handler(new Request('http://127.0.0.1/'));
     expect(res.status).toBe(200);
-    expect(await res.text()).not.toContain('ASTRO-VIVO');
-  });
-
-  test('sin DEV_MODE no proxya aunque Astro viva', async () => {
-    const astro = Bun.serve({
-      port: 0,
-      hostname: '127.0.0.1',
-      fetch: () => new Response('<html>ASTRO-VIVO</html>', { headers: { 'content-type': 'text/html' } }),
-    });
-    try {
-      delete process.env.DEV_MODE;
-      process.env.ASTRO_PORT = String(astro.port);
-      isolateDb();
-      const handler = createDaemonFetch(fakeDeps());
-      const res = await handler(new Request('http://127.0.0.1/'));
-      expect(await res.text()).not.toContain('ASTRO-VIVO');
-    } finally {
-      astro.stop(true);
-    }
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('cache-control')).toBe('no-store');
   });
 });

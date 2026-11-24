@@ -15,75 +15,85 @@ import {
   getPeerIp,
 } from './lan-guard';
 import { DatabaseService } from '../db';
-import { findWebDistFile, findWebDistIndex, getContentType, serveDataAsset, webDistCacheHeaders } from './static';
+import {
+  findWebDistFile,
+  findWebDistIndex,
+  getContentType,
+  resolveWebSrcCandidates,
+  serveDataAsset,
+  webDistCacheHeaders,
+  webDistStale,
+} from './static';
 import { getVersion } from '../version';
 import { API_PORT as PORT, WS_PORT, FRONTEND_PORT } from '../config';
 import type { APIServices } from '../api/types';
+import fs from 'node:fs';
+import path from 'node:path';
 
-/** Puerto del Astro dev (UI viva). Coincide con `web/astro.config.mjs`. */
-export function astroDevPort(): number {
-  const n = Number(process.env.ASTRO_PORT ?? '4321');
-  return Number.isFinite(n) && n > 0 ? n : 4321;
+/** Intervalo mínimo entre auto-rebuilds del frontend en DEV. */
+export const WEB_BUILD_MIN_INTERVAL_MS = 60_000;
+
+let webBuildRunning = false;
+let webBuildLastTrigger = 0;
+
+/** Solo tests: resetea el estado del auto-rebuild. */
+export function __resetWebDistRebuildForTests(): void {
+  webBuildRunning = false;
+  webBuildLastTrigger = 0;
 }
 
-/**
- * En DEV_MODE el túnel (`/t/<token>/…`) y las visitas directas sirven la UI
- * VIVA de Astro (`npm run dev`) en vez de `web-dist` compilado (obsoleto en
- * dev: el iPad veía la app vieja). Lectura dinámica de env para poder
- * testearlo sin reimportar el módulo.
- */
-export function shouldProxyToAstro(pathname: string): boolean {
-  if (process.env.DEV_MODE !== 'true') return false;
-  if (pathname.startsWith('/api/')) return false;
-  if (pathname.startsWith('/assets/')) return false;
-  if (pathname === '/config' || pathname === '/health') return false;
-  return true;
-}
-
-/**
- * Reverse-proxy best-effort a Astro dev. Devuelve `null` si Astro no responde
- * (el llamador cae a web-dist). El HMR-WS de Vite no viaja por el túnel (el
- * puente solo lleva `/ws`): la página carga viva pero sin hot-reload.
- */
-export async function tryProxyAstroDev(req: Request, url: URL): Promise<Response | null> {
-  const upstream = `http://127.0.0.1:${astroDevPort()}${url.pathname}${url.search}`;
-  const headers = new Headers();
-  req.headers.forEach((v, k) => {
-    const lk = k.toLowerCase();
-    if (lk === 'host' || lk === 'connection' || lk === 'content-length') return;
-    try {
-      headers.append(k, v);
-    } catch { /* noop */ }
-  });
-  const init: RequestInit = {
-    method: req.method,
-    headers,
-    signal: AbortSignal.timeout(8000),
-  };
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    const buf = await req.arrayBuffer().catch(() => null);
-    if (buf && buf.byteLength > 0) init.body = buf;
-  }
-  let upstreamRes: Response;
+function defaultSpawnWebBuild(webDir: string): void {
   try {
-    upstreamRes = await fetch(upstream, init);
+    const cmd =
+      process.platform === 'win32' ? ['cmd', '/c', 'npm', 'run', 'build'] : ['npm', 'run', 'build'];
+    const proc = Bun.spawn(cmd, { cwd: webDir, stdio: ['ignore', 'ignore', 'ignore'] });
+    void proc.exited
+      .then(() => {
+        webBuildRunning = false;
+      })
+      .catch(() => {
+        webBuildRunning = false;
+      });
   } catch {
-    return null;
+    webBuildRunning = false;
   }
-  const outHeaders = new Headers();
-  upstreamRes.headers.forEach((v, k) => {
-    const lk = k.toLowerCase();
-    if (lk === 'content-encoding' || lk === 'content-length' || lk === 'connection' || lk === 'transfer-encoding') return;
-    try {
-      outHeaders.append(k, v);
-    } catch { /* noop */ }
-  });
-  // El documento HTML siempre fresco (iOS cachea agresivo sin no-store).
-  if ((outHeaders.get('content-type') ?? '').includes('text/html')) {
-    outHeaders.set('Cache-Control', 'no-store');
+}
+
+/**
+ * DEV_MODE: si `web/src` es más nuevo que `web/dist`, dispara `npm run build`
+ * en segundo plano (máx. 1 vez por minuto, sin solapar). Así el túnel sirve UI
+ * fresca sin intervención. No bloquea: se sirve el build actual mientras se
+ * reconstruye (Vite vacía `dist` al empezar: puede haber un hueco breve de
+ * 404 que se cura recargando).
+ */
+export async function maybeRebuildWebDist(opts?: {
+  nowMs?: number;
+  spawnFn?: (webDir: string) => void;
+}): Promise<boolean> {
+  if (process.env.DEV_MODE !== 'true') return false;
+  if (webBuildRunning) return false;
+  const now = opts?.nowMs ?? Date.now();
+  if (now - webBuildLastTrigger < WEB_BUILD_MIN_INTERVAL_MS) return false;
+  const srcDir =
+    resolveWebSrcCandidates().find((d) => {
+      try {
+        return fs.statSync(d).isDirectory();
+      } catch {
+        return false;
+      }
+    }) ?? null;
+  if (!srcDir) return false;
+  const webDir = path.dirname(srcDir);
+  const distIndex = await findWebDistIndex().catch(() => null);
+  if (!webDistStale(srcDir, distIndex)) return false;
+  webBuildRunning = true;
+  webBuildLastTrigger = now;
+  try {
+    (opts?.spawnFn ?? defaultSpawnWebBuild)(webDir);
+  } catch {
+    webBuildRunning = false;
   }
-  const body = await upstreamRes.arrayBuffer().catch(() => null);
-  return new Response(body, { status: upstreamRes.status, headers: outHeaders });
+  return true;
 }
 
 export interface DaemonHttpDeps {
@@ -186,22 +196,21 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request, server?:
       ));
     }
 
-    // DEV_MODE: UI viva de Astro (npm run dev) en vez de web-dist compilado
-    // (obsoleto en dev). Vale para el túnel y para visitas directas.
-    if (shouldProxyToAstro(url.pathname)) {
-      try {
-        const proxied = await tryProxyAstroDev(req, url);
-        if (proxied) return finish(proxied);
-      } catch { /* cae a web-dist */ }
-    }
-
     // Frontend embebido (web-dist): lo mismo que el servidor dedicado de
     // `server.ts`, para que el túnel (`/t/<token>/…`) sirva la UI real en el
-    // móvil en vez del texto plano de la API.
+    // móvil en vez del texto plano de la API. OJO: en DEV el túnel NO proxya
+    // a Astro dev aunque sea más fresco: los bundles dev (`/@id/`, HMR…)
+    // no sobreviven al reescritor de URLs del relay y la app quedaría sin
+    // JS; se sirve el build y se reconstruye solo si está obsoleto (abajo).
     try {
       const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
       const found = await findWebDistFile(filePath);
       if (found) {
+        if (filePath.endsWith('.html')) {
+          // Solo en documentos (no en cada asset): si el build está viejo,
+          // reconstruir en segundo plano para la próxima carga.
+          void maybeRebuildWebDist().catch(() => {});
+        }
         return finish(new Response(Bun.file(found), {
           headers: {
             ...corsHeaders,
@@ -218,6 +227,7 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request, server?:
     try {
       const indexPath = await findWebDistIndex();
       if (indexPath) {
+        void maybeRebuildWebDist().catch(() => {});
         return finish(new Response(Bun.file(indexPath), {
           headers: {
             ...corsHeaders,

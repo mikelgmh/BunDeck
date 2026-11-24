@@ -11,6 +11,7 @@
  */
 
 import path from 'path';
+import fs from 'node:fs';
 import { getDataDir } from '../paths';
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -73,6 +74,56 @@ export function webDistCacheHeaders(filePath: string): Record<string, string> {
   if (p.endsWith('.html')) return { 'Cache-Control': 'no-store' };
   if (p.includes('/_astro/')) return { 'Cache-Control': 'public, max-age=31536000, immutable' };
   return {};
+}
+
+/** Candidatos para `web/src` (misma lógica que web-dist, para detectar obsolescencia en DEV). */
+export function resolveWebSrcCandidates(): string[] {
+  return [
+    path.join(process.cwd(), 'web', 'src'),
+    path.join(import.meta.dir, '..', '..', 'web', 'src'),
+  ];
+}
+
+/** mtime más reciente bajo un directorio (recursivo, best-effort). */
+export function newestMtimeMs(dir: string): number {
+  let newest = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const cur = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = path.join(cur, e.name);
+      if (e.isDirectory()) {
+        stack.push(full);
+      } else if (e.isFile()) {
+        try {
+          const m = fs.statSync(full).mtimeMs;
+          if (m > newest) newest = m;
+        } catch { /* noop */ }
+      }
+    }
+  }
+  return newest;
+}
+
+/**
+ * ¿El build está obsoleto? `web/src` más nuevo que `web/dist/index.html`
+ * (o dist ausente). Solo se usa en DEV para reconstruir solo.
+ */
+export function webDistStale(webSrcDir: string | null, distIndex: string | null): boolean {
+  if (!distIndex) return true;
+  if (!webSrcDir) return false;
+  try {
+    const distStat = fs.statSync(distIndex);
+    return newestMtimeMs(webSrcDir) > distStat.mtimeMs;
+  } catch {
+    return false;
+  }
 }
 
 /** Busca `requestPath` (p. ej. `/js/app.js`) en los candidatos web-dist. */
