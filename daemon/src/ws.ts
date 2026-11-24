@@ -359,14 +359,37 @@ export class WebSocketManager {
       : (typeof payload?.device_id === 'string' && payload.device_id.length > 0 ? payload.device_id : null);
     const deviceId = rawId || client.deviceId;
     const kind = normalizeDeviceKind(payload?.kind ?? client.kind);
-    let name = typeof payload?.name === 'string' && payload.name.length > 0 ? payload.name : client.name;
-    // Nombres únicos por navegador: dos orígenes del mismo navegador no
-    // deben verse idénticos en las listas (p. ej. dos "Chrome").
+    const wantName = typeof payload?.name === 'string' && payload.name.length > 0 ? payload.name : client.name;
+    // Nombre visible único por navegador: dos orígenes del mismo navegador
+    // no deben verse idénticos (p. ej. dos "Brave").
+    // - Se respeta el nombre personalizado (fila renombrada a mano).
+    // - Las filas con el genérico antiguo ("Navegador") se actualizan.
+    // - Solo cuentan los nombres con sesión viva (los fantasmas viejos
+    //   no bloquean el nombre limpio).
+    let name: string | null = wantName ?? null;
+    let helloCreatedRow = false;
     try {
       const k = String(kind ?? '').toLowerCase();
-      if (name && (k === 'browser' || k === 'phone' || k === 'tablet' || k === 'unknown')) {
-        const clash = this.db.listDevices().some((d: any) => d && d.id !== deviceId && (d.name ?? '') === name);
-        if (clash) name = `${name} ${deviceId.slice(0, 4)}`;
+      const browserish = k === 'browser' || k === 'phone' || k === 'tablet' || k === 'unknown';
+      const liveNames = new Set<string>();
+      try {
+        for (const s of this.db.listDeviceSessions()) {
+          const nm = String((s as any)?.name ?? '').trim();
+          if (nm && (s as any).device_id !== deviceId) liveNames.add(nm);
+        }
+      } catch { /* sin sesiones: no hay colisión */ }
+      const row = (() => { try { return this.db.getDevice(deviceId); } catch { return null; } })();
+      const rowName = String((row as any)?.name ?? '').trim();
+      const isGeneric = !rowName || rowName === 'Navegador';
+      if (row && !isGeneric && !liveNames.has(rowName) && rowName) {
+        name = rowName; // personalizado: manda sobre lo que diga hello
+      } else if (browserish && name && liveNames.has(name)) {
+        name = `${name} ${deviceId.slice(0, 4)}`;
+      }
+      if (!row) {
+        try { helloCreatedRow = this.ensureDeviceRow(deviceId, kind, name); } catch { /* noop */ }
+      } else if ((rowName || null) !== (name || null)) {
+        try { this.db.updateDevice(deviceId, { name: name ?? '' }); } catch { /* noop */ }
       }
     } catch { /* mejor esfuerzo */ }
 
@@ -427,6 +450,19 @@ export class WebSocketManager {
       if (!pageId) pageId = this.currentGlobalPageId();
     }
 
+    // La asignación del host manda sobre la vista recordada: al (re)conectar,
+    // el dispositivo abre la pantalla que tiene asignada en este perfil
+    // (cubre kioscos y móviles que entran después del reparto).
+    try {
+      if (profileId && deviceId) {
+        const asgPage = this.db.getAssignments(profileId)[deviceId];
+        if (asgPage) {
+          const pg = this.db.getPage(asgPage);
+          if (pg && pg.profile_id === profileId) pageId = asgPage;
+        }
+      }
+    } catch { /* mejor esfuerzo */ }
+
     client.profileId = profileId;
     client.pageId = pageId;
     this.db.upsertDeviceSession({ device_id: deviceId, name, kind, profile_id: profileId, page_id: pageId });
@@ -434,9 +470,9 @@ export class WebSocketManager {
     // Auto-provisión: todo dispositivo que se identifica existe como fila
     // `devices` (los dispositivos ya no se crean a mano). Así la lista
     // unificada y las asignaciones por perfil lo ven sin pasos extra.
-    let deviceCreated = false;
+    let deviceCreated = helloCreatedRow;
     try {
-      deviceCreated = this.ensureDeviceRow(deviceId, kind, name);
+      deviceCreated = this.ensureDeviceRow(deviceId, kind, name) || deviceCreated;
     } catch { /* mejor esfuerzo */ }
     try {
       if (deviceCreated) {
@@ -585,6 +621,8 @@ export class WebSocketManager {
     originDeviceId?: string | null;
     targets?: NavTargets;
     context?: any;
+    /** Actualizar también `current.page_id` global (defecto true, compat). */
+    updateGlobal?: boolean;
   }): { ok: boolean; error?: string; deliveredTo?: string[]; profileId?: string } {
     const page = this.db.getPage(opts.pageId);
     if (!page) return { ok: false, error: `Page not found: ${opts.pageId}` };
@@ -637,7 +675,8 @@ export class WebSocketManager {
 
     // Compat global: el origen navegando él mismo o un broadcast actualizan
     // los settings `current.*` que leen integraciones antiguas y el driver.
-    if (!origin || expanded === 'all' || (Array.isArray(expanded) && expanded.includes(origin))) {
+    // (El reparto de pantallas lo desactiva: no debe mover al anfitrión.)
+    if (opts.updateGlobal !== false && (!origin || expanded === 'all' || (Array.isArray(expanded) && expanded.includes(origin)))) {
       this.db.setCurrentPage(page.id);
     }
 

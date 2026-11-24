@@ -139,7 +139,7 @@ describe('StageBoard: dispositivos y pantallas', () => {
     wrapper.unmount()
   })
 
-  it('el desplegable solo muestra lo que está en línea', async () => {
+  it('el desplegable lista todos (online primero) para asignar también offline', async () => {
     const hwOff = { ...deck, online: false }
     const ghost = { id: 'g9', name: 'Navegador', kind: 'browser', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
     const ownOff = { id: 'own', name: 'Este', kind: 'browser', model: null, cols: null, rows: null, hw_path: null, online: false, source: 'browser' }
@@ -147,13 +147,15 @@ describe('StageBoard: dispositivos y pantallas', () => {
       props: { ...baseProps, devices: [hwOff, ghost, ownOff, mobile], assignments: {} },
     })
     await wrapper.find('[data-cy=bd-devices-btn]').trigger('click')
-    // Solo el móvil en línea; ni hardware apagado, ni fantasmas, ni el propio en gris.
-    expect(wrapper.find('[data-cy=bd-device-row-d1]').exists()).toBe(false)
-    expect(wrapper.find('[data-cy=bd-device-row-g9]').exists()).toBe(false)
-    expect(wrapper.find('[data-cy=bd-device-row-own]').exists()).toBe(false)
+    // Todos visibles (asignar offline aplica al reconectar); online primero.
+    expect(wrapper.find('[data-cy=bd-device-row-d1]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy=bd-device-row-g9]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy=bd-device-row-own]').exists()).toBe(true)
     expect(wrapper.find('[data-cy=bd-device-row-m1]').exists()).toBe(true)
-    // El badge cuenta solo lo visible.
-    expect(wrapper.find('[data-cy=bd-devices-badge]').text()).toContain('1')
+    const rows = wrapper.findAll('[data-cy^=bd-device-row-]')
+    expect(rows[0].attributes('data-cy')).toBe('bd-device-row-m1')
+    // El badge cuenta todos los dispositivos.
+    expect(wrapper.find('[data-cy=bd-devices-badge]').text()).toContain('4')
     wrapper.unmount()
   })
 })

@@ -286,6 +286,38 @@ describe('device-sessions: hello, reconexión y startup', () => {
     void a; void b;
   });
 
+  it('hello actualiza la fila con el genérico y respeta la personalizada', () => {
+    const mgr = makeManager();
+    db.createDevice({ id: 'cccc3333-0000-0000-0000-000000000003', name: 'Navegador', kind: 'browser', model: null, cols: null, rows: null, hw_path: null });
+    const c = addClient(mgr, { clientId: 'c-N3', deviceId: 'cccc3333-0000-0000-0000-000000000003' });
+    send(mgr, 'c-N3', { type: 'hello', payload: { deviceId: 'cccc3333-0000-0000-0000-000000000003', kind: 'browser', name: 'Brave' } });
+    expect(db.getDevice('cccc3333-0000-0000-0000-000000000003')?.name).toBe('Brave');
+    db.createDevice({ id: 'dddd4444-0000-0000-0000-000000000004', name: 'Móvil salón', kind: 'browser', model: null, cols: null, rows: null, hw_path: null });
+    const d = addClient(mgr, { clientId: 'c-N4', deviceId: 'dddd4444-0000-0000-0000-000000000004' });
+    send(mgr, 'c-N4', { type: 'hello', payload: { deviceId: 'dddd4444-0000-0000-0000-000000000004', kind: 'browser', name: 'Brave' } });
+    expect(db.getDevice('dddd4444-0000-0000-0000-000000000004')?.name).toBe('Móvil salón');
+    expect(db.getDeviceSession('dddd4444-0000-0000-0000-000000000004')?.name).toBe('Móvil salón');
+    void c; void d;
+    db.deleteDevice('cccc3333-0000-0000-0000-000000000003');
+    db.deleteDeviceSession('cccc3333-0000-0000-0000-000000000003');
+    db.deleteDevice('dddd4444-0000-0000-0000-000000000004');
+    db.deleteDeviceSession('dddd4444-0000-0000-0000-000000000004');
+  });
+
+  it('hello aplica la pantalla asignada al perfil', () => {
+    const mgr = makeManager();
+    const a = addClient(mgr, { clientId: 'c-A1', deviceId: 'dev-asg' });
+    db.setAssignment(P.a, 'dev-asg', PG.a2);
+    try {
+      send(mgr, 'c-A1', { type: 'hello', payload: { deviceId: 'dev-asg', kind: 'browser' } });
+      const state = lastOfType(a.inbox, 'session.state');
+      expect(state?.payload.pageId).toBe(PG.a2);
+    } finally {
+      db.deleteDeviceSession('dev-asg');
+      db.clearAssignment(P.a, 'dev-asg');
+    }
+  });
+
   it('reconexión con el mismo deviceId restaura la vista', () => {
     const mgr = makeManager();
     const a = addClient(mgr, { clientId: 'c-R1', deviceId: 'dev-recon' });

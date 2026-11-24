@@ -274,8 +274,7 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
       const wanted = body?.assignments;
       if (!wanted || typeof wanted !== 'object' || Array.isArray(wanted)) {
         return jsonResponse({ error: 'assignments (objeto deviceId → pageId|null) requerido' }, 400);
-      }
-      const devices = db.listDevices();
+      }      const devices = db.listDevices();
       const byId = new Map(devices.map((d) => [d.id, d]));
       const pages = db.getPagesByProfile(profileId);
       const pageById = new Map(pages.map((p) => [p.id, p]));
@@ -331,6 +330,34 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
       const fixed = db.repairAssignments(profileId);
       const assignments = db.getAssignments(profileId);
       services.wsManager.broadcast('assignment.updated', { profileId, assignments }, 'pages');
+      // La asignación manda: los navegadores/móviles cuya vista actual no
+      // coincide con la asignada abren su pantalla al momento (navegación
+      // dirigida sin tocar el current global del anfitrión). Se compara con
+      // la vista real (no con el cambio del mapa) para rescatar también
+      // estados desincronizados. Al HW lo mueve el bloque de abajo.
+      try {
+        const nav = services?.wsManager;
+        if (nav && typeof nav.navigatePageTo === 'function') {
+          for (const deviceId of Object.keys(wanted)) {
+            if (!byId.has(deviceId)) continue;
+            if (byId.get(deviceId)?.kind === 'deck') continue;
+            const finalPage = assignments[deviceId];
+            if (!finalPage) continue;
+            let current: string | null = null;
+            try {
+              current = nav.getSessionView(deviceId)?.pageId ?? null;
+            } catch { /* sin vista: se navega igual (persiste para reconectar) */ }
+            if (current === finalPage) continue;
+            nav.navigatePageTo({
+              pageId: finalPage,
+              originDeviceId: null,
+              targets: { kind: 'devices', ids: [deviceId] },
+              context: { via: 'device-assignment' },
+              updateGlobal: false,
+            });
+          }
+        }
+      } catch { /* noop */ }
       // El HW físico sigue la asignación (nunca al revés): si cambió un deck,
       // fijar la vista del HW a su página final (post-repair). Sin esto el
       // botón "dispositivos" no movía nada físico. Best-effort: nunca tumba

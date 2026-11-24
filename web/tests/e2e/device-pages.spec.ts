@@ -10,8 +10,28 @@ let profileId = '';
 let phoneId = '';
 let deckId = '';
 
+async function dismissWelcome(page: any) {
+  // En contextos frescos aparece el diálogo de bienvenida (modal nativo):
+  // cerrarlo o bloquea todos los clics de la prueba. El diálogo es un chunk
+  // async y puede abrirse segundos después del load: cerrar por JS (y marcar
+  // visto) funciona esté abierto o no, sin esperas.
+  try {
+    await page.evaluate(() => {
+      try { window.localStorage.setItem('bundeck:welcome-seen', '1'); } catch { /* noop */ }
+      const d = document.querySelector('[data-cy=bd-welcome]') as any;
+      try { if (d && d.open) d.close(); } catch { /* noop */ }
+    });
+  } catch { /* ya cerrado o no toca */ }
+  try {
+    const skip = page.locator('[data-cy=bd-welcome-skip]');
+    await skip.waitFor({ state: 'visible', timeout: 1500 });
+    await skip.click();
+  } catch { /* ya cerrado o no toca */ }
+}
+
 async function currentProfileAndPage(request: any, page: any) {
   await page.goto('/');
+  await dismissWelcome(page);
   await expect(page.locator('[data-cy=bd-profile-tab]').first()).toBeVisible({ timeout: 30000 });
 
   const activePageName = (
@@ -41,11 +61,13 @@ async function currentProfileAndPage(request: any, page: any) {
 }
 
 async function openDevicesPopover(page: any) {
+  await dismissWelcome(page);
   await page.locator('[data-cy=bd-devices-btn]').click();
   await expect(page.locator('[data-cy=bd-devices-pop]')).toBeVisible({ timeout: 5000 });
 }
 
 async function createTestPage(page: any) {
+  await dismissWelcome(page);
   const createPagePromise = page.waitForResponse(
     (res: any) => res.url().includes('/api/v1/pages') && res.request().method() === 'POST',
   );
@@ -204,6 +226,7 @@ test('borrar una página se puede deshacer desde el toast', async ({ page, reque
 
   // Menú de la página → Eliminar.
   const row = page.locator('.bd-page', { hasText: created.name });
+  await dismissWelcome(page);
   await row.locator('.bd-pagemenu-btn').click();
   await row.locator('.bd-menu .bd-dng').click();
 

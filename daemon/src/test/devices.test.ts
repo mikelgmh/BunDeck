@@ -344,6 +344,16 @@ describe('guarda HW en navegación', () => {
       (streamDeckDriver as any).streamDeck = null;
     }
   });
+
+  it('updateGlobal:false no toca current.page_id (reparto de pantallas)', () => {
+    db.setCurrentPage(gridId);
+    const res = (mgr as any).navigatePageTo({ pageId: freeId, targets: { kind: 'devices', ids: ['streamdeck-local'] }, updateGlobal: false });
+    expect(res.ok).toBe(true);
+    expect(db.getSetting('current.page_id')).toBe(gridId);
+    const res2 = (mgr as any).navigatePageTo({ pageId: freeId, targets: { kind: 'devices', ids: ['streamdeck-local'] } });
+    expect(res2.ok).toBe(true);
+    expect(db.getSetting('current.page_id')).toBe(freeId);
+  });
 });
 
 describe('pickHwDeckForRepaint (puro)', () => {

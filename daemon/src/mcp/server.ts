@@ -2561,6 +2561,32 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       const fixed = db.repairAssignments(profileId);
       const assignments = db.getAssignments(profileId);
       ctx.ws?.broadcast('assignment.updated', { profileId, assignments }, 'pages');
+      // La asignación manda también vía MCP: navegadores/móviles cuya vista
+      // no coincide con la asignada abren su pantalla (sin current global).
+      try {
+        const nav = (ctx.ws as any)?.navigatePageTo;
+        const viewOf = (ctx.ws as any)?.getSessionView;
+        if (typeof nav === 'function') {
+          for (const deviceId of Object.keys(wanted)) {
+            if (!byId.has(deviceId)) continue;
+            if ((byId.get(deviceId) as any)?.kind === 'deck') continue;
+            const finalPage = assignments[deviceId];
+            if (!finalPage) continue;
+            let current: string | null = null;
+            try {
+              current = typeof viewOf === 'function' ? viewOf.call(ctx.ws, deviceId)?.pageId ?? null : prev[deviceId] ?? null;
+            } catch { /* sin vista: se navega igual */ }
+            if (current === finalPage) continue;
+            nav.call(ctx.ws, {
+              pageId: finalPage,
+              originDeviceId: null,
+              targets: { kind: 'devices', ids: [deviceId] },
+              context: { via: 'device-assignment' },
+              updateGlobal: false,
+            });
+          }
+        }
+      } catch { /* noop */ }
       recordInverse(ctx, 'set_assignments', `asignaciones del perfil ${profileId}`, { tool: '__restore_assignments', arguments: { profile_id: profileId, assignments: prev } });
       return { assignments, repaired: fixed };
     }

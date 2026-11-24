@@ -84,3 +84,24 @@ export function describeNavTarget(payload: any): string {
   if (p.broadcast === true) return 'all'
   return 'all' // sin destino: broadcast (compat)
 }
+
+/**
+ * ¿Es una navegación GLOBAL (broadcast) y no dirigida?
+ * Solo el broadcast debe tocar los settings globales `current.*` que lee
+ * el HW físico y usan los arranques sin asignación. El reparto de pantallas
+ * (destino concreto) nunca mueve al anfitrión: el daemon ya lo garantiza en
+ * su lado y el frontend no debe deshacerlo con un POST directo a /settings.
+ */
+export function isBroadcastNav(payload: any): boolean {
+  const p = payload ?? {}
+  if ((p as any).broadcast === true) return true
+  const targets = Array.isArray((p as any).targets) ? (p as any).targets : null
+  if (targets) {
+    if (targets.length === 0) return true
+    return targets.includes('all') || targets.includes('*')
+  }
+  const t = (p as any).targetDeviceId ?? (p as any).target ?? (p as any).deviceId ?? (p as any).device_id ?? null
+  if (t === null || t === undefined || t === '') return true
+  if (t === 'all' || t === '*') return true
+  return false
+}

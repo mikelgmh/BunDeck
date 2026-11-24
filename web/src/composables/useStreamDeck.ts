@@ -7,7 +7,7 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
-import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe } from '../utils/sessionRouting'
+import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe, isBroadcastNav } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 /** Icono Lucide por defecto para teclas recién creadas (nombre PascalCase,
@@ -622,19 +622,40 @@ export function useStreamDeck() {
         isRemotePageChange.value = true
         try {
           if (message.payload.pageId) {
-            await selectPage(message.payload.pageId)
-            // Save remote page change to database settings for StreamDeck integration
-            try {
-              await apiRequest('/settings', {
-                method: 'POST',
-                body: JSON.stringify({
-                  key: 'current.page_id',
-                  value: message.payload.pageId
+            // La asignación puede venir de otro perfil o de una página recién
+            // creada que aún no está en currentPages (carrera page.created vs
+            // page.navigate): cambiar de perfil y recargar antes de seleccionar.
+            const wantProfile = typeof message.payload.profileId === 'string' ? message.payload.profileId : null
+            if (wantProfile && wantProfile !== selectedProfile.value) {
+              selectedProfile.value = wantProfile
+              await loadProfile()
+            }
+            if (!currentPages.value.some((p) => p.id === message.payload.pageId)) {
+              await reloadPages()
+            }
+            if (currentPages.value.some((p) => p.id === message.payload.pageId)) {
+              await selectPage(message.payload.pageId)
+            } else {
+              console.warn('🧭 Page navigation: página desconocida tras recargar:', message.payload.pageId)
+            }
+            // Solo los broadcasts antiguos (sin destino) tocan el global
+            // `current.*` que lee el HW físico: una navegación DIRIGIDA
+            // (reparto de pantallas) nunca debe mover al anfitrión. El
+            // daemon ya mantiene esa invariante en su lado; aquí no se
+            // deshace con un POST directo.
+            if (isBroadcastNav(message.payload)) {
+              try {
+                await apiRequest('/settings', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    key: 'current.page_id',
+                    value: message.payload.pageId
+                  })
                 })
-              })
-              console.log('✅ Remote page change saved to database settings:', message.payload.pageId)
-            } catch (error) {
-              console.error('❌ Failed to save remote page change to database settings:', error)
+                console.log('✅ Remote page change saved to database settings:', message.payload.pageId)
+              } catch (error) {
+                console.error('❌ Failed to save remote page change to database settings:', error)
+              }
             }
             // OJO: no se empuja la vista al HW. El Stream Deck físico sigue su
             // propia sesión/asignación; solo cambia por acción o por el botón
@@ -657,18 +678,28 @@ export function useStreamDeck() {
         if (message.payload.profileId) {
           selectedProfile.value = message.payload.profileId
           await loadProfile()
-          // Save remote profile change to database settings for StreamDeck integration
+          // El daemon adjunta la primera página del perfil: abrirla si no es
+          // la actual (loadProfile puede haber elegido la asignada/global).
           try {
-            await apiRequest('/settings', {
-              method: 'POST',
-              body: JSON.stringify({
-                key: 'current.profile_id',
-                value: message.payload.profileId
+            const wantPage = typeof message.payload.pageId === 'string' ? message.payload.pageId : null
+            if (wantPage && wantPage !== currentPage.value?.id && currentPages.value.some((p) => p.id === wantPage)) {
+              await selectPage(wantPage)
+            }
+          } catch { /* mejor esfuerzo: ya se cargó el perfil */ }
+          // Como en page.navigate: solo el broadcast mueve el global.
+          if (isBroadcastNav(message.payload)) {
+            try {
+              await apiRequest('/settings', {
+                method: 'POST',
+                body: JSON.stringify({
+                  key: 'current.profile_id',
+                  value: message.payload.profileId
+                })
               })
-            })
-            console.log('✅ Remote profile change saved to database settings:', message.payload.profileId)
-          } catch (error) {
-            console.error('❌ Failed to save remote profile change to database settings:', error)
+              console.log('✅ Remote profile change saved to database settings:', message.payload.profileId)
+            } catch (error) {
+              console.error('❌ Failed to save remote profile change to database settings:', error)
+            }
           }
         }
         isRemoteProfileChange.value = false
@@ -902,11 +933,12 @@ export function useStreamDeck() {
     saveSelectedProfile(selectedProfile.value)
 
     try {
-      // Perfil, lista de páginas y página guardada son independientes: en paralelo.
-      const [profile, pages, pageSettingRes] = await Promise.all([
+      // Perfil, lista de páginas, página guardada y asignaciones son independientes: en paralelo.
+      const [profile, pages, pageSettingRes, assignRes] = await Promise.all([
         apiRequest(`/profiles/${selectedProfile.value}`),
         apiRequest(`/pages?profileId=${selectedProfile.value}`),
         apiRequest('/settings?key=current.page_id').catch(() => null),
+        apiRequest(`/profiles/${selectedProfile.value}/assignments`).catch(() => null),
       ])
       currentProfile.value = profile
 
@@ -946,6 +978,18 @@ export function useStreamDeck() {
       // Try to load saved page from database settings, fallback to first non-folder page
       let targetPage = null;
       {
+        // La pantalla asignada a este dispositivo manda sobre la global:
+        // al abrir (kiosco incluido) cada pantalla muestra SU página.
+        const mine = (assignRes as any)?.assignments?.[deviceId.value];
+        if (mine) {
+          const ap = pages.find(p => p.id === mine);
+          if (ap) {
+            targetPage = ap;
+            console.log('📄 Loaded assigned page for this device:', mine);
+          }
+        }
+      }
+      if (!targetPage) {
         const savedPageId = (pageSettingRes as any)?.value;
 
         // Handle the case where invalid values were saved
@@ -1794,17 +1838,20 @@ export function useStreamDeck() {
 
     // Fuera del camino crítico: persistir el setting y repintar el HW no
     // deben retrasar el cambio de perfil visible (fire-and-forget).
-    void apiRequest('/settings', {
-      method: 'POST',
-      body: JSON.stringify({
-        key: 'current.profile_id',
-        value: profileId
+    // OJO: si el cambio lo empujó otro dispositivo, no se toca el global.
+    if (!isRemoteProfileChange.value) {
+      void apiRequest('/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          key: 'current.profile_id',
+          value: profileId
+        })
+      }).then(() => {
+        console.log('✅ Profile saved to database settings:', profileId)
+      }).catch((error) => {
+        console.error('❌ Failed to save profile to database settings:', error)
       })
-    }).then(() => {
-      console.log('✅ Profile saved to database settings:', profileId)
-    }).catch((error) => {
-      console.error('❌ Failed to save profile to database settings:', error)
-    })
+    }
 
     // Broadcast profile change to other devices (only for local changes)
     if (!isRemoteProfileChange.value) {
@@ -2013,17 +2060,21 @@ export function useStreamDeck() {
 
     // Persistir el setting y repintar el HW fuera del camino crítico: la
     // página ya está visible; esto no debe retrasar el cambio (fire-and-forget).
-    void apiRequest('/settings', {
-      method: 'POST',
-      body: JSON.stringify({
-        key: 'current.page_id',
-        value: pageId
+    // OJO: si la navegación la empujó otro dispositivo (asignación), no se
+    // toca el global: cada pantalla sigue su propia vista.
+    if (!isRemotePageChange.value) {
+      void apiRequest('/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          key: 'current.page_id',
+          value: pageId
+        })
+      }).then(() => {
+        console.log('✅ Page saved to database settings:', pageId)
+      }).catch((error) => {
+        console.error('❌ Failed to save page to database settings:', error)
       })
-    }).then(() => {
-      console.log('✅ Page saved to database settings:', pageId)
-    }).catch((error) => {
-      console.error('❌ Failed to save page to database settings:', error)
-    })
+    }
 
     // OJO: navegar en el editor NO repinta el Stream Deck físico (ver nota en
     // updateStreamDeckButtons). El HW sigue su propia sesión/asignación.

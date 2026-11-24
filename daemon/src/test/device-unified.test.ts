@@ -96,11 +96,17 @@ describe('buildUnifiedDevices (lista unificada)', () => {
 
 describe('purgeStaleDeviceSessions (higiene de fantasmas)', () => {
   it('purga sesiones viejas y la lista unificada no las resucita', () => {
+    // Hermético en aislado (DB real) y en suite completa (mock global de
+    // action-runner.test.ts, sin `.db`): envejecer 31 días por la vía que
+    // cada impl soporte. El corte de 30 días solo se lleva al fantasma.
     const ghostId = uid('ghost');
     db.upsertDeviceSession({ device_id: ghostId, name: 'Navegador', kind: 'browser' });
-    // Envejecer la sesión 31 días a mano.
-    (db as any).db.prepare('UPDATE device_sessions SET updated_at = ? WHERE device_id = ?')
-      .run(Date.now() - 31 * 24 * 3600 * 1000, ghostId);
+    if (typeof (db as any).__setSessionUpdatedAt === 'function') {
+      (db as any).__setSessionUpdatedAt(ghostId, Date.now() - 31 * 24 * 3600 * 1000);
+    } else {
+      (db as any).db.prepare('UPDATE device_sessions SET updated_at = ? WHERE device_id = ?')
+        .run(Date.now() - 31 * 24 * 3600 * 1000, ghostId);
+    }
     const freshId = uid('fresh');
     db.upsertDeviceSession({ device_id: freshId, name: 'Navegador', kind: 'browser' });
     const listed = buildUnifiedDevices(db, svc([
@@ -112,6 +118,45 @@ describe('purgeStaleDeviceSessions (higiene de fantasmas)', () => {
     expect(listed.find((d: any) => d.id === freshId)).toBeTruthy();
     db.deleteDevice(freshId);
     db.deleteDeviceSession(freshId);
+  });
+});
+
+describe('PUT assignments empuja la pantalla al navegador', () => {
+  const putCall = (profileId: string, body: any, wsManager: any) => {
+    const p = `/api/v1/profiles/${profileId}/assignments`;
+    const req = new Request(`http://localhost:3001${p}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleDevices(req, { url: new URL(req.url), method: 'PUT', path: p, db, services: { wsManager } as any });
+  };
+
+  it('navega solo navegadores cambiados, sin tocar el global', async () => {
+    const prof = db.createProfile({ id: uid('prof'), name: 'Push', data: {} });
+    const g1 = uid('page');
+    const g2 = uid('page');
+    db.createPage({ id: g1, profile_id: prof.id, name: 'G1', order_idx: 0, is_folder: 0, data: {} });
+    db.createPage({ id: g2, profile_id: prof.id, name: 'G2', order_idx: 1, is_folder: 0, data: {} });
+    const b1 = uid('br');
+    const b2 = uid('br');
+    db.createDevice({ id: b1, name: 'B1', kind: 'browser', model: null, cols: null, rows: null, hw_path: null } as any);
+    db.createDevice({ id: b2, name: 'B2', kind: 'browser', model: null, cols: null, rows: null, hw_path: null } as any);
+    db.setAssignment(prof.id, b1, g1); // b1 ya estaba en g1: no debe renavegar
+    const navs: any[] = [];
+    const broadcasts: any[] = [];
+    const wsManager = {
+      broadcast: (t: string, p: any) => broadcasts.push({ t, p }),
+      navigatePageTo: (o: any) => { navs.push(o); return { ok: true }; },
+      // b1 ya muestra su página asignada: no debe renavegar.
+      getSessionView: (id: string) => (id === b1 ? { profileId: prof.id, pageId: g1 } : null),
+    };
+    const res = await putCall(prof.id, { assignments: { [b1]: g1, [b2]: g2 } }, wsManager);
+    expect(res!.status).toBe(200);
+    expect(navs.length).toBe(1);
+    expect(navs[0].pageId).toBe(g2);
+    expect(navs[0].targets).toEqual({ kind: 'devices', ids: [b2] });
+    expect(navs[0].updateGlobal).toBe(false);
   });
 });
 
