@@ -42,6 +42,16 @@ jobs:
         cd web
         npm ci
 
+    - name: Install Linux system fonts (canvas text rendering in daemon tests)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fonts-dejavu-core fonts-liberation
+
+    - name: Build Web (daemon frontend-cache test serves web/dist)
+      run: |
+        cd web
+        npm run build
+
     - name: Run tests
       run: bun run test
 
