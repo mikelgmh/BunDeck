@@ -55,20 +55,22 @@ const STR = {
   es: {
     lang: 'es',
     badge: 'en línea',
-    subtitle: 'Relay E2E de BunDeck: conecta tu mando y tu equipo aunque no estén en la misma red.',
+    subtitle: 'Relay de BunDeck con WebRTC P2P: conexión directa cifrada entre tus dispositivos cuando la red lo permite, con el relay como señalización y alternativa.',
     whatTitle: '¿Qué es esto?',
-    what: 'Este servidor es un <strong>router opaco de extremo a extremo</strong>: reenvía mensajes cifrados entre tus dispositivos por <code>deviceId</code> <strong>sin leer ni guardar tus comandos</strong>. Si el destino está offline, responde error y descarta el mensaje (sin cola).',
+    what: 'Este servidor cumple <strong>dos funciones</strong>: <strong>1) señalización WebRTC</strong>, para que tus dispositivos negocien una <strong>conexión directa P2P cifrada de extremo a extremo</strong> (ese tráfico <strong>no pasa por aquí</strong>); y <strong>2) relay de respaldo</strong>, que proxea la UI y la API por túnel cuando el P2P no es posible (NAT simétrico). En modo relay el operador sí puede ver el tráfico (protegido con TLS hasta aquí). El emparejamiento E2E por <code>deviceId</code> sigue siendo opaco: sin leer ni guardar tus comandos y sin cola.',
+    transportTitle: '¿P2P o relay?',
+    transport: 'Tu navegador <strong>intenta primero P2P</strong>. Si conecta, verás <strong>P2P</strong> en el remoto y en la lista de sesiones del anfitrión (el relay solo hizo de presentador). Si la red lo bloquea, verás <strong>Relay</strong> y todo seguirá funcionando por el túnel. El anfitrión aprueba el acceso <strong>antes</strong> de saber el transporte final, y siempre puede revocar la sesión.',
     stepsTitle: 'Cómo conectar (2 min)',
     s1t: '1 · En BunDeck abre Ajustes → Acceso remoto',
     s1b: 'Activa el acceso remoto en el equipo que hace de anfitrión.',
-    s2t: '2 · Este relay es público: no necesita token',
-    s2b: 'Tu BunDeck ya lo usa por defecto, sin configurar nada. Solo necesitas <code>RELAY_URL</code>/<code>RELAY_TOKEN</code> si usas tu propio relay privado.',
+    s2t: '2 · Este relay es privado: exige token',
+    s2b: 'Tu BunDeck lo usa con <code>RELAY_URL</code> + <code>RELAY_TOKEN</code> ya configurados. Sin token el WS y <code>POST /pair</code> responden <code>401</code>; la UI remota (<code>/ui</code>, <code>/t</code>) sigue pidiendo aprobación del anfitrión.',
     s3t: '3 · Genera el código y acéptalo en el otro equipo',
     s3b: 'El anfitrión genera un código de 6 dígitos (<code>POST /pair</code>) y el otro equipo lo introduce para emparejar. Caduca en 5 minutos y es de un solo uso.',
     copy: 'Copiar URL',
     copied: '¡Copiada!',
     urlLabel: 'Tu URL de relay (RELAY_URL)',
-    tokenHint: 'Sin token: cualquiera puede usar este relay público. El emparejamiento entre tus equipos sigue exigiendo tu aprobación explícita.',
+    tokenHint: 'Privado con token: solo tus equipos pueden usar la señalización y el túnel. El emparejamiento y el acceso remoto siguen exigiendo tu aprobación explícita.',
     statusTitle: 'Estado',
     online: 'dispositivos conectados ahora',
     known: 'dispositivos conocidos',
@@ -103,25 +105,27 @@ const STR = {
     scanKindTunnelUrl: 'Enlace tuneleado (/t/)',
     scanKindHttpUrl: 'Enlace web',
     scanKindOther: 'Texto',
-    footer: 'BunDeck Relay · E2E opaco · Tus comandos nunca se ven aquí',
+    footer: 'BunDeck Relay · WebRTC P2P + fallback por relay · El P2P no pasa por aquí',
   },
   en: {
     lang: 'en',
     badge: 'online',
-    subtitle: 'BunDeck E2E relay: connect your controller and your rig even when they are not on the same network.',
+    subtitle: 'BunDeck relay with WebRTC P2P: encrypted direct connection between your devices when the network allows it, with the relay as signaling and fallback.',
     whatTitle: 'What is this?',
-    what: 'This server is an <strong>opaque end-to-end router</strong>: it forwards encrypted messages between your devices by <code>deviceId</code> <strong>without reading or storing your commands</strong>. If the destination is offline it answers with an error and drops the message (no queue).',
+    what: 'This server has <strong>two jobs</strong>: <strong>1) WebRTC signaling</strong>, so your devices can negotiate an <strong>encrypted end-to-end P2P connection</strong> (that traffic <strong>never goes through here</strong>); and <strong>2) fallback relay</strong>, proxying the UI and API over a tunnel when P2P is not possible (symmetric NAT). In relay mode the operator can see the traffic (TLS-protected up to here). E2E pairing by <code>deviceId</code> stays opaque: no reading or storing your commands, no queue.',
+    transportTitle: 'P2P or relay?',
+    transport: 'Your browser <strong>tries P2P first</strong>. If it connects you will see <strong>P2P</strong> on the remote and in the host sessions list (the relay only introduced them). If the network blocks it, you will see <strong>Relay</strong> and everything keeps working over the tunnel. The host approves access <strong>before</strong> knowing the final transport, and can always revoke the session.',
     stepsTitle: 'How to connect (2 min)',
     s1t: '1 · In BunDeck open Settings → Remote access',
     s1b: 'Enable remote access on the host machine.',
-    s2t: '2 · This relay is public: no token needed',
-    s2b: 'Your BunDeck already uses it by default with zero config. You only need <code>RELAY_URL</code>/<code>RELAY_TOKEN</code> for your own private relay.',
+    s2t: '2 · This relay is private: token required',
+    s2b: 'Your BunDeck uses it with <code>RELAY_URL</code> + <code>RELAY_TOKEN</code> already configured. Without a token the WS and <code>POST /pair</code> answer <code>401</code>; the remote UI (<code>/ui</code>, <code>/t</code>) still asks the host for approval.',
     s3t: '3 · Generate the code and accept it on the other device',
     s3b: 'The host generates a 6-digit code (<code>POST /pair</code>) and the other device enters it to pair. It expires in 5 minutes and is single-use.',
     copy: 'Copy URL',
     copied: 'Copied!',
     urlLabel: 'Your relay URL (RELAY_URL)',
-    tokenHint: 'No token: anyone can use this public relay. Pairing your devices still requires your explicit approval.',
+    tokenHint: 'Private with token: only your devices can use signaling and the tunnel. Pairing and remote access still require your explicit approval.',
     statusTitle: 'Status',
     online: 'devices connected right now',
     known: 'known devices',
@@ -156,7 +160,7 @@ const STR = {
     scanKindTunnelUrl: 'Tunnelled link (/t/)',
     scanKindHttpUrl: 'Web link',
     scanKindOther: 'Text',
-    footer: 'BunDeck Relay · opaque E2E · Your commands are never visible here',
+    footer: 'BunDeck Relay · WebRTC P2P + relay fallback · P2P never goes through here',
   },
 } as const;
 
@@ -238,6 +242,7 @@ a{color:#4ade80}
 <h1>BunDeck Relay</h1>
 <p class="sub">${t.subtitle}</p>
 <div class="card"><h2>${t.whatTitle}</h2><p>${t.what}</p></div>
+<div class="card"><h2>${t.transportTitle}</h2><p>${t.transport}</p></div>
 <div class="card"><h2>${t.stepsTitle}</h2>
 <ol>
 <li><strong>${t.s1t}</strong><br>${t.s1b}</li>
