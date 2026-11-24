@@ -1,3 +1,41 @@
+# [1.11.0](https://github.com/mikelgmh/BunDeck/compare/v1.10.6...v1.11.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **ci:** build web + system fonts in test job; installer tracks libredeck binaries ([b66209a](https://github.com/mikelgmh/BunDeck/commit/b66209a775ce4dab24e3f9e6735f0084bf9a64a8))
+* **ci:** bump napi-rs canvas 1.0.9 to 1.2.0 for Linux font discovery ([8c1a5c6](https://github.com/mikelgmh/BunDeck/commit/8c1a5c627a37b1a762ea7ad093f217d49b9ce8b0))
+* **devices:** asignacion de pantalla con cambio instantaneo por WS ([11b8aa8](https://github.com/mikelgmh/BunDeck/commit/11b8aa83bb1a908e157df55bd10f97d9d13ab3ec))
+* **devices:** el desplegable vuelve a listar solo online ([dc23dfc](https://github.com/mikelgmh/BunDeck/commit/dc23dfc6a09a98bab5d5297b146dd87aa1c5b21c))
+* **devices:** el HW sigue la asignacion explicita aunque su sesion este en otro perfil ([2b22ee1](https://github.com/mikelgmh/BunDeck/commit/2b22ee1689eee3116cca3df5aa264d9f07a59cdb))
+* **hw:** navigatePageTo dirigido al HW fija su sesion (cubre MCP/flujos) ([906138d](https://github.com/mikelgmh/BunDeck/commit/906138d6ddae55f940f38af787d0931c9095c9cc))
+* **kiosk:** click/doble/triple/hold funcionan tambien en kiosco tactil ([6423994](https://github.com/mikelgmh/BunDeck/commit/6423994b393fead605d66299a50e3fe56dcc2a27))
+* **relay): rate-limit diferenciado por token + trust proxy + retry-after; feat(webrtc:** DataChannel P2P daemon-frontend con fallback relay ([10c90db](https://github.com/mikelgmh/BunDeck/commit/10c90dbe776f23cd047787dbc5950804e8a811cd))
+* **relay:** auto-ir navegaba a /%5Ehttps:/ por regex con barras escapadas en el template ([2dda60a](https://github.com/mikelgmh/BunDeck/commit/2dda60acb925d53042c933e6bcaa1db7f6c61021))
+* **relay:** escaner QR de la landing con fallback auto-hospedado (jsqr) para navegadores sin BarcodeDetector (Safari/iPad) ([a15ac80](https://github.com/mikelgmh/BunDeck/commit/a15ac804651a9369206f1850d9a6e96f854fbc9b))
+* **remote:** auto-ir tras escanear QR de acceso; timeouts adaptativos en tunel; reintento de hello y aviso de ws-msg huerfano ([cbdf872](https://github.com/mikelgmh/BunDeck/commit/cbdf872813c792792ae67086496607f56cc99aea))
+* **remote:** el tunel vuelve a servir el build (el proxy a Astro dev rompia el JS); auto-rebuild en DEV si src es mas nuevo ([ca81ce8](https://github.com/mikelgmh/BunDeck/commit/ca81ce866922ca7bc15179155bd343affb760bcc))
+* **remote:** las sesiones del tunel sobreviven a reinicios del daemon y del relay ([3c26998](https://github.com/mikelgmh/BunDeck/commit/3c26998c6521e8412e92857f586f8e5a381f975c))
+* **remote:** URL visible en pestana internet del QR; UI viva de Astro por el tunel en DEV y no-store en HTML (iOS) ([cc688e4](https://github.com/mikelgmh/BunDeck/commit/cc688e4286c4e55d115bb64c875ba79cac0f5a24))
+* **remote:** web/dist va antes que la copia vieja daemon/web-dist en DEV (y corrige niveles http/) ([01379b9](https://github.com/mikelgmh/BunDeck/commit/01379b9b782caa1f1161f4df542b840c04a44a15))
+* **site:** align hero copy with page content on desktop ([c43f782](https://github.com/mikelgmh/BunDeck/commit/c43f782fd5448c4fc5e31e31516a44fddae631fa))
+* **site:** mobile hero buttons inline, hide mascot, icon-only github nav, bento features grid ([7bff24b](https://github.com/mikelgmh/BunDeck/commit/7bff24bf38c238354931f5ec5466d09bfa309d4b))
+* **site:** restore home workflow section to original design ([78b84fc](https://github.com/mikelgmh/BunDeck/commit/78b84fc0dda972391ce743031db64327b07d7084))
+* **ui:** los chips de pagina muestran un solo icono de dispositivo ([7cbd623](https://github.com/mikelgmh/BunDeck/commit/7cbd6235ef8f79025563d62dde11f5553eea3d7a))
+* **web:** kiosco encaja el grid a lo ancho y alto sin deformar ([f313fc7](https://github.com/mikelgmh/BunDeck/commit/f313fc73dc7c408fe6f9cc74b42459d0f1f10470))
+
+
+### Features
+
+* **elgato:** shim en-Worker sin emulacion (sdk + raw) y matriz de 20 plugins ([b3005c5](https://github.com/mikelgmh/BunDeck/commit/b3005c5ca015a4fd65ce7b92257aaafcef47a980))
+* gestion de dispositivos en Acceso remoto, nombres por navegador y popover solo en linea ([3c4e49c](https://github.com/mikelgmh/BunDeck/commit/3c4e49c23f8d30fb5a051cbb5ddd2deaf067998c))
+* mejoras de dispositivos, pintado de teclas y compatibilidad ([6d33406](https://github.com/mikelgmh/BunDeck/commit/6d33406a6310d8041cf2ca2f158beb5936918ec7))
+* press FX + acciones por pulsacion, kiosco, QR relay, LAN por invitacion, grid por pagina ([6fc9043](https://github.com/mikelgmh/BunDeck/commit/6fc904326fcb1d11b39e2ec6809de05b7929e647))
+* **remote:** avisar transporte WebRTC vs relay en dialogo de aprobacion y sesiones ([69a28c0](https://github.com/mikelgmh/BunDeck/commit/69a28c0dc61410b6ed62aa0c7a7e71a074db6910))
+* **remote:** transporte P2P/Relay visible en sala de espera, banner de sesion y dialogo de aprobacion ([3f9cb04](https://github.com/mikelgmh/BunDeck/commit/3f9cb041cbad7d01403545a20fa06c97ac15b489))
+* **streamdeck:** importacion de perfiles (detect, import, bienvenida y ajustes) ([5ef0666](https://github.com/mikelgmh/BunDeck/commit/5ef066624d143714e9155ac0907608d2fe2c41cb))
+* **web:** exportar e importar perfil desde el menu del tab ([02230c9](https://github.com/mikelgmh/BunDeck/commit/02230c93d04fa04742ec6d67e5669b91b4a3133f))
+
 ## [1.10.6](https://github.com/mikelgmh/libredeck/compare/v1.10.5...v1.10.6) (2026-11-23)
 
 
