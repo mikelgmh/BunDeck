@@ -990,7 +990,9 @@ const clearHoldTimer = () => {
   }
 }
 const onPressStart = (event: PointerEvent, position: number) => {
-  if (props.mode !== 'use' || (event.button !== undefined && event.button !== 0)) return
+  // Solo botón principal: se ignoran medio/secundario (button > 0). El
+  // táctil/lápiz puede reportar button 0 o -1 según navegador; ambos valen.
+  if (props.mode !== 'use' || (event.button !== undefined && event.button > 0)) return
   lastPointer.pos = position
   lastPointer.t = Date.now()
   if (suppressClickPos !== null && suppressClickPos !== position) suppressClickPos = null

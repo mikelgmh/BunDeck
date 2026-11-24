@@ -42,6 +42,16 @@ describe('usePressActions', () => {
     expect(m.actions.map((x: any) => x.type)).toEqual(['web'])
   })
 
+  it('getActionsForKind click usa pressActions.click aunque falte el espejo actions[]', () => {
+    // Teclas creadas fuera del editor (API/MCP/imports) pueden no traer el
+    // espejo legacy: el click efectivo sigue siendo pressActions.click.
+    const d = { actions: [], pressActions: { click: [a('web')], double: [], triple: [], long: [] } }
+    expect(getActionsForKind(d, 'click').map((x: any) => x.type)).toEqual(['web'])
+    expect(hasKindContent(d, 'click')).toBe(true)
+    // Con espejo vacío en ambos, sigue sin contenido.
+    expect(getActionsForKind({ actions: [] }, 'click')).toEqual([])
+  })
+
   it('detecta contenido multi-tap y long (listas y reglas)', () => {
     expect(hasMultiTapContent({ actions: [] })).toBe(false)
     expect(hasMultiTapContent({ actions: [], pressActions: { double: [a('web')] } })).toBe(true)

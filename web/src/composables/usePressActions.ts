@@ -49,7 +49,14 @@ export function normalizePressActions(data: any): Record<PressKind, any[]> {
 /** Lista de acciones directas para un tipo de pulsación. */
 export function getActionsForKind(data: any, kind: PressKind): any[] {
   if (!data) return []
-  if (kind === 'click') return cleanList(data.actions)
+  // El click efectivo es pressActions.click si tiene contenido, si no
+  // actions[] (espejo legacy; ver ensurePressMirror). Las teclas creadas
+  // fuera del editor (API/MCP/imports) pueden no traer el espejo.
+  if (kind === 'click') {
+    const pa = cleanList((data as any)?.pressActions?.click)
+    if (pa.length) return pa
+    return cleanList(data.actions)
+  }
   const pa = (data?.pressActions ?? {}) as PressActions
   return cleanList(pa[kind])
 }
