@@ -308,7 +308,7 @@
               :data-cy="`bd-page-${page.id}`"
               @click="$emit('page-select', page.id)"
             >
-              <Folder v-if="page.is_folder === 1" :size="14" stroke-width="1.75" aria-hidden="true" /><Move v-else-if="pageLayoutOf(page) === 'gridstack'" :size="14" stroke-width="1.75" aria-hidden="true" />{{ page.name }}<span v-if="pageDevices(page).length" class="bd-dvs" :title="t('bd.shownOn', { devices: pageDevices(page).map((d) => d.name).join(', ') })"><component v-for="d in pageDevices(page)" :key="d.id" :is="deviceIcon(d.kind)" :size="12" stroke-width="1.75" aria-hidden="true" /></span>
+              <Folder v-if="page.is_folder === 1" :size="14" stroke-width="1.75" aria-hidden="true" /><Move v-else-if="pageLayoutOf(page) === 'gridstack'" :size="14" stroke-width="1.75" aria-hidden="true" />{{ page.name }}<span v-if="pageDevices(page).length" class="bd-dvs" :title="t('bd.shownOn', { devices: pageDevices(page).map((d) => d.name).join(', ') })"><component v-for="d in pageDevices(page).slice(0, 1)" :key="d.id" :is="deviceIcon(d.kind)" :size="12" stroke-width="1.75" aria-hidden="true" /></span>
             </button>
             <button
               v-if="mode === 'edit'"

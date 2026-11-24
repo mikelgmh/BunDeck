@@ -114,12 +114,16 @@ describe('StageBoard: dispositivos y pantallas', () => {
     wrapper.unmount()
   })
 
-  it('chips muestran iconos de los dispositivos asignados', () => {
+  it('chips muestran un solo icono aunque haya varios dispositivos asignados', () => {
+    const mobile = { id: 'm1', name: 'Móvil', kind: 'phone', model: null, cols: null, rows: null, hw_path: null, online: true, source: 'browser' }
     const wrapper = mount(StageBoard, {
-      props: { ...baseProps, devices: [deck], assignments: { d1: 'g1' } },
+      props: { ...baseProps, devices: [deck, mobile], assignments: { d1: 'g1', m1: 'g1' } },
     })
     const chip = wrapper.find('[data-cy=bd-page-g1]')
     expect(chip.find('.bd-dvs').exists()).toBe(true)
+    // Un solo icono (el tooltip conserva la lista completa de nombres).
+    expect(chip.findAll('.bd-dvs > *').length).toBe(1)
+    expect(chip.find('.bd-dvs').attributes('title')).toBeTruthy()
     wrapper.unmount()
   })
 
