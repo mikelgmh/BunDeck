@@ -10,6 +10,7 @@
   --feature-foreground: #202020;
   --feature-muted: #5f5f5d;
   --feature-divider: #c7c7c4;
+  --card: #f4f4f2;
 }
 
 * { box-sizing: border-box; }
@@ -23,13 +24,12 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
 .wordmark { display: inline-flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; letter-spacing: -0.6px; }
 .brand-mark { display: block; width: 36px; height: 36px; flex: 0 0 auto; }
 .brand-mark img { display: block; width: 100%; height: 100%; }
-.site-header nav { display: flex; gap: 29px; align-items: center; color: #505050; font-size: 13px; }
+.site-header nav { display: flex; gap: 22px; align-items: center; color: #505050; font-size: 13px; }
 .site-header nav a, .site-footer > a:last-child { transition: color 150ms ease; }
 .site-header nav a:hover, .site-footer > a:last-child:hover { color: #000; }
-.source-nav { display: inline-flex; align-items: center; gap: 7px; }
-.source-nav img { width: 16px; height: 16px; opacity: .78; }
-.header-download { padding: 10px 14px; border: 1px solid #c9c9c6; border-radius: 6px; font-size: 12px; font-weight: 650; transition: background 150ms ease; }
-.header-download:hover { background: #fff; }
+.github-nav { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid #c9c9c6; border-radius: 50%; transition: background 150ms ease, transform 150ms ease; }
+.github-nav img { width: 17px; height: 17px; opacity: .85; }
+.github-nav:hover { background: #fff; transform: translateY(-1px); }
 
 .hero { width: min(1180px, calc(100% - 96px)); min-height: 590px; margin: 0 auto; padding: 77px 0 79px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 46px; }
 .hero-copy { padding-left: clamp(0px, 3vw, 38px); }
@@ -41,14 +41,14 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
 .download-button:active { transform: translateY(1px); }
 .download-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 5px; background: #e5e5e3; color: #30302f; }
 .download-icon svg { width: 17px; height: 17px; }
-.download-copy { display: flex; flex-direction: column; gap: 5px; }
-.download-button strong { font-size: 13px; font-weight: 650; }
-.download-copy > span { color: #dededc; font-size: 11px; }
+.download-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.download-button strong { font-size: 13px; font-weight: 650; white-space: nowrap; }
+.download-copy > span { color: #dededc; font-size: 11px; white-space: nowrap; }
 .hero-note { margin: 15px 0 0; color: #777; font-size: 11px; line-height: 1.6; }
 .hero-note a { color: #333; text-decoration: underline; text-underline-offset: 3px; }
 
 /* Secondary GitHub button: light, fully square — deliberately not the primary. */
-.github-button { display: inline-flex; align-items: center; align-self: stretch; gap: 10px; padding: 13px 24px; border: 0; border-radius: 7px; background: #fff; color: var(--ink); font-size: 13px; font-weight: 650; transition: background 150ms ease, transform 160ms ease; }
+.github-button { display: inline-flex; align-items: center; align-self: stretch; gap: 10px; padding: 13px 24px; border: 0; border-radius: 7px; background: #fff; color: var(--ink); font-size: 13px; font-weight: 650; transition: background 150ms ease, transform 160ms ease; white-space: nowrap; }
 .github-button:hover { background: #f2f2f0; transform: translateY(-2px); }
 .github-button:active { transform: translateY(1px); }
 .github-icon { display: block; width: 20px; height: 20px; flex: 0 0 auto; }
@@ -75,68 +75,97 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
 .mascot-spark { fill: #e3b77a; transform: scale(0); transform-box: fill-box; transform-origin: center; animation: mascot-twinkle 2.8s ease-in-out infinite; }
 @keyframes mascot-twinkle { 0%, 100% { transform: scale(0) rotate(0); opacity: 0; } 50% { transform: scale(1) rotate(45deg); opacity: 1; } }
 
-.workflow-section { width: min(1180px, calc(100% - 96px)); margin: 0 auto 54px; padding: 46px 48px 38px; border-radius: 14px; background: var(--feature-surface); color: var(--feature-foreground); }
-.workflow-heading { margin-bottom: 38px; }
+/* Home "how it works": staggered sticker cards with ghost numbers, not plain columns. */
+.workflow-section { width: min(1180px, calc(100% - 96px)); margin: 0 auto 54px; padding: 46px 48px 48px; border-radius: 14px; background: var(--feature-surface); color: var(--feature-foreground); }
+.workflow-heading { margin-bottom: 30px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .workflow-heading h2 { margin: 0; font-size: clamp(42px, 5vw, 58px); font-weight: 650; letter-spacing: -3.8px; line-height: .98; }
-.workflow-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--feature-divider); }
-.workflow-step { padding: 22px 30px 0 0; }
-.workflow-step + .workflow-step { padding-left: 30px; border-left: 1px solid var(--feature-divider); }
-.workflow-step h3 { margin: 0 0 10px; font-size: 19px; font-weight: 600; letter-spacing: -.45px; }
-.workflow-step p { max-width: 290px; margin: 0; color: var(--feature-muted); font-size: 13px; line-height: 1.7; }
+.workflow-heading::after { content: "How it works"; font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--feature-muted); border: 1px solid var(--feature-divider); border-radius: 999px; padding: 7px 12px; background: rgba(255,255,255,.5); }
+.workflow-steps { counter-reset: step; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.workflow-step { counter-increment: step; position: relative; overflow: hidden; padding: 22px 20px 20px; border: 1px solid var(--feature-divider); border-radius: 12px; background: var(--card); transition: transform 160ms ease, box-shadow 160ms ease; }
+.workflow-step:nth-child(2) { transform: translateY(10px); }
+.workflow-step:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(32,32,32,.10); }
+.workflow-step:nth-child(2):hover { transform: translateY(7px); box-shadow: 0 10px 24px rgba(32,32,32,.10); }
+.workflow-step::before { content: "0" counter(step); display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; color: #fff; background: #202020; border-radius: 999px; padding: 5px 10px; margin-bottom: 14px; }
+.workflow-step::after { content: counter(step); position: absolute; right: 6px; bottom: -26px; font-size: 110px; font-weight: 800; line-height: 1; letter-spacing: -8px; color: #202020; opacity: .06; pointer-events: none; }
+.workflow-step h3 { position: relative; margin: 0 0 8px; font-size: 19px; font-weight: 600; letter-spacing: -.45px; }
+.workflow-step p { position: relative; max-width: 290px; margin: 0; color: var(--feature-muted); font-size: 13px; line-height: 1.7; }
+
 .site-footer { min-height: 80px; border-top: 1px solid var(--line); color: #777; font-size: 11px; }
 .footer-wordmark { color: var(--ink); font-size: 14px; }
 .footer-wordmark .brand-mark { width: 30px; height: 30px; }
 .site-footer > a:last-child { color: #444; }
 
-@media (max-width: 760px) {
-  .site-header, .site-footer { width: calc(100% - 40px); }
-  .site-header { height: 70px; }
-  .site-header nav { gap: 18px; }
-  .wordmark { font-size: 15px; }
-  .header-download { padding: 9px 11px; font-size: 11px; }
-  .hero { width: calc(100% - 40px); padding: 53px 0 56px; grid-template-columns: 1fr; gap: 35px; }
-  .hero-copy { padding: 0; }
-  .hero h1 { font-size: clamp(48px, 11.5vw, 66px); letter-spacing: -3.8px; }
-  .hero-description { max-width: 370px; font-size: 15px; }
-  .hero-actions { align-items: flex-start; flex-direction: column; gap: 16px; }
-  .download-button { width: min(100%, 340px); }
-  .github-button { width: min(100%, 340px); justify-content: center; }
-  .features-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 22px 8px; }
-  .features-section h2 { font-size: clamp(40px, 10vw, 48px); letter-spacing: -2.8px; }
-  .feature-list { margin-top: 20px; }
-  .feature-row { grid-template-columns: 1fr; gap: 6px; padding: 18px 0; }
-  .mascot-wrap { min-height: 320px; }
-  .mascot-svg { width: min(62vmin, 300px); }
-  .workflow-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 22px 24px; }
-  .workflow-heading { margin-bottom: 28px; }
-  .workflow-heading h2 { font-size: clamp(40px, 10vw, 48px); letter-spacing: -2.8px; }
-  .workflow-steps { grid-template-columns: 1fr; }
-  .workflow-step { padding: 18px 0 20px; }
-  .workflow-step + .workflow-step { padding-left: 0; border-top: 1px solid var(--feature-divider); border-left: 0; }
-  .workflow-step h3 { margin: 0 0 6px; font-size: 18px; }
-  .workflow-step p { font-size: 12px; }
-  .site-footer { min-height: 72px; gap: 10px; flex-wrap: wrap; }
-  .site-footer > span { font-size: 10px; }
-}
-@media (prefers-reduced-motion: reduce) {  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
-  .mascot-bob, #shadow, .mascot-shine, .mascot-spark, .mascot-hop.jump { animation: none; }
-  .mascot-spark { opacity: .8; transform: scale(.8); }
-}
-
 /* Single-column hero (features page): full container width, copy aligned to its left edge. */
 .hero-single { grid-template-columns: 1fr; min-height: 0; padding: 64px 0 56px; }
 .hero-single .hero-copy { padding-left: 0; max-width: 620px; }
 
-/* Features index: editorial numbered rows, deliberately not the home cards. */
-.features-section { width: min(1180px, calc(100% - 96px)); margin: 0 auto 54px; padding: 46px 48px 12px; border-radius: 14px; background: var(--feature-surface); color: var(--feature-foreground); }
+/* Features index: bento card grid — number pill on top, no more 3-column rows. */
+.features-section { width: min(1180px, calc(100% - 96px)); margin: 0 auto 54px; padding: 46px 48px 48px; border-radius: 14px; background: var(--feature-surface); color: var(--feature-foreground); }
 .features-section h2 { margin: 0; font-size: clamp(42px, 5vw, 58px); font-weight: 650; letter-spacing: -3.8px; line-height: .98; }
-.feature-list { list-style: none; margin: 30px 0 0; padding: 0; }
-.feature-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px; align-items: baseline; padding: 24px 0; border-top: 1px solid var(--feature-divider); }
-.feature-num { font-size: 13px; font-weight: 700; color: var(--feature-muted); letter-spacing: .5px; }
-.feature-row h3 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.45px; }
-.feature-row p { margin: 0; color: var(--feature-muted); font-size: 13px; line-height: 1.7; max-width: 440px; }
+.feature-list { list-style: none; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.feature-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 22px 20px 20px; border: 1px solid var(--feature-divider); border-radius: 12px; background: var(--card); transition: transform 160ms ease, box-shadow 160ms ease; }
+.feature-row:nth-child(2), .feature-row:nth-child(5) { transform: translateY(10px); }
+.feature-row:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(32,32,32,.10); }
+.feature-row:nth-child(2):hover, .feature-row:nth-child(5):hover { transform: translateY(7px); box-shadow: 0 10px 24px rgba(32,32,32,.10); }
+.feature-num { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; color: #fff; background: #202020; border-radius: 999px; padding: 5px 10px; margin-bottom: 14px; }
+.feature-row h3 { margin: 0 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -.45px; line-height: 1.25; }
+.feature-row p { margin: 0; color: var(--feature-muted); font-size: 13px; line-height: 1.7; max-width: none; }
 
-/* Second row of cards (features grid): same divider rhythm as the first. */
-@media (min-width: 761px) {
-  .workflow-step:nth-child(n+4) { border-top: 1px solid var(--feature-divider); margin-top: 26px; padding-top: 22px; }
+@media (max-width: 760px) {
+  .site-header, .site-footer { width: calc(100% - 40px); }
+  .site-header { height: 70px; }
+  .site-header nav { gap: 16px; }
+  .wordmark { font-size: 15px; }
+  .github-nav { width: 32px; height: 32px; }
+  .hero { width: calc(100% - 40px); padding: 53px 0 56px; grid-template-columns: 1fr; gap: 0; min-height: 0; }
+  .hero-copy { padding: 0; }
+  .hero h1 { font-size: clamp(48px, 11.5vw, 66px); letter-spacing: -3.8px; }
+  .hero-description { max-width: 370px; font-size: 15px; }
+
+  /* 1) Download + GitHub en la misma línea, sin salto. */
+  .hero-actions { flex-direction: row; flex-wrap: nowrap; align-items: stretch; gap: 10px; margin-top: 24px; }
+  .download-button { flex: 1 1 auto; min-width: 0; gap: 10px; padding: 11px 12px; }
+  .download-icon { width: 30px; height: 30px; }
+  .download-button strong { font-size: 12px; }
+  .download-copy > span { font-size: 10px; }
+  .github-button { flex: 0 0 auto; align-self: auto; padding: 11px 14px; font-size: 12px; gap: 8px; }
+
+  /* 3) Sin SVG animado enorme en mobile. */
+  .mascot-wrap { display: none; }
+
+  /* 2) Features: una sola columna de tarjetas apiladas, nada de 3 columnas. */
+  .workflow-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 18px 20px; }
+  .workflow-heading { margin-bottom: 20px; }
+  .workflow-heading h2 { font-size: clamp(40px, 10vw, 48px); letter-spacing: -2.8px; }
+  .workflow-heading::after { display: none; }
+  .workflow-steps { grid-template-columns: 1fr; gap: 10px; }
+  .workflow-step, .workflow-step:nth-child(2) { transform: none; padding: 18px 16px; }
+  .workflow-step:hover, .workflow-step:nth-child(2):hover { transform: translateY(-2px); }
+  .workflow-step::after { font-size: 84px; bottom: -20px; }
+  .workflow-step h3 { margin: 0 0 6px; font-size: 18px; }
+  .workflow-step p { font-size: 12px; max-width: none; }
+
+  .features-section { width: calc(100% - 40px); margin-bottom: 36px; padding: 30px 18px 20px; }
+  .features-section h2 { font-size: clamp(40px, 10vw, 48px); letter-spacing: -2.8px; }
+  .feature-list { margin-top: 20px; grid-template-columns: 1fr; gap: 10px; }
+  .feature-row, .feature-row:nth-child(2), .feature-row:nth-child(5) { transform: none; padding: 18px 16px; }
+  .feature-row:hover, .feature-row:nth-child(2):hover, .feature-row:nth-child(5):hover { transform: translateY(-2px); }
+  .feature-num { margin-bottom: 10px; }
+  .feature-row h3 { font-size: 17px; }
+  .feature-row p { font-size: 12px; }
+
+  .site-footer { min-height: 72px; gap: 10px; flex-wrap: wrap; }
+  .site-footer > span { font-size: 10px; }
+}
+
+@media (max-width: 380px) {
+  .hero-actions { gap: 8px; }
+  .download-button { padding: 10px; gap: 8px; }
+  .github-button { padding: 10px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+  .mascot-bob, #shadow, .mascot-shine, .mascot-spark, .mascot-hop.jump { animation: none; }
+  .mascot-spark { opacity: .8; transform: scale(.8); }
 }
