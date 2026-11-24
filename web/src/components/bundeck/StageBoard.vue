@@ -80,7 +80,7 @@
 
     </div>
 
-    <div class="bd-floor">
+    <div class="bd-floor" ref="floorRef">
      <div class="bd-stack">
       <div v-if="showNoScreen" class="bd-gs-empty-state" data-cy="bd-no-screen">
         <p><b>{{ t('bd.deviceNoScreen') }}</b></p>
@@ -107,7 +107,7 @@
         data-swapy-container
         class="bd-plate"
         :data-l="labelMode"
-        :style="{ '--bd-c': gridCols }"
+        :style="plateStyle"
         @keydown="onKeyNav"
       >
         <div v-for="index in gridCols * gridRows" :key="`slot-${index - 1}`" :data-swapy-slot="`slot-${index - 1}`">
@@ -849,6 +849,123 @@ const gsMaxRow = computed(() => {
   return bottom
 })
 
+// ---- Kiosco: encajar el grid a lo ancho Y a lo alto sin deformar ----
+// La tecla es cuadrada (aspect-ratio 1/1 en CSS): el tamaño que encaja es
+//   S = min((anchoDisp - gaps - pads) / cols, (altoDisp - gaps - pads) / rows)
+// Se mide contra el viewport (visualViewport en móvil: la barra URL cambia
+// el alto) menos los paddings reales del floor/plate, más la altura de los
+// hermanos del plate (caption, breadcrumb). El plate se centra con width:auto,
+// así que si el alto manda, el grid no llega al borde ancho (letterbox).
+const floorRef = ref<HTMLElement | null>(null)
+const kioskFit = ref<number | null>(null)
+
+const plateStyle = computed<Record<string, string | number>>(() => {
+  const base: Record<string, string | number> = { '--bd-c': props.gridCols }
+  if (props.kiosk && kioskFit.value != null && !isGsMode.value) {
+    const s = Math.max(1, Math.floor(kioskFit.value))
+    base['grid-template-columns'] = `repeat(${Math.max(1, props.gridCols)}, ${s}px)`
+    base['width'] = 'auto'
+    base['max-width'] = '100%'
+  }
+  return base
+})
+
+let kioskRO: ResizeObserver | null = null
+
+function updateKioskFit() {
+  if (!props.kiosk || isGsMode.value) {
+    if (kioskFit.value !== null) kioskFit.value = null
+    return
+  }
+  const plate = container.value
+  if (!plate || typeof window === 'undefined') return
+  const floor = floorRef.value ?? (plate.closest?.('.bd-floor') as HTMLElement | null)
+  if (!floor) return
+  const vv = window.visualViewport
+  const vpW = Math.max(1, vv?.width ?? document.documentElement.clientWidth ?? window.innerWidth)
+  const vpH = Math.max(1, vv?.height ?? window.innerHeight)
+  const fcs = getComputedStyle(floor)
+  const fPadX = (parseFloat(fcs.paddingLeft) || 0) + (parseFloat(fcs.paddingRight) || 0)
+  const fPadY = (parseFloat(fcs.paddingTop) || 0) + (parseFloat(fcs.paddingBottom) || 0)
+  const pcs = getComputedStyle(plate)
+  const padL = parseFloat(pcs.paddingLeft) || 0
+  const padR = parseFloat(pcs.paddingRight) || 0
+  const padT = parseFloat(pcs.paddingTop) || 0
+  const padB = parseFloat(pcs.paddingBottom) || 0
+  const colGap = parseFloat(pcs.columnGap || (pcs as any).gap) || 0
+  const rowGap = parseFloat(pcs.rowGap || (pcs as any).gap) || 0
+  const cols = Math.max(1, props.gridCols)
+  const rows = Math.max(1, props.gridRows)
+  // Hermanos del plate dentro del stack (caption, breadcrumb…): restan alto.
+  let extraH = 0
+  const stack = plate.parentElement
+  if (stack) {
+    const scs = getComputedStyle(stack)
+    const stackGap = parseFloat(scs.rowGap || scs.columnGap || (scs as any).gap) || 0
+    let n = 0
+    for (const child of Array.from(stack.children)) {
+      if (child === plate) continue
+      const h = (child as HTMLElement).getBoundingClientRect?.().height ?? 0
+      if (h > 0) {
+        extraH += h
+        n++
+      }
+    }
+    if (n > 0) extraH += stackGap * n
+  }
+  const availW = vpW - fPadX - padL - padR
+  const availH = vpH - fPadY - padT - padB - extraH
+  const sW = (availW - colGap * (cols - 1)) / cols
+  const sH = (availH - rowGap * (rows - 1)) / rows
+  let s = Math.floor(Math.min(sW, sH))
+  if (!Number.isFinite(s)) return
+  // Cota inferior de seguridad: con los máximos (8×6) nunca se baja de ~25px
+  // en un móvil pequeño; evita teclas de 0px si algo se mide a 0 en un tick.
+  s = Math.max(12, s)
+  if (kioskFit.value !== s) kioskFit.value = s
+}
+
+function startKioskFit() {
+  stopKioskFit()
+  void nextTick().then(() => updateKioskFit())
+  if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') return
+  try {
+    kioskRO = new ResizeObserver(() => updateKioskFit())
+    if (floorRef.value) kioskRO.observe(floorRef.value)
+    if (container.value) kioskRO.observe(container.value)
+  } catch { /* sin ResizeObserver: tiran los listeners de ventana */ }
+  window.addEventListener('resize', updateKioskFit)
+  window.addEventListener('orientationchange', updateKioskFit)
+  try {
+    window.visualViewport?.addEventListener('resize', updateKioskFit)
+  } catch { /* Safari antiguo */ }
+}
+
+function stopKioskFit() {
+  try {
+    kioskRO?.disconnect()
+  } catch { /* noop */ }
+  kioskRO = null
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateKioskFit)
+    window.removeEventListener('orientationchange', updateKioskFit)
+    try {
+      window.visualViewport?.removeEventListener('resize', updateKioskFit)
+    } catch { /* noop */ }
+  }
+}
+
+watch(
+  [() => props.kiosk, () => props.gridCols, () => props.gridRows, () => props.layoutMode, () => props.mode, () => props.navTrail?.length, () => props.profileName],
+  ([isKiosk]) => {
+    if (isKiosk) startKioskFit()
+    else {
+      stopKioskFit()
+      kioskFit.value = null
+    }
+  }
+)
+
 /**
  * Resolver la apariencia es relativamente caro (entorno + expresiones + texto).
  * El template consulta varias propiedades por tecla; cachear por posición evita
@@ -1296,6 +1413,7 @@ watch(gridSignature, () => {
 onMounted(() => {
   void initializeSwapy()
   void nextTick().then(initGs)
+  if (props.kiosk) startKioskFit()
   document.addEventListener('keydown', onEsc)
   document.addEventListener('click', onDocClick)
   window.addEventListener('libredeck:swapy-resync', resyncSwapy)
@@ -1309,6 +1427,7 @@ const destroyFxNodes = () => {
 }
 onUnmounted(() => {
   swapy.value?.destroy()
+  stopKioskFit()
   clearHoldTimer()
   fx.destroy()
   destroyFxNodes()

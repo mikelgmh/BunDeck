@@ -907,12 +907,43 @@
 .bundeck.bd-kiosk .bd-floor {
   padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
 }
+.bundeck.bd-kiosk .bd-stack {
+  width: 100%;
+}
+.bundeck.bd-kiosk .bd-plate {
+  width: 100%;
+  grid-template-columns: repeat(var(--bd-c), minmax(0, 1fr));
+}
 .bundeck.bd-kiosk .bd-key {
-  min-height: 88px;
-  min-width: 88px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  min-height: 0;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+}
+/* El icono/imagen hereda el tamaño de la tecla: en móvil las teclas
+   pueden quedar en ~35px y el icono fijo de 28px / imagen de 40px
+   las desbordaría. */
+.bundeck.bd-kiosk .bd-key .bd-kimg {
+  width: 55%;
+  height: 55%;
+}
+.bundeck.bd-kiosk .bd-key > svg {
+  width: 42%;
+  height: 42%;
+}
+/* Libre (gridstack) en kiosco: que no desborde en horizontal; las
+   columnas ya reparten el ancho disponible. */
+.bundeck.bd-kiosk .bd-gs-viewport {
+  width: 100%;
+  max-width: 100%;
+}
+.bundeck.bd-kiosk .bd-gs-wrap {
+  width: 100%;
+  max-width: 100%;
 }
 /* Zona invisible de triple-tap (esquina superior derecha, 96x96). */
 .bundeck .bd-kiosk-corner {
@@ -968,8 +999,22 @@
   box-shadow: 0 0 6px #fbbf24;
 }
 @media (max-width: 640px) {
+  .bundeck.bd-kiosk .bd-floor {
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  }
+  .bundeck.bd-kiosk .bd-plate {
+    gap: 8px;
+    padding: 12px;
+  }
+  /* En pantallas estrechas el texto no debe forzar el ancho de la tecla:
+     las 8 columnas tienen que caber sin deformar el cuadrado. */
   .bundeck.bd-kiosk .bd-key {
-    min-height: 96px;
+    gap: 2px;
+  }
+  .bundeck.bd-kiosk .bd-key small,
+  .bundeck.bd-kiosk .bd-key .bd-tt,
+  .bundeck.bd-kiosk .bd-key .bd-tb {
+    max-width: 100%;
   }
 }
 
