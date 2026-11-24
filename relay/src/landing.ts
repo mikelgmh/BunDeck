@@ -282,7 +282,7 @@ a{color:#4ade80}
 <div><b>${d.devices}</b>${t.known}</div>
 <div><b>v${esc(d.version)}</b>${t.version}</div>
 </div></div>
-<p><a href="https://github.com/mikelgranero/libredeck/tree/master/relay">${t.docs} →</a></p>
+<p><a href="https://github.com/mikelgmh/BunDeck/tree/master/relay">${t.docs} →</a></p>
 <p style="font-size:13px;opacity:.7">${t.api}</p>
 <p class="foot">${t.footer}</p>
 </div>

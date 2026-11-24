@@ -12,11 +12,11 @@ AppName=BunDeck
 AppId=LibreDeck
 AppVersion={#AppVersion}
 AppPublisher=Mikel
-AppPublisherURL=https://github.com/mikelgmh/libredeck
-AppSupportURL=https://github.com/mikelgmh/libredeck
-AppUpdatesURL=https://github.com/mikelgmh/libredeck
+AppPublisherURL=https://github.com/mikelgmh/BunDeck
+AppSupportURL=https://github.com/mikelgmh/BunDeck
+AppUpdatesURL=https://github.com/mikelgmh/BunDeck
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\libredeck-launcher.exe
+UninstallDisplayIcon={app}\bundeck-launcher.exe
 DefaultDirName={localappdata}\Programs\BunDeck
 DisableDirPage=yes
 UsePreviousAppDir=no
@@ -37,25 +37,28 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\libredeck-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\libredeck-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\libredeck-launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\libredeck-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\bundeck-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\bundeck-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\bundeck-launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\bundeck-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\active.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\web-dist\*"; DestDir: "{app}\web-dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
+Name: "{%APPDATA}\BunDeck"; Flags: uninsneveruninstall
+Name: "{%APPDATA}\BunDeck\data"; Flags: uninsneveruninstall
+Name: "{%APPDATA}\BunDeck\data\assets"; Flags: uninsneveruninstall
+Name: "{%APPDATA}\BunDeck\data\logs"; Flags: uninsneveruninstall
+Name: "{%APPDATA}\BunDeck\data\plugins"; Flags: uninsneveruninstall
+; Compat: instalaciones antiguas usaban LibreDeck
 Name: "{%APPDATA}\LibreDeck"; Flags: uninsneveruninstall
 Name: "{%APPDATA}\LibreDeck\data"; Flags: uninsneveruninstall
-Name: "{%APPDATA}\LibreDeck\data\assets"; Flags: uninsneveruninstall
-Name: "{%APPDATA}\LibreDeck\data\logs"; Flags: uninsneveruninstall
-Name: "{%APPDATA}\LibreDeck\data\plugins"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{group}\BunDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"
+Name: "{group}\BunDeck"; Filename: "{app}\bundeck-launcher.exe"; IconFilename: "{app}\icon.ico"
 Name: "{group}\{cm:UninstallProgram,BunDeck}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\BunDeck"; Filename: "{app}\libredeck-launcher.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{userdesktop}\BunDeck"; Filename: "{app}\bundeck-launcher.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\libredeck-launcher.exe"; Description: "{cm:LaunchProgram,BunDeck}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\bundeck-launcher.exe"; Description: "{cm:LaunchProgram,BunDeck}"; Flags: nowait postinstall skipifsilent

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BunDeck | A software deck for your shortcuts</title>
+  <meta name="description" content="Turn repeat tasks into buttons. BunDeck is a free, open source software deck for Windows, macOS, and Linux." />
+  <meta property="og:title" content="BunDeck | A software deck for your shortcuts" />
+  <meta property="og:description" content="Turn repeat tasks into buttons with a free, open source software deck." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="BunDeck | A software deck for your shortcuts" />
+  <meta name="twitter:description" content="Turn repeat tasks into buttons with a free, open source software deck." />
+  <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
+  <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/assets/icon-light-32x32.png" />
+  <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href="/assets/icon-dark-32x32.png" />
+  <link rel="apple-touch-icon" href="/assets/apple-icon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="site-header">
+      <a class="wordmark" href="#top" aria-label="BunDeck home"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a>
+      <nav aria-label="Main navigation"><a href="#why">About</a><a class="source-nav" href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer"><img src="/assets/github-mark.svg" alt="" aria-hidden="true" />Source</a></nav>
+      <a class="header-download" href="#download">Download</a>
+    </header>
+
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <h1>A shortcut for<br />the things you do.</h1>
+        <p class="hero-description">BunDeck turns your repeat tasks into buttons. Make a deck that fits the way you work.</p>
+        <div class="hero-actions" id="download">
+          <a class="download-button" id="download-button" href="https://github.com/mikelgmh/BunDeck/releases/latest" target="_blank" rel="noreferrer">
+            <span class="download-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            </span>
+            <span class="download-copy"><strong id="download-title">Download BunDeck</strong><span id="download-sub">View available downloads</span></span>
+          </a>
+        </div>
+        <p class="hero-note">Free and open source. <span id="release-note">Latest release — checking…</span> <a id="other-platforms" href="https://github.com/mikelgmh/BunDeck/releases/latest" target="_blank" rel="noreferrer">Other platforms</a></p>
+      </div>
+      <div class="mascot-wrap">
+        <svg
+          id="mascot"
+          class="mascot-svg"
+          viewBox="0 0 64 64"
+          role="button"
+          aria-label="BunDeck mascot. Activate to make it hop."
+          tabindex="0"
+        >
+          <defs>
+            <linearGradient id="bdg-hero" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#f4d9a8" />
+              <stop offset=".6" stop-color="#e3b77a" />
+              <stop offset="1" stop-color="#c98f52" />
+            </linearGradient>
+          </defs>
+          <g class="mascot-sparks" aria-hidden="true">
+            <g transform="translate(8 14)"><path class="mascot-spark" style="animation-delay:.2s" d="M0-5 1.2-1.2 5 0 1.2 1.2 0 5-1.2 1.2-5 0-1.2-1.2Z" /></g>
+            <g transform="translate(57 10) scale(.8)"><path class="mascot-spark" style="animation-delay:1.1s" d="M0-5 1.2-1.2 5 0 1.2 1.2 0 5-1.2 1.2-5 0-1.2-1.2Z" /></g>
+            <g transform="translate(60 33) scale(.55)"><path class="mascot-spark" style="animation-delay:1.9s" d="M0-5 1.2-1.2 5 0 1.2 1.2 0 5-1.2 1.2-5 0-1.2-1.2Z" /></g>
+          </g>
+          <ellipse id="shadow" cx="32" cy="55" rx="21" ry="4" />
+          <g class="mascot-hop" id="mascot-hop">
+            <g class="mascot-bob">
+              <g data-tilt>
+                <path d="M7 40c0-18 10-29 25-29s25 11 25 29c0 9-7 14-25 14S7 49 7 40" fill="url(#bdg-hero)" />
+                <path class="mascot-shine" d="M14 27c3-8 9-12 16-13" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round" />
+                <g data-face>
+                  <ellipse class="mascot-cheek" cx="19" cy="42" rx="3.5" ry="2.5" fill="#e0806a" />
+                  <ellipse class="mascot-cheek" cx="45" cy="42" rx="3.5" ry="2.5" fill="#e0806a" />
+                  <g data-eye="left"><g class="mascot-lid"><circle cx="24" cy="37" r="2.6" fill="#33200f" /><circle cx="24.9" cy="36.1" r=".8" fill="#fff" fill-opacity=".85" /></g></g>
+                  <g data-eye="right"><g class="mascot-lid"><circle cx="40" cy="37" r="2.6" fill="#33200f" /><circle cx="40.9" cy="36.1" r=".8" fill="#fff" fill-opacity=".85" /></g></g>
+                  <path id="mascot-mouth" d="M28 42c2 3 6 3 8 0" fill="none" stroke="#33200f" stroke-width="2" stroke-linecap="round" />
+                </g>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <section class="workflow-section" id="why" aria-labelledby="workflow-title">
+      <div class="workflow-heading">
+        <h2 id="workflow-title">Less hunting.<br />More doing.</h2>
+      </div>
+      <div class="workflow-steps">
+        <article class="workflow-step">
+          <h3>Pick a repeat task</h3>
+          <p>Choose the app, command, or shortcut you reach for all the time.</p>
+        </article>
+        <article class="workflow-step">
+          <h3>Give it a key</h3>
+          <p>Arrange your actions into a deck that feels natural to you.</p>
+        </article>
+        <article class="workflow-step">
+          <h3>Tap and get on with it</h3>
+          <p>Launch an action in one click and stay focused on your work.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="site-footer"><a class="wordmark footer-wordmark" href="#top"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a><span>Free to use. Free to change.</span><a href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer">GitHub</a></footer>
+  </main>
+</body>
+</html>

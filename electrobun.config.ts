@@ -11,7 +11,7 @@ export default {
   },
   release: {
     // Artefactos se publican en GitHub Releases; Updater los descarga desde /latest/download
-    baseUrl: "https://github.com/mikelgmh/libredeck/releases/latest/download",
+    baseUrl: "https://github.com/mikelgmh/BunDeck/releases/latest/download",
   },
   build: {
     bun: {

@@ -1,0 +1,10 @@
+{
+  "name": "bundeck-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun server.ts",
+    "dev": "bun server.ts"
+  }
+}
