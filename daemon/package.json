@@ -1,5 +1,5 @@
 {
-  "name": "libredeck-daemon",
+  "name": "bundeck-daemon",
   "version": "0.1.0",
   "description": "BunDeck daemon - Local server for StreamDeck-like functionality",
   "main": "src/server.ts",
@@ -20,7 +20,7 @@
     "@elgato-stream-deck/node": "^7.6.3",
     "@elgato-stream-deck/node-lib": "^7.6.3",
     "@julusian/jpeg-turbo": "^3.0.1",
-    "@napi-rs/canvas": "^1.0.9",
+    "@napi-rs/canvas": "^1.2.0",
     "adm-zip": "^0.6.0",
     "chokidar": "^5.0.0",
     "lucide": "^1.44.0",
