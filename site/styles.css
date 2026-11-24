@@ -114,3 +114,8 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
 /* Single-column hero (features page): same rhythm, centered narrow copy. */
 .hero-single { grid-template-columns: 1fr; max-width: 820px; min-height: 0; padding: 64px 0 56px; }
 .hero-single .hero-copy { padding-left: 0; max-width: 620px; }
+
+/* Second row of cards (features grid): same divider rhythm as the first. */
+@media (min-width: 761px) {
+  .workflow-step:nth-child(n+4) { border-top: 1px solid var(--feature-divider); margin-top: 26px; padding-top: 22px; }
+}
