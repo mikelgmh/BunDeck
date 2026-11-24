@@ -505,4 +505,129 @@ describe('túnel inverso', () => {
     const err = await d.next((m) => m.kind === 'error');
     expect(err.error).toBe('unknown-code');
   });
+
+  test('ui-rebind restaura la sesión sin código (sobrevive a la caída del daemon)', async () => {
+    const relay = startRelay();
+    const base = `http://127.0.0.1:${relay.port}`;
+    const echo = (d: FakeDaemon) => {
+      d.httpHandler = (m) => {
+        d.send({
+          v: 1,
+          kind: 'http-res',
+          id: m.id,
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+          bodyB64: Buffer.from('ok-rebind', 'utf8').toString('base64'),
+        });
+      };
+    };
+    const d = await registeredDaemon(relay.port);
+    echo(d);
+    // Sesión anunciada solo con rebind (sin publicar código antes).
+    d.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() + 600_000 });
+    const ack = await d.next((m) => m.kind === 'ui-rebound');
+    expect(ack.sessionToken).toBe(TOK);
+
+    const ok = await fetch(`${base}/t/${TOK}/p`);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('ok-rebind');
+
+    // Cae el daemon (el relay borra todo) y reconecta: re-anuncia y todo vale.
+    d.ws.close();
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await fetch(`${base}/t/${TOK}/p`)).status).toBe(401);
+
+    const d2 = await registeredDaemon(relay.port, 'daemon-1');
+    echo(d2);
+    d2.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() + 600_000 });
+    await d2.next((m) => m.kind === 'ui-rebound');
+    const ok2 = await fetch(`${base}/t/${TOK}/p`);
+    expect(ok2.status).toBe(200);
+    expect(await ok2.text()).toBe('ok-rebind');
+  });
+
+  test('ui-rebind valida token, expiración y registro', async () => {
+    const relay = startRelay();
+    const d = await registeredDaemon(relay.port);
+    d.send({ v: 1, kind: 'ui-rebind', sessionToken: 'no-hex', exp: Date.now() + 600_000 });
+    expect((await d.next((m) => m.kind === 'error')).error).toBe('bad-token');
+    d.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() - 1000 });
+    expect((await d.next((m) => m.kind === 'error')).error).toBe('expired');
+    d.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() + 30 * 24 * 3600 * 1000 });
+    expect((await d.next((m) => m.kind === 'error')).error).toBe('bad-exp');
+    // Socket sin registrar: el relay no sabe de qué device es.
+    const raw = await new FakeDaemon().connect(relay.port);
+    raw.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() + 600_000 });
+    expect((await raw.next((m) => m.kind === 'error')).error).toBe('not-registered');
+  });
+
+  test('sesiones persistidas sobreviven al reinicio del relay', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-rebind-persist-'));
+    const store = new DeviceStore(dir);
+    stores.push(store);
+    const persist = {
+      saveSession: (s: { token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }) =>
+        store.saveTunnelSession(s),
+      deleteSession: (token: string) => store.deleteTunnelSession(token),
+      deleteDeviceSessions: (deviceId: string) => store.deleteTunnelSessionsByDevice(deviceId),
+      loadSessions: () => store.listTunnelSessions(),
+      pruneExpired: (now: number) => store.pruneTunnelSessions(now),
+    };
+    const mk = (): RelayServer => {
+      const r = new RelayServer({ token: TOKEN, store, pairing: new PairingStore(), tunnelPersist: persist });
+      r.listen(0, '127.0.0.1');
+      servers.push(r);
+      return r;
+    };
+    const relay = mk();
+    const d = await registeredDaemon(relay.port);
+    d.send({ v: 1, kind: 'ui-publish', urlCode: CODE, exp: Date.now() + 600_000 });
+    await d.next((m) => m.kind === 'ui-published');
+    d.send({ v: 1, kind: 'ui-bind', urlCode: CODE, sessionToken: TOK, exp: Date.now() + 600_000 });
+    await d.next((m) => m.kind === 'ui-bound');
+    expect(store.listTunnelSessions().some((s) => s.token === TOK)).toBe(true);
+
+    // Reinicio del relay (misma BD): la sesión sigue en disco y el proxy
+    // responde 502 daemon-offline (no 401) hasta que el daemon reconecte.
+    relay.stop();
+    servers.splice(servers.indexOf(relay), 1);
+    const relay2 = mk();
+    const base2 = `http://127.0.0.1:${relay2.port}`;
+    const res = await fetch(`${base2}/t/${TOK}/p`);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'daemon-offline' });
+
+    // El daemon reconecta y re-anuncia: vuelve a servir sin QR nuevo.
+    const d2 = await registeredDaemon(relay2.port, 'daemon-1');
+    d2.httpHandler = (m) => {
+      d2.send({
+        v: 1,
+        kind: 'http-res',
+        id: m.id,
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        bodyB64: Buffer.from('ok-persist', 'utf8').toString('base64'),
+      });
+    };
+    d2.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: Date.now() + 600_000 });
+    await d2.next((m) => m.kind === 'ui-rebound');
+    const ok = await fetch(`${base2}/t/${TOK}/p`);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('ok-persist');
+  });
+
+  test('navegación a /t/ con sesión muerta devuelve HTML amable, no JSON', async () => {
+    const relay = startRelay();
+    const base = `http://127.0.0.1:${relay.port}`;
+    const html = await fetch(`${base}/t/zzz-no-existe/`, { headers: { accept: 'text/html' } });
+    expect(html.status).toBe(401);
+    expect(html.headers.get('content-type') ?? '').toContain('text/html');
+    const body = await html.text();
+    expect(body).toContain('data-tunnel-gone="invalid-token"');
+    expect(body).not.toContain('zzz-no-existe');
+    // XHR/API sigue recibiendo JSON.
+    const api = await fetch(`${base}/t/zzz-no-existe/api/v1/profiles`, { headers: { accept: 'application/json' } });
+    expect(api.status).toBe(401);
+    expect(await api.json()).toEqual({ error: 'invalid-token' });
+  });
 });

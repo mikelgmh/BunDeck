@@ -29,6 +29,7 @@
 
 import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
 import { RtcManager, buildTurnCreds } from './rtc';
+import { UI_CODE_KEY, UI_SESSION_PREFIX } from './ui-policy';
 
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
@@ -59,6 +60,8 @@ export interface TunnelWsHost {
 
 interface DbLike {
   getSetting: (key: string) => string | null;
+  /** Opcional: si existe, el túnel re-anuncia sesiones/códigos persistidos al reconectar. */
+  getAllSettings?: () => Record<string, string>;
   addLog?: (entry: { level: string; message: string; meta?: any; ts: number }) => void;
 }
 
@@ -303,6 +306,13 @@ export class TunnelClient {
         }
         this.send({ v: 1, kind: 'ui-publish', urlCode, exp });
       }
+      // Re-anunciar el estado UI persistido (códigos + sesiones de settings):
+      // sin esto, reiniciar el daemon invalidaba todos los `/t/<token>/`
+      // aunque a la sesión le quedaran horas (el relay las borra al caer el
+      // socket). Con el re-`bind`, el enlace viejo sigue valiendo.
+      try {
+        this.resyncUiState();
+      } catch { /* best-effort: lo nuevo se aprueba igual */ }
     };
     this.ws.onmessage = (ev: MessageEvent) => {
       try {
@@ -368,6 +378,71 @@ export class TunnelClient {
 
   publishedCodes(): Array<{ urlCode: string; exp: number }> {
     return [...this.published.entries()].map(([urlCode, exp]) => ({ urlCode, exp }));
+  }
+
+  /**
+   * Re-anuncia al relay el estado UI persistido en settings tras cada
+   * (re)conexión:
+   * - Código vigente (`remote.ui.code`): se republica si no está ya en
+   *   memoria (p. ej. tras reiniciar el daemon).
+   * - Sesiones vigentes (`remote.ui.session.*`): se re-emiten como
+   *   `ui-rebind` (restaura sin necesitar el código original, ya consumido).
+   *   Las revocadas pero aún no caducadas se re-emiten como `ui-unbind`
+   *   (cubre revocar con el relay caído y reconectar después).
+   * Sin esto, cualquier reinicio del daemon (o micro-corte) dejaba todos los
+   * `/t/<token>/` en `401 invalid-token` hasta generar un QR nuevo.
+   */
+  resyncUiState(): { republishedCode: boolean; rebound: number; unbound: number } {
+    const out = { republishedCode: false, rebound: 0, unbound: 0 };
+    const now = this.now();
+    // 1) Código vigente persistido.
+    try {
+      const raw = this.db.getSetting(UI_CODE_KEY);
+      if (raw) {
+        const code = JSON.parse(raw) as { urlCode?: unknown; exp?: unknown; expiresAt?: unknown };
+        const urlCode = typeof code?.urlCode === 'string' ? code.urlCode : '';
+        // `remote.ui.code` guarda `expiresAt` (las sesiones usan `exp`).
+        const exp = typeof code?.expiresAt === 'number' ? code.expiresAt
+          : typeof code?.exp === 'number' ? code.exp : 0;
+        if (urlCode && Number.isFinite(exp) && exp > now && !this.published.has(urlCode)) {
+          this.published.set(urlCode, exp);
+          this.send({ v: 1, kind: 'ui-publish', urlCode, exp });
+          out.republishedCode = true;
+        }
+      }
+    } catch { /* sin código persistido: nada que republicar */ }
+    // 2) Sesiones persistidas.
+    let all: Record<string, string> = {};
+    try {
+      all = typeof this.db.getAllSettings === 'function' ? this.db.getAllSettings() : {};
+    } catch {
+      return out;
+    }
+    for (const [k, v] of Object.entries(all)) {
+      if (!k.startsWith(UI_SESSION_PREFIX)) continue;
+      const token = k.slice(UI_SESSION_PREFIX.length);
+      if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
+      let s: { exp?: unknown; revoked?: unknown };
+      try {
+        s = JSON.parse(v) as { exp?: unknown; revoked?: unknown };
+      } catch {
+        continue;
+      }
+      const exp = typeof s?.exp === 'number' ? s.exp : 0;
+      if (!Number.isFinite(exp) || exp <= now) continue;
+      if (s?.revoked === true) {
+        // Revocada en local pero quizá el relay no se enteró (caído al
+        // revocar): reintento best-effort, el relay ignora lo desconocido.
+        this.bindings.delete(token);
+        this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
+        out.unbound += 1;
+        continue;
+      }
+      this.bindings.set(token, { sessionToken: token, urlCode: '', exp });
+      this.send({ v: 1, kind: 'ui-rebind', sessionToken: token, exp });
+      out.rebound += 1;
+    }
+    return out;
   }
 
   // ---- pendientes ui-request ----

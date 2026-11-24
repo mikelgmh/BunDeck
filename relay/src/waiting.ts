@@ -356,6 +356,87 @@ function renderGonePage(lang: WaitingLang): string {
 </html>`;
 }
 
+/** Motivos por los que un `/t/<token>/` no se puede servir. */
+export type TunnelGoneReason = 'invalid-token' | 'expired' | 'daemon-offline';
+
+/** ¿Es una navegación de página (mostrar HTML) en vez de API/XHR/WS? */
+export function wantsHtmlPage(req: Request): boolean {
+  const accept = req.headers.get('accept') ?? '';
+  if (!accept.includes('text/html')) return false;
+  // XHR/fetch que acepta html explícitamente sigue recibiendo JSON.
+  if ((req.headers.get('sec-fetch-mode') ?? '') === 'cors') return false;
+  if ((req.headers.get('x-requested-with') ?? '').toLowerCase() === 'xmlhttprequest') return false;
+  return true;
+}
+
+const TUNNEL_GONE: Record<TunnelGoneReason, Record<WaitingLang, { title: string; body: string }>> = {
+  'invalid-token': {
+    es: {
+      title: 'Sesión no válida',
+      body: 'Esta sesión ya no existe en el relay: probablemente el equipo anfitrión se reinició o el relay se redesplegó antes de que el equipo re-anunciara sus sesiones. Recarga en unos segundos y, si persiste, pide un QR nuevo al anfitrión.',
+    },
+    en: {
+      title: 'Invalid session',
+      body: 'This session no longer exists on the relay: the host machine probably restarted, or the relay was redeployed before the host re-announced its sessions. Reload in a few seconds and, if it persists, ask the host for a new QR code.',
+    },
+  },
+  expired: {
+    es: {
+      title: 'Sesión caducada',
+      body: 'Esta sesión expiró (duración máxima 24 h). Pide un QR nuevo al anfitrión para volver a entrar.',
+    },
+    en: {
+      title: 'Session expired',
+      body: 'This session has expired (max lifetime 24 h). Ask the host for a new QR code to get back in.',
+    },
+  },
+  'daemon-offline': {
+    es: {
+      title: 'Equipo sin conexión',
+      body: 'El equipo anfitrión está sin conexión o reiniciándose. Espera unos segundos y recarga: la sesión se restaura sola al reconectar. Si persiste, pide un QR nuevo al anfitrión.',
+    },
+    en: {
+      title: 'Host offline',
+      body: 'The host machine is offline or restarting. Wait a few seconds and reload: the session restores itself on reconnect. If it persists, ask the host for a new QR code.',
+    },
+  },
+};
+
+/**
+ * Página estática para `/t/<token>/` con sesión muerta o daemon caído.
+ * Sustituye al JSON crudo (`{"error":"invalid-token"}`) cuando un navegador
+ * recarga la página: explica qué pasó y qué hacer. Nunca incluye secretos.
+ */
+export function renderTunnelGonePage(reason: TunnelGoneReason, lang: WaitingLang): string {
+  const t = TUNNEL_GONE[reason] ?? TUNNEL_GONE['invalid-token'];
+  const s = t[lang] ?? t.es;
+  return `<!doctype html>
+<html lang="${lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>${esc(s.title)} — BunDeck Relay</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:0;line-height:1.55;background:#0f172a;color:#e2e8f0}
+@media(prefers-color-scheme:light){body{background:#f1f5f9;color:#0f172a}}
+.wrap{max-width:560px;margin:0 auto;padding:48px 20px 64px;text-align:center}
+.card{background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);border-radius:14px;padding:28px 24px;margin:20px 0}
+h1{font-size:22px;margin:8px 0}
+p{margin:8px 0}
+button{cursor:pointer;border:0;border-radius:10px;padding:10px 22px;font-weight:700;background:#334155;color:#e2e8f0;margin-top:10px}
+</style>
+</head>
+<body data-tunnel-gone="${esc(reason)}">
+<div class="wrap"><div class="card">
+<h1>${esc(reason === 'daemon-offline' ? '📡' : '🔒')} ${esc(s.title)}</h1>
+<p>${esc(s.body)}</p>
+<div><button type="button" onclick="location.reload()">${esc(lang === 'en' ? 'Reload' : 'Recargar')}</button></div>
+</div></div>
+</body>
+</html>`;
+}
+
 export interface UiRouteOptions {
   /** Fuente de verdad del estado (el módulo del túnel). Si se omite, import dinámico. */
   getUiStatus?: GetUiStatus;

@@ -31,7 +31,8 @@ import { DatabaseService } from '../db';
 export const UI_ENABLED_KEY = 'remote.ui.enabled';
 export const UI_CODE_KEY = 'remote.ui.code';
 const UI_CONSUMED_PREFIX = 'remote.ui.consumed.';
-const UI_SESSION_PREFIX = 'remote.ui.session.';
+/** Prefijo de las sesiones UI persistidas (lo reutiliza el TunnelClient para re-anunciarlas al reconectar). */
+export const UI_SESSION_PREFIX = 'remote.ui.session.';
 
 export const UI_CODE_TTL_MS = 10 * 60 * 1000; // 10 min, como pairing
 export const UI_PENDING_TTL_MS = 2 * 60 * 1000; // igual que la ventana de aprobación del relay

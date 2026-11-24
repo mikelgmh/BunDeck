@@ -21,7 +21,18 @@
         <p class="bd-hint">{{ t('bd.lanDeniedHint') }}</p>
       </div>
     </div>
-    <template v-if="!lanDenied">
+    <!-- Túnel del relay con sesión muerta (reinicio, caducidad 24 h o daemon
+      caído): tapa la app en vez de dejar un grid vacío; recargar reintenta
+      (la sesión se restaura sola al reconectar el daemon). -->
+    <div v-else-if="isTunnelRoute && tunnelSessionInvalid" class="bd-noperm" role="alert" data-cy="tunnel-gone">
+      <div class="bd-noperm__card">
+        <h1>{{ tunnelSessionInvalid === 'daemon-offline' ? '📡' : '🔒' }} {{ t('bd.tunnelGoneTitle') }}</h1>
+        <p>{{ t('bd.tunnelGoneMsg') }}</p>
+        <p class="bd-hint">{{ t('bd.tunnelGoneHint') }}</p>
+        <button class="bd-btn bd-pri" type="button" @click="() => location.reload()">{{ t('bd.reload') }}</button>
+      </div>
+    </div>
+    <template v-if="!lanDenied && !(isTunnelRoute && tunnelSessionInvalid)">
     <TitleBar v-if="!kiosk" />
     <header v-if="!kiosk" class="bd-top">
       <div class="bd-brand">
@@ -660,6 +671,7 @@ const {
   uploadPluginFile, installPluginFromUrl,
   mcpTokens, mcpScopes, loadMcpTokens, loadMcpScopes, createMcpToken, updateMcpToken, revokeMcpToken,
   lanDenied, redeemLanInviteFromUrl,
+  tunnelSessionInvalid,
   installProgress, clearInstallProgress
 } = useStreamDeck()
 

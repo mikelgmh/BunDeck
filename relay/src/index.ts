@@ -29,6 +29,16 @@ const relay = new RelayServer({
   pairing,
   version: config.version,
   publicHost: config.domain,
+  // Sesiones del túnel en SQLite: sobreviven a reinicios del relay para que
+  // los `/t/<token>/` existentes sigan valiendo al recargar. Best-effort:
+  // si la BD falla, el relay sigue funcionando solo con memoria.
+  tunnelPersist: {
+    saveSession: (s) => store.saveTunnelSession(s),
+    deleteSession: (token) => store.deleteTunnelSession(token),
+    deleteDeviceSessions: (deviceId) => store.deleteTunnelSessionsByDevice(deviceId),
+    loadSessions: () => store.listTunnelSessions(),
+    pruneExpired: (now) => store.pruneTunnelSessions(now),
+  },
 });
 
 const server = relay.listen(config.port, '0.0.0.0');
@@ -51,6 +61,11 @@ console.log(
 const pruneTimer = setInterval(() => {
   pairing.prune();
   relay.pruneTunnel();
+  try {
+    store.pruneTunnelSessions(Date.now());
+  } catch {
+    /* noop */
+  }
 }, 60_000);
 pruneTimer.unref?.();
 

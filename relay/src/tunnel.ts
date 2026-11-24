@@ -19,6 +19,10 @@
  *  - daemon→relay `{v:1, kind:'ui-bind', urlCode, sessionToken, exp}`
  *    (sessionToken hex 32+ chars generado por el daemon) →
  *    `{v:1, kind:'ui-bound', urlCode}`.
+ *  - daemon→relay `{v:1, kind:'ui-rebind', sessionToken, exp}` (sin código:
+ *    el daemon re-anuncia sus sesiones vigentes al (re)conectar para que un
+ *    reinicio o micro-corte no invalide los `/t/<token>/` existentes) →
+ *    `{v:1, kind:'ui-rebound', sessionToken}`.
  *  - daemon→relay `{v:1, kind:'ui-unbind', sessionToken}` → elimina el token
  *    Y su publicación (polls → `expired`, peticiones → 401).
  *  - relay→daemon `{v:1, kind:'http-req', id, method, path, headers, bodyB64}`
@@ -140,6 +144,29 @@ interface SessionEntry {
   turn?: TurnCreds | null;
 }
 
+/** Fila de sesión tuneleada tal como la persiste el relay (SQLite). */
+export interface PersistedTunnelSession {
+  token: string;
+  deviceId: string;
+  exp: number;
+  urlCode: string;
+  turnJson: string | null;
+}
+
+/**
+ * Adaptador de persistencia de sesiones del túnel (opcional). Sin él, el
+ * estado vive solo en memoria y un reinicio del relay invalida todos los
+ * `/t/<token>/` (401 `invalid-token`) hasta que cada daemon reconecte y
+ * re-emita sus `ui-rebind`. Con él, las sesiones sobreviven al reinicio.
+ */
+export interface TunnelSessionPersist {
+  saveSession(session: PersistedTunnelSession): void;
+  deleteSession(token: string): void;
+  deleteDeviceSessions(deviceId: string): void;
+  loadSessions(): PersistedTunnelSession[];
+  pruneExpired(now: number): void;
+}
+
 /** Credenciales TURN efímeras para WebRTC (las genera el daemon, el relay solo las pasa). */
 export interface TurnCreds {
   urls: string[];
@@ -153,7 +180,12 @@ export interface TunnelStateOptions {
   /** Sin decisión del daemon en este tiempo, el status pasa a `denied`. */
   uiRequestTimeoutMs?: number;
   genId?: (prefix: string) => string;
+  /** Persistencia opcional de sesiones (supervivencia a reinicios del relay). */
+  persist?: TunnelSessionPersist | null;
 }
+
+/** TTL máximo aceptado al restaurar/enlazar una sesión (24 h + margen). */
+export const MAX_TUNNEL_SESSION_TTL_MS = 24 * 60 * 60 * 1000 + 10 * 60 * 1000;
 
 function b64(obj: unknown): string {
   return Buffer.from(JSON.stringify(obj), 'utf8').toString('base64');
@@ -219,17 +251,58 @@ export class TunnelState {
   private readonly now: () => number;
   private readonly uiTimeout: number;
   private readonly genId: (prefix: string) => string;
+  private readonly persist: TunnelSessionPersist | null;
 
   constructor(opts: TunnelStateOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.uiTimeout = opts.uiRequestTimeoutMs ?? UI_REQUEST_TIMEOUT_MS;
+    this.persist = opts.persist ?? null;
     this.genId =
       opts.genId ??
       ((p) => `${p}-${this.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`);
   }
 
+  /** Persistencia (si hay): restaura sesiones vigentes tras un reinicio. */
+  restorePersistedSessions(): number {
+    if (!this.persist) return 0;
+    let rows: PersistedTunnelSession[] = [];
+    try {
+      rows = this.persist.loadSessions();
+    } catch {
+      return 0;
+    }
+    const now = this.now();
+    let n = 0;
+    for (const r of rows) {
+      if (typeof r?.token !== 'string' || !isHexToken(r.token)) continue;
+      if (typeof r?.deviceId !== 'string' || !r.deviceId) continue;
+      if (typeof r?.exp !== 'number' || !Number.isFinite(r.exp) || r.exp <= now) continue;
+      let turn: TurnCreds | null = null;
+      if (typeof r?.turnJson === 'string' && r.turnJson) {
+        try {
+          turn = sanitizeTurnCreds(JSON.parse(r.turnJson));
+        } catch {
+          turn = null;
+        }
+      }
+      this.sessions.set(r.token, {
+        deviceId: r.deviceId,
+        exp: r.exp,
+        urlCode: typeof r?.urlCode === 'string' ? r.urlCode : '',
+        turn,
+      });
+      n += 1;
+    }
+    return n;
+  }
+
   nextId(prefix: string): string {
     return this.genId(prefix);
+  }
+
+  /** deviceId registrado en un socket de daemon (para `ui-rebind`). */
+  socketDeviceId(ws: TunnelSocket): string | undefined {
+    return this.socketDevice(ws);
   }
 
   // ---- registro de daemons ----
@@ -380,6 +453,7 @@ export class TunnelState {
     if (prev && prev.sessionToken !== sessionToken) this.dropSession(prev.sessionToken);
     this.sessions.set(sessionToken as string, { deviceId: entry.deviceId, exp: exp as number, urlCode, turn: turnCreds });
     this.bindings.set(urlCode, { sessionToken: sessionToken as string, exp: exp as number, consumed: false, turn: turnCreds });
+    this.persistSession(sessionToken as string);
     this.usedCodes.set(urlCode, entry.exp);
     const pendingId = this.pendingByCode.get(urlCode);
     if (pendingId) {
@@ -387,6 +461,42 @@ export class TunnelState {
       this.pending.delete(pendingId);
     }
     return 'ok';
+  }
+
+  /**
+   * Restaura una sesión del daemon sin necesitar el código original (ya
+   * consumido o perdido). Lo usa el daemon al (re)conectar para re-anunciar
+   * sus sesiones vigentes de settings (`resyncUiState`): así un reinicio del
+   * daemon o un micro-corte ya no invalida los `/t/<token>/` existentes.
+   * Solo acepta tokens hex + expiración futura acotada (24 h + margen).
+   */
+  rebind(deviceId: unknown, sessionToken: unknown, exp: unknown): 'ok' | string {
+    if (typeof deviceId !== 'string' || deviceId === '') return 'not-registered';
+    if (!isHexToken(sessionToken)) return 'bad-token';
+    if (typeof exp !== 'number' || !Number.isFinite(exp)) return 'bad-exp';
+    const now = this.now();
+    if (exp <= now) return 'expired';
+    if (exp - now > MAX_TUNNEL_SESSION_TTL_MS) return 'bad-exp';
+    this.sessions.set(sessionToken as string, { deviceId, exp, urlCode: '', turn: null });
+    this.persistSession(sessionToken as string);
+    return 'ok';
+  }
+
+  private persistSession(token: string): void {
+    if (!this.persist) return;
+    try {
+      const s = this.sessions.get(token);
+      if (!s) return;
+      this.persist.saveSession({
+        token,
+        deviceId: s.deviceId,
+        exp: s.exp,
+        urlCode: s.urlCode,
+        turnJson: s.turn ? JSON.stringify(s.turn) : null,
+      });
+    } catch {
+      /* persistencia best-effort: la memoria sigue mandando */
+    }
   }
 
   /**
@@ -494,6 +604,11 @@ export class TunnelState {
 
   private dropSession(token: string): void {
     this.sessions.delete(token);
+    try {
+      this.persist?.deleteSession(token);
+    } catch {
+      /* best-effort */
+    }
     for (const [code, b] of [...this.bindings]) {
       if (b.sessionToken === token) this.bindings.delete(code);
     }

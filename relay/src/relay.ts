@@ -12,7 +12,9 @@ import {
   HTTP_TIMEOUT_MS,
   MAX_TUNNEL_BODY_BYTES,
   type HttpResult,
+  type TunnelSessionPersist,
 } from './tunnel';
+import { renderTunnelGonePage, wantsHtmlPage, waitingLang, type TunnelGoneReason } from './waiting';
 
 export { getUiPageHandler, setUiPageHandler } from './tunnel';
 
@@ -63,6 +65,8 @@ export interface RelayServerOptions {
   uiRequestTimeoutMs?: number;
   /** Respuesta del daemon a `http-req` en este tiempo o 504 (defecto 30 s). */
   httpTimeoutMs?: number;
+  /** Persistencia opcional de sesiones del túnel (SQLite: sobreviven al reinicio). */
+  tunnelPersist?: TunnelSessionPersist | null;
 }
 
 function rateLimitedResponse(): Response {
@@ -156,7 +160,21 @@ export class RelayServer {
     this.wsLimiter = new RateLimiter(opts.rateLimitWs ?? legacy ?? RATE_LIMIT_WS_PER_MIN, 60_000, nowFn);
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.startedAt ?? this.now();
-    this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs });
+    this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs, persist: opts.tunnelPersist ?? null });
+    // Rehidrata sesiones vigentes persistidas (reinicio del relay sin perder
+    // los `/t/<token>/` existentes). Best-effort: sin persistencia o con la
+    // BD inaccesible se arranca vacío como antes.
+    try {
+      opts.tunnelPersist?.pruneExpired(this.now());
+    } catch {
+      /* noop */
+    }
+    try {
+      const restored = this.tunnel.restorePersistedSessions();
+      if (restored > 0) console.log(`[relay] restored ${restored} tunnel session(s) from storage`);
+    } catch {
+      /* noop */
+    }
     this.httpTimeoutMs = opts.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
   }
 
@@ -415,7 +433,7 @@ export class RelayServer {
   private handleTunnelFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
     const m = /^\/t\/([^/]+)([\s\S]*)$/.exec(url.pathname);
-    if (!m) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!m) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
     const token = m[1];
     const rest = m[2]; // '' o '/…'
     const upgrade = (req.headers.get('upgrade') ?? '').toLowerCase();
@@ -438,16 +456,30 @@ export class RelayServer {
     return this.handleTunnelProxy(req, token, rest === '' ? '/' : rest, url.search);
   }
 
+  /**
+   * Página amable para navegaciones a `/t/<token>/` con sesión muerta o
+   * daemon caído. Sustituye al JSON crudo (`{"error":"invalid-token"}`) que
+   * veía el usuario al recargar. Devuelve `null` si no es navegación de
+   * página (API/XHR/assets/WS siguen recibiendo JSON).
+   */
+  private tunnelGone(req: Request, reason: TunnelGoneReason, status: number): Response | null {
+    if (req.method !== 'GET' || !wantsHtmlPage(req)) return null;
+    return new Response(renderTunnelGonePage(reason, waitingLang(req)), {
+      status,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    });
+  }
+
   /** Proxy HTTP tuneleado: inyecta `http-req` al daemon y espera `http-res`. */
   private async handleTunnelProxy(req: Request, token: string, rest: string, search: string): Promise<Response> {
     const sess = this.tunnel.sessions.get(token);
-    if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!sess) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
     if (sess.exp <= this.now()) {
       this.tunnel.expireSession(token);
-      return Response.json({ error: 'expired' }, { status: 401 });
+      return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
     }
     const daemon = this.tunnel.devices.get(sess.deviceId);
-    if (!daemon) return Response.json({ error: 'daemon-offline' }, { status: 502 });
+    if (!daemon) return this.tunnelGone(req, 'daemon-offline', 502) ?? Response.json({ error: 'daemon-offline' }, { status: 502 });
 
     const headers: Record<string, string> = {};
     req.headers.forEach((v, k) => {
@@ -586,6 +618,15 @@ export class RelayServer {
         const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
         if (r !== 'ok') err(r);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode }));
+        return;
+      }
+      case 'ui-rebind': {
+        // Re-anuncio de una sesión vigente del daemon (tras reconectar).
+        // El socket ya está autenticado (RELAY_TOKEN): el daemon afirma sus
+        // propias sesiones sin necesitar el código original (consumido).
+        const r = this.tunnel.rebind(this.tunnel.socketDeviceId(ws), msg.sessionToken, msg.exp);
+        if (r !== 'ok') err(r);
+        else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-rebound', sessionToken: msg.sessionToken }));
         return;
       }
       case 'ui-unbind': {

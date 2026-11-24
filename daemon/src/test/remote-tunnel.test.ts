@@ -338,6 +338,42 @@ describe('remote-tunnel', () => {
     expect((sent[0] as any).status).toBe(503);
   });
 
+  it('resyncUiState: sesiones y código persistidos se re-emiten al (re)conectar', async () => {
+    // Sesión vigente + revocada + código en settings (como tras reiniciar el daemon).
+    const liveTok = 'cd'.repeat(32);
+    const deadTok = 'ef'.repeat(32);
+    const liveExp = Date.now() + 3600_000;
+    db.setSetting(`remote.ui.session.${liveTok}`, JSON.stringify({ createdAt: Date.now(), exp: liveExp, ua: 't', ip: '1', revoked: false }));
+    db.setSetting(`remote.ui.session.${deadTok}`, JSON.stringify({ createdAt: Date.now(), exp: Date.now() + 3600_000, ua: 't', ip: '1', revoked: true }));
+    db.setSetting('remote.ui.code', JSON.stringify({ code: '123456', urlCode: 'CODE-PERSIST-1', createdAt: Date.now(), expiresAt: Date.now() + 600_000 }));
+
+    received.length = 0;
+    const t2 = new TunnelClient(db as any, mgr, {
+      deviceId: 'dev-resync-1',
+      relayUrl: `ws://127.0.0.1:${relayPort}`,
+    });
+    t2.setHttpHandler(httpHandler);
+    t2.start();
+    // Al conectar: register + republica código persistido + rebind de la vigente + unbind de la revocada.
+    await waitFor(() => receivedOf('tunnel-register').some((m) => m.deviceId === 'dev-resync-1'));
+    await waitFor(() => receivedOf('ui-rebind').some((m) => m.sessionToken === liveTok), 10000);
+    const rebind = receivedOf('ui-rebind').find((m) => m.sessionToken === liveTok)!;
+    expect(rebind.exp).toBe(liveExp);
+    expect(receivedOf('ui-publish').some((m) => m.urlCode === 'CODE-PERSIST-1')).toBe(true);
+    expect(receivedOf('ui-rebind').some((m) => m.sessionToken === deadTok)).toBe(false);
+    await waitFor(() => receivedOf('ui-unbind').some((m) => m.sessionToken === deadTok), 10000);
+
+    // Llamada directa: idempotente y reporta conteos.
+    const r = (t2 as any).resyncUiState();
+    expect(r.rebound).toBe(1);
+    expect(r.unbound).toBe(1);
+
+    t2.stop();
+    try { db.deleteSetting(`remote.ui.session.${liveTok}`); } catch { /* noop */ }
+    try { db.deleteSetting(`remote.ui.session.${deadTok}`); } catch { /* noop */ }
+    try { db.deleteSetting('remote.ui.code'); } catch { /* noop */ }
+  });
+
   it('cleanup', async () => {
     tunnel.stop();
     try {

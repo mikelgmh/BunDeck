@@ -17,6 +17,15 @@ const SCHEMA = `
     name TEXT,
     last_seen INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS tunnel_sessions (
+    token TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    exp INTEGER NOT NULL,
+    url_code TEXT NOT NULL DEFAULT '',
+    turn TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_tunnel_sessions_exp ON tunnel_sessions (exp);
+  CREATE INDEX IF NOT EXISTS idx_tunnel_sessions_device ON tunnel_sessions (device_id);
 `;
 
 /**
@@ -57,6 +66,40 @@ export class DeviceStore {
 
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM devices').get() as { n: number }).n;
+  }
+
+  // ---- Sesiones del túnel UI (supervivencia a reinicios del relay) ----
+  // Solo lo necesario para rehidratar `TunnelState.sessions`: token,
+  // deviceId, exp, urlCode y TURN (JSON). JAMÁS secretos del daemon.
+
+  saveTunnelSession(row: { token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }): void {
+    this.db
+      .prepare(
+        `INSERT INTO tunnel_sessions (token, device_id, exp, url_code, turn)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(token) DO UPDATE SET device_id = excluded.device_id,
+           exp = excluded.exp, url_code = excluded.url_code, turn = excluded.turn`,
+      )
+      .run(row.token, row.deviceId, row.exp, row.urlCode, row.turnJson);
+  }
+
+  deleteTunnelSession(token: string): void {
+    this.db.prepare('DELETE FROM tunnel_sessions WHERE token = ?').run(token);
+  }
+
+  deleteTunnelSessionsByDevice(deviceId: string): void {
+    this.db.prepare('DELETE FROM tunnel_sessions WHERE device_id = ?').run(deviceId);
+  }
+
+  listTunnelSessions(): Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }> {
+    return this.db
+      .prepare('SELECT token, device_id AS deviceId, exp, url_code AS urlCode, turn AS turnJson FROM tunnel_sessions')
+      .all() as Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }>;
+  }
+
+  pruneTunnelSessions(now: number): number {
+    const r = this.db.prepare('DELETE FROM tunnel_sessions WHERE exp <= ?').run(now);
+    return Number(r?.changes ?? 0);
   }
 
   close(): void {

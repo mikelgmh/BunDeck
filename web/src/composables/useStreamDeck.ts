@@ -177,6 +177,19 @@ export function useStreamDeck() {
   const lanSession = ref<string | null>(getStoredLanSession())
   const lanRedeeming = ref(false)
 
+  // Túnel del relay (/t/<token>/…): si el relay responde invalid-token /
+  // expired / daemon-offline, la sesión no vale (reinicio, caducidad 24 h o
+  // daemon caído) y en vez de un grid vacío se muestra la tarjeta de
+  // "Sesión no válida". Se limpia al primer API ok.
+  type TunnelSessionInvalid = 'invalid-token' | 'expired' | 'daemon-offline' | null
+  const tunnelSessionInvalid = ref<'invalid-token' | 'expired' | 'daemon-offline' | null>(null)
+  const markTunnelGone = (detail: string, status: number): void => {
+    if (!getTunnelToken()) return
+    if (status !== 401 && status !== 502 && status !== 403) return
+    const m = /invalid-token|daemon-offline|expired/.exec(detail)
+    if (m) tunnelSessionInvalid.value = m[0] as NonNullable<TunnelSessionInvalid>
+  }
+
   // Flag to prevent infinite loops when receiving page change broadcasts
   const isRemotePageChange = ref(false)
 
@@ -457,8 +470,10 @@ export function useStreamDeck() {
       if ((response.status === 401 || response.status === 403) && isLanDeniedError(detail, response.status) && !getTunnelToken()) {
         lanDenied.value = true
       }
+      if (getTunnelToken()) markTunnelGone(detail, response.status)
       throw new Error(detail || `API Error: ${response.status}`)
     }
+    if (getTunnelToken() && tunnelSessionInvalid.value) tunnelSessionInvalid.value = null
 
     return response.json()
   }
@@ -2839,6 +2854,9 @@ export function useStreamDeck() {
     lanSession,
     lanRedeeming,
     redeemLanInviteFromUrl,
+
+    // Túnel del relay: sesión muerta (reinicio/caducidad/daemon caído)
+    tunnelSessionInvalid,
 
     // URLs
     API_BASE,
