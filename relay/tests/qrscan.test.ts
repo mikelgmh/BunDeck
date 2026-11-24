@@ -139,6 +139,9 @@ describe('landing: sección escáner QR', () => {
       expect(html).not.toContain('new Function');
       expect(html).not.toContain('onclick=');
       expect(html).not.toContain('onload=');
+      // Auto-ir tras escanear enlaces de acceso (solo https del propio relay).
+      expect(html).toContain('autoGoUrl');
+      expect(html).toContain('location.assign');
       // Sin URLs absolutas en el escáner: funciona tras reverse proxy.
       expect(html).not.toContain('http://localhost');
       expect(html).not.toContain('127.0.0.1:3');

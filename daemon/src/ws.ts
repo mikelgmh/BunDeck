@@ -61,6 +61,8 @@ export class WebSocketManager {
   private server: any;
   private clients: Map<string, WebSocketClient> = new Map();
   private db: DatabaseService;
+  /** Puentes con ws-msg huérfano ya avisado (una vez por puente, sin spam). */
+  private tunnelOrphanLogged = new Set<string>();
   private port: number;
 
   constructor(port: number) {
@@ -1181,6 +1183,8 @@ export class WebSocketManager {
   /** Registra un cliente virtual del túnel. Devuelve el clientId local. */
   public createTunnelClient(tunnelId: string, send: (text: string) => void): string {
     const clientId = `tunnel:${tunnelId}`;
+    // El puente ya existe: futuros huérfanos de este id vuelven a avisarse.
+    this.tunnelOrphanLogged.delete(clientId);
     const fakeWs: any = {
       readyState: 1, // WebSocket.OPEN
       send: (text: string) => { try { send(String(text)); } catch { /* noop */ } },
@@ -1218,7 +1222,24 @@ export class WebSocketManager {
   public handleTunnelMessage(tunnelId: string, text: string): void {
     const clientId = `tunnel:${tunnelId}`;
     const client = this.clients.get(clientId);
-    if (!client) return;
+    if (!client) {
+      // El `hello` del navegador puede adelantar al `ws-open` en la primera
+      // carga (el frontend lo reintenta hasta `session.state`, pero este aviso
+      // deja rastro para diagnosticar la carrera). Sin contenido: puede traer
+      // sessionToken y nunca se loguea el cuerpo.
+      if (!this.tunnelOrphanLogged.has(clientId)) {
+        this.tunnelOrphanLogged.add(clientId);
+        try {
+          this.db.addLog?.({
+            level: 'warn',
+            message: `[tunnel] ws-msg huérfano (puente ${tunnelId} aún sin ws-open): posible hello perdido en primera carga`,
+            meta: { remote: true, tunnel: true, bridgeId: tunnelId, bytes: text.length },
+            ts: Date.now(),
+          });
+        } catch { /* mejor esfuerzo */ }
+      }
+      return;
+    }
     client.lastSeen = Date.now();
     try {
       const parsed: WebSocketMessage = JSON.parse(text);

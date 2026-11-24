@@ -377,7 +377,15 @@ function render(c){
 function stopTracks(){ try{ if(stream){ stream.getTracks().forEach(function(tr){ try{ tr.stop(); }catch(e){} }); } }catch(e){} stream=null; }
 function stopLoop(){ stopped=true; if(timer!==null){ clearTimeout(timer); timer=null; } }
 function stopAll(){ stopLoop(); stopTracks(); detector=null; }
-function onDecoded(text){ stopAll(); openBtn.textContent=L.again; render(classify(text)); }
+/* Auto-ir tras escanear: solo enlaces de acceso servidos por el propio relay
+   (siempre https). El resto (pareo, códigos, texto) exige gesto explícito:
+   emparejar es consentimiento y no se automatiza. */
+function autoGoUrl(c){
+  if(!c||c.expired||typeof c.url!=='string'||!c.url) return '';
+  if(c.kind!=='ui-url'&&c.kind!=='tunnel-url'&&c.kind!=='http-url') return '';
+  return /^https:\/\//i.test(c.url)?c.url:'';
+}
+function onDecoded(text){ stopAll(); openBtn.textContent=L.again; var c=classify(text); render(c); var go=autoGoUrl(c); if(go){ try{ location.assign(go); }catch(e){} } }
 function loop(){ if(stopped) return; timer=setTimeout(function(){ tick(); },400); }
 async function tick(){
   if(stopped) return;

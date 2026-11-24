@@ -1632,7 +1632,8 @@ const ioBusy = ref(false)
 const apiBase = API_BASE
 // Ningún fetch cuelga para siempre: sin timeout, un daemon ocupado dejaba
 // pageBusy activo y toda la UI "pillada" (failed to fetch al abortar el navegador).
-const FETCH_TIMEOUT_MS = 15000
+// Por el túnel (internet) las respuestas pesadas superan 15 s: presupuesto mayor.
+const FETCH_TIMEOUT_MS = getTunnelToken() ? 45000 : 15000
 const apiGet = async (path: string) => {
   const res = await fetch(`${apiBase.value}${path}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)

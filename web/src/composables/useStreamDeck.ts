@@ -154,6 +154,13 @@ export function useStreamDeck() {
 
   // WebSocket
   let ws: WebSocket | null = null
+  // Reintento del `hello`: si el mensaje se pierde en el puente del túnel
+  // (ws-msg huérfano en el daemon antes de crear el cliente virtual), el
+  // cliente quedaría sin sesión y sin presencia hasta recargar la página.
+  // Se reenvía hasta recibir `session.state` (máx. 3 intentos).
+  let helloTimer: ReturnType<typeof setTimeout> | null = null
+  let helloAttempts = 0
+  let helloAcked = false
 
   // Sesión propia del dispositivo: vista profile/page independiente por
   // browser (el daemon la persiste y la restaura al reconectar).
@@ -432,7 +439,9 @@ export function useStreamDeck() {
     const response = await fetch(`${API_BASE.value}${endpoint}`, {
       ...rest,
       headers,
-      signal: callerSignal ?? AbortSignal.timeout(30000)
+      // Por el túnel (internet) las respuestas pesadas (plugins/acciones,
+      // perfiles) superan 30 s de ida y vuelta relay↔daemon: presupuesto mayor.
+      signal: callerSignal ?? AbortSignal.timeout(getTunnelToken() ? 60000 : 30000)
     })
 
     if (!response.ok) {
@@ -512,8 +521,53 @@ export function useStreamDeck() {
   }
 
   // WebSocket functions
+  const clearHelloTimer = () => {
+    if (helloTimer !== null) {
+      clearTimeout(helloTimer)
+      helloTimer = null
+    }
+  }
+  const sendHello = () => {
+    if (!ws || ws.readyState !== 1) return false
+    // Sesión propia: el daemon restaura nuestra vista (reconexión) o
+    // aplica el startup profile asignado, y responde `session.state`.
+    // Invitado LAN: la invitación viaja en `hello` (o ya en el query).
+    ws.send(JSON.stringify({
+      type: 'hello',
+      payload: {
+        deviceId: deviceId.value,
+        kind: 'browser',
+        // Nombre visible en las listas: la familia real (Chrome, Edge…)
+        // en vez del genérico, para distinguir varios orígenes.
+        name: browserFamilyName(),
+        ...(lanSession.value ? { invite: lanSession.value } : {}),
+        // UI remota (túnel): el token viaja en la URL (/t/...). Se
+        // reenvía para vincular deviceId ↔ sesión (revocar = ocultar).
+        ...(getTunnelToken() ? { sessionToken: getTunnelToken() } : {}),
+      }
+    }))
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings'] }
+    }))
+    return true
+  }
+  const scheduleHelloRetry = () => {
+    clearHelloTimer()
+    helloTimer = setTimeout(() => {
+      helloTimer = null
+      if (helloAcked || helloAttempts >= 3) return
+      if (!ws || ws.readyState !== 1) return
+      helloAttempts += 1
+      console.warn(`🔁 Reintentando hello (${helloAttempts}/3): sin session.state aún`)
+      if (sendHello()) scheduleHelloRetry()
+    }, 4000)
+  }
   const connectWebSocket = () => {
     try {
+      clearHelloTimer()
+      helloAcked = false
+      helloAttempts = 0
       ws = new WebSocket(WS_URL.value)
 
       ws.onopen = () => {
@@ -521,30 +575,12 @@ export function useStreamDeck() {
         connectionText.value = 'Conectado'
 
         console.log('🔌 WebSocket connected, identifying session...', { deviceId: deviceId.value })
-        // Sesión propia: el daemon restaura nuestra vista (reconexión) o
-        // aplica el startup profile asignado, y responde `session.state`.
-        // Invitado LAN: la invitación viaja en `hello` (o ya en el query).
-        ws?.send(JSON.stringify({
-          type: 'hello',
-          payload: {
-            deviceId: deviceId.value,
-            kind: 'browser',
-            // Nombre visible en las listas: la familia real (Chrome, Edge…)
-            // en vez del genérico, para distinguir varios orígenes.
-            name: browserFamilyName(),
-            ...(lanSession.value ? { invite: lanSession.value } : {}),
-             // UI remota (túnel): el token viaja en la URL (/t/...). Se
-             // reenvía para vincular deviceId ↔ sesión (revocar = ocultar).
-             ...(getTunnelToken() ? { sessionToken: getTunnelToken() } : {}),
-          }
-        }))
-        ws?.send(JSON.stringify({
-          type: 'subscribe',
-          payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings'] }
-        }))
+        sendHello()
+        scheduleHelloRetry()
       }
 
       ws.onclose = () => {
+        clearHelloTimer()
         connectionStatus.value = 'bg-error'
         connectionText.value = 'Desconectado'
         setTimeout(connectWebSocket, 3000)
@@ -598,6 +634,13 @@ export function useStreamDeck() {
         break
       case 'session.state':
         console.log('🪪 Session state:', message.payload)
+        // El `hello` llegó (carrera del túnel superada): no más reintentos.
+        // Refrescar dispositivos: al (re)conectar puede haber presencia nueva.
+        helloAcked = true
+        clearHelloTimer()
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('libredeck:devices-changed'))
+        }
         if (message.payload?.clientId) clientId.value = message.payload.clientId
         if (message.payload?.deviceId) deviceId.value = message.payload.deviceId
         if (message.payload?.lanSessionToken && typeof message.payload.lanSessionToken === 'string') {

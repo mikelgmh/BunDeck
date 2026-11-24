@@ -72,6 +72,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { isTunnelMode } from '../../composables/useTunnel'
 
 const { t } = useI18nStore()
 
@@ -116,7 +117,12 @@ const apiFailed = computed(() => {
 
 const configUrl = computed(() => props.apiBase.replace(/\/api\/v1\/?$/, '/config'))
 
-const withTimeout = (ms = 8000): AbortSignal => AbortSignal.timeout(ms)
+const withTimeout = (ms = 8000): AbortSignal => {
+  // Por el túnel (internet) cada petición da varios saltos relay↔daemon:
+  // con 8 s Safari abortaba ("Fetch is aborted") en las respuestas pesadas.
+  const budget = isTunnelMode() ? Math.max(ms, 30000) : ms
+  return AbortSignal.timeout(budget)
+}
 
 async function timedFetch(url: string, init?: RequestInit): Promise<{ res: Response; ms: number }> {
   const t0 = performance.now()
