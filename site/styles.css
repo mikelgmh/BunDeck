@@ -32,7 +32,7 @@ a:focus-visible { outline: 2px solid #171717; outline-offset: 4px; border-radius
 .github-nav:hover { background: #fff; transform: translateY(-1px); }
 
 .hero { width: min(1180px, calc(100% - 96px)); min-height: 590px; margin: 0 auto; padding: 77px 0 79px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 46px; }
-.hero-copy { padding-left: clamp(0px, 3vw, 38px); }
+.hero-copy { padding-left: 0; }
 .hero h1 { max-width: 560px; margin: 0 0 22px; font-size: clamp(54px, 6vw, 76px); line-height: .99; letter-spacing: -5.6px; font-weight: 680; }
 .hero-description { max-width: 405px; margin: 0; color: #626262; font-size: 16px; line-height: 1.65; }
 .hero-actions { display: flex; align-items: center; gap: 23px; margin-top: 30px; }
