@@ -153,3 +153,46 @@ describe('PUT assignments empuja page.navigate dirigido', () => {
     expect(lastOfType(inbox, 'session.state')?.payload.pageId).toBe(pageB);
   });
 });
+
+describe('PUT assignments: el HW sigue la asignación explícita aunque su sesión esté en otro perfil', () => {
+  it('fija la sesión del driver (memoria + tabla) a la página asignada', async () => {
+    const { streamDeckDriver } = await import('../hw-driver/streamdeck-driver');
+    // Sin HW físico en tests: setSessionView guarda sesión sin repintar.
+    const prev = streamDeckDriver.getSessionView();
+    const mgr = makeManager();
+    try {
+      // Dos perfiles con cuadrícula 5×3; el HW "vive" en el otro.
+      const profX = db.createProfile({ id: uid('prof'), name: 'X', data: {} }).id;
+      const profY = db.createProfile({ id: uid('prof'), name: 'Y', data: {} }).id;
+      const gx = uid('page'); db.createPage({ id: gx, profile_id: profX, name: 'GX', order_idx: 0, is_folder: 0, data: {} });
+      const gy = uid('page'); db.createPage({ id: gy, profile_id: profY, name: 'GY', order_idx: 0, is_folder: 0, data: {} });
+      const deck = uid('deck');
+      db.createDevice({ id: deck, name: 'Deck', kind: 'deck', model: 'mk2', cols: 5, rows: 3, hw_path: null } as any);
+      await streamDeckDriver.setSessionView({ profileId: profY, pageId: gy });
+      expect(streamDeckDriver.getSessionView()).toEqual({ profileId: profY, pageId: gy });
+
+      // Asignar en X: antes la guarda sameProfile lo ignoraba (sesión en Y).
+      const req = new Request(`http://localhost:3001/api/v1/profiles/${profX}/assignments`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignments: { [deck]: gx } }),
+      });
+      const res = await handleDevices(req, {
+        url: new URL(req.url), method: 'PUT', path: `/api/v1/profiles/${profX}/assignments`,
+        db, services: { wsManager: mgr } as any,
+      });
+      expect(res!.status).toBe(200);
+      expect(db.getAssignments(profX)[deck]).toBe(gx);
+      // La sesión del HW sigue a la asignación explícita (perfil incluido).
+      expect(streamDeckDriver.getSessionView()).toEqual({ profileId: profX, pageId: gx });
+      expect(db.getDeviceSession(streamDeckDriver.getDeviceId())?.page_id).toBe(gx);
+    } finally {
+      // Restaurar la sesión del driver para no contaminar otros ficheros.
+      try {
+        if (prev.profileId && prev.pageId) await streamDeckDriver.setSessionView({ profileId: prev.profileId, pageId: prev.pageId });
+        else {
+          (streamDeckDriver as any).sessionProfileId = prev.profileId;
+          (streamDeckDriver as any).sessionPageId = prev.pageId;
+        }
+      } catch { /* mejor esfuerzo */ }
+    }
+  });
+});

@@ -358,17 +358,20 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
           }
         }
       } catch { /* noop */ }
-      // El HW físico sigue la asignación (nunca al revés): si cambió un deck,
-      // fijar la vista del HW a su página final (post-repair). Sin esto el
-      // botón "dispositivos" no movía nada físico. Best-effort: nunca tumba
-      // el guardado.
+      // El HW físico sigue la asignación EXPLÍCITA (nunca al revés): si
+      // cambió un deck, fijar su sesión y repintar a su página final
+      // (post-repair). Sin esto el botón "dispositivos" no movía nada
+      // físico. Best-effort: nunca tumba el guardado.
+      // OJO: sin guarda de perfil. La asignación es intención explícita del
+      // usuario: si le pone al deck una página de otro perfil, el deck la
+      // muestra (y su sesión pasa a ese perfil). La guarda anterior
+      // (`sameProfile`) dejaba al HW clavado en la primera página que vio
+      // al arrancar porque navigatePageTo nunca actualizaba su sesión.
       try {
         const changedDecks = Object.entries(wanted)
           .filter(([id, p]) => p !== null && byId.get(id)?.kind === 'deck')
           .map(([id]) => id);
-        if (changedDecks.length > 0
-          && streamDeckDriver.isConnected()
-          && typeof services.wsManager.navigatePageTo === 'function') {
+        if (changedDecks.length > 0) {
           const allDevices = db.listDevices().map((d) => ({
             id: d.id,
             name: d.name,
@@ -394,20 +397,23 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
           });
           const finalPage = picked ? assignments[picked] : null;
           if (picked && finalPage) {
-            let sameProfile = true;
             try {
-              const view = streamDeckDriver.getSessionView();
-              sameProfile = !view.profileId || view.profileId === profileId;
-            } catch { sameProfile = true; }
-            // No arrancar al HW de otro perfil: solo sigue asignaciones de
-            // su perfil actual (o sin sesión todavía).
-            if (sameProfile) {
-              services.wsManager.navigatePageTo({
-                pageId: finalPage,
-                originDeviceId: null,
-                targets: { kind: 'devices', ids: [streamDeckDriver.getDeviceId()] },
-                context: { via: 'device-assignment' },
-              });
+              // Fija sesión (memoria + tabla) y repinta si hay HW; sin HW
+              // conectado igual queda guardado para la reconexión.
+              await streamDeckDriver.setSessionView({ profileId, pageId: finalPage });
+              // Compat con el camino anterior: la asignación al HW también
+              // movía el current global (integraciones/driver lo leen).
+              db.setCurrentPage(finalPage);
+            } catch (e) {
+              // Incompatible con el HW real (p. ej. modelo mal configurado
+              // frente a la geometría viva): avisar sin tumbar el guardado.
+              try {
+                services.wsManager?.broadcast?.('page.blocked', {
+                  pageId: finalPage,
+                  reason: e instanceof Error ? e.message : String(e),
+                  pageName: db.getPage(finalPage)?.name ?? null,
+                }, 'pages');
+              } catch { /* noop */ }
             }
           }
         }
