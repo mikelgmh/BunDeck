@@ -169,6 +169,7 @@
           </div>
         </dl>
         <p class="bd-hint">{{ t('bd.remoteUiApprovalWarning') }}</p>
+        <p class="bd-hint" data-cy="qr-internet-approval-transport">{{ t('bd.remoteUiTransportNotice') }}</p>
         <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
       </div>
       <div class="bd-remote-approval__actions">

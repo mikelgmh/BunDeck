@@ -167,6 +167,12 @@
       </button>
     </header>
 
+    <TunnelTransportBanner
+      v-if="isTunnelRoute && showTransportBanner"
+      :status="rtcStatus"
+      @dismiss="showTransportBanner = false"
+    />
+
     <main class="bd-main">
       <aside v-if="!kiosk" id="bd-drw" class="bd-side" :class="{ 'bd-collapsed': !bdShowLeft }" :aria-label="t('bd.libraryLabel')">
         <div v-if="bdShowLeft">
@@ -524,6 +530,7 @@ import {
 } from '../../composables/useDevices'
 import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
+import TunnelTransportBanner from './TunnelTransportBanner.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
@@ -661,6 +668,23 @@ const rtc = getRtcSingleton()
 const rtcStatus = rtc.status
 const rtcDetail = rtc.detail
 const isTunnelRoute = computed(() => getTunnelToken() !== null)
+// Banner de transporte al entrar por túnel: visible hasta que el usuario lo
+// cierre o pasen 8 s desde un estado terminal (connected/fallback).
+const showTransportBanner = ref(false)
+let transportBannerTimer: ReturnType<typeof setTimeout> | null = null
+watch(rtcStatus, (s) => {
+  if (transportBannerTimer !== null) {
+    clearTimeout(transportBannerTimer)
+    transportBannerTimer = null
+  }
+  if (!isTunnelRoute.value || !showTransportBanner.value) return
+  if (s === 'connected' || s === 'fallback') {
+    transportBannerTimer = setTimeout(() => {
+      showTransportBanner.value = false
+      transportBannerTimer = null
+    }, 8000)
+  }
+})
 
 const pluginBusyId = ref<string | null>(null)
 const pluginUploading = ref(false)
@@ -2540,6 +2564,7 @@ onMounted(async () => {
   // transporte relay sigue funcionando aunque P2P falle por NAT).
   try {
     if (getTunnelToken()) {
+      showTransportBanner.value = true
       setTimeout(() => {
         rtc.connect().catch(() => {})
       }, 1500)
@@ -2602,6 +2627,10 @@ onUnmounted(() => {
   if (ruleTimer) {
     clearInterval(ruleTimer)
     ruleTimer = null
+  }
+  if (transportBannerTimer !== null) {
+    clearTimeout(transportBannerTimer)
+    transportBannerTimer = null
   }
   if (unsubVar) {
     unsubVar()

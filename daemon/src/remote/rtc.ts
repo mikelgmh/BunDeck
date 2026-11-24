@@ -165,7 +165,10 @@ export class RtcManager {
     if (entry.sessionToken) {
       try {
         (this.deps.wsManager as unknown as { broadcast?: (e: string, p: unknown, t?: string) => void })?.broadcast?.(
-          'rtc-closed',
+          // Prefijo `remote.`: el panel web solo reenvía a la UI los tipos
+          // `remote.*` (ver useRemote.onRemoteEvent); sin prefijo el aviso
+          // P2P nunca llegaba y todo quedaba como Relay.
+          'remote.rtc-closed',
           { tokenPrefix: entry.sessionToken.slice(0, 8), bridgeId, ts: Date.now() },
           'remote',
         );
@@ -261,9 +264,10 @@ export class RtcManager {
       entry.sessionToken = token;
       this.sendDc(entry, { t: 'welcome', bridgeId: entry.bridgeId });
       // Avisa al host (panel remoto): esta sesión ya habla P2P.
+      // Prefijo `remote.*` (ver arriba): si no, el aviso no llega al panel.
       try {
         (this.deps.wsManager as unknown as { broadcast?: (e: string, p: unknown, t?: string) => void })?.broadcast?.(
-          'rtc-connected',
+          'remote.rtc-connected',
           { tokenPrefix: token.slice(0, 8), bridgeId: entry.bridgeId, ts: Date.now() },
           'remote',
         );

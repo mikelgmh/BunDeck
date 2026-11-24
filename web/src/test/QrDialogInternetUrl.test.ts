@@ -11,6 +11,8 @@ vi.mock('../composables/useI18n', () => ({
 
 const UI_URL = 'https://relay.example.test/ui/AbC123xYz'
 
+const mockPending = ref<Array<Record<string, unknown>>>([])
+
 vi.mock('../composables/useRemote', () => ({
   useRemote: () => ({
     uiEnabled: ref(true),
@@ -19,7 +21,7 @@ vi.mock('../composables/useRemote', () => ({
     uiError: ref(''),
     uiCode: ref({ code: '482913', urlCode: 'AbC123xYz', url: UI_URL, expiresAt: Date.now() + 60000 }),
     uiCodeDataUrl: ref('data:image/png;base64,QR'),
-    uiPending: ref([]),
+    uiPending: mockPending,
     uiSessions: ref([]),
     requestUiCode: vi.fn(),
     loadUiPending: vi.fn(async () => []),
@@ -49,6 +51,7 @@ function stubDialog(el: HTMLDialogElement | null) {
 const realClipboard = navigator.clipboard
 
 beforeEach(() => {
+  mockPending.value = []
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: vi.fn(async () => {}) },
     configurable: true,
@@ -87,6 +90,23 @@ describe('QrDialog pestaña internet: URL visible sin cámara', () => {
     await wrapper.find('[data-cy="qr-internet-copy"]').trigger('click')
     await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`${UI_URL}?kiosk=1`)
+    wrapper.unmount()
+  })
+
+  it('el diálogo de aprobar anuncia la política de transporte', async () => {
+    const wrapper = mount(QrDialog)
+    // showModal no existe en jsdom: stub + propiedad open para activar el flujo.
+    wrapper.findAll('dialog').forEach((d) => stubDialog(d.element as HTMLDialogElement))
+    await (wrapper.vm as any).show()
+    await flushPromises()
+    // El pendiente llega despues: el watcher lo pone en cola y abre el dialogo.
+    mockPending.value = [{ reqId: 'req-9', urlCode: 'AbC123xYz', ua: 'iPad', ip: '9.9.9.9', createdAt: Date.now() }]
+    await flushPromises()
+    // Al llegar el pendiente se muestra el contenido de aprobación.
+    expect(wrapper.find('[data-cy="qr-internet-approval-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="qr-internet-approval-transport"]').text()).toBe(
+      'bd.remoteUiTransportNotice'
+    )
     wrapper.unmount()
   })
 })

@@ -114,6 +114,21 @@ describe('waiting: renderWaitingPage', () => {
     expect(html.toLowerCase()).not.toContain('google-analytics');
     expect(html.toLowerCase()).not.toContain('googletagmanager');
   });
+
+  test('muestra el transporte: intento P2P en espera y conexion en aprobado', () => {
+    const es = renderWaitingPage('abc123', 'es');
+    // En espera: politica de transporte visible antes de aprobar.
+    expect(es).toContain('se intentará primero una conexión directa P2P');
+    // Aprobado: latido de conexion + boton para entrar sin esperar.
+    expect(es).toContain('wait-connecting');
+    expect(es).toContain('Estableciendo conexión segura');
+    expect(es).toContain('id="wait-go"');
+    expect(es).toContain('Entrar ahora');
+    expect(es).toContain('setTimeout(go,2000)');
+    const en = renderWaitingPage('abc123', 'en');
+    expect(en).toContain('first try an encrypted direct P2P');
+    expect(en).toContain('Enter now');
+  });
 });
 
 describe('waiting: handleUiFetch (sin servidor)', () => {

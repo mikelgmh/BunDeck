@@ -372,4 +372,99 @@ describe('RemotePane UI remota', () => {
     setSpy.mockRestore()
     clearSpy.mockRestore()
   })
+
+  describe('aprobación con transporte en vivo', () => {
+    const wsInstances: Array<{ onmessage: ((e: unknown) => void) | null }> = []
+
+    beforeEach(() => {
+      wsInstances.length = 0
+      vi.stubGlobal(
+        'WebSocket',
+        class {
+          static OPEN = 1
+          readyState = 1
+          onopen: ((e?: unknown) => void) | null = null
+          onmessage: ((e: unknown) => void) | null = null
+          onclose: ((e?: unknown) => void) | null = null
+          onerror: ((e?: unknown) => void) | null = null
+          constructor() {
+            wsInstances.push(this as unknown as { onmessage: ((e: unknown) => void) | null })
+          }
+          send() {}
+          close() {}
+        }
+      )
+    })
+
+    async function openApproval() {
+      const { fn } = makeFetch({
+        uiEnabled: true,
+        pending: [{ reqId: 'req-1', urlCode: 'abc123', ua: 'Mobile', ip: '1.2.3.4', createdAt: Date.now() }],
+      })
+      vi.stubGlobal('fetch', fn)
+      const wrapper = mount(RemotePane)
+      await flushPromises()
+      await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+      await flushPromises()
+      const approvalDialog = wrapper.find('[data-cy="remote-ui-approval-dialog"]')
+      expect(approvalDialog.attributes('open')).toBeDefined()
+      return wrapper
+    }
+
+    it('el diálogo anuncia la política de transporte antes de aprobar', async () => {
+      const wrapper = await openApproval()
+      expect(wrapper.find('[data-cy="remote-ui-transport-notice"]').exists()).toBe(true)
+      wrapper.unmount()
+    })
+
+    it('allow → vista de éxito con "probando P2P" y cerrar', async () => {
+      const wrapper = await openApproval()
+      await wrapper.find('[data-cy="remote-ui-approval-allow"]').trigger('click')
+      await flushPromises()
+      // Vista de éxito: muestra el navegador y el transporte conectando.
+      expect(wrapper.find('[data-cy="remote-ui-approved-ua"]').text()).toContain('Mobile')
+      const badge = wrapper.find('[data-cy="remote-ui-approved-transport"]')
+      expect(badge.exists()).toBe(true)
+      expect(badge.attributes('data-transport')).toBe('connecting')
+      expect(badge.text()).toContain('bd.remoteUiApprovedConnecting')
+      // Cerrar vuelve a dejar el diálogo oculto.
+      await wrapper.find('[data-cy="remote-ui-approval-close"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-cy="remote-ui-approved-transport"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('rtc-connected convierte la vista en P2P en vivo', async () => {
+      const wrapper = await openApproval()
+      await wrapper.find('[data-cy="remote-ui-approval-allow"]').trigger('click')
+      await flushPromises()
+      expect(wsInstances.length).toBeGreaterThan(0)
+      const ws = wsInstances[wsInstances.length - 1]
+      // El daemon avisa con el tipo `remote.rtc-connected` (con prefijo).
+      ws.onmessage?.({
+        data: JSON.stringify({ type: 'remote.rtc-connected', payload: { tokenPrefix: 'SECRET-T' } }),
+      })
+      await flushPromises()
+      const badge = wrapper.find('[data-cy="remote-ui-approved-transport"]')
+      expect(badge.attributes('data-transport')).toBe('p2p')
+      expect(badge.text()).toContain('bd.remoteUiTransportP2p')
+      wrapper.unmount()
+    })
+
+    it('sin P2P en 15 s → muestra Relay', async () => {
+      vi.useFakeTimers()
+      const wrapper = await openApproval()
+      await wrapper.find('[data-cy="remote-ui-approval-allow"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-cy="remote-ui-approved-transport"]').attributes('data-transport')).toBe(
+        'connecting'
+      )
+      await vi.advanceTimersByTimeAsync(16000)
+      await flushPromises()
+      const badge = wrapper.find('[data-cy="remote-ui-approved-transport"]')
+      expect(badge.attributes('data-transport')).toBe('relay')
+      expect(badge.text()).toContain('bd.remoteUiTransportRelay')
+      wrapper.unmount()
+    })
+  })
 })

@@ -41,6 +41,22 @@
           </button>
         </div>
       </template>
+      <template v-else-if="approvedSession">
+        <div class="bd-remote-approval__body">
+          <span class="bd-remote-approval__mark" aria-hidden="true"><Check :size="20" stroke-width="1.75" /></span>
+          <div>
+            <h2 id="bd-remote-approval-title">{{ t('bd.remoteUiApprovedTitle') }}</h2>
+            <p class="bd-sub" data-cy="remote-ui-approved-ua">{{ approvedSession.ua || t('bd.remoteUiEmptyUa') }}</p>
+          </div>
+          <p class="bd-hint">
+            <span class="bd-tag-def" :data-transport="approvedTransport" data-cy="remote-ui-approved-transport">{{ approvedTransportLabel }}</span>
+          </p>
+          <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
+        </div>
+        <div class="bd-remote-approval__actions">
+          <button class="bd-btn bd-pri" data-cy="remote-ui-approval-close" @click="closeApprovalSuccess">{{ t('bd.close') }}</button>
+        </div>
+      </template>
     </dialog>
 
     <!-- Estado -->
@@ -565,7 +581,7 @@ import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
 import { useDevices, type LogicalDevice } from '../../composables/useDevices'
 import { getOrCreateDeviceId } from '../../utils/sessionRouting'
-import { Link2, Globe, ShieldOff, KeyRound, Trash2 } from 'lucide-vue-next'
+import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -586,6 +602,24 @@ const transportLabel = (tr: 'p2p' | 'relay'): string =>
   tr === 'p2p' ? t('bd.remoteUiTransportP2p') : t('bd.remoteUiTransportRelay')
 const activeApproval = computed<UiPendingItem | null>(() =>
   uiPending.value.find((item) => item.reqId === activeApprovalId.value) ?? null
+)
+// Tras aprobar, el diálogo no se cierra: muestra la vista de éxito con el
+// transporte real en vivo (P2P cuando llega `remote.rtc-connected`, Relay si
+// pasan ~15 s sin P2P). El transporte no se conoce antes de aprobar porque
+// la negociación P2P la inicia el navegador ya en su sesión.
+const approvedSession = ref<{ prefix: string; ua: string } | null>(null)
+const approvedAt = ref(0)
+let approvingReqId = ''
+const APPROVED_RELAY_AFTER_MS = 15000
+const approvedTransport = computed<'connecting' | 'p2p' | 'relay'>(() => {
+  const a = approvedSession.value
+  if (!a) return 'relay'
+  if (sessionTransports.value[a.prefix] === 'p2p') return 'p2p'
+  if (now.value - approvedAt.value > APPROVED_RELAY_AFTER_MS) return 'relay'
+  return 'connecting'
+})
+const approvedTransportLabel = computed(() =>
+  approvedTransport.value === 'connecting' ? t('bd.remoteUiApprovedConnecting') : transportLabel(approvedTransport.value)
 )
 
 const activateNextApproval = () => {
@@ -618,11 +652,13 @@ watch(activeApprovalId, async (requestId) => {
   const dialog = approvalDialog.value
   if (!dialog) return
   if (requestId) {
+    // Nueva solicitud: fuera la vista de éxito anterior.
+    approvedSession.value = null
     if (!dialog.open) {
       if (typeof dialog.showModal === 'function') dialog.showModal()
       else dialog.setAttribute('open', '')
     }
-  } else if (dialog.open) {
+  } else if (dialog.open && !approvedSession.value && !approvingReqId) {
     if (typeof dialog.close === 'function') dialog.close()
     else dialog.removeAttribute('open')
   }
@@ -756,15 +792,17 @@ const onRevokeUiCode = async () => {
   }
 }
 
-const onAllow = async (reqId: string) => {
+const onAllow = async (reqId: string): Promise<string | undefined> => {
   tokenCopied.value = false
   try {
-    await allowPending(reqId)
+    const token = await allowPending(reqId)
     // El URL aprobado es de un solo uso. Sustituirlo de inmediato para que
     // el siguiente móvil tenga un enlace vigente en el QR visible.
     await requestUiCode()
+    return typeof token === 'string' ? token : undefined
   } catch (e) {
     if (!uiError.value) uiError.value = e instanceof Error ? e.message : String(e)
+    return undefined
   }
 }
 
@@ -780,15 +818,46 @@ const dismissApproval = () => {
   const requestId = activeApprovalId.value
   if (requestId) approvalQueue.value = approvalQueue.value.filter((id) => id !== requestId)
   activeApprovalId.value = ''
+  approvedSession.value = null
+  approvingReqId = ''
+  const dialog = approvalDialog.value
+  if (dialog && dialog.open) {
+    try {
+      if (typeof dialog.close === 'function') dialog.close()
+      else dialog.removeAttribute('open')
+    } catch { /* noop */ }
+  }
+}
+
+const closeApprovalSuccess = () => {
+  dismissApproval()
 }
 
 const resolveApproval = async (allow: boolean) => {
   const requestId = activeApprovalId.value
   if (!requestId) return
-  dismissApproval()
-  await nextTick()
-  if (allow) await onAllow(requestId)
-  else await onDeny(requestId)
+  if (!allow) {
+    dismissApproval()
+    await nextTick()
+    await onDeny(requestId)
+    activateNextApproval()
+    return
+  }
+  // Aprobar sin cerrar: el diálogo pasa a la vista de éxito con el transporte
+  // real en vivo (el P2P se negocia después, desde la sesión del navegador).
+  approvingReqId = requestId
+  const ua = activeApproval.value?.ua ?? ''
+  activeApprovalId.value = ''
+  const token = await onAllow(requestId)
+  approvingReqId = ''
+  if (typeof token === 'string' && token) {
+    approvedSession.value = { prefix: token.slice(0, 8), ua }
+    approvedAt.value = Date.now()
+    startQrTick()
+  } else {
+    dismissApproval()
+  }
+  approvalQueue.value = approvalQueue.value.filter((id) => id !== requestId)
   activateNextApproval()
 }
 

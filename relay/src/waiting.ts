@@ -149,12 +149,15 @@ export interface WaitingTexts {
   title: string;
   pendingTitle: string;
   pendingBody: string;
+  pendingTransport: string;
   codeLabel: string;
   cancel: string;
   cancelledTitle: string;
   cancelledBody: string;
   approvedTitle: string;
   approvedBody: string;
+  connectingBody: string;
+  goNow: string;
   tokenWarning: string;
   deniedTitle: string;
   deniedBody: string;
@@ -170,12 +173,15 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     title: 'Sala de espera — BunDeck Relay',
     pendingTitle: 'Esperando aprobación en el equipo anfitrión',
     pendingBody: 'Deja esta pestaña abierta mientras el anfitrión aprueba el acceso. La solicitud caduca en 2 minutos.',
+    pendingTransport: 'Al aprobar, se intentará primero una conexión directa P2P cifrada; si la red lo bloquea, se usará el relay.',
     codeLabel: 'Tu código',
     cancel: 'Cancelar',
     cancelledTitle: 'Espera cancelada',
     cancelledBody: 'Has detenido la espera. Puedes cerrar esta pestaña o pedir un código nuevo.',
     approvedTitle: 'Acceso aprobado. Redirigiendo…',
     approvedBody: 'El anfitrión ha aprobado tu acceso. Te llevamos a tu sesión.',
+    connectingBody: 'Estableciendo conexión segura… probando conexión directa P2P.',
+    goNow: 'Entrar ahora',
     tokenWarning:
       'Aviso: el token de sesión quedará visible en la barra de direcciones. No lo compartas.',
     deniedTitle: 'Acceso denegado',
@@ -192,12 +198,15 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     title: 'Waiting room — BunDeck Relay',
     pendingTitle: 'Waiting for approval on the host machine',
     pendingBody: 'Keep this tab open while the host approves access. The request expires after 2 minutes.',
+    pendingTransport: 'On approval, it will first try an encrypted direct P2P connection; if the network blocks it, it will use the relay.',
     codeLabel: 'Your code',
     cancel: 'Cancel',
     cancelledTitle: 'Wait cancelled',
     cancelledBody: 'You stopped waiting. You can close this tab or ask for a new code.',
     approvedTitle: 'Access approved. Redirecting…',
     approvedBody: 'The host approved your access. Taking you to your session.',
+    connectingBody: 'Establishing secure connection… trying direct P2P connection.',
+    goNow: 'Enter now',
     tokenWarning:
       'Note: the session token will stay visible in the address bar. Do not share it.',
     deniedTitle: 'Access denied',
@@ -254,12 +263,16 @@ button:active{transform:scale(.97)}
 <div class="spinner" role="status" aria-label="loading"></div>
 <h1>${esc(t.pendingTitle)}</h1>
 <p>${esc(t.pendingBody)}</p>
+<p class="hint">${esc(t.pendingTransport)}</p>
 <div><span class="code" id="wait-code">${code}</span></div>
 <div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
 </div>
 <div class="card" id="st-approved" hidden>
+<div class="spinner" role="status" aria-label="loading"></div>
 <h1>${esc(t.approvedTitle)}</h1>
 <p>${esc(t.approvedBody)}</p>
+<p class="hint" id="wait-connecting">${esc(t.connectingBody)}</p>
+<div><button id="wait-go" type="button">${esc(t.goNow)}</button></div>
 <p class="warn">${esc(t.tokenWarning)}</p>
 </div>
 <div class="card" id="st-denied" hidden>
@@ -280,9 +293,10 @@ button:active{transform:scale(.97)}
 (function(){
 var POLL_MS=${UI_POLL_MS},TIMEOUT_MS=${UI_TIMEOUT_MS};
 var STATUS_URL=location.pathname.replace(/\\/+$/,'')+'${UI_STATUS_SUFFIX}';
-var body=document.body,timer=null,deadline=null,done=false;
+var body=document.body,timer=null,deadline=null,done=false,goTimer=null,goUrl='';
 function show(s){body.setAttribute('data-state',s);['pending','approved','denied','expired','cancelled'].forEach(function(k){var el=document.getElementById('st-'+k);if(el)el.hidden=(k!==s);});}
-function cleanup(){done=true;if(timer){clearInterval(timer);timer=null;}if(deadline){clearTimeout(deadline);deadline=null;}}
+function go(){ if(!goUrl) return; var u=goUrl; goUrl=''; try{ location.replace(u); }catch(e){} }
+function cleanup(){done=true;if(timer){clearInterval(timer);timer=null;}if(deadline){clearTimeout(deadline);deadline=null;}if(goTimer){clearTimeout(goTimer);goTimer=null;}}
 function expired(){if(done)return;cleanup();show('expired');}
 function poll(){
 if(done)return;
@@ -302,7 +316,8 @@ var keep=new URLSearchParams();
 var qs=keep.toString();
 kq=(qs?'?'+qs:'')+(location.hash||'');
 }catch(e){kq=(location.search||'')+(location.hash||'');}
-location.replace('/t/'+encodeURIComponent(data.sessionToken)+'/'+kq);
+goUrl='/t/'+encodeURIComponent(data.sessionToken)+'/'+kq;
+goTimer=setTimeout(go,2000);
 }else if(data.status==='denied'){cleanup();show('denied');}
 else if(data.status==='expired'){expired();}
 }).catch(function(){});
@@ -310,6 +325,8 @@ else if(data.status==='expired'){expired();}
 }
 var cancel=document.getElementById('wait-cancel');
 if(cancel)cancel.addEventListener('click',function(){cleanup();show('cancelled');});
+var goBtn=document.getElementById('wait-go');
+if(goBtn)goBtn.addEventListener('click',function(){if(goTimer){clearTimeout(goTimer);goTimer=null;}go();});
 window.addEventListener('pagehide',cleanup);
 window.addEventListener('beforeunload',cleanup);
 deadline=setTimeout(expired,TIMEOUT_MS);
