@@ -246,11 +246,16 @@ describe('contrato v2.2: integraciones robustecidas', () => {
   });
 
   it('calendar today-count cuenta eventos de hoy (ICS temporal)', async () => {
+    // Anclado al mediodía LOCAL de hoy: un offset fijo (+1h) caería en mañana
+    // si el run es 23:00-00:00 UTC y el test fallaría una hora al día.
+    const noon = new Date();
+    noon.setHours(12, 0, 0, 0);
+    const stamp = noon.toISOString().replace(/[-:]/g, '').split('.')[0];
     const ics = [
       'BEGIN:VCALENDAR',
       'BEGIN:VEVENT',
       'SUMMARY:Hoy mismo',
-      `DTSTART:${new Date(Date.now() + 3600_000).toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+      `DTSTART:${stamp}Z`,
       'END:VEVENT',
       'BEGIN:VEVENT',
       'SUMMARY:Pasado',
