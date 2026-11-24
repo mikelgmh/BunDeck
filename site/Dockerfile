@@ -9,6 +9,7 @@ COPY site/package.json ./
 RUN bun install --production
 COPY site/server.ts ./
 COPY site/index.html ./
+COPY site/features.html ./
 COPY site/styles.css ./
 COPY site/app.js ./
 COPY site/assets ./assets
