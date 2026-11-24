@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/mikelgmh/BunDeck/compare/v1.11.0...v1.11.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **ci:** restore libredeck binary names in build jobs until rename lands whole ([bd97a9d](https://github.com/mikelgmh/BunDeck/commit/bd97a9d62ae5c91050a50327ae311278297cd820))
+
 # [1.11.0](https://github.com/mikelgmh/BunDeck/compare/v1.10.6...v1.11.0) (2026-11-24)
 
 
