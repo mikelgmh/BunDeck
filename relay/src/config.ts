@@ -31,7 +31,7 @@ export const VERSION = '0.2.0';
  *
  * - RELAY_PORT (def 8787). PORT tiene prioridad (openship/openpanel inyectan $PORT).
  * - RELAY_TOKEN: secreto compartido para conectar (WS y POST /pair). Vacío = abierto (solo dev).
- * - RELAY_DOMAIN: solo informativo para logs (p.ej. bundeck.mikelgranero.com).
+ * - RELAY_DOMAIN: solo informativo para logs (p.ej. relay.bundeck.app).
  * - DATA_DIR / RELAY_DATA_DIR: dónde vive relay.db (def relay/data).
  * - RELAY_RATE_LIMIT_T (def 600): cuota /t/* por token (plano de datos). Antes 60 global.
  * - RELAY_RATE_LIMIT_UI (def 120): cuota /ui/* por IP.

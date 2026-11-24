@@ -113,8 +113,8 @@ describe('remote-qr: GET /qr', () => {
     // Sin configuración → relay público por defecto
     const def = await remoteCall(db, services, '/api/v1/remote/qr', 'GET');
     expect(def.status).toBe(200);
-    expect(def.body.relayUrl).toBe('wss://bundeck.mikelgranero.com');
-    expect(JSON.parse(def.body.qr as string).relay).toBe('wss://bundeck.mikelgranero.com');
+    expect(def.body.relayUrl).toBe('wss://relay.bundeck.app');
+    expect(JSON.parse(def.body.qr as string).relay).toBe('wss://relay.bundeck.app');
 
     // Con RELAY_URL en env → se propaga a relayUrl y al payload
     process.env.RELAY_URL = 'wss://relay.example.test';

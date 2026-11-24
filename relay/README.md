@@ -86,7 +86,7 @@ por mensaje). Límite: **64 KB** por mensaje; **60 msg/min por IP**.
 | `PORT` | — | Prioritario (lo inyectan openship/openpanel). Si no, `RELAY_PORT`. |
 | `RELAY_PORT` | `8787` | Puerto de escucha. |
 | `RELAY_TOKEN` | vacío (abierto, solo dev) | Secreto para WS y `POST /pair`. Generar: `openssl rand -hex 32`. |
-| `RELAY_DOMAIN` | vacío | URL que muestra la landing como `wss://…` y etiqueta de logs (p.ej. `bundeck.mikelgranero.com`). Si vacío, la landing autodetecta el `Host` del request. Acepta `dominio` o `wss://dominio`. |
+| `RELAY_DOMAIN` | vacío | URL que muestra la landing como `wss://…` y etiqueta de logs (p.ej. `relay.bundeck.app`). Si vacío, la landing autodetecta el `Host` del request. Acepta `dominio` o `wss://dominio`. |
 
 ### Personalizar la landing (RELAY_DOMAIN)
 
@@ -98,8 +98,8 @@ descarga si el navegador no tiene BarcodeDetector nativo como Safari),
 ES+EN según `Accept-Language` (default ES).
 
 ```bash
-# La URL visible será wss://bundeck.mikelgranero.com
-RELAY_DOMAIN=bundeck.mikelgranero.com
+# La URL visible será wss://relay.bundeck.app
+RELAY_DOMAIN=relay.bundeck.app
 ```
 
 - Con `RELAY_DOMAIN` vacío se usa el `Host` del request
@@ -131,7 +131,7 @@ cd relay
 docker build -t libredeck-relay:0.1.0 .
 docker run --rm -p 8787:8787 \
   -e RELAY_TOKEN="$(openssl rand -hex 32)" \
-  -e RELAY_DOMAIN=bundeck.mikelgranero.com \
+  -e RELAY_DOMAIN=relay.bundeck.app \
   -v relay-data:/data \
   libredeck-relay:0.1.0
 
@@ -141,7 +141,7 @@ docker compose up -d --build
 ```
 
 Openship-ready: respeta `$PORT`, expone `HEALTHCHECK /health`.
-Dominio previsto: `bundeck.mikelgranero.com` → reverse proxy TLS → `wss://` a este servicio
+Dominio previsto: `relay.bundeck.app` → reverse proxy TLS → `wss://` a este servicio
 (el relay no termina TLS por sí mismo; `wss` lo pone el proxy).
 
 ## Túnel inverso (exponer la web del daemon en internet)

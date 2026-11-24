@@ -49,7 +49,7 @@ export function buildTurnCreds(
 ): RtcTurnCreds | null {
   const secret = (env.TURN_SECRET ?? '').trim();
   if (!secret) return null;
-  const urlsRaw = (env.TURN_URLS ?? 'turn:bundeck.mikelgranero.com:3478').trim();
+  const urlsRaw = (env.TURN_URLS ?? 'turn:relay.bundeck.app:3478').trim();
   const urls = urlsRaw
     .split(/[,\s]+/)
     .map((s) => s.trim())

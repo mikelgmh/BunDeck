@@ -71,9 +71,9 @@ describe('relay landing (GET /)', () => {
   });
 
   test('RELAY_DOMAIN personaliza la URL mostrada', async () => {
-    const relay = startRelay({ publicHost: 'bundeck.mikelgranero.com' });
+    const relay = startRelay({ publicHost: 'relay.bundeck.app' });
     const html = await (await fetch(`http://127.0.0.1:${relay.port}/`)).text();
-    expect(html).toContain('wss://bundeck.mikelgranero.com');
+    expect(html).toContain('wss://relay.bundeck.app');
   });
 
   test('/health sigue JSON (contrato intacto)', async () => {

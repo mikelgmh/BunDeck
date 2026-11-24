@@ -35,7 +35,7 @@ describe('qrscan parser (classifyQrText)', () => {
   test('QR de emparejamiento BunDeck (formato GET /api/v1/remote/qr) → pair-qr', () => {
     const payload = {
       v: 1,
-      relay: 'wss://bundeck.mikelgranero.com',
+      relay: 'wss://relay.bundeck.app',
       code: '482913',
       dev: 'device-id-abc',
       pub: 'cHViLWtleQ==',
@@ -45,7 +45,7 @@ describe('qrscan parser (classifyQrText)', () => {
     const r = classifyQrText(JSON.stringify(payload));
     expect(r.kind).toBe('pair-qr');
     expect(r.code).toBe('482913');
-    expect(r.relay).toBe('wss://bundeck.mikelgranero.com');
+    expect(r.relay).toBe('wss://relay.bundeck.app');
     expect(r.expired).toBe(false);
   });
 
@@ -69,13 +69,13 @@ describe('qrscan parser (classifyQrText)', () => {
   });
 
   test('wss:// → relay-url', () => {
-    const r = classifyQrText('wss://bundeck.mikelgranero.com');
+    const r = classifyQrText('wss://relay.bundeck.app');
     expect(r.kind).toBe('relay-url');
-    expect(r.url).toBe('wss://bundeck.mikelgranero.com');
+    expect(r.url).toBe('wss://relay.bundeck.app');
   });
 
   test('…/ui/<code> → ui-url con urlCode', () => {
-    const r = classifyQrText('https://bundeck.mikelgranero.com/ui/AbC123xYz');
+    const r = classifyQrText('https://relay.bundeck.app/ui/AbC123xYz');
     expect(r.kind).toBe('ui-url');
     expect(r.urlCode).toBe('AbC123xYz');
   });
@@ -218,7 +218,7 @@ describe('landing: auto-ir ejecuta el JS inline real', () => {
   const { classify, autoGoUrl } = loadInlineScanner(renderLanding(landingData('es')));
 
   test('ui-url https → navega a la URL tal cual', () => {
-    const u = 'https://bundeck.mikelgranero.com/ui/AbC123xYz';
+    const u = 'https://relay.bundeck.app/ui/AbC123xYz';
     const c = classify(u);
     expect(c.kind).toBe('ui-url');
     expect(autoGoUrl(c)).toBe(u);
@@ -260,9 +260,9 @@ describe('landing: contratos intactos (pickLang/publicHostname)', () => {
 
   test('publicHostname: RELAY_DOMAIN gana; si no, x-forwarded-host; si no, Host', () => {
     const base = 'http://internal:8080/';
-    expect(publicHostname(new Request(base), 'bundeck.mikelgranero.com')).toBe('bundeck.mikelgranero.com');
-    expect(publicHostname(new Request(base), 'wss://bundeck.mikelgranero.com/')).toBe(
-      'bundeck.mikelgranero.com',
+    expect(publicHostname(new Request(base), 'relay.bundeck.app')).toBe('relay.bundeck.app');
+    expect(publicHostname(new Request(base), 'wss://relay.bundeck.app/')).toBe(
+      'relay.bundeck.app',
     );
     expect(
       publicHostname(

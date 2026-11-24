@@ -1,5 +1,5 @@
 # Ejemplo de despliegue con reverse proxy TLS delante (wss en prod).
-# Dominio previsto: bundeck.mikelgranero.com -> este servicio.
+# Dominio previsto: relay.bundeck.app -> este servicio.
 services:
   relay:
     build: .
@@ -11,7 +11,7 @@ services:
       # Openship/openpanel inyectan PORT automáticamente; se respeta tal cual.
       PORT: "8787"
       RELAY_TOKEN: "${RELAY_TOKEN:?pon RELAY_TOKEN en .env}"
-      RELAY_DOMAIN: "bundeck.mikelgranero.com"
+      RELAY_DOMAIN: "relay.bundeck.app"
       DATA_DIR: "/data"
     ports:
       - "8787:8787"

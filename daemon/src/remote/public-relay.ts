@@ -2,7 +2,7 @@
  * Relay público de BunDeck.
  *
  * Por defecto todos los daemons usan el relay público
- * (`wss://bundeck.mikelgranero.com`) sin necesidad de configurar nada:
+ * (`wss://relay.bundeck.app`) sin necesidad de configurar nada:
  * el emparejamiento entre equipos y la UI remota funcionan nada más
  * arrancar. Para usar un relay propio (o desactivarlo):
  *
@@ -13,7 +13,7 @@
  *   si el relay lo exige (el público no pide).
  */
 
-export const DEFAULT_PUBLIC_RELAY_URL = 'wss://bundeck.mikelgranero.com';
+export const DEFAULT_PUBLIC_RELAY_URL = 'wss://relay.bundeck.app';
 
 export interface RelaySettingsLike {
   getSetting: (key: string) => string | null;

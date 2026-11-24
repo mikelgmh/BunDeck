@@ -10,7 +10,7 @@ import { describe, expect, test } from 'bun:test';
  * se rechaza y POST /pair da 401. El modo con token se testea en local
  * en `auth.test.ts`.
  */
-const PROD = (process.env.RELAY_PROD_URL ?? 'https://bundeck.mikelgranero.com').replace(/\/$/, '');
+const PROD = (process.env.RELAY_PROD_URL ?? 'https://relay.bundeck.app').replace(/\/$/, '');
 
 function toWsUrl(httpUrl: string): string {
   if (httpUrl.startsWith('https://')) return 'wss://' + httpUrl.slice('https://'.length);
