@@ -45,8 +45,12 @@ Bun.serve({
       const res = await serveFile('index.html');
       if (res) return res;
     }
-    // No directory traversal: only serve inside DIR.
     const clean = path.replace(/^\/+/, '').replace(/\.\./g, '');
+    // Clean URLs: /features -> features.html (same design, no framework router).
+    if (clean === 'features') {
+      const res = await serveFile('features.html');
+      if (res) return res;
+    }
     if (clean === '' || clean.endsWith('/')) {
       const res = await serveFile('index.html');
       if (res) return res;

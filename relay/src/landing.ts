@@ -205,55 +205,87 @@ export function renderLanding(d: LandingData): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BunDeck Relay — ${d.lang === 'es' ? 'cómo conectar' : 'how to connect'}</title>
 <style>
-:root{color-scheme:light dark}
+:root{
+  --paper:#eeeeec; --ink:#202020; --muted:#626262; --line:#d6d6d3;
+  --panel:#e5e5e3; --dark:#3b3b3a; --dark-ink:#fff;
+  --ok:#2f7a3d; --ok-bg:#e2efe4; --ok-line:#bfd8c4; --err:#b3261e;
+}
 *{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:0;line-height:1.55;background:#0f172a;color:#e2e8f0}
-@media(prefers-color-scheme:light){body{background:#f1f5f9;color:#0f172a}}
-.wrap{max-width:720px;margin:0 auto;padding:32px 20px 64px}
-.badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;background:#052e16;color:#86efac;border:1px solid #166534;border-radius:999px;padding:4px 14px}
-.dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e}
-h1{font-size:32px;margin:16px 0 4px}
-.sub{opacity:.8;margin:0 0 24px}
-.card{background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.25);border-radius:14px;padding:18px 20px;margin:16px 0}
-.card h2{font-size:17px;margin:0 0 8px}
-ol{margin:8px 0;padding-left:22px}
-li{margin:12px 0}
-code{background:rgba(148,163,184,.18);padding:2px 7px;border-radius:6px;font-size:13.5px;word-break:break-all}
-.urlbox{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.urlbox code{flex:1;min-width:220px;font-size:15px;padding:10px 12px}
-button{cursor:pointer;border:0;border-radius:10px;padding:10px 18px;font-weight:700;background:#22c55e;color:#052e16}
-button:active{transform:scale(.97)}
-a.abtn{display:inline-block;text-decoration:none;background:#22c55e;color:#052e16;border-radius:10px;padding:10px 18px;font-weight:700}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.55}
+a{color:inherit}
+a:focus-visible,button:focus-visible{outline:2px solid #171717;outline-offset:3px;border-radius:3px}
+.site-header{width:min(1180px,calc(100% - 48px));margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:72px;border-bottom:1px solid var(--line)}
+.wordmark{display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:700;letter-spacing:-.5px;text-decoration:none}
+.brand-mark{display:block;width:32px;height:32px;flex:0 0 auto}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:650;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-line);border-radius:999px;padding:6px 14px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:#2f9e44}
+.wrap{width:min(760px,calc(100% - 40px));margin:0 auto;padding:0 0 64px}
+.hero{padding:56px 0 8px}
+.hero h1{margin:0 0 14px;font-size:clamp(44px,9vw,64px);line-height:.99;letter-spacing:-3.4px;font-weight:680}
+.sub{margin:0;color:var(--muted);font-size:15.5px;line-height:1.65;max-width:600px}
+.card{background:var(--panel);border-radius:14px;padding:30px 28px;margin:28px 0;color:var(--ink)}
+.card h2{margin:0 0 12px;font-size:clamp(30px,6vw,40px);font-weight:650;letter-spacing:-2px;line-height:1}
+.card p{margin:0 0 12px;color:#4a4a48;font-size:13.5px;line-height:1.7}
+.card p:last-child{margin-bottom:0}
+.card strong{color:var(--ink)}
+code{background:rgba(32,32,32,.08);padding:2px 7px;border-radius:6px;font-size:13px;word-break:break-all}
+ol{margin:8px 0 0;padding-left:22px;color:#4a4a48;font-size:13.5px;line-height:1.7}
+li{margin:14px 0}
+li strong{display:block;color:var(--ink);font-size:15px;margin-bottom:2px}
+.urlbox{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.urlbox code{flex:1;min-width:220px;font-size:14px;padding:12px 14px;background:#fff;border:1px solid var(--line)}
+button{cursor:pointer;border:1px solid var(--dark);border-radius:7px;padding:12px 18px;font-weight:650;font-size:13px;background:var(--dark);color:var(--dark-ink);transition:transform 160ms ease,background 160ms ease}
+button:hover{background:#50504f}
+button:active{transform:translateY(1px)}
+a.abtn{display:inline-block;text-decoration:none;border:1px solid var(--dark);background:var(--dark);color:var(--dark-ink);border-radius:7px;padding:12px 18px;font-weight:650;font-size:13px}
 [hidden]{display:none!important}
-#qrscan-video{width:100%;max-height:320px;border-radius:10px;background:#000;object-fit:cover;margin-top:10px}
-#qrscan-paste{width:100%;box-sizing:border-box;border-radius:10px;padding:10px 12px;font:inherit;font-size:13.5px;background:rgba(148,163,184,.12);color:inherit;border:1px solid rgba(148,163,184,.25);margin-top:10px}
+#qrscan-video{width:100%;max-height:320px;border-radius:10px;background:#000;object-fit:cover;margin-top:12px}
+#qrscan-paste{width:100%;box-sizing:border-box;border-radius:7px;padding:10px 12px;font:inherit;font-size:13.5px;background:#fff;color:var(--ink);border:1px solid var(--line);margin-top:10px}
 .btnrow{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-.err{color:#f87171;font-size:13px}
-.kind{display:inline-block;font-size:12.5px;font-weight:700;background:rgba(34,197,94,.15);border:1px solid #166534;border-radius:999px;padding:2px 10px}
-.bigcode{font-size:30px;letter-spacing:8px;font-weight:800;margin:8px 0}
+.err{color:var(--err);font-size:13px}
+.kind{display:inline-block;font-size:12px;font-weight:700;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-line);border-radius:999px;padding:2px 10px}
+.bigcode{font-size:30px;letter-spacing:8px;font-weight:800;margin:8px 0;color:var(--ink)}
 .resbox{margin-top:10px}
-.resbox code{display:block}
-.hint{font-size:13px;opacity:.75;margin-top:8px}
-.stats{display:flex;gap:22px;flex-wrap:wrap;font-size:14px}
-.stats b{font-size:22px;display:block}
-a{color:#4ade80}
-.foot{margin-top:28px;font-size:12.5px;opacity:.6;text-align:center}
+.resbox code{display:block;background:#fff;border:1px solid var(--line)}
+.hint{font-size:12px;color:var(--muted);line-height:1.6;margin-top:10px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid #c7c7c4;margin-top:14px}
+.stat{padding:16px 18px 0 0}
+.stat+.stat{padding-left:18px;border-left:1px solid #c7c7c4}
+.stat b{display:block;font-size:26px;font-weight:650;letter-spacing:-1px}
+.stat span{font-size:12px;color:#5f5f5d}
+.docsline{margin:24px 0 0;font-size:13px}
+.docsline a{color:#333;text-decoration:underline;text-underline-offset:3px}
+.docsline a:hover{color:#000}
+.apiline{font-size:12px;color:var(--muted);margin:10px 0 0}
+.site-footer{width:min(760px,calc(100% - 40px));margin:0 auto;min-height:72px;border-top:1px solid var(--line);color:#777;font-size:11px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+@media(max-width:560px){
+  .card{padding:24px 20px}
+  .stats{grid-template-columns:1fr}
+  .stat{padding:14px 0}
+  .stat+.stat{padding-left:0;border-left:0;border-top:1px solid #c7c7c4}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
+<header class="site-header">
+<a class="wordmark" href="/"><span class="brand-mark"><svg viewBox="0 0 64 64" aria-hidden="true" width="32" height="32"><defs><linearGradient id="bdg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4d9a8"/><stop offset=".6" stop-color="#e3b77a"/><stop offset="1" stop-color="#c98f52"/></linearGradient></defs><ellipse cx="32" cy="55" rx="21" ry="4" opacity=".2"/><path d="M7 40c0-18 10-29 25-29s25 11 25 29c0 9-7 14-25 14S7 49 7 40" fill="url(#bdg)"/><path d="M14 27c3-8 9-12 16-13" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/><ellipse cx="19" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><ellipse cx="45" cy="42" rx="3.5" ry="2.5" fill="#e0806a" opacity=".5"/><circle cx="24" cy="37" r="2.6" fill="#33200f"/><circle cx="40" cy="37" r="2.6" fill="#33200f"/><path d="M28 42c2 3 6 3 8 0" fill="none" stroke="#33200f" stroke-width="2" stroke-linecap="round"/></svg></span><span>BunDeck Relay</span></a>
 <span class="badge"><span class="dot"></span>${t.badge} · v${esc(d.version)}</span>
+</header>
+<div class="wrap">
+<div class="hero">
 <h1>BunDeck Relay</h1>
 <p class="sub">${t.subtitle}</p>
+<div class="urlbox"><code id="relay-url">${ws}</code><button id="copy-btn" type="button">${t.copy}</button></div>
+<p class="hint">${t.urlLabel} · ${t.tokenHint}</p>
+</div>
 <div class="card"><h2>${t.whatTitle}</h2><p>${t.what}</p></div>
 <div class="card"><h2>${t.transportTitle}</h2><p>${t.transport}</p></div>
 <div class="card"><h2>${t.stepsTitle}</h2>
 <ol>
-<li><strong>${t.s1t}</strong><br>${t.s1b}</li>
-<li><strong>${t.s2t}</strong><br>${t.s2b}
-<div class="urlbox"><code id="relay-url">${ws}</code><button id="copy-btn" type="button">${t.copy}</button></div>
-<div class="hint">${t.urlLabel} · ${t.tokenHint}</div></li>
-<li><strong>${t.s3t}</strong><br>${t.s3b}</li>
+<li><strong>${t.s1t}</strong>${t.s1b}</li>
+<li><strong>${t.s2t}</strong>${t.s2b}</li>
+<li><strong>${t.s3t}</strong>${t.s3b}</li>
 </ol>
 </div>
 <div class="card"><h2>${t.scanTitle}</h2>
@@ -278,14 +310,14 @@ a{color:#4ade80}
 </div>
 <div class="card"><h2>${t.statusTitle}</h2>
 <div class="stats">
-<div><b>${d.online}</b>${t.online}</div>
-<div><b>${d.devices}</b>${t.known}</div>
-<div><b>v${esc(d.version)}</b>${t.version}</div>
+<div class="stat"><b>${d.online}</b><span>${t.online}</span></div>
+<div class="stat"><b>${d.devices}</b><span>${t.known}</span></div>
+<div class="stat"><b>v${esc(d.version)}</b><span>${t.version}</span></div>
 </div></div>
-<p><a href="https://github.com/mikelgmh/BunDeck/tree/master/relay">${t.docs} →</a></p>
-<p style="font-size:13px;opacity:.7">${t.api}</p>
-<p class="foot">${t.footer}</p>
+<p class="docsline"><a href="https://github.com/mikelgmh/BunDeck/tree/master/relay">${t.docs} →</a></p>
+<p class="apiline">${t.api}</p>
 </div>
+<footer class="site-footer"><span>BunDeck Relay</span><span>${t.footer}</span></footer>
 <script>
 (function(){var b=document.getElementById('copy-btn'),u=document.getElementById('relay-url');if(!b||!u)return;var done='${t.copied}';b.addEventListener('click',function(){var txt=u.textContent||'';function ok(){var o=b.textContent;b.textContent=done;setTimeout(function(){b.textContent=o;},1500);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(ok,ok);}else{var ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok();}});})();
 </script>
