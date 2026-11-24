@@ -182,11 +182,11 @@ jobs:
     - name: Build CLI
       shell: bash
       env:
-        BUNDECK_VERSION: ${{ steps.version.outputs.version }}
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
         cd cli
         bun run build
-        mv bundeck-cli${{ matrix.ext }} ../bundeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
+        mv libredeck-cli${{ matrix.ext }} ../libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
     - name: "Setup Rust (all OS: launcher + updater ship everywhere)"
       uses: dtolnay/rust-toolchain@stable
@@ -200,8 +200,8 @@ jobs:
     - name: Build launcher + updater (all OS)
       shell: bash
       env:
-        BUNDECK_VERSION: ${{ steps.version.outputs.version }}
-        BUNDECK_UPDATE_PUBKEY: ${{ secrets.BUNDECK_UPDATE_PUBKEY }}
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
+        LIBREDECK_UPDATE_PUBKEY: ${{ secrets.LIBREDECK_UPDATE_PUBKEY }}
       run: |
         cd launcher
         cargo build --release
@@ -217,7 +217,7 @@ jobs:
     - name: Build Unified Daemon
       shell: bash
       env:
-        BUNDECK_VERSION: ${{ steps.version.outputs.version }}
+        LIBREDECK_VERSION: ${{ steps.version.outputs.version }}
       run: |
         cd daemon
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -225,18 +225,18 @@ jobs:
         else
           bun run build
         fi
-        mv bundeck-daemon${{ matrix.ext }} ../bundeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
+        mv libredeck-daemon${{ matrix.ext }} ../libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }}
 
     - name: Assemble managed bundle (daemon+cli+launcher+updater+web)
       shell: bash
       run: |
         rm -rf dist
         mkdir -p dist
-        cp bundeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/bundeck-daemon${{ matrix.ext }}"
-        cp bundeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/bundeck-cli${{ matrix.ext }}"
+        cp libredeck-daemon-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/libredeck-daemon${{ matrix.ext }}"
+        cp libredeck-cli-v${{ steps.version.outputs.version }}-${{ matrix.target }}${{ matrix.ext }} "dist/libredeck-cli${{ matrix.ext }}"
         LAUNCHER_EXT="${{ matrix.ext }}"
-        cp launcher/target/release/bundeck-launcher${LAUNCHER_EXT} "dist/bundeck-launcher${LAUNCHER_EXT}"
-        cp launcher/target/release/bundeck-updater${LAUNCHER_EXT} "dist/bundeck-updater${LAUNCHER_EXT}"
+        cp launcher/target/release/libredeck-launcher${LAUNCHER_EXT} "dist/libredeck-launcher${LAUNCHER_EXT}"
+        cp launcher/target/release/libredeck-updater${LAUNCHER_EXT} "dist/libredeck-updater${LAUNCHER_EXT}"
         mkdir -p dist/web-dist
         cp -r web/dist/* dist/web-dist/
         echo "{\"version\":\"${{ steps.version.outputs.version }}\"}" > dist/active.json
@@ -261,7 +261,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: bundeck-${{ matrix.os }}
+        name: libredeck-${{ matrix.os }}
         path: |
           bundeck-v*-${{ matrix.target }}.zip
           bundeck-v*-${{ matrix.target }}.zip.sha256
@@ -306,7 +306,6 @@ jobs:
 
     - name: Build update manifest (signed if secret present)
       env:
-        BUNDECK_UPDATE_PRIVKEY: ${{ secrets.BUNDECK_UPDATE_PRIVKEY }}
         LIBREDECK_UPDATE_PRIVKEY: ${{ secrets.LIBREDECK_UPDATE_PRIVKEY }}
         VERSION: ${{ needs.release-version.outputs.version }}
       run: |
