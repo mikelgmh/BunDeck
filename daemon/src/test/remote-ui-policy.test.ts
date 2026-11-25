@@ -39,10 +39,12 @@ async function remoteCall(p: string, method: string, body?: any) {
   const init: RequestInit = { method, headers: { 'content-type': 'application/json' } };
   if (body !== undefined) init.body = JSON.stringify(body);
   const req = new Request(`http://localhost:3001${p}`, init);
+  const url = new URL(`http://localhost:3001${p}`);
   const res = await handleRemote(req, {
-    url: new URL(`http://localhost:3001${p}`),
+    url,
     method,
-    path: p,
+    // Como en producción (routes.ts): solo el pathname, sin query.
+    path: url.pathname,
     db,
     services,
   });
@@ -210,6 +212,59 @@ describe('remote-ui: pendientes + aprobación', () => {
       .toThrow(/denegado o expirado/i);
     const logs = db.getLogs(50).map((l) => l.message).join('\n');
     expect(logs).toMatch(/caducado/i);
+  });
+});
+
+describe('remote-ui: nombre de dispositivo en la sesión', () => {
+  async function approvedSession() {
+    enableUi();
+    const c = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
+    const q = enqueueUiRequest(db, { urlCode: c.body.urlCode, ua: 'iPad Safari', ip: '10.0.0.9' });
+    const a = await remoteCall(`/api/v1/remote/ui-pending/${q.reqId}/allow`, 'POST', {});
+    expect(a.status).toBe(200);
+    const token = String(a.body.sessionToken);
+    return { token, prefix: token.slice(0, 8) };
+  }
+
+  it('POST device-name guarda + GET por token lo devuelve', async () => {
+    const { token, prefix } = await approvedSession();
+    const set = await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: 'iPad Safari' });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ok: true, tokenPrefix: prefix, renamed: [] });
+    const got = await remoteCall(`/api/v1/remote/ui-session/device-name?token=${token}`, 'GET');
+    expect(got.status).toBe(200);
+    expect(got.body).toEqual({ deviceName: 'iPad Safari' });
+    // Sin nombre → null.
+    const { token: t2, prefix: p2 } = await approvedSession();
+    void p2;
+    const got2 = await remoteCall(`/api/v1/remote/ui-session/device-name?token=${t2}`, 'GET');
+    expect(got2.body).toEqual({ deviceName: null });
+  });
+
+  it('renombra de inmediato el dispositivo ya vinculado', async () => {
+    const { prefix } = await approvedSession();
+    db.createDevice({ id: 'dev-remote-1', name: 'Safari', kind: 'browser', model: null, cols: null, rows: null, hw_path: null });
+    const { bindDeviceToToken } = await import('../remote/device-bindings');
+    const all = db.getAllSettings();
+    const tokKey = Object.keys(all).find((k) => k.startsWith('remote.ui.session.'))!;
+    const fullToken = tokKey.slice('remote.ui.session.'.length);
+    bindDeviceToToken(db, 'ui', 'dev-remote-1', fullToken);
+    const set = await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: 'iPad Salón' });
+    expect(set.body).toMatchObject({ ok: true, renamed: ['dev-remote-1'] });
+    expect(db.getDevice('dev-remote-1')?.name).toBe('iPad Salón');
+  });
+
+  it('valida: vacío y largo → 400, prefijo/token desconocido → 404, apagado → 403', async () => {
+    enableUi();
+    const { prefix, token } = await approvedSession();
+    expect((await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: '  ' })).status).toBe(400);
+    expect((await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: 'x'.repeat(81) })).status).toBe(400);
+    expect((await remoteCall('/api/v1/remote/ui-sessions/deadbeef/device-name', 'POST', { name: 'X' })).status).toBe(404);
+    expect((await remoteCall('/api/v1/remote/ui-session/device-name?token=' + '00'.repeat(32), 'GET')).status).toBe(404);
+    expect((await remoteCall(`/api/v1/remote/ui-session/device-name?token=${token}`, 'GET')).status).toBe(200);
+    db.setSetting('remote.ui.enabled', '0');
+    expect((await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: 'X' })).status).toBe(403);
+    expect((await remoteCall(`/api/v1/remote/ui-session/device-name?token=${token}`, 'GET')).status).toBe(403);
   });
 });
 

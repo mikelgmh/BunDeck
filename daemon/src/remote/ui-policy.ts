@@ -60,6 +60,8 @@ export interface UiSession {
   ua: string;
   ip: string;
   revoked: boolean;
+  /** Nombre propuesto por el dueño al aprobar (se usa como nombre del dispositivo). */
+  deviceName?: string;
 }
 
 export interface UiSessionView {
@@ -448,6 +450,67 @@ export function revokeUiSessionByPrefix(
     }
   }
   return null;
+}
+
+/**
+ * Localiza una sesión por prefijo (8 chars) SIN modificarla.
+ * null si no existe o está corrupta.
+ */
+export function findUiSessionByPrefix(
+  db: DatabaseService,
+  prefix: string,
+): { token: string; session: UiSession } | null {
+  const want = String(prefix ?? '').slice(0, 8);
+  if (!want) return null;
+  let all: Record<string, string> = {};
+  try {
+    all = db.getAllSettings();
+  } catch {
+    return null;
+  }
+  for (const [k, v] of Object.entries(all)) {
+    if (!k.startsWith(UI_SESSION_PREFIX)) continue;
+    const token = k.slice(UI_SESSION_PREFIX.length);
+    if (token.slice(0, 8) !== want) continue;
+    try {
+      return { token, session: JSON.parse(v) as UiSession };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Lee una sesión por token COMPLETO (solo quien lo posee la conoce). */
+export function readUiSessionByToken(db: DatabaseService, token: string): UiSession | null {
+  return readSession(db, String(token ?? ''));
+}
+
+/**
+ * Guarda el nombre de dispositivo propuesto por el dueño al aprobar.
+ * Lo persiste en la sesión (el móvil lo adopta al arrancar con su token)
+ * y devuelve el token completo para renombrar de inmediato si el
+ * dispositivo ya conectó. Solo valida longitud; el API layer decide
+ * quién puede llamar (igual que allow/deny).
+ */
+export function setUiSessionDeviceName(
+  db: DatabaseService,
+  prefix: string,
+  name: string,
+): { ok: boolean; token?: string; error?: string } {
+  const clean = String(name ?? '').trim();
+  if (!clean) return { ok: false, error: 'Nombre vacío' };
+  if (clean.length > 80) return { ok: false, error: 'Nombre demasiado largo (máx 80)' };
+  const hit = findUiSessionByPrefix(db, prefix);
+  if (!hit) return { ok: false, error: 'Sesión desconocida' };
+  try {
+    const next: UiSession = { ...hit.session, deviceName: clean };
+    db.setSetting(`${UI_SESSION_PREFIX}${hit.token}`, JSON.stringify(next));
+  } catch {
+    return { ok: false, error: 'No se pudo guardar' };
+  }
+  audit(db, `[remote-ui] nombre de dispositivo propuesto (prefijo ${hit.token.slice(0, 8)}): ${clean}`);
+  return { ok: true, token: hit.token };
 }
 
 /** Persiste en settings una sesión cuyo token generó el túnel (ui-bind). */

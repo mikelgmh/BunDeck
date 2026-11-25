@@ -620,6 +620,16 @@ export function useRemote() {
     await loadUiSessions().catch(() => {})
   }
 
+  /** Guarda el nombre propuesto para una sesión aprobada (vista de éxito). */
+  const setSessionDeviceName = async (prefix: string, name: string) => {
+    uiError.value = ''
+    await uiFetch(`/remote/ui-sessions/${encodeURIComponent(prefix)}/device-name`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    })
+    await loadUiSessions().catch(() => {})
+  }
+
   const clearJustToken = () => {
     uiJustToken.value = ''
   }
@@ -667,6 +677,7 @@ export function useRemote() {
     allowPending,
     denyPending,
     revokeSession,
+    setSessionDeviceName,
     clearJustToken,
     onRemoteEvent,
     // Invitaciones LAN (QR/enlace)

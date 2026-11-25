@@ -8,7 +8,7 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
-import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe, isBroadcastNav } from '../utils/sessionRouting'
+import { getOrCreateDeviceId, deviceDefaultName, isNavigationForMe, isBroadcastNav } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 /** Icono Lucide por defecto para teclas recién creadas (nombre PascalCase,
@@ -165,6 +165,9 @@ export function useStreamDeck() {
   // Sesión propia del dispositivo: vista profile/page independiente por
   // browser (el daemon la persiste y la restaura al reconectar).
   const deviceId = ref(getOrCreateDeviceId())
+  /** Nombre propuesto por el dueño al aprobar (sesión UI remota). */
+  const tunnelDeviceName = ref<string | null>(null)
+  const lastHelloName = ref('')
   const clientId = ref<string | null>(null)
   const sessionStartupProfileId = ref<string | null>(null)
   // Clientes conectados y su vista actual (GET /sessions).
@@ -547,14 +550,16 @@ export function useStreamDeck() {
     // Sesión propia: el daemon restaura nuestra vista (reconexión) o
     // aplica el startup profile asignado, y responde `session.state`.
     // Invitado LAN: la invitación viaja en `hello` (o ya en el query).
+    // Nombre visible: el propuesto por el dueño al aprobar (túnel) o el
+    // modelo + navegador ("iPad Safari") en vez del genérico.
+    const helloName = tunnelDeviceName.value ?? deviceDefaultName()
+    lastHelloName.value = helloName
     ws.send(JSON.stringify({
       type: 'hello',
       payload: {
         deviceId: deviceId.value,
         kind: 'browser',
-        // Nombre visible en las listas: la familia real (Chrome, Edge…)
-        // en vez del genérico, para distinguir varios orígenes.
-        name: browserFamilyName(),
+        name: helloName,
         ...(lanSession.value ? { invite: lanSession.value } : {}),
         // UI remota (túnel): el token viaja en la URL (/t/...). Se
         // reenvía para vincular deviceId ↔ sesión (revocar = ocultar).
@@ -578,11 +583,33 @@ export function useStreamDeck() {
       if (sendHello()) scheduleHelloRetry()
     }, 4000)
   }
+  // Nombre propuesto por el dueño al aprobar (solo ruta túnel): el daemon
+  // lo guarda en la sesión y este cliente lo adopta como nombre visible.
+  // Se pide en cada (re)conexión para converger aunque el dueño lo fije
+  // tarde; si difiere del último hello enviado, se reenvía.
+  const loadTunnelDeviceName = async () => {
+    const token = getTunnelToken()
+    if (!token) return
+    try {
+      const res = await fetch(
+        `${tunnelApiBase(token)}/remote/ui-session/device-name?token=${encodeURIComponent(token)}`,
+        { signal: AbortSignal.timeout(8000) }
+      )
+      if (!res.ok) return
+      const data = await res.json().catch(() => null)
+      const name = typeof data?.deviceName === 'string' && data.deviceName.trim() ? data.deviceName.trim().slice(0, 80) : null
+      tunnelDeviceName.value = name
+      if (name && ws && ws.readyState === 1 && name !== lastHelloName.value) sendHello()
+    } catch { /* sin nombre propuesto: se queda el local */ }
+  }
   const connectWebSocket = () => {
     try {
       clearHelloTimer()
       helloAcked = false
       helloAttempts = 0
+      // En túnel, el nombre propuesto por el dueño llega en paralelo al
+      // hello (y lo corrige con un segundo hello si hace falta).
+      void loadTunnelDeviceName()
       ws = new WebSocket(WS_URL.value)
 
       ws.onopen = () => {

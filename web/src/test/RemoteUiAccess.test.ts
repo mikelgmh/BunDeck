@@ -396,10 +396,10 @@ describe('RemotePane UI remota', () => {
       )
     })
 
-    async function openApproval() {
+    async function openApproval(ua = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1') {
       const { fn } = makeFetch({
         uiEnabled: true,
-        pending: [{ reqId: 'req-1', urlCode: 'abc123', ua: 'Mobile', ip: '1.2.3.4', createdAt: Date.now() }],
+        pending: [{ reqId: 'req-1', urlCode: 'abc123', ua, ip: '1.2.3.4', createdAt: Date.now() }],
       })
       vi.stubGlobal('fetch', fn)
       const wrapper = mount(RemotePane)
@@ -418,7 +418,15 @@ describe('RemotePane UI remota', () => {
     })
 
     it('allow → vista de éxito con "probando P2P" y cerrar', async () => {
-      const wrapper = await openApproval()
+      const { fn, calls } = makeFetch({
+        uiEnabled: true,
+        pending: [{ reqId: 'req-1', urlCode: 'abc123', ua: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', ip: '1.2.3.4', createdAt: Date.now() }],
+      })
+      vi.stubGlobal('fetch', fn)
+      const wrapper = mount(RemotePane)
+      await flushPromises()
+      await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+      await flushPromises()
       await wrapper.find('[data-cy="remote-ui-approval-allow"]').trigger('click')
       await flushPromises()
       // Vista de éxito: muestra el navegador y el transporte conectando.
@@ -429,9 +437,17 @@ describe('RemotePane UI remota', () => {
       expect(badge.text()).toContain('bd.remoteUiApprovedConnecting')
       // Spinner de carga mientras se intenta el P2P.
       expect(badge.find('.bd-spin').exists()).toBe(true)
-      // Cerrar vuelve a dejar el diálogo oculto.
+      // Input con el nombre sugerido (modelo + navegador que vio el relay).
+      const nameInput = wrapper.find('[data-cy="remote-ui-device-name"]')
+      expect(nameInput.exists()).toBe(true)
+      expect((nameInput.element as HTMLInputElement).value).toBe('iPad Safari')
+      // Guardar envía el nombre a la sesión y cierra.
+      await nameInput.setValue('iPad Salón')
       await wrapper.find('[data-cy="remote-ui-approval-close"]').trigger('click')
       await flushPromises()
+      const posted = calls.find((c) => c.url.includes('/device-name') && c.init?.method === 'POST')
+      expect(posted).toBeTruthy()
+      expect(String(posted!.init?.body)).toContain('iPad Salón')
       expect(wrapper.find('[data-cy="remote-ui-approved-transport"]').exists()).toBe(false)
       wrapper.unmount()
     })

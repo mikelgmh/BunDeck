@@ -18,6 +18,7 @@ import { generatePairCode, acceptInvite, listDevices, listPending, revokeDevice,
 import {
   isUiEnabled, setUiEnabled, relayHttpsUrl, createUiCode, revokeUiCode, listUiPendingCombined,
   approveUiPending, denyUiPending, listUiSessions, revokeUiSessionByPrefix,
+  setUiSessionDeviceName, readUiSessionByToken, validateUiSession,
   notifyTunnelUiUnbind,
 } from '../remote/ui-policy';
 import {
@@ -285,6 +286,47 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     if (!isUiEnabled(db)) return uiDisabled();
     // Solo prefijos: el token completo jamás sale del servidor salvo al aprobar.
     return jsonResponse({ sessions: listUiSessions(db) });
+  }
+
+  // Nombre del dispositivo propuesto al aprobar (lo escribe el dueño en la
+  // vista de éxito; el móvil lo adopta al arrancar con su token). Si el
+  // dispositivo ya conectó, se renombra de inmediato.
+  const devNameMatch = path.match(/^\/api\/v1\/remote\/ui-sessions\/([^/]+)\/device-name$/);
+  if (devNameMatch && method === 'POST') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const prefix = decodeURIComponent(devNameMatch[1]).slice(0, 8);
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const clean = String(body?.name ?? '').trim().slice(0, 80);
+    const r = setUiSessionDeviceName(db, prefix, String(body?.name ?? ''));
+    if (!r.ok) return jsonResponse({ error: r.error ?? 'No se pudo guardar' }, r.error === 'Sesión desconocida' ? 404 : 400);
+    // Renombrado inmediato si el dispositivo ya está vinculado a la sesión.
+    let renamed: string[] = [];
+    try {
+      for (const deviceId of devicesForTokenPrefix(db, 'ui', prefix)) {
+        const updated = db.updateDevice(deviceId, { name: clean });
+        if (updated) {
+          try { db.upsertDeviceSession({ device_id: deviceId, name: updated.name }); } catch { /* noop */ }
+          renamed.push(deviceId);
+        }
+      }
+      if (renamed.length > 0) {
+        try { services.wsManager?.broadcast('device.updated', { deviceIds: renamed, ts: Date.now() }, 'pages'); } catch { /* noop */ }
+      }
+    } catch { /* la sesión ya guarda el nombre: el móvil lo adopta al arrancar */ }
+    try { services.wsManager?.broadcast('remote.ui-device-name', { tokenPrefix: prefix, name: clean, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true, tokenPrefix: prefix, renamed });
+  }
+
+  // Nombre propuesto para la sesión del llamante (el móvil lo pide al
+  // arrancar con su token completo: solo quien lo posee lo conoce).
+  if (path === '/api/v1/remote/ui-session/device-name' && method === 'GET') {
+    if (!isUiEnabled(db)) return uiDisabled();
+    const token = String(url.searchParams.get('token') ?? '');
+    const v = validateUiSession(db, token);
+    if (!v.ok) return jsonResponse({ error: `Sesión ${v.reason ?? 'desconocida'}` }, 404);
+    const s = readUiSessionByToken(db, token);
+    return jsonResponse({ deviceName: typeof s?.deviceName === 'string' && s.deviceName ? s.deviceName : null });
   }
 
   const sessDel = path.match(/^\/api\/v1\/remote\/ui-sessions\/([^/]+)$/);

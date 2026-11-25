@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getOrCreateDeviceId, browserFamilyName, isNavigationForMe, describeNavTarget } from '../utils/sessionRouting'
+import { getOrCreateDeviceId, browserFamilyName, parseDeviceUserAgent, deviceDefaultName, isNavigationForMe, describeNavTarget } from '../utils/sessionRouting'
 
 function memStorage(): Pick<Storage, 'getItem' | 'setItem'> & { data: Record<string, string> } {
   const data: Record<string, string> = {}
@@ -44,6 +44,36 @@ describe('sessionRouting: browserFamilyName', () => {
   it('sin datos devuelve el genérico', () => {
     expect(browserFamilyName({ userAgent: '' })).toBe('Navegador')
     expect(browserFamilyName({})).toBe('Navegador')
+  })
+})
+
+describe('sessionRouting: deviceDefaultName', () => {
+  const IPAD_SAFARI = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+  const IPAD_DESKTOP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+  const IPHONE_SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+  const ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+  const WIN_EDGE = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
+  const MAC_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15'
+  const LINUX_FF = 'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0'
+
+  it('compone modelo + navegador', () => {
+    expect(deviceDefaultName(IPAD_SAFARI)).toBe('iPad Safari')
+    expect(deviceDefaultName(IPHONE_SAFARI)).toBe('iPhone Safari')
+    expect(deviceDefaultName(ANDROID_CHROME)).toBe('Android Chrome')
+    expect(deviceDefaultName(WIN_EDGE)).toBe('Windows Edge')
+    expect(deviceDefaultName(MAC_SAFARI)).toBe('macOS Safari')
+    expect(deviceDefaultName(LINUX_FF)).toBe('Linux Firefox')
+  })
+
+  it('detecta iPad en modo escritorio (Macintosh + Mobile)', () => {
+    expect(parseDeviceUserAgent(IPAD_DESKTOP)).toEqual({ model: 'iPad', browser: 'Safari' })
+    expect(deviceDefaultName(IPAD_DESKTOP)).toBe('iPad Safari')
+  })
+
+  it('sin UA o irreconocible devuelve el genérico', () => {
+    expect(deviceDefaultName('')).toBe('Navegador')
+    expect(deviceDefaultName('curl/8.0')).toBe('Navegador')
+    expect(deviceDefaultName('Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)')).toBe('iPad')
   })
 })
 

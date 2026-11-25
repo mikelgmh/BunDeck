@@ -36,14 +36,69 @@ export function browserFamilyName(nav?: any | null): string {
     const ua = String(n?.userAgent ?? '')
     const brands: Array<{ brand?: string }> = n?.userAgentData?.brands ?? []
     const b = brands.map((x) => String(x?.brand ?? '').toLowerCase()).join(' ')
-    if (b.includes('brave') || !!(n as any)?.brave) return 'Brave'
-    if (/edg/i.test(ua) || b.includes('edge') || /(^|\s)edg($|\s)/.test(b)) return 'Edge'
-    if (/opr\/|opera|opt\//i.test(ua) || b.includes('opera')) return 'Opera'
-    if (/firefox|fxios/i.test(ua)) return 'Firefox'
-    if (/chrome|chromium|crios/i.test(ua) || b.includes('chromium') || b.includes('chrome')) return 'Chrome'
-    if (/safari/i.test(ua)) return 'Safari'
+    return browserFamilyFromUa(ua, b, !!(n as any)?.brave)
   } catch { /* sin navigator: nombre genérico */ }
   return 'Navegador'
+}
+
+/** Núcleo puro de detección de navegador sobre un UA ya extraído. */
+function browserFamilyFromUa(ua: string, brandsLower: string, braveFlag: boolean): string {
+  try {
+    if (braveFlag || brandsLower.includes('brave')) return 'Brave'
+    if (/edg/i.test(ua) || brandsLower.includes('edge') || /(^|\s)edg($|\s)/.test(brandsLower)) return 'Edge'
+    if (/opr\/|opera|opt\//i.test(ua) || brandsLower.includes('opera')) return 'Opera'
+    if (/firefox|fxios/i.test(ua)) return 'Firefox'
+    if (/chrome|chromium|crios/i.test(ua) || brandsLower.includes('chromium') || brandsLower.includes('chrome')) return 'Chrome'
+    if (/safari/i.test(ua)) return 'Safari'
+  } catch { /* noop */ }
+  return 'Navegador'
+}
+
+export interface ParsedDevice {
+  /** Modelo legible: iPad | iPhone | Android | Windows | macOS | Linux | '' */
+  model: string
+  /** Familia de navegador (igual que browserFamilyName). */
+  browser: string
+}
+
+/**
+ * Modelo de dispositivo + navegador a partir de un UA crudo.
+ * Sirve para sugerir el nombre al aprobar ("iPad Safari"): el diálogo del
+ * anfitrión solo tiene el UA que vio el relay, sin objeto navigator.
+ */
+export function parseDeviceUserAgent(ua: unknown): ParsedDevice {
+  const s = String(ua ?? '')
+  let model = ''
+  if (/ipad/i.test(s)) model = 'iPad'
+  else if (/iphone/i.test(s)) model = 'iPhone'
+  // iPadOS 13+: el UA finge ser de escritorio ("Macintosh") pero con Mobile.
+  else if (/macintosh/i.test(s) && /mobile/i.test(s)) model = 'iPad'
+  else if (/android/i.test(s)) model = 'Android'
+  else if (/windows nt/i.test(s)) model = 'Windows'
+  else if (/mac os x|macintosh/i.test(s)) model = 'macOS'
+  else if (/linux/i.test(s)) model = 'Linux'
+  return { model, browser: browserFamilyFromUa(s, '', false) }
+}
+
+/**
+ * Nombre por defecto para un dispositivo ("iPad Safari", "Windows Edge").
+ * Sin UA usa el navegador propio (con detección Brave incluida); con UA
+ * ajeno (p. ej. el que vio el relay) solo se puede inferir del texto, así
+ * que un Brave en iOS se leerá como Chrome.
+ */
+export function deviceDefaultName(ua?: string): string {
+  const nav = typeof navigator !== 'undefined' ? navigator : null
+  const raw = typeof ua === 'string' ? ua : String((nav as any)?.userAgent ?? '')
+  if (!raw.trim()) return 'Navegador'
+  const brands: Array<{ brand?: string }> = (nav as any)?.userAgentData?.brands ?? []
+  const b = ua === undefined ? brands.map((x) => String(x?.brand ?? '').toLowerCase()).join(' ') : ''
+  // Brave solo se detecta en el navegador propio (navigator.brave / brands);
+  // con un UA ajeno no hay forma de distinguirlo de Chrome.
+  const brave = ua === undefined && (!!(nav as any)?.brave || b.includes('brave'))
+  const { model } = parseDeviceUserAgent(raw)
+  const browser = browserFamilyFromUa(raw, b, brave)
+  const name = [model, browser === 'Navegador' ? '' : browser].filter(Boolean).join(' ')
+  return name || 'Navegador'
 }
 
 /**

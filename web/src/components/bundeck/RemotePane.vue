@@ -51,10 +51,22 @@
           <p class="bd-hint">
             <span class="bd-tag-def" :data-transport="approvedTransport" data-cy="remote-ui-approved-transport"><LoaderCircle v-if="approvedTransport === 'connecting'" :size="12" class="bd-spin" aria-hidden="true" />{{ approvedTransportLabel }}</span>
           </p>
+          <label class="bd-fld" style="grid-column: 1 / -1">
+            <span class="bd-lb">{{ t('bd.deviceName') }}</span>
+            <input
+              class="bd-inp"
+              data-cy="remote-ui-device-name"
+              v-model="deviceNameInput"
+              maxlength="80"
+              :placeholder="t('bd.deviceName')"
+              autocomplete="off"
+            />
+          </label>
+          <p class="bd-hint">{{ t('bd.remoteUiDeviceNameHint') }}</p>
           <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
         </div>
         <div class="bd-remote-approval__actions">
-          <button class="bd-btn bd-pri" data-cy="remote-ui-approval-close" @click="closeApprovalSuccess">{{ t('bd.close') }}</button>
+          <button class="bd-btn bd-pri" data-cy="remote-ui-approval-close" :disabled="!deviceNameInput.trim()" @click="onSaveDeviceName">{{ t('bd.save') }}</button>
         </div>
       </template>
     </dialog>
@@ -580,14 +592,14 @@ import { buildLanInviteUrl } from '../../utils/lanInvite'
 import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
 import { useDevices, type LogicalDevice } from '../../composables/useDevices'
-import { getOrCreateDeviceId } from '../../utils/sessionRouting'
+import { getOrCreateDeviceId, deviceDefaultName } from '../../utils/sessionRouting'
 import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check, LoaderCircle } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
 const { status, devices, pair, events, loading, error, qr, qrDataUrl, qrUnsupported, qrError, refresh, genCode, fetchQr, acceptCode, revoke, savePolicy, rotate, connectWs, disconnectWs,
   uiEnabled, uiUnsupported, uiLoading, uiError, uiCode, uiCodeDataUrl, uiPending, uiSessions, uiJustToken,
-  setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, clearJustToken, onRemoteEvent,
+  setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, setSessionDeviceName, clearJustToken, onRemoteEvent,
   apiBase, lanInvite, lanSessions, lanLoading, lanError, requestLanInvite, revokeLanInvite, loadLanSessions, revokeLanSession } = useRemote()
 
 const approvalDialog = ref<HTMLDialogElement | null>(null)
@@ -609,6 +621,8 @@ const activeApproval = computed<UiPendingItem | null>(() =>
 // la negociación P2P la inicia el navegador ya en su sesión.
 const approvedSession = ref<{ prefix: string; ua: string } | null>(null)
 const approvedAt = ref(0)
+/** Nombre propuesto para el dispositivo recién aceptado (editable). */
+const deviceNameInput = ref('')
 let approvingReqId = ''
 const APPROVED_RELAY_AFTER_MS = 15000
 const approvedTransport = computed<'connecting' | 'p2p' | 'relay'>(() => {
@@ -820,6 +834,7 @@ const dismissApproval = () => {
   activeApprovalId.value = ''
   approvedSession.value = null
   approvingReqId = ''
+  deviceNameInput.value = ''
   const dialog = approvalDialog.value
   if (dialog && dialog.open) {
     try {
@@ -829,7 +844,19 @@ const dismissApproval = () => {
   }
 }
 
-const closeApprovalSuccess = () => {
+// Nombre del dispositivo recién aceptado: el dueño lo confirma con
+// Guardar (antes Cerrar). Se envía a la sesión (el móvil lo adopta al
+// arrancar) y se aplica de inmediato si el dispositivo ya conectó.
+const onSaveDeviceName = async () => {
+  const a = approvedSession.value
+  const name = deviceNameInput.value.trim()
+  if (a && name) {
+    try {
+      await setSessionDeviceName(a.prefix, name)
+    } catch {
+      /* best-effort: el cierre no depende del renombrado */
+    }
+  }
   dismissApproval()
 }
 
@@ -853,6 +880,8 @@ const resolveApproval = async (allow: boolean) => {
   if (typeof token === 'string' && token) {
     approvedSession.value = { prefix: token.slice(0, 8), ua }
     approvedAt.value = Date.now()
+    // Sugerencia con modelo + navegador que vio el relay ("iPad Safari").
+    try { deviceNameInput.value = deviceDefaultName(ua || '') } catch { deviceNameInput.value = '' }
     startQrTick()
   } else {
     dismissApproval()

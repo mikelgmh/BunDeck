@@ -905,6 +905,7 @@
         "remoteUiTransportRelay": "Relay",
         "remoteUiApprovedTitle": "Access approved",
         "remoteUiApprovedConnecting": "Establishing secure connection… trying direct P2P",
+        "remoteUiDeviceNameHint": "It will be saved as the device name in the Devices list.",
         "tunnelTransportProbing": "Trying direct P2P connection…",
         "tunnelTransportP2p": "Direct P2P connection",
         "tunnelTransportRelay": "Connected via relay",
