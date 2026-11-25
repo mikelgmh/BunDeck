@@ -810,6 +810,9 @@ export class DiscordRpcConnection {
     private ready = false
     private pending = new Map<string, PendingRequest>()
     private voiceCache: RpcVoiceState = { mute: null, deaf: null }
+    /** Token con el que esta conexión ya hizo AUTHENTICATE (evita el
+     *  "Already authenticated" de Discord al reutilizar la conexión). */
+    private authedToken: string | null = null
 
     constructor(opts: RpcConnectionOptions) {
         this.clientId = String(opts.clientId ?? '').trim()
@@ -854,6 +857,7 @@ export class DiscordRpcConnection {
                 // Handshake PLANO (sin `{op,d}`): el pipe lo exige.
                 socket.send(JSON.stringify(buildRpcHandshake(this.clientId)))
                 await this.waitReady()
+                this.authedToken = null // conexión nueva: hay que autenticar
                 return { transport: 'pipe', port: null, pipe: this.pipePath }
             } catch (err) {
                 lastError = err
@@ -862,6 +866,7 @@ export class DiscordRpcConnection {
                 this.pipePath = null
                 this.transport = null
                 this.ready = false
+                this.authedToken = null
                 if (err instanceof DiscordRpcError && (err.code === 'needs-auth' || err.code === 'token-expired')) throw err
                 continue // probar siguiente pipe
             }
@@ -878,6 +883,7 @@ export class DiscordRpcConnection {
                 // Handshake plano también en WS (JSON por mensaje, sin `{op,d}`).
                 socket.send(JSON.stringify(buildRpcHandshake(this.clientId)))
                 await this.waitReady()
+                this.authedToken = null // conexión nueva: hay que autenticar
                 return { transport: 'ws', port, pipe: null }
             } catch (err) {
                 lastError = err
@@ -886,6 +892,7 @@ export class DiscordRpcConnection {
                 this.port = null
                 this.transport = null
                 this.ready = false
+                this.authedToken = null
                 if (err instanceof DiscordRpcError && (err.code === 'needs-auth' || err.code === 'token-expired')) throw err
                 continue // probar siguiente puerto
             }
@@ -903,9 +910,16 @@ export class DiscordRpcConnection {
         if (!token) {
             throw new DiscordRpcError('needs-auth', 'Falta el access token: autoriza la app en Discord primero.', { retryable: false })
         }
+        // Idempotente: Discord rechaza ("Already authenticated") re-autenticar
+        // la misma conexión con el mismo token. Sin este guard, reutilizar la
+        // conexión persistente rompía la 2ª acción seguida (caía a hotkey).
+        if (this.authedToken === token && this.socket !== null) {
+            return { alreadyAuthenticated: true }
+        }
         this.accessToken = token
         const msg = buildRpcAuthenticate(token)
         const data = await this.request(msg, 'AUTHENTICATE')
+        this.authedToken = token
         return data
     }
 
@@ -938,6 +952,7 @@ export class DiscordRpcConnection {
         this.pipePath = null
         this.transport = null
         this.ready = false
+        this.authedToken = null
     }
 
     private attach(socket: MinimalRpcSocket): void {
