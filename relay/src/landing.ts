@@ -288,7 +288,7 @@ a.abtn{display:inline-block;text-decoration:none;border:1px solid var(--dark);ba
 <li><strong>${t.s3t}</strong>${t.s3b}</li>
 </ol>
 </div>
-<div class="card"><h2>${t.scanTitle}</h2>
+<div class="card" id="escanear-qr"><h2>${t.scanTitle}</h2>
 <p>${t.scanSub}</p>
 <button id="qrscan-open" type="button">${t.scanOpen}</button>
 <div id="qrscan-panel" hidden>

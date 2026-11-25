@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DeviceStore } from '../src/store';
 import { PairingStore } from '../src/pairing';
 import { RelayServer } from '../src/relay';
+import { renderLanding } from '../src/landing';
 import {
   UI_POLL_MS,
   UI_STATUS_SUFFIX,
@@ -13,6 +14,7 @@ import {
   handleUiFetch,
   isValidUrlCode,
   registerUiRoutes,
+  renderTunnelGonePage,
   renderWaitingPage,
   waitingTimedOut,
   type GetUiStatus,
@@ -228,6 +230,43 @@ describe('waiting: handleUiFetch (sin servidor)', () => {
     expect(res).toBeNull();
     const page = await handleUiFetch(uiReq('/ui/abc123'), { pageOnly: true });
     expect(page!.status).toBe(200);
+  });
+});
+
+describe('waiting: renderTunnelGonePage', () => {
+  test('ES: titulos/cuerpos localizados y enlace al escaner, sin reload', () => {
+    for (const reason of ['invalid-token', 'expired', 'daemon-offline'] as const) {
+      const html = renderTunnelGonePage(reason, 'es');
+      expect(html).toContain(`data-tunnel-gone="${reason}"`);
+      expect(html).toContain('href="/#escanear-qr"');
+      expect(html).toContain('Escanear un QR nuevo');
+      expect(html).not.toContain('location.reload()');
+      expect(html).not.toContain('Recargar');
+    }
+    expect(renderTunnelGonePage('invalid-token', 'es')).toContain('Sesión no válida');
+    expect(renderTunnelGonePage('expired', 'es')).toContain('Sesión caducada');
+    expect(renderTunnelGonePage('daemon-offline', 'es')).toContain('Equipo sin conexión');
+  });
+
+  test('EN: enlace al escaner, sin reload', () => {
+    for (const reason of ['invalid-token', 'expired', 'daemon-offline'] as const) {
+      const html = renderTunnelGonePage(reason, 'en');
+      expect(html).toContain(`data-tunnel-gone="${reason}"`);
+      expect(html).toContain('href="/#escanear-qr"');
+      expect(html).toContain('Scan a new QR');
+      expect(html).not.toContain('location.reload()');
+    }
+    expect(renderTunnelGonePage('invalid-token', 'en')).toContain('Invalid session');
+    expect(renderTunnelGonePage('expired', 'en')).toContain('Session expired');
+    expect(renderTunnelGonePage('daemon-offline', 'en')).toContain('Host offline');
+  });
+
+  test('la landing expone el anchor estable del escaner', () => {
+    for (const lang of ['es', 'en'] as const) {
+      const html = renderLanding({ version: '0.1.0', online: 0, devices: 0, wsUrl: 'wss://x.test', lang });
+      expect(html).toContain('id="escanear-qr"');
+      expect(html).toContain('id="qrscan-open"');
+    }
   });
 });
 
