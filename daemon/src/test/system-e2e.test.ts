@@ -586,12 +586,24 @@ describe('audio-mixer / window-manager (degradación)', () => {
 
     test('window-action: aplicado o error humanizado con hint (nunca ENOENT crudo)', async () => {
         const runner = makeRunner()
-        const out = await runner.executeAction(
-            { type: 'window-manager.window-action', parameters: { action: 'minimize' } }, { ...ctx })
-        if (out.success) {
+        const plug = findPlug(runner, 'window-manager')
+        // Sin tocar el sistema: el handler real minimiza la ventana en
+        // primer plano (ShowWindow 6 en Windows). Se intercepta `run` (punto
+        // de inyección del plugin) y se verifica el script generado.
+        const seen: string[] = []
+        const origRun = plug.run.bind(plug)
+        plug.run = async (cmd: string[]) => {
+            seen.push(cmd.join(' '))
+            return { stdout: '', stderr: '', exitCode: 0 }
+        }
+        try {
+            const out = await runner.executeAction(
+                { type: 'window-manager.window-action', parameters: { action: 'minimize' } }, { ...ctx })
+            expect(out.success).toBe(true)
             expect(out.result.applied).toBe(true)
-        } else {
-            expect(out.error).toMatch(/wmctrl|xdotool|PowerShell|osascript|Accesib|ventana|activa/i)
+            expect(seen.join('\n')).toMatch(/ShowWindow\(\$h, 6\)|wmctrl|xdotool|miniaturiz/)
+        } finally {
+            plug.run = origRun
         }
     })
 
