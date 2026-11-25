@@ -300,21 +300,31 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
           const code = typeof body?.code === 'string' && body.code.trim() ? body.code.trim() : null;
           let stored: { accessToken: string; refreshToken: string; tokenType: string; obtainedAt: string; expiresAt: string; expiresIn: string };
           if (code) {
-            const all = db.getPluginSettings('discord');
-            const userClientId = String(all?.clientId ?? '').trim();
-            const userSecret = String(all?.clientSecret ?? '').trim();
-            const redirectUri = resolveDiscordRedirectUri(String(all?.redirectUri ?? ''));
-            // Power-user con app propia: intercambio directo con discord.com.
-            if (userClientId && userSecret) {
-              stored = await exchangeDiscordCode({ clientId: userClientId, clientSecret: userSecret, code, redirectUri });
-            } else {
-              // Zero-config: el secret vive solo en el relay, nunca en el cliente.
-              const clientCheck = resolveDiscordClientId(userClientId);
-              const proxyUrl = resolveDiscordProxyUrl(String(all?.proxyUrl ?? ''));
-              if (!clientCheck || !proxyUrl) {
-                return jsonResponse({ error: 'discord-not-configured: el maintainer aún no rellenó DEFAULT_DISCORD_CLIENT_ID / DEFAULT_DISCORD_PROXY_URL (ver docs/discord-app-setup.md). Mientras tanto usa el fallback de atajos globales.' }, 400);
+            const t0 = Date.now();
+            try {
+              const all = db.getPluginSettings('discord');
+              const userClientId = String(all?.clientId ?? '').trim();
+              const userSecret = String(all?.clientSecret ?? '').trim();
+              const redirectUri = resolveDiscordRedirectUri(String(all?.redirectUri ?? ''));
+              // Power-user con app propia: intercambio directo con discord.com.
+              if (userClientId && userSecret) {
+                stored = await exchangeDiscordCode({ clientId: userClientId, clientSecret: userSecret, code, redirectUri });
+              } else {
+                // Zero-config: el secret vive solo en el relay, nunca en el cliente.
+                const clientCheck = resolveDiscordClientId(userClientId);
+                const proxyUrl = resolveDiscordProxyUrl(String(all?.proxyUrl ?? ''));
+                if (!clientCheck || !proxyUrl) {
+                  return jsonResponse({ error: 'discord-not-configured: el maintainer aún no rellenó DEFAULT_DISCORD_CLIENT_ID / DEFAULT_DISCORD_PROXY_URL (ver docs/discord-app-setup.md). Mientras tanto usa el fallback de atajos globales.' }, 400);
+                }
+                stored = await exchangeDiscordCodeViaProxy({ code, redirectUri, proxyUrl });
               }
-              stored = await exchangeDiscordCodeViaProxy({ code, redirectUri, proxyUrl });
+            } catch (e) {
+              // Diagnóstico en el log del daemon (sin el code: es secreto de un
+              // solo uso). El mensaje ya trae el status + error de Discord/relay.
+              const msg = e instanceof Error ? e.message : String(e);
+              const errCode = typeof (e as any)?.code === 'string' ? ` [${(e as any).code}]` : '';
+              console.warn(`[discord] token-capture: intercambio fallido${errCode} (${Date.now() - t0} ms): ${msg}`);
+              return jsonResponse({ error: msg }, 400);
             }
           } else {
             stored = normalizeDiscordTokenCapture(body ?? {}, Date.now());

@@ -56,6 +56,7 @@ const CB_STR = {
     copy: 'Copiar código',
     copied: '¡Copiado!',
     manualHint: 'En LibreDeck: acción discord.connect con { "code": "<pega-aquí>" }.',
+    localNetHint: 'Si el navegador bloquea el acceso a la red local, acepta el permiso y pulsa Reintentar.',
     daemonLabel: 'Puerto API del daemon (api_port)',
     retry: 'Reintentar',
     noCodeTitle: 'Sin código de autorización',
@@ -72,6 +73,7 @@ const CB_STR = {
     copy: 'Copy code',
     copied: 'Copied!',
     manualHint: 'In LibreDeck: discord.connect action with { "code": "<paste-here>" }.',
+    localNetHint: 'If the browser blocks local-network access, allow it and press Retry.',
     daemonLabel: 'Daemon API port (api_port)',
     retry: 'Retry',
     noCodeTitle: 'No authorization code',
@@ -126,6 +128,7 @@ input{border:1px solid #d6d6d3;border-radius:7px;padding:10px 12px;font:inherit;
 <code class="bigcode" id="code"></code>
 <div class="row"><button id="copy" type="button">${esc(t.copy)}</button></div>
 <p class="hint">${esc(t.manualHint)}</p>
+<p class="hint">${esc(t.localNetHint)}</p>
 </div>
 <div class="row"><label for="apiport">${esc(t.daemonLabel)}</label><input id="apiport" inputmode="numeric" value="${port}"><button id="retry" type="button" hidden>${esc(t.retry)}</button></div>
 </div></div>
@@ -153,7 +156,7 @@ async function deliver(){
   status.className=''; status.textContent=L.working;
   var port=/^\\d+$/.test(apiport.value||'')?apiport.value.trim():'3001';
   var paths=['/api/v1/plugins/discord/token-capture','/api/plugins/discord/token-capture'];
-  var lastErr='';
+  var attempts=[];
   for(var i=0;i<paths.length;i++){
     try{
       var r=await fetch('http://127.0.0.1:'+port+paths[i],{
@@ -161,10 +164,13 @@ async function deliver(){
         body:JSON.stringify({code:code})
       });
       if(r.ok){ ok(); return; }
-      lastErr='HTTP '+r.status+' en '+paths[i];
-    }catch(e){ lastErr=String((e&&e.message)||e); }
+      var detail='';
+      try{ detail=await r.text(); }catch(e2){}
+      detail=String(detail||'').slice(0,200);
+      attempts.push('HTTP '+r.status+' en '+paths[i]+(detail?' — '+detail:''));
+    }catch(e){ attempts.push(paths[i]+': '+String((e&&e.message)||e)); }
   }
-  showManual(L.failTitle+' ('+lastErr+')');
+  showManual(L.failTitle+' ('+attempts.join(' | ')+')');
 }
 copy.addEventListener('click',function(){
   var txt=codeEl.textContent||'';

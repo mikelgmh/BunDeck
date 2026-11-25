@@ -9,6 +9,12 @@
  * - En cualquier otro caso se responde `Access-Control-Allow-Origin: *`
  *   SIN credentials (combinar `*` con `Allow-Credentials: true` viola la
  *   especificación Fetch y los navegadores lo rechazan).
+ *
+ * Además se responde siempre `Access-Control-Allow-Private-Network: true`:
+ * la página de callback del relay (`https://relay.bundeck.app`, red pública)
+ * hace fetch a `http://127.0.0.1:<apiPort>` (red privada) y Chrome
+ * (Private Network Access) exige ese header en el preflight; sin él el
+ * navegador bloquea la petición antes de llegar a la API.
  */
 
 /** Hosts considerados locales (sin puerto). */
@@ -35,6 +41,10 @@ export function buildCorsHeaders(origin: string | null): Record<string, string> 
   const base = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Lan-Invite',
+    // Private Network Access: permite que una página pública (el callback
+    // https del relay) llame a este daemon en loopback/LAN. Chrome exige
+    // este header en el preflight para https→http://127.0.0.1.
+    'Access-Control-Allow-Private-Network': 'true',
   };
   if (origin && isLocalOrigin(origin)) {
     return {
