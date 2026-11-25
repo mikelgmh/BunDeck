@@ -242,6 +242,14 @@ export class TunnelState {
   readonly httpPending = new Map<string, HttpPending>();
   readonly sessions = new Map<string, SessionEntry>();
   readonly devices = new Map<string, TunnelSocket>();
+  /**
+   * Última actividad vista por deviceId (register, ping o pong del
+   * keepalive). El `pong` del daemon refresca este registro para que el
+   * barrido periódico no lo considere muerto: sin tráfico, el socket
+   * ocioso lo cortaría el LB y caería todo el registro (sesiones,
+   * publicaciones y puentes).
+   */
+  private readonly deviceSeen = new Map<string, number>();
   private readonly wsDevices = new Map<TunnelSocket, Set<string>>();
   private readonly codes = new Map<string, CodeEntry>();
   private readonly pending = new Map<string, PendingReq>();
@@ -308,6 +316,21 @@ export class TunnelState {
     return this.socketDevice(ws);
   }
 
+  /**
+   * Marca actividad de un deviceId (keepalive ping/pong). Refresca el
+   * registro para que el sweep no lo purgue por idle.
+   */
+  noteDeviceActivity(deviceId: string): void {
+    if (typeof deviceId !== 'string' || deviceId === '') return;
+    if (!this.devices.has(deviceId)) return;
+    this.deviceSeen.set(deviceId, this.now());
+  }
+
+  /** Última actividad registrada de un deviceId (0 = nunca visto). */
+  lastDeviceSeen(deviceId: string): number {
+    return this.deviceSeen.get(deviceId) ?? 0;
+  }
+
   // ---- registro de daemons ----
 
   registerDevice(ws: TunnelSocket, deviceId: string): void {
@@ -320,6 +343,7 @@ export class TunnelState {
       }
     }
     this.devices.set(deviceId, ws);
+    this.deviceSeen.set(deviceId, this.now());
     let set = this.wsDevices.get(ws);
     if (!set) {
       set = new Set();
@@ -698,6 +722,7 @@ export class TunnelState {
 
   private removeDevice(deviceId: string): void {
     this.devices.delete(deviceId);
+    this.deviceSeen.delete(deviceId);
     for (const set of this.wsDevices.values()) set.delete(deviceId);
     for (const [code, e] of [...this.codes]) {
       if (e.deviceId === deviceId) this.dropCode(code);

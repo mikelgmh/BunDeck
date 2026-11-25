@@ -71,6 +71,14 @@ export const TUNNEL_PENDING_TTL_MS = 120_000;
 export const TUNNEL_MAX_PENDING = 20;
 export const TUNNEL_MAX_BODY_BYTES = 5 * 1024 * 1024;
 export const TUNNEL_MAX_BACKOFF_MS = 30_000;
+/**
+ * Keepalive del WS daemon↔relay (~25 s): el LB/proxy intermedio corta los
+ * sockets ociosos y cada micro-corte disparaba `resyncUiState` pesado +
+ * tormenta de hellos. El ping sale del daemon; el relay responde `pong`.
+ * El `pong` (o un `ping` entrante) refresca `lastPongAt`: prueba de vida
+ * que impide que el barrido periódico considere muerto el registro.
+ */
+export const TUNNEL_KEEPALIVE_MS = 25_000;
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 
@@ -161,6 +169,11 @@ export interface TunnelClientOpts {
   /** URL override (tests). Si no, `RELAY_URL` env, `remote.relay.url` o relay público por defecto. */
   relayUrl?: string;
   now?: () => number;
+  /**
+   * Periodo del keepalive daemon→relay (defecto 25 s). `0` lo desactiva.
+   * Inyectable para tests (intervalo corto + `send` stub = sin red real).
+   */
+  keepaliveMs?: number;
 }
 
 export class TunnelClient {
@@ -183,6 +196,11 @@ export class TunnelClient {
   private httpHandler: HttpHandler | null = null;
   private now: () => number;
   private rtc: RtcManager | null = null;
+  /** Periodo del keepalive (inyectable para tests). */
+  private readonly keepaliveMs: number;
+  /** Último ping emitido / último pong (o ping entrante) visto. */
+  private lastPingAt = 0;
+  private lastPongAt = 0;
 
   constructor(
     private db: DbLike,
@@ -190,6 +208,7 @@ export class TunnelClient {
     private opts: TunnelClientOpts,
   ) {
     this.now = opts.now ?? Date.now;
+    this.keepaliveMs = opts.keepaliveMs ?? TUNNEL_KEEPALIVE_MS;
   }
 
   // ---- estado / config ----
@@ -299,6 +318,9 @@ export class TunnelClient {
       this.backoffMs = 1000;
       this.setStatus('connected');
       this.send({ v: 1, kind: 'tunnel-register', deviceId: this.opts.deviceId });
+      // Keepalive: sin tráfico periódico el LB/proxy corta el socket
+      // ocioso (micro-corte → resync pesado + tormenta de hellos).
+      this.startHeartbeat();
       // Republicar códigos vigentes tras cada (re)conexión.
       const now = this.now();
       for (const [urlCode, exp] of [...this.published.entries()]) {
@@ -324,6 +346,7 @@ export class TunnelClient {
     };
     this.ws.onclose = () => {
       this.ws = null;
+      this.stopHeartbeat();
       if (!this.closed) {
         this.setStatus('disconnected');
         this.scheduleReconnect();
@@ -353,6 +376,35 @@ export class TunnelClient {
       }
     } catch { /* noop */ }
     return false;
+  }
+
+  // ---- keepalive daemon↔relay (~25 s) ----
+
+  /** Último `pong` (o `ping` entrante) visto del relay. */
+  lastPongSeenAt(): number {
+    return this.lastPongAt;
+  }
+
+  /** Último `ping` emitido al relay. */
+  lastPingSentAt(): number {
+    return this.lastPingAt;
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (this.keepaliveMs <= 0) return;
+    this.heartbeatTimer = setInterval(() => this.sendPing(), this.keepaliveMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  /** Un ping al relay; el `pong` refresca el registro (ver `lastPongAt`). */
+  sendPing(): boolean {
+    this.lastPingAt = this.now();
+    return this.send({ v: 1, kind: 'tunnel-ping', ts: this.lastPingAt });
   }
 
   // ---- UI codes ----
@@ -394,6 +446,27 @@ export class TunnelClient {
    * Sin esto, cualquier reinicio del daemon (o micro-corte) dejaba todos los
    * `/t/<token>/` en `401 invalid-token` hasta generar un QR nuevo.
    */
+  /**
+   * Lee solo las settings bajo un prefijo (`getSettingsByPrefix` acotado
+   * por índice; fallback al volcado completo filtrado en DBs viejas/tests).
+   * El resync anterior hacía 2× `getAllSettings()` (volcado entero de la
+   * tabla en cada micro-corte); ahora son 2 lecturas acotadas por índice.
+   */
+  private readPrefixedSettings(prefix: string): Record<string, string> {
+    try {
+      const anyDb = this.db as DbLike & { getSettingsByPrefix?: (p: string) => Record<string, string> };
+      if (typeof anyDb.getSettingsByPrefix === 'function') return anyDb.getSettingsByPrefix(prefix);
+      const all = typeof this.db.getAllSettings === 'function' ? this.db.getAllSettings() : {};
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(all)) {
+        if (k.startsWith(prefix)) out[k] = v;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
   resyncUiState(): { republishedCode: boolean; rebound: number; unbound: number } {
     const out = { republishedCode: false, rebound: 0, unbound: 0 };
     const now = this.now();
@@ -413,15 +486,9 @@ export class TunnelClient {
         }
       }
     } catch { /* sin código persistido: nada que republicar */ }
-    // 2) Sesiones persistidas.
-    let all: Record<string, string> = {};
-    try {
-      all = typeof this.db.getAllSettings === 'function' ? this.db.getAllSettings() : {};
-    } catch {
-      return out;
-    }
-    for (const [k, v] of Object.entries(all)) {
-      if (!k.startsWith(UI_SESSION_PREFIX)) continue;
+    // 2) Sesiones persistidas (lectura acotada al prefijo, no volcado total).
+    const sessions = this.readPrefixedSettings(UI_SESSION_PREFIX);
+    for (const [k, v] of Object.entries(sessions)) {
       const token = k.slice(UI_SESSION_PREFIX.length);
       if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
       let s: { exp?: unknown; revoked?: unknown };
@@ -446,30 +513,28 @@ export class TunnelClient {
     }
     // 3) Tombstones de revocación: re-emite ui-unbind aunque la fila de
     // sesión ya no exista (revocar con el relay caído). Idempotente.
-    try {
-      const all2 = typeof this.db.getAllSettings === 'function' ? this.db.getAllSettings() : {};
-      for (const [k, v] of Object.entries(all2)) {
-        if (!k.startsWith(UI_UNBIND_PENDING_PREFIX)) continue;
-        const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
-        if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
-        const exp = Number(v);
-        if (exp === 0) {
-          // Tombstone perenne: la sesión revocada no caducaba; el unbind
-          // se re-emite en cada reconexión (el relay ignora lo desconocido).
-          this.bindings.delete(token);
-          this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
-          out.unbound += 1;
-          continue;
-        }
-        if (!Number.isFinite(exp) || exp <= now) {
-          try { this.db.deleteSetting?.(k); } catch { /* noop */ }
-          continue;
-        }
+    // (lectura acotada al prefijo, no segundo volcado total).
+    const tombstones = this.readPrefixedSettings(UI_UNBIND_PENDING_PREFIX);
+    for (const [k, v] of Object.entries(tombstones)) {
+      const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
+      if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
+      const exp = Number(v);
+      if (exp === 0) {
+        // Tombstone perenne: la sesión revocada no caducaba; el unbind
+        // se re-emite en cada reconexión (el relay ignora lo desconocido).
         this.bindings.delete(token);
         this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
         out.unbound += 1;
+        continue;
       }
-    } catch { /* sin tombstones: nada que reintentar */ }
+      if (!Number.isFinite(exp) || exp <= now) {
+        try { this.db.deleteSetting?.(k); } catch { /* noop */ }
+        continue;
+      }
+      this.bindings.delete(token);
+      this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
+      out.unbound += 1;
+    }
     return out;
   }
 
@@ -570,6 +635,16 @@ export class TunnelClient {
   private async handleRelayMessage(msg: any): Promise<void> {
     if (!msg || typeof msg.kind !== 'string') return;
     switch (msg.kind) {
+      case 'tunnel-ping':
+        // El relay también puede pingeear: cualquier actividad prueba vida
+        // y se responde para que su sweep no purgue el registro.
+        this.lastPongAt = this.now();
+        this.send({ v: 1, kind: 'tunnel-pong', ts: this.now() });
+        break;
+      case 'tunnel-pong':
+        // Respuesta a nuestro keepalive: refresca el registro de vida.
+        this.lastPongAt = this.now();
+        break;
       case 'ui-request':
         this.onUiRequest(msg);
         break;

@@ -739,6 +739,26 @@ export class RelayServer {
         }
         return;
       }
+      case 'tunnel-ping': {
+        // Keepalive del daemon (~25 s): refresca el registro de vida y
+        // se responde `pong` para que el daemon no considere muerto el
+        // enlace. Sin esto, el LB corta el socket ocioso (micro-corte →
+        // resync pesado + tormenta de hellos).
+        const id = this.tunnel.socketDeviceId(ws);
+        if (id) this.tunnel.noteDeviceActivity(id);
+        try {
+          ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'tunnel-pong', ts: this.now() }));
+        } catch {
+          /* daemon caído: se limpia al cerrar el socket */
+        }
+        return;
+      }
+      case 'tunnel-pong': {
+        // Respuesta a un ping del relay (o eco): refresca el registro.
+        const id = this.tunnel.socketDeviceId(ws);
+        if (id) this.tunnel.noteDeviceActivity(id);
+        return;
+      }
       default:
         err('unknown-kind', String(msg.kind));
     }

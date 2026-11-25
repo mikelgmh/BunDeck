@@ -8,6 +8,17 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
+import {
+  applyButtonDeleted as applyButtonDeletedPayload,
+  applyButtonPayload,
+  applyButtonsReordered,
+  applyPageDeleted as applyPageDeletedPayload,
+  applyPagePayload,
+  buildExecuteManyBody,
+  isBatchUnsupported,
+  isDynamicDue,
+  reloadDebounceMs,
+} from '../utils/wsIncremental'
 import { getOrCreateDeviceId, deviceDefaultName, isNavigationForMe, isBroadcastNav } from '../utils/sessionRouting'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
@@ -328,7 +339,9 @@ export function useStreamDeck() {
   // Recargas WS con debounce + coalescencia: una ráfaga de N broadcasts
   // seguidos (p. ej. 5 button.updated) produce una sola recarga por kind.
   // No cambia el protocolo WS, solo agrupa el trabajo local.
-  const RELOAD_DEBOUNCE_MS = 200
+  // En modo túnel todo comparte un único WS ordenado daemon↔relay: el
+  // debounce sube a ~1 s para no sumar GETs completos a la cola.
+  const reloadDebounceMsForMode = () => reloadDebounceMs(!!getTunnelToken())
   const reloadPending = new Set<'buttons' | 'plugins' | 'profiles' | 'pages'>()
   let reloadTimer: ReturnType<typeof setTimeout> | null = null
   const flushReloads = () => {
@@ -355,7 +368,104 @@ export function useStreamDeck() {
     if (isSwapping.value) return
     reloadPending.add(kind)
     if (reloadTimer) return
-    reloadTimer = setTimeout(flushReloads, RELOAD_DEBOUNCE_MS)
+    reloadTimer = setTimeout(flushReloads, reloadDebounceMsForMode())
+  }
+
+  /**
+   * Cancela una recarga pendiente de un kind: cuando el payload del evento
+   * ya se aplicó en local, el GET programado sobra (era lo que hacía
+   * refetchear tras cada pulsación/cambio de página por relay).
+   */
+  const cancelPendingReload = (kind: 'buttons' | 'plugins' | 'profiles' | 'pages') => {
+    if (!reloadPending.has(kind)) return
+    reloadPending.delete(kind)
+    if (reloadPending.size === 0 && reloadTimer) {
+      clearTimeout(reloadTimer)
+      reloadTimer = null
+    }
+  }
+
+  /**
+   * Aplica `button.created/updated` con el objeto del evento (sin
+   * `GET /buttons`). Devuelve true si quedó manejado.
+   */
+  const applyRemoteButton = (payload: any): boolean => {
+    // Durante un swap la UI optimista manda (como hacía el debounce).
+    if (isSwapping.value || !currentPage.value) return false
+    const { list, handled } = applyButtonPayload(
+      currentButtons.value,
+      currentPage.value.id,
+      payload,
+    )
+    if (!handled) return false
+    currentButtons.value = list
+    bumpButtonsEpoch()
+    cancelPendingReload('buttons')
+    // La selección sigue al botón por ID tras aplicar el remoto.
+    if (selectedButtonId.value) {
+      const sel = currentButtons.value.find((b) => b.id === selectedButtonId.value)
+      selectedButton.value = sel ? sel.position : null
+      if (!sel) selectedButtonId.value = null
+    }
+    return true
+  }
+
+  /** Aplica `button.deleted` con el id del evento (sin `GET /buttons`). */
+  const applyRemoteButtonDeleted = (payload: any): boolean => {
+    if (isSwapping.value || !currentPage.value) return false
+    const { list, handled } = applyButtonDeletedPayload(
+      currentButtons.value,
+      currentPage.value.id,
+      payload,
+    )
+    if (!handled) return false
+    currentButtons.value = list
+    bumpButtonsEpoch()
+    cancelPendingReload('buttons')
+    const deletedId =
+      (typeof payload?.buttonId === 'string' && payload.buttonId) ||
+      (typeof payload?.button?.id === 'string' && payload.button.id) ||
+      null
+    if (deletedId && selectedButtonId.value === deletedId) {
+      selectedButtonId.value = null
+      selectedButton.value = null
+    }
+    return true
+  }
+
+  /**
+   * Aplica `page.created/updated` con el objeto del evento (sin
+   * `GET /pages` completo). Sincroniza la página actual si es ella.
+   */
+  const applyRemotePage = (payload: any): boolean => {
+    if (isSwapping.value) return false
+    const { list, handled } = applyPagePayload(currentPages.value, payload)
+    if (!handled) return false
+    currentPages.value = list
+    const page = payload?.page
+    if (page && currentPage.value && page.id === currentPage.value.id) {
+      currentPage.value = currentPages.value.find((p) => p.id === page.id) ?? currentPage.value
+      applyGridForPage(currentPage.value, parseProfileData(currentProfile.value?.data))
+    }
+    cancelPendingReload('pages')
+    return true
+  }
+
+  /** Aplica `page.deleted` sin refetchear (salvo que fuera la actual). */
+  const applyRemotePageDeleted = (payload: any): boolean => {
+    if (isSwapping.value) return false
+    const pageId = typeof payload?.pageId === 'string' ? payload.pageId : null
+    if (!pageId) return false
+    const { list, removed } = applyPageDeletedPayload(currentPages.value, pageId)
+    if (!removed) {
+      // No la teníamos: nada que refetchear tampoco.
+      cancelPendingReload('pages')
+      return true
+    }
+    currentPages.value = list
+    if (currentPage.value && currentPage.value.id === pageId) return false
+    cancelPendingReload('pages')
+    return true
   }
 
   // Computed properties
@@ -703,41 +813,57 @@ export function useStreamDeck() {
         scheduleReload('profiles')
         break
       case 'page.updated':
-        // Recarga de páginas con debounce (renombrada en otro dispositivo).
-        scheduleReload('pages')
-        break
       case 'page.created':
-        // Recarga de páginas con debounce (creada en otro dispositivo).
-        scheduleReload('pages')
+        // El evento ya trae la página: se aplica en local sin
+        // `GET /pages` (por relay, cada refetch suma a la cola del túnel).
+        if (!applyRemotePage(message.payload)) scheduleReload('pages')
         break
       case 'page.deleted':
-        // Recarga de páginas con debounce; reloadPages reubica la actual
-        // si fue la borrada.
-        scheduleReload('pages')
+        // Sin refetch salvo que fuera la actual (reloadPages la reubica).
+        if (!applyRemotePageDeleted(message.payload)) scheduleReload('pages')
         break
       case 'button.created':
         if (isOwnEcho(message.payload)) break
-        if (currentPage.value) scheduleReload('buttons')
+        // El evento ya trae el botón: se aplica en local sin
+        // `GET /buttons` (pulsar por relay no debe refetchear).
+        if (currentPage.value && !applyRemoteButton(message.payload)) {
+          scheduleReload('buttons')
+        }
         break
       case 'button.updated':
         if (isOwnEcho(message.payload)) break
-        if (currentPage.value) scheduleReload('buttons')
+        if (currentPage.value && !applyRemoteButton(message.payload)) {
+          scheduleReload('buttons')
+        }
         break
       case 'buttons.reordered': {
         // Reordenado atómico: si es el eco de nuestro propio swap (mutationId
         // pendiente) se ignora — el estado local optimista ya está al día y
         // recargar aquí es lo que hacía "rebotar" la tecla a su sitio viejo.
-        // Si viene de otro cliente, recarga la página actual (con debounce).
+        // Si viene de otro cliente, se aplica la lista del evento (sin GET).
         if (isOwnEcho(message.payload)) break
         const reorderedPageId = (message.payload as any)?.pageId
-        if (currentPage.value && reorderedPageId === currentPage.value.id) {
+        if (currentPage.value && !isSwapping.value && reorderedPageId === currentPage.value.id) {
+          const { list, handled } = applyButtonsReordered(
+            currentButtons.value,
+            currentPage.value.id,
+            message.payload,
+          )
+          if (handled) {
+            currentButtons.value = list
+            bumpButtonsEpoch()
+            cancelPendingReload('buttons')
+            break
+          }
           scheduleReload('buttons')
         }
         break
       }
       case 'button.deleted':
         if (isOwnEcho(message.payload)) break
-        if (currentPage.value) scheduleReload('buttons')
+        if (currentPage.value && !applyRemoteButtonDeleted(message.payload)) {
+          scheduleReload('buttons')
+        }
         break
       case 'page.navigate':
         // Dirigida: solo aplica si es para este dispositivo; los broadcasts
@@ -1564,23 +1690,46 @@ export function useStreamDeck() {
 
     executingButtons.value.push(position)
 
+    // Un solo round-trip por botón (`POST /actions/execute-many`): por el
+    // túnel cada `POST /actions/execute` en serie sumaba su ida y vuelta a
+    // la cola ordenada del relay (trompicones). El daemon ejecuta en orden.
+    const baseContext = {
+      buttonId: button.id,
+      pageId: button.page_id,
+      profileId: currentProfile.value?.id,
+      position,
+      // Origen de la acción: la navegación que provoque (page.action)
+      // por defecto solo se aplica en este dispositivo.
+      deviceId: deviceId.value
+    }
     try {
-      for (const action of button.data.actions) {
+      const actions = button.data.actions
+      if (actions.length === 1) {
         await apiRequest('/actions/execute', {
           method: 'POST',
-          body: JSON.stringify({
-            action,
-            context: {
-              buttonId: button.id,
-              pageId: button.page_id,
-              profileId: currentProfile.value?.id,
-              position,
-              // Origen de la acción: la navegación que provoque (page.action)
-              // por defecto solo se aplica en este dispositivo.
-              deviceId: deviceId.value
-            }
-          })
+          body: JSON.stringify({ action: actions[0], context: baseContext })
         })
+      } else {
+        try {
+          await apiRequest(
+            '/actions/execute-many',
+            {
+              method: 'POST',
+              body: JSON.stringify(
+                buildExecuteManyBody(actions.map((action: any) => ({ action, context: baseContext })))
+              )
+            }
+          )
+        } catch (batchError) {
+          // Compat con daemons sin batch: serie clásica.
+          if (!isBatchUnsupported(batchError)) throw batchError
+          for (const action of actions) {
+            await apiRequest('/actions/execute', {
+              method: 'POST',
+              body: JSON.stringify({ action, context: baseContext })
+            })
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to execute button:', error)
@@ -2703,18 +2852,74 @@ export function useStreamDeck() {
   }
 
   // Un solo tick para todos los botones dinámicos: respeta el
-  // updateInterval individual de cada acción (vía lastRun) y nunca supera
-  // DYNAMIC_MAX_IN_FLIGHT peticiones en vuelo.
+  // updateInterval individual de cada acción (vía lastRun) y lo resuelve
+  // en UN solo `POST /actions/execute-many` por tick de página (cada item
+  // lleva su contexto) en vez de N POST en ráfaga. En modo túnel el
+  // intervalo se multiplica ×4 y con la pestaña oculta se pausa (el
+  // sondeo en segundo plano sumaba ráfagas a la cola del túnel).
   const dynamicTick = () => {
+    if (typeof document !== 'undefined' && document.hidden) return
+    const isTunnel = !!getTunnelToken()
     const now = Date.now()
+    const due: Array<{ position: number; button: ButtonEntity; action: any }> = []
     for (const { position, button } of dynamicTargets()) {
-      if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) break
       const dynamicAction = getDynamicAction(button)
-      const interval = Number(dynamicAction?.parameters?.updateInterval) || 1000
+      if (!dynamicAction) continue
+      const base = Number(dynamicAction?.parameters?.updateInterval) || 1000
       const last = dynamicLastRun.get(position) ?? 0
-      if (now - last < interval) continue
+      if (!isDynamicDue(now, last, base, isTunnel)) continue
       dynamicLastRun.set(position, now)
-      void updateDynamicButtonValue(position, button)
+      due.push({ position, button, action: dynamicAction })
+    }
+    if (due.length > 0) void updateDynamicButtonsBatch(due)
+  }
+
+  // Lote de sondeo dinámico (1 round-trip por tick de página). Con daemon
+  // viejo sin batch cae al sondeo clásico por botón.
+  const updateDynamicButtonsBatch = async (
+    due: Array<{ position: number; button: ButtonEntity; action: any }>
+  ) => {
+    if (due.length === 0 || dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) return
+    dynamicInFlight += 1
+    let batched = false
+    try {
+      const res = await apiRequest('/actions/execute-many', {
+        method: 'POST',
+        body: JSON.stringify(
+          buildExecuteManyBody(
+            due.map(({ button, position, action }) => ({
+              action,
+              context: {
+                buttonId: button.id,
+                pageId: button.page_id,
+                profileId: currentProfile.value?.id,
+                position,
+                // Sondeo periódico: sin logs en BD ni broadcasts WS.
+                quiet: true
+              }
+            }))
+          )
+        )
+      })
+      const results = (res as any)?.results
+      if (Array.isArray(results)) {
+        results.forEach((r: any, i: number) => {
+          if (r?.result) dynamicButtonValues.value.set(due[i].position, r.result)
+        })
+        batched = true
+      }
+    } catch (batchError) {
+      // Daemon sin batch u otro fallo: si no es "endpoint desconocido" se
+      // deja pasar en silencio (el polling no spamea) sin fallback.
+      if (!isBatchUnsupported(batchError)) return
+    } finally {
+      dynamicInFlight -= 1
+    }
+    if (!batched) {
+      for (const { position, button } of due) {
+        if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) break
+        await updateDynamicButtonValue(position, button)
+      }
     }
   }
 

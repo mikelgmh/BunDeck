@@ -65,6 +65,102 @@ export class WebSocketManager {
   private tunnelOrphanLogged = new Set<string>();
   private port: number;
 
+  /**
+   * Caché de lectura del `hello` (perfil/páginas/asignaciones): cada hello
+   * hacía ~10 ops SQLite (getProfile/getPage/getPagesByProfile/
+   * getAssignments…) y en tormenta de reconexiones por micro-cortes
+   * saturaba la BD. TTL corto + invalidación en cada broadcast que muta
+   * esas entidades (ver `broadcast()`), así que nunca sirve vistas viejas
+   * más allá de la ventana de coalescencia.
+   *
+   * Inicialización perezosa: parte del código (y tests) construye el
+   * manager con `Object.create` sin pasar por el constructor, así que los
+   * inicializadores de campos no están garantizados.
+   */
+  private helloCache!: {
+    profiles: Map<string, { at: number; val: any }>;
+    pagesByProfile: Map<string, { at: number; val: any[] }>;
+    pageById: Map<string, { at: number; val: any }>;
+    assignments: Map<string, { at: number; val: Record<string, string> }>;
+  };
+  private static readonly HELLO_CACHE_TTL_MS = 10_000;
+
+  private helloCacheMaps(): {
+    profiles: Map<string, { at: number; val: any }>;
+    pagesByProfile: Map<string, { at: number; val: any[] }>;
+    pageById: Map<string, { at: number; val: any }>;
+    assignments: Map<string, { at: number; val: Record<string, string> }>;
+  } {
+    const self = this as any;
+    if (!self.helloCache) {
+      self.helloCache = {
+        profiles: new Map(),
+        pagesByProfile: new Map(),
+        pageById: new Map(),
+        assignments: new Map(),
+      };
+    }
+    return self.helloCache;
+  }
+
+  private helloCacheGet<T>(map: Map<string, { at: number; val: T }>, key: string, load: () => T): T {
+    const now = Date.now();
+    const hit = map.get(key);
+    if (hit && now - hit.at < WebSocketManager.HELLO_CACHE_TTL_MS) return hit.val;
+    const val = load();
+    // No cachear ausencias con TTL largo: solo la ventana corta (un perfil
+    // recién creado debe verse al instante tras su broadcast, que de todos
+    // modos invalida; el TTL es red de seguridad, no fuente de verdad).
+    map.set(key, { at: now, val });
+    if (map.size > 500) map.clear();
+    return val;
+  }
+
+  private cachedProfile(profileId: string): any {
+    return this.helloCacheGet(this.helloCacheMaps().profiles, profileId, () => {
+      try { return this.db.getProfile(profileId) ?? null; } catch { return null; }
+    });
+  }
+
+  private cachedPagesByProfile(profileId: string): any[] {
+    return this.helloCacheGet(this.helloCacheMaps().pagesByProfile, profileId, () => {
+      try { return this.db.getPagesByProfile(profileId); } catch { return []; }
+    });
+  }
+
+  private cachedPage(pageId: string): any {
+    return this.helloCacheGet(this.helloCacheMaps().pageById, pageId, () => {
+      try { return this.db.getPage(pageId) ?? null; } catch { return null; }
+    });
+  }
+
+  private cachedAssignments(profileId: string): Record<string, string> {
+    return this.helloCacheGet(this.helloCacheMaps().assignments, profileId, () => {
+      try { return this.db.getAssignments(profileId); } catch { return {}; }
+    });
+  }
+
+  /** Invalida la caché del hello ante broadcasts que mutan esas entidades. */
+  private invalidateHelloCache(event: string): void {
+    const cache = this.helloCacheMaps();
+    if (event === 'assignment.updated') {
+      cache.assignments.clear();
+      return;
+    }
+    if (event.startsWith('profile.')) {
+      cache.profiles.clear();
+      cache.pagesByProfile.clear();
+      cache.pageById.clear();
+      cache.assignments.clear();
+      return;
+    }
+    if (event.startsWith('page.')) {
+      cache.pagesByProfile.clear();
+      cache.pageById.clear();
+      cache.assignments.clear();
+    }
+  }
+
   constructor(port: number) {
     this.port = port;
     this.db = new DatabaseService();
@@ -189,7 +285,7 @@ export class WebSocketManager {
   /** Primera página no-carpeta del perfil (fallback de vista inicial). */
   private firstPageOfProfile(profileId: string): string | null {
     try {
-      const pages = this.db.getPagesByProfile(profileId);
+      const pages = this.cachedPagesByProfile(profileId);
       const page = pages.find((p) => p.is_folder === 0) || pages[0];
       return page ? page.id : null;
     } catch { return null; }
@@ -458,9 +554,11 @@ export class WebSocketManager {
 
     if (!profileId && startup) profileId = startup;
     // Validar que el perfil/página existen; si no, caer al global
-    if (profileId && !this.db.getProfile(profileId)) profileId = null;
+    // (lecturas cacheadas: el hello es el camino caliente de cada
+    // reconexión y la invalidación vive en `broadcast()`).
+    if (profileId && !this.cachedProfile(profileId)) profileId = null;
     if (profileId && pageId) {
-      const page = this.db.getPage(pageId);
+      const page = this.cachedPage(pageId);
       if (!page || page.profile_id !== profileId) {
         pageId = this.firstPageOfProfile(profileId);
       }
@@ -479,7 +577,7 @@ export class WebSocketManager {
     // (cubre kioscos y móviles que entran después del reparto).
     try {
       if (profileId && deviceId) {
-        const asgPage = this.db.getAssignments(profileId)[deviceId];
+        const asgPage = this.cachedAssignments(profileId)[deviceId];
         if (asgPage) {
           const pg = this.db.getPage(asgPage);
           if (pg && pg.profile_id === profileId) pageId = asgPage;
@@ -505,7 +603,14 @@ export class WebSocketManager {
       }
     } catch { /* noop */ }
     try {
-      this.broadcast('device.online', { deviceId, online: true }, 'devices');
+      // Solo si no había otra conexión viva del mismo dispositivo: cada
+      // hello/reconexión re-emitía `device.online` y los suscritos a
+      // `devices` refetcheaban en tormenta. La primera conexión avisa;
+      // las siguientes (segunda pestaña, re-hello tras micro-corte)
+      // ya estaban online y no aportan nada.
+      if (this.clientsOfDevice(deviceId).length <= 1) {
+        this.broadcast('device.online', { deviceId, online: true }, 'devices');
+      }
     } catch { /* noop */ }
 
     this.sendToClient(clientId, {
@@ -1085,6 +1190,9 @@ export class WebSocketManager {
   }
 
   public broadcast(eventType: string, payload: any, topic?: string): void {
+    // Las entidades que lee el hello van cacheadas: cualquier broadcast
+    // que las mute invalida la caché para no servir vistas viejas.
+    try { this.invalidateHelloCache(eventType); } catch { /* noop */ }
     const message: WebSocketMessage = {
       type: eventType,
       payload,
