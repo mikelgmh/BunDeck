@@ -61,7 +61,9 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     const box = wrapper.find('[data-cy="bd-discord-fields"]')
     expect(box.exists()).toBe(true)
     expect(wrapper.find('[data-cy="bd-discord-client-id"]').attributes('placeholder')).toBe('1575201215791497256')
-    expect(wrapper.find('[data-cy="bd-discord-redirect-uri"]').attributes('placeholder')).toBe('http://127.0.0.1:6463')
+    expect(wrapper.find('[data-cy="bd-discord-redirect-uri"]').attributes('placeholder')).toBe(
+      'https://relay.bundeck.app/api/discord/callback',
+    )
     expect(wrapper.find('[data-cy="bd-discord-proxy-url"]').attributes('placeholder')).toBe(
       'https://relay.bundeck.app/api/discord/rpc-token',
     )
@@ -122,5 +124,67 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await (wrapper.vm as any).show('spotify')
     await Promise.resolve()
     expect(wrapper.find('[data-cy="bd-discord-fields"]').exists()).toBe(false)
+  })
+
+  it('sin autorizar: muestra "no conectado" + Autorizar (sin ✓ mentiroso)', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'needs-auth' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: false, discordStatus: 'needs-auth' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordNotConnected')
+    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordConnect')
+  })
+
+  it('autorizado + RPC en vivo: muestra ✓ + Reautorizar', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'connected' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
+  })
+
+  it('token caducado: mensaje accionable + Reautorizar', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'token-expired' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: false, discordStatus: 'token-expired' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordExpired')
+    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
+  })
+
+  it('Discord cerrado: mensaje accionable sin ✓', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordClosed')
   })
 })

@@ -27,8 +27,15 @@ export const DISCORD_TOKEN_URL = `${DISCORD_API_BASE}/oauth2/token`
 /** Scopes mínimos para voz en background (los mismos que pide Elgato). */
 export const DISCORD_RPC_SCOPES = ['identify', 'rpc', 'rpc.voice.write'] as const
 
-/** Redirect de ejemplo: debe coincidir EXACTO con el registrado en el portal. */
-export const DISCORD_DEFAULT_REDIRECT_URI = 'http://127.0.0.1:6463'
+/** Redirect por defecto: callback https del relay con auto-entrega al daemon
+ * local (el flujo diseñado: popup → callback https → POST a
+ * 127.0.0.1:<apiPort>/api/v1/plugins/discord/token-capture, con fallback a
+ * copiar el code a mano). Debe coincidir EXACTO con el registrado en el portal.
+ * Los loopback (`http://127.0.0.1:6463`, `http://localhost:6463`) siguen
+ * registrados y son válidos como override manual, pero 127.0.0.1:6463 es
+ * además el puerto del propio RPC de Discord y nada escucha ahí para OAuth,
+ * así que ya no es el default. */
+export const DISCORD_DEFAULT_REDIRECT_URI = 'https://relay.bundeck.app/api/discord/callback'
 
 /**
  * Zero-config (LibreDeck): el usuario final SOLO pulsa Autorizar.
@@ -43,13 +50,14 @@ export const DISCORD_DEFAULT_REDIRECT_URI = 'http://127.0.0.1:6463'
  */
 export const DISCORD_MAINTAINER_CLIENT_ID = '1575201215791497256'
 export const DEFAULT_DISCORD_CLIENT_ID = DISCORD_MAINTAINER_CLIENT_ID
-/** Redirect registrado en OAuth2 → Redirects de la app (ver docs/discord-app-setup.md). */
+/** Redirect registrado en OAuth2 → Redirects de la app (ver docs/discord-app-setup.md).
+ * Default: callback https del relay. Los 2 loopback siguen válidos (registrados). */
 export const DEFAULT_DISCORD_REDIRECT_URI = DISCORD_DEFAULT_REDIRECT_URI
-/** Redirects válidos a registrar en el portal de Discord (los 2 loopback + callback https). */
+/** Redirects válidos a registrar en el portal de Discord (callback https + 2 loopback). */
 export const DISCORD_VALID_REDIRECT_URIS = [
     DISCORD_DEFAULT_REDIRECT_URI,
+    'http://127.0.0.1:6463',
     'http://localhost:6463',
-    'https://relay.bundeck.app/api/discord/callback',
 ] as const
 /** Ruta del callback https del relay: reenvía el code al daemon local (sin secret). */
 export const DISCORD_CALLBACK_PATH = '/api/discord/callback'

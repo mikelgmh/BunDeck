@@ -17,10 +17,23 @@
         <div v-if="oauth" class="bd-fld" data-cy="bd-oauth-box">
           <label><b>{{ oauthTitle }}</b></label>
           <p class="bd-hint">{{ oauth.notes ?? oauthHint }}</p>
-          <p v-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
+          <p v-if="isDiscordOauth && discordChecking" class="bd-hint" role="status" data-cy="bd-discord-state">
+            {{ t('bd.discordStatusChecking') }}
+          </p>
+          <p v-else-if="isDiscordOauth && (discordState === 'connected' || discordState === 'authorized')" class="bd-hint" data-cy="bd-oauth-status">
+            ✓ {{ oauthConnected }}
+          </p>
+          <p v-else-if="isDiscordOauth && discordState === 'token-expired'" class="bd-err" role="alert" data-cy="bd-discord-state">
+            {{ t('bd.discordExpired') }}
+          </p>
+          <p v-else-if="isDiscordOauth && discordState === 'discord-closed'" class="bd-err" role="alert" data-cy="bd-discord-state">
+            {{ t('bd.discordClosed') }}
+          </p>
+          <p v-else-if="isDiscordOauth" class="bd-hint" data-cy="bd-discord-state">{{ t('bd.discordNotConnected') }}</p>
+          <p v-else-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
           <div class="bd-r2">
             <button class="bd-btn bd-pri" :disabled="loginBusy" data-cy="bd-oauth-connect" @click="connectOAuth">
-              {{ configured ? oauthReconnect : oauthConnect }}
+              {{ discordNeedsAuth ? oauthConnect : oauthReconnect }}
             </button>
             <span v-if="loginBusy" class="bd-hint" role="status">{{ oauthWaiting }}</span>
           </div>
@@ -184,7 +197,11 @@ const tab = ref<'settings' | 'instructions'>('settings')
 const schema = ref<any>(null)
 const instructions = ref('')
 const oauth = ref<any>(null)
-const configured = ref(true)
+const configured = ref(false)
+/** Estado OAuth de Discord: bundle (`discordStatus`) + sonda en vivo (`discord.status`). */
+type DiscordState = 'connected' | 'discord-closed' | 'needs-auth' | 'not-configured' | 'token-expired' | 'authorized' | null
+const discordState = ref<DiscordState>(null)
+const discordChecking = ref(false)
 const loginBusy = ref(false)
 const loginError = ref('')
 const loginAuthorizeUrl = ref('')
@@ -206,7 +223,7 @@ const isDiscordOauth = computed(() => oauth.value?.provider === 'discord')
 /** Baked-in del daemon (daemon/src/plugins/discord-rpc.ts): se muestran como placeholder; vacío = usar estos. */
 const DISCORD_DEFAULTS = {
   clientId: '1575201215791497256',
-  redirectUri: 'http://127.0.0.1:6463',
+  redirectUri: 'https://relay.bundeck.app/api/discord/callback',
   proxyUrl: 'https://relay.bundeck.app/api/discord/rpc-token',
 } as const
 /** Claves que edita la sección dedicada de Discord (no se duplican en el loop genérico). */
@@ -217,6 +234,10 @@ const oauthConnect = computed(() => (isDiscordOauth.value ? t('bd.discordConnect
 const oauthReconnect = computed(() => (isDiscordOauth.value ? t('bd.discordReconnect') : t('bd.spotifyReconnect')))
 const oauthWaiting = computed(() => (isDiscordOauth.value ? t('bd.discordWaiting') : t('bd.spotifyWaiting')))
 const oauthConnected = computed(() => (isDiscordOauth.value ? t('bd.discordConnected') : t('bd.spotifyConnected')))
+const discordNeedsAuth = computed(() => {
+  if (!isDiscordOauth.value) return !configured.value
+  return discordState.value === null || discordState.value === 'needs-auth' || discordState.value === 'not-configured'
+})
 
 const fields = computed(() => {
   const propsMap = schema.value?.properties ?? {}
@@ -260,7 +281,9 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   schema.value = null
   instructions.value = ''
   oauth.value = null
-  configured.value = true
+  configured.value = false
+  discordState.value = null
+  discordChecking.value = false
   form.value = {}
   secretFields.value = []
   try {
@@ -271,11 +294,25 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
     secretFields.value = Array.isArray(data.secretFields) ? data.secretFields : []
     instructions.value = data.instructions ?? ''
     oauth.value = data.oauth ?? null
-    configured.value = data.configured ?? true
+    configured.value = data.configured ?? false
     pluginName.value = pid
     for (const [k, v] of Object.entries<any>(data.values ?? {})) {
       const prop = schema.value?.properties?.[k]
       form.value[k] = prop?.type === 'number' || prop?.type === 'integer' ? Number(v) : prop?.type === 'boolean' ? v === 'true' : v
+    }
+    if (isDiscordOauth.value) {
+      // Estado real: el bundle trae `discordStatus` (needs-auth /
+      // token-expired / authorized sin token nunca miente); la sonda en
+      // vivo (`discord.status`, sin lanzar nada) distingue además
+      // connected vs discord-closed.
+      const bundleStatus = (data as any)?.discordStatus
+      discordState.value =
+        bundleStatus === 'needs-auth' || bundleStatus === 'not-configured' || bundleStatus === 'token-expired' || bundleStatus === 'authorized'
+          ? bundleStatus
+          : configured.value
+            ? 'authorized'
+            : 'needs-auth'
+      void refreshDiscordLive()
     }
     if (!hasSettings.value && hasInstructions.value) tab.value = 'instructions'
     else if (!hasInstructions.value) tab.value = 'settings'
@@ -284,6 +321,30 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
     loadError.value = String((e as Error)?.message ?? e)
   }
   dialog.value?.showModal()
+}
+/** Sonda en vivo del estado Discord (acción `status`, sin lanzar ni mutar nada). */
+const refreshDiscordLive = async () => {
+  if (!isDiscordOauth.value) return
+  discordChecking.value = true
+  try {
+    const res = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status' }),
+    })
+    if (!res.ok) return
+    const data = await res.json().catch(() => ({}))
+    const st = (data as any)?.result?.status ?? (data as any)?.status
+    if (st === 'connected' || st === 'discord-closed' || st === 'needs-auth' || st === 'token-expired' || st === 'not-configured') {
+      discordState.value = st
+      if (st === 'connected') configured.value = true
+      if (st === 'needs-auth' || st === 'token-expired' || st === 'not-configured') configured.value = false
+    }
+  } catch {
+    /* sin red/sonda: se conserva el estado del bundle */
+  } finally {
+    discordChecking.value = false
+  }
 }
 const close = () => {
   stopLoginPoll()
@@ -346,10 +407,14 @@ const connectOAuth = async () => {
             instructions.value = data.instructions ?? instructions.value
             oauth.value = data.oauth ?? oauth.value
             configured.value = true
+            const bs = (data as any)?.discordStatus
+            if (bs === 'authorized' || bs === 'connected') discordState.value = 'authorized'
             for (const [k, v] of Object.entries<any>(data.values ?? {})) {
               const prop = schema.value?.properties?.[k]
               form.value[k] = prop?.type === 'number' || prop?.type === 'integer' ? Number(v) : prop?.type === 'boolean' ? v === 'true' : v
             }
+            // Confirmar en vivo (connected vs discord-closed) tras capturar.
+            await refreshDiscordLive()
             resolve()
           }
         } catch {

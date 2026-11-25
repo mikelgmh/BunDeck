@@ -582,22 +582,27 @@ describe('discord zero-config: needs-auth vs not-configured', () => {
 })
 
 describe('discord zero-config: redirects registrados (app real del maintainer)', () => {
-    it('expone los 3 redirects a registrar: 2 loopback + callback https', async () => {
+    it('expone los 3 redirects a registrar: callback https + 2 loopback', async () => {
         const mod: any = await import('../plugins/discord-rpc')
         expect(mod.DISCORD_MAINTAINER_CLIENT_ID).toBe('1575201215791497256')
         expect(mod.DEFAULT_DISCORD_CLIENT_ID).toBe('1575201215791497256')
         expect([...mod.DISCORD_VALID_REDIRECT_URIS]).toEqual([
+            'https://relay.bundeck.app/api/discord/callback',
             'http://127.0.0.1:6463',
             'http://localhost:6463',
-            'https://relay.bundeck.app/api/discord/callback',
         ])
         expect(mod.DEFAULT_DISCORD_CALLBACK_URL).toBe('https://relay.bundeck.app/api/discord/callback')
         expect(mod.DISCORD_CALLBACK_PATH).toBe('/api/discord/callback')
     })
 
-    it('la URL de autorización usa el loopback por defecto (el redirect registrado 1)', () => {
+    it('la URL de autorización usa el callback https por defecto (auto-entrega vía relay)', () => {
         const r = buildDiscordNeedsAuth({ clientId: '1575201215791497256', redirectUri: undefined, reason: 'no-token' })
         expect(r.authorizeUrl).toContain('client_id=1575201215791497256')
+        expect(r.authorizeUrl).toContain(encodeURIComponent('https://relay.bundeck.app/api/discord/callback'))
+    })
+
+    it('los loopback siguen aceptados como override manual (registrados en Discord)', () => {
+        const r = buildDiscordNeedsAuth({ clientId: '1575201215791497256', redirectUri: 'http://127.0.0.1:6463', reason: 'no-token' })
         expect(r.authorizeUrl).toContain(encodeURIComponent('http://127.0.0.1:6463'))
     })
 })

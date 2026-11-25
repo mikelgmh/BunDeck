@@ -13,12 +13,17 @@ Redirects** añade EXACTAS estas 3 URLs (Discord solo acepta http/https;
 NO admite esquemas personalizados como `bundeck://…`, por eso el flujo usa
 el callback https del relay como intermediario):
 
-1. `http://127.0.0.1:6463` (loopback principal; el redirect por defecto del daemon)
-2. `http://localhost:6463` (variante loopback; algunos navegadores/SO la prefieren)
-3. `https://relay.bundeck.app/api/discord/callback` (callback https del relay;
-   si cambias de dominio, actualiza `DEFAULT_DISCORD_CALLBACK_URL` y
-   `DEFAULT_DISCORD_PROXY_URL` en `daemon/src/plugins/discord-rpc.ts` y
-   registra la nueva URL aquí)
+1. `https://relay.bundeck.app/api/discord/callback` (callback https del relay;
+   es el redirect POR DEFECTO del daemon: tras el "Authorize", Discord
+   redirige aquí y la página auto-entrega el code al daemon local)
+2. `http://127.0.0.1:6463` (loopback principal; override manual válido, pero
+   OJO: ese puerto es también el del RPC local de Discord y nada escucha
+   ahí para OAuth, así que el navegador mostraría error si se usa)
+3. `http://localhost:6463` (variante loopback; algunos navegadores/SO la prefieren)
+
+Si cambias el dominio del relay, actualiza `DEFAULT_DISCORD_CALLBACK_URL` y
+`DEFAULT_DISCORD_PROXY_URL` en `daemon/src/plugins/discord-rpc.ts` y registra
+la nueva URL aquí.
 
 Las 3 están declaradas en código como `DISCORD_VALID_REDIRECT_URIS`
 (`daemon/src/plugins/discord-rpc.ts`).
@@ -64,7 +69,7 @@ En `daemon/src/plugins/discord-rpc.ts`:
 | Constante | Valor |
 |---|---|
 | `DEFAULT_DISCORD_CLIENT_ID` | `1575201215791497256` (app real del maintainer) |
-| `DEFAULT_DISCORD_REDIRECT_URI` | `http://127.0.0.1:6463` (redirect loopback) |
+| `DEFAULT_DISCORD_REDIRECT_URI` | `https://relay.bundeck.app/api/discord/callback` (callback https; los 2 loopback siguen válidos como override) |
 | `DEFAULT_DISCORD_CALLBACK_URL` | `https://relay.bundeck.app/api/discord/callback` |
 | `DEFAULT_DISCORD_PROXY_URL` | `https://relay.bundeck.app/api/discord/rpc-token` |
 

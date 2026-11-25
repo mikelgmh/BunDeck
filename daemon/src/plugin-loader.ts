@@ -11,6 +11,7 @@ import type { PluginManifestV2, PluginActionV2, LoadedPluginV2 } from './plugin-
 import { getNativeManifests } from './plugins/index';
 import { isVersionRangeRef, pickBestTag, invalidateCatalog } from './catalog';
 import { getPluginConfiguredStatus } from './plugins/connection-status';
+import { isDiscordTokenExpired, resolveDiscordClientId } from './plugins/discord-rpc';
 import { ensureShimBridge, isShimEnabled, SHIM_IDLE_MS } from './elgato/shim/loader-shim';
 
 // Re-export para compatibilidad
@@ -23,6 +24,40 @@ export interface LoadedPlugin extends LoadedPluginV2 {
 /** Firma mínima del WebSocketManager necesaria para propagar eventos de plugins. */
 export interface PluginEventBroadcaster {
   broadcast(eventType: string, payload: any, topic?: string): void;
+}
+
+/**
+ * Estado real de Discord para el bundle de ajustes (solo lectura síncrona
+ * de valores guardados, sin red ni RPC).
+ * - `not-configured`: ni siquiera hay Client ID resoluble (zero-config caído).
+ * - `needs-auth`: nunca se autorizó (sin access token).
+ * - `token-expired`: hay token pero caducó (hay que reautorizar).
+ * - `authorized`: hay token vigente (el vivo `connected`/`discord-closed`
+ *   lo distingue la acción `discord.status`).
+ */
+export type DiscordBundleStatus = 'not-configured' | 'needs-auth' | 'token-expired' | 'authorized';
+
+export function getDiscordBundleStatus(values: Record<string, any> | null | undefined): {
+  configured: boolean;
+  missing: string[];
+  requiresConfiguration: boolean;
+  status: DiscordBundleStatus;
+} {
+  const vals = values ?? {};
+  const clientId = resolveDiscordClientId(
+    typeof vals.clientId === 'string' ? vals.clientId : '',
+  );
+  if (!clientId) {
+    return { configured: false, missing: ['clientId'], requiresConfiguration: true, status: 'not-configured' };
+  }
+  const token = typeof vals.accessToken === 'string' ? vals.accessToken.trim() : '';
+  if (!token) {
+    return { configured: false, missing: ['accessToken'], requiresConfiguration: true, status: 'needs-auth' };
+  }
+  if (isDiscordTokenExpired({ tokenExpiresAt: vals.tokenExpiresAt })) {
+    return { configured: false, missing: ['accessToken'], requiresConfiguration: true, status: 'token-expired' };
+  }
+  return { configured: true, missing: [], requiresConfiguration: false, status: 'authorized' };
 }
 
 export const BUILT_IN_IDS = new Set([
@@ -1216,7 +1251,7 @@ export class PluginLoader {
   }
 
   /** Ajustes generales del plugin: schema + instrucciones + valores actuales. */
-  public getPluginSettingsBundle(pluginId: string): { schema: any | null; values: Record<string, string>; instructions: string | null; configured: boolean; missing: string[]; requiresConfiguration: boolean; oauth: any | null; secretFields: string[] } {
+  public getPluginSettingsBundle(pluginId: string): { schema: any | null; values: Record<string, string>; instructions: string | null; configured: boolean; missing: string[]; requiresConfiguration: boolean; oauth: any | null; secretFields: string[]; discordStatus?: DiscordBundleStatus | null } {
     const id = this.resolveCanonicalId(pluginId);
     const loaded = this.loadedPlugins.get(id);
     let manifest: any = loaded?.manifest;
@@ -1236,6 +1271,27 @@ export class PluginLoader {
     const schema = manifest.settingsSchema ?? manifest.ui?.settingsSchema ?? null;
     const values = this.db.getPluginSettings(manifest.id ?? id);
     const st = getPluginConfiguredStatus(manifest, values);
+    // Discord: estado REAL en vez del genérico (el schema no declara
+    // `required`, así que el genérico siempre diría configured:true aunque
+    // nunca se haya autorizado). Solo lectura de ajustes guardados, sin red:
+    // - sin clientId resoluble → not-configured (ni el zero-config aplica)
+    // - sin token → needs-auth · token caducado → token-expired
+    // - con token vigente → authorized (el `connected` vs `discord-closed`
+    //   en vivo lo resuelve la acción discord.status vía POST .../key).
+    // Otros plugins (Spotify incluido) usan el contrato genérico intacto.
+    let configured = st.configured;
+    let missing = st.missing;
+    let requiresConfiguration = st.requiresConfiguration;
+    let discordStatus: DiscordBundleStatus | null = null;
+    try {
+      if (manifest?.id === 'discord' || manifest?.oauth?.provider === 'discord') {
+        const ds = getDiscordBundleStatus(values);
+        configured = ds.configured;
+        missing = ds.missing;
+        requiresConfiguration = ds.requiresConfiguration;
+        discordStatus = ds.status;
+      }
+    } catch { /* mejor esfuerzo: cae al genérico */ }
     // Config flows seguros: la UI usa `secretFields` para pintar inputs
     // password y no autocompletar/eco en logs (nunca viajan en claro a WS).
     let secretFields: string[] = [];
@@ -1246,11 +1302,12 @@ export class PluginLoader {
       schema,
       values,
       instructions: typeof manifest.instructions === 'string' ? manifest.instructions : null,
-      configured: st.configured,
-      missing: st.missing,
-      requiresConfiguration: st.requiresConfiguration,
+      configured,
+      missing,
+      requiresConfiguration,
       oauth: manifest?.oauth ?? null,
       secretFields,
+      ...(discordStatus !== null ? { discordStatus } : {}),
     };
   }
 
