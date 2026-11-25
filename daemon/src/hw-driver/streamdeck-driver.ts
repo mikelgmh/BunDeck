@@ -403,6 +403,7 @@ export class StreamDeckDriver {
       // Conexión nueva: la pantalla física está sin pintar aunque la
       // sesión recuerde una página (el skip-if-same no aplica aquí).
       this.lastPaintedPageId = null;
+      this.paintedKeySigs.clear();
       this.hidFailCount = 0;
       this.hidCooldownUntil = 0;
       this.queuedPageId = null;
@@ -448,6 +449,7 @@ export class StreamDeckDriver {
   async disconnect(): Promise<void> {
     this.stopIdleLoop();
     this.lastPaintedPageId = null;
+    this.paintedKeySigs.clear();
     for (const [, iv] of this.dynamicIntervals.entries()) {
       clearInterval(iv);
     }
@@ -778,13 +780,69 @@ export class StreamDeckDriver {
       const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
       const size = this.getIconSize();
       const keyCount = this.getKeyCount();
+      const raw = { label, backgroundColor: '#000000', textColor: '#f1f5f9' };
+      const env = getDaemonDisplayEnv();
+      const sig = this.keyContentSig(raw, env, size);
+      const tG0 = Bun.nanoseconds();
+      const buf = await this.getCachedOrRender(sig, size, raw, env);
+      this.noteKeyGen((Bun.nanoseconds() - tG0) / 1e6);
       for (let i = 0; i < keyCount; i++) {
-        const buf = await this.generateButtonImage({ label, backgroundColor: '#000000', textColor: '#f1f5f9' }, size);
+        const tW0 = Bun.nanoseconds();
         await this.setButtonImage(i, buf);
+        this.noteKeyWrite((Bun.nanoseconds() - tW0) / 1e6);
+        this.paintedKeySigs.set(i, sig);
       }
     } catch (e) {
       console.warn('⚠️ Reloj idle falló:', e instanceof Error ? e.message : e);
     }
+  }
+
+  /**
+   * Firma del contenido a pintar por tecla: apariencia efectiva resuelta
+   * (looks + {{vars}} + dynamicValue) + tamaño. Barata (sin canvas): el
+   * diff se decide ANTES de renderizar o escribir al HID.
+   */
+  private keyContentSig(dataToRender: any, env: Env, size: number): string {
+    try {
+      return `${size}|${resolvedSignature(resolveKeyDisplay(dataToRender ?? {}, env ?? getDaemonDisplayEnv()))}`;
+    } catch {
+      try {
+        return `${size}|${JSON.stringify(dataToRender ?? null)}`;
+      } catch {
+        return `${size}|unhashable`;
+      }
+    }
+  }
+
+  /** Render con caché por firma (evita re-renderizar iconos/fondos iguales). */
+  private async getCachedOrRender(sig: string, size: number, dataToRender: any, env: Env): Promise<Buffer> {
+    const key = `${size}|${sig}`;
+    const hit = this.keyImageCache.get(key);
+    if (hit) {
+      this.keyImageCacheHits += 1;
+      return hit;
+    }
+    const buf = await this.generateButtonImage(dataToRender, size, env);
+    if (this.keyImageCache.size >= StreamDeckDriver.KEY_IMAGE_CACHE_MAX) {
+      const oldest = this.keyImageCache.keys().next();
+      if (!oldest.done) this.keyImageCache.delete(oldest.value);
+    }
+    this.keyImageCache.set(key, buf);
+    return buf;
+  }
+
+  private noteKeyGen(ms: number): void {
+    this.keyGenCount += 1;
+    this.keyGenMsTotal += ms;
+    if (ms > StreamDeckDriver.GEN_SLOW_WARN_MS) {
+      this.slowGenRenders += 1;
+      console.warn(`⚠️ HW gen lenta: render tecla ${ms.toFixed(0)}ms (>${StreamDeckDriver.GEN_SLOW_WARN_MS}ms)`);
+    }
+  }
+
+  private noteKeyWrite(ms: number): void {
+    this.keyWriteCount += 1;
+    this.keyWriteMsTotal += ms;
   }
 
   async testStreamDeck(): Promise<void> {    if (!this.streamDeck) {
@@ -1455,6 +1513,10 @@ export class StreamDeckDriver {
   //  4. abortar el repintado tras 2 fallos HID seguidos (no 15 timeouts).
   private static readonly HID_SLOW_WARN_MS = 50;
   private static readonly REPAINT_SLOW_WARN_MS = 500;
+  /** Render de UNA tecla >50 ms también se avisa (separado del write HID). */
+  private static readonly GEN_SLOW_WARN_MS = 50;
+  /** Caché de imágenes renderizadas por firma de contenido (evita re-render). */
+  private static readonly KEY_IMAGE_CACHE_MAX = 64;
   private static readonly HID_COOLDOWN_BASE_MS = 2000;
   private static readonly HID_COOLDOWN_MAX_MS = 30000;
   private hidFailCount = 0;
@@ -1462,11 +1524,28 @@ export class StreamDeckDriver {
   private cooldownRetryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Última página pintada OK en ESTA conexión (null = aún sin pintar). */
   private lastPaintedPageId: string | null = null;
+  /**
+   * Diff por tecla: firma del contenido pintado por posición en ESTA
+   * conexión. Si la firma coincide se omite render + write HID. Cambio de
+   * página distinto → se vacía (repintado completo). Conexión nueva →
+   * se vacía (la pantalla física está sin pintar).
+   */
+  private paintedKeySigs = new Map<number, string>();
+  /** Imágenes renderizadas por firma (size|sig → RGB top-down). */
+  private keyImageCache = new Map<string, Buffer>();
   private repaintStarts: number[] = [];
   private totalRepaints = 0;
   private skippedSamePage = 0;
   private skippedCooldown = 0;
   private slowHidWrites = 0;
+  /** Diff por tecla + medición gen vs write (ver resumen). */
+  private skippedSameKey = 0;
+  private keyGenMsTotal = 0;
+  private keyWriteMsTotal = 0;
+  private keyGenCount = 0;
+  private keyWriteCount = 0;
+  private slowGenRenders = 0;
+  private keyImageCacheHits = 0;
 
   /** Contadores para diagnóstico (log de comprobación, ver resumen). */
   getRepaintStats(): {
@@ -1478,6 +1557,14 @@ export class StreamDeckDriver {
     skippedSamePage: number;
     skippedCooldown: number;
     slowHidWrites: number;
+    skippedSameKey: number;
+    keyGenMsTotal: number;
+    keyWriteMsTotal: number;
+    keyGenCount: number;
+    keyWriteCount: number;
+    slowGenRenders: number;
+    keyImageCacheHits: number;
+    keyImageCacheSize: number;
   } {
     const now = Date.now();
     this.repaintStarts = this.repaintStarts.filter((t) => now - t < 60_000);
@@ -1490,6 +1577,14 @@ export class StreamDeckDriver {
       skippedSamePage: this.skippedSamePage,
       skippedCooldown: this.skippedCooldown,
       slowHidWrites: this.slowHidWrites,
+      skippedSameKey: this.skippedSameKey,
+      keyGenMsTotal: this.keyGenMsTotal,
+      keyWriteMsTotal: this.keyWriteMsTotal,
+      keyGenCount: this.keyGenCount,
+      keyWriteCount: this.keyWriteCount,
+      slowGenRenders: this.slowGenRenders,
+      keyImageCacheHits: this.keyImageCacheHits,
+      keyImageCacheSize: this.keyImageCache.size,
     };
   }
 
@@ -1502,11 +1597,20 @@ export class StreamDeckDriver {
     this.hidFailCount = 0;
     this.hidCooldownUntil = 0;
     this.lastPaintedPageId = null;
+    this.paintedKeySigs.clear();
+    this.keyImageCache.clear();
     this.repaintStarts = [];
     this.totalRepaints = 0;
     this.skippedSamePage = 0;
     this.skippedCooldown = 0;
     this.slowHidWrites = 0;
+    this.skippedSameKey = 0;
+    this.keyGenMsTotal = 0;
+    this.keyWriteMsTotal = 0;
+    this.keyGenCount = 0;
+    this.keyWriteCount = 0;
+    this.slowGenRenders = 0;
+    this.keyImageCacheHits = 0;
     this.updateInFlight = false;
     this.queuedPageId = null;
     if (this.pendingSchedule) {
@@ -1616,8 +1720,14 @@ export class StreamDeckDriver {
           const sig = resolvedSignature(resolveKeyDisplay(dataWithDyn, env));
           if (this.liveSigs.get(pos) === sig) return;
           this.liveSigs.set(pos, sig);
-          const buf = await this.generateButtonImage(dataWithDyn, size, env);
+          const fullSig = this.keyContentSig(dataWithDyn, env, size);
+          const tG0 = Bun.nanoseconds();
+          const buf = await this.getCachedOrRender(fullSig, size, dataWithDyn, env);
+          this.noteKeyGen((Bun.nanoseconds() - tG0) / 1e6);
+          const tW0 = Bun.nanoseconds();
           await this.setButtonImage(pos, buf);
+          this.noteKeyWrite((Bun.nanoseconds() - tW0) / 1e6);
+          this.paintedKeySigs.set(pos, fullSig);
         } catch {}
       }, Math.max(500, intervalMs));
       this.dynamicIntervals.set(pos, iv);
@@ -1647,8 +1757,14 @@ export class StreamDeckDriver {
               const sig = resolvedSignature(resolveKeyDisplay(raw, env));
               if (this.liveSigs.get(pos) === sig) continue;
               this.liveSigs.set(pos, sig);
-              const buf = await this.generateButtonImage(raw, size, env);
+              const fullSig = this.keyContentSig(raw, env, size);
+              const tG0 = Bun.nanoseconds();
+              const buf = await this.getCachedOrRender(fullSig, size, raw, env);
+              this.noteKeyGen((Bun.nanoseconds() - tG0) / 1e6);
+              const tW0 = Bun.nanoseconds();
               await this.setButtonImage(pos, buf);
+              this.noteKeyWrite((Bun.nanoseconds() - tW0) / 1e6);
+              this.paintedKeySigs.set(pos, fullSig);
             } catch { /* best-effort por tecla */ }
           }
         } catch { /* best-effort */ }
@@ -1749,6 +1865,9 @@ export class StreamDeckDriver {
     this.totalRepaints += 1;
     this.repaintStarts.push(Date.now());
     if (this.repaintStarts.length > 120) this.repaintStarts.splice(0, this.repaintStarts.length - 120);
+    // Marcas para el desglose gen vs write de ESTE repaint (visibles en finally).
+    const genT0 = this.keyGenMsTotal;
+    const writeT0 = this.keyWriteMsTotal;
 
     try {
       // Un solo fetch de métricas por repintado completo: antes se hacía un
@@ -1777,12 +1896,15 @@ export class StreamDeckDriver {
       // (cada uno bloquea el loop y retrasa /health).
       let consecHidFail = 0;
       let painted = 0;
+      let skipped = 0;
       for (let i = 0; i < Math.min(buttons.length, keyCount); i++) {
         // Ceder el event loop por botón: el render (canvas) + escritura USB
         // son pesados y si no la API/WS se quedan colgados durante el repintado.
         await new Promise<void>((r) => setImmediate(r));
         try {
-          painted += await this.paintButtonAt(buttons[i], i, size, env, metrics);
+          const wrote = await this.paintButtonAt(buttons[i], i, size, env, metrics);
+          painted += wrote;
+          skipped += wrote ? 0 : 1;
           consecHidFail = 0;
         } catch (e) {
           if (this.isHidDeadError(e)) {
@@ -1796,29 +1918,40 @@ export class StreamDeckDriver {
           throw e;
         }
       }
-      void painted;
 
-      console.log('✅ StreamDeck buttons updated with data successfully');
+      console.log(`✅ StreamDeck buttons updated with data successfully (${painted} writes, ${skipped} omitidas por diff)`);
     } catch (error) {
       console.error('❌ Error updating StreamDeck buttons with data:', error);
     } finally {
       const ms = (Bun.nanoseconds() - repaintT0) / 1e6;
+      const genMs = this.keyGenMsTotal - genT0;
+      const writeMs = this.keyWriteMsTotal - writeT0;
       if (ms > StreamDeckDriver.REPAINT_SLOW_WARN_MS) {
         const perMin = this.getRepaintStats().repaintsLastMinute;
-        console.warn(`⚠️ HW repaint lento: ${ms.toFixed(0)}ms (>${StreamDeckDriver.REPAINT_SLOW_WARN_MS}ms, ${perMin}/min, bloquea /health)`);
+        // Desglose gen vs write: si domina el write, es límite USB del
+        // equipo (node-hid síncrono, no arreglable por software más allá
+        // del diff); si dominase la gen, la caché de imágenes la absorbe.
+        const dom = writeMs >= genMs
+          ? 'domina WRITE (límite USB del equipo: node-hid síncrono; el diff ya minimiza writes)'
+          : 'domina GEN (render canvas; la caché por firma la absorbe)';
+        console.warn(`⚠️ HW repaint lento: ${ms.toFixed(0)}ms (>${StreamDeckDriver.REPAINT_SLOW_WARN_MS}ms, ${perMin}/min, bloquea /health) [gen ${genMs.toFixed(0)}ms / write ${writeMs.toFixed(0)}ms → ${dom}]`);
       }
     }
   }
 
   /**
-   * Pinta UNA tecla (render + write HID). Extraído del loop para poder
-   * cortar por tecla ante fallos HID sin abortar todo el try/catch.
-   * Devuelve 1 si pintó, 0 si la tecla estaba vacía… (siempre pinta fondo).
+   * Pinta UNA tecla (diff + render con caché + write HID). Calcula la firma
+   * del contenido ANTES de renderizar: si coincide con lo último pintado en
+   * esta conexión se omite render y write. Devuelve 1 si escribió al HID,
+   * 0 si se omitió por diff. Ante fallo HID lanza (sin registrar firma).
    */
   private async paintButtonAt(button: any, i: number, size: number, env: any, metrics: any): Promise<number> {
+    // Resolver qué se va a pintar (incluido valor dinámico) para la firma.
+    let dataToRender: any = null;
+    let hasContent = false;
     if (button && button.data) {
       // Check if button has content
-      const hasContent = !!(
+      hasContent = !!(
         button.data.label?.trim() ||
         button.data.textTop?.trim() ||
         button.data.textBottom?.trim() ||
@@ -1831,27 +1964,48 @@ export class StreamDeckDriver {
 
       if (hasContent) {
         // Si es dinámico (pc-vitals), usar las métricas ya obtenidas
-        let dataToRender = button.data;
+        dataToRender = button.data;
         if (button.data.actions?.some((a: any) => a.type?.includes('pc-vitals'))) {
           try {
             const dyn = this.dynamicValueFromMetrics(button, metrics);
             if (dyn) dataToRender = { ...button.data, dynamicValue: dyn };
           } catch {}
         }
-        const imageBuffer = await this.generateButtonImage(dataToRender, size, env);
-        await this.setButtonImage(i, imageBuffer);
-        const effLog = (() => { try { return resolveKeyDisplay(dataToRender, env); } catch { return null; } })();
-        console.log(`📝 Set button ${i} to "${effLog?.dynamicValue || effLog?.label || effLog?.emoji || effLog?.icon || 'BTN'}"`);
       } else {
         // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
-        const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
-        await this.setButtonImage(i, imageBuffer);
-        console.log(`⬛ Set button ${i} to default (empty)`);
+        dataToRender = { icon: '' };
       }
     } else {
       // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
-      const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+      dataToRender = { icon: '' };
+    }
+
+    // Diff por tecla: sin cambios → sin render ni write HID.
+    const sig = this.keyContentSig(dataToRender, env, size);
+    if (this.paintedKeySigs.get(i) === sig) {
+      this.skippedSameKey += 1;
+      return 0;
+    }
+
+    // Generación (con caché por firma) medida por separado del write HID.
+    const tG0 = Bun.nanoseconds();
+    const imageBuffer = await this.getCachedOrRender(sig, size, dataToRender, env);
+    this.noteKeyGen((Bun.nanoseconds() - tG0) / 1e6);
+
+    const tW0 = Bun.nanoseconds();
+    try {
       await this.setButtonImage(i, imageBuffer);
+    } finally {
+      // El write se mide aunque falle (el aborto por HID muerto lo decide
+      // el llamador con isHidDeadError; aquí no se registra la firma).
+      this.noteKeyWrite((Bun.nanoseconds() - tW0) / 1e6);
+    }
+    this.paintedKeySigs.set(i, sig);
+
+    if (hasContent) {
+      const effLog = (() => { try { return resolveKeyDisplay(dataToRender, env); } catch { return null; } })();
+      console.log(`📝 Set button ${i} to "${effLog?.dynamicValue || effLog?.label || effLog?.emoji || effLog?.icon || 'BTN'}"`);
+    } else {
       console.log(`⬛ Set button ${i} to default (empty)`);
     }
     return 1;
@@ -1909,6 +2063,12 @@ export class StreamDeckDriver {
     this.updateInFlight = true;
 
     try {
+      // Diff por tecla: página distinta → repintado completo (se vacían las
+      // firmas; pintar solo el delta contra la página anterior no compensa).
+      // Misma página → solo se escriben las teclas cuya firma cambió.
+      if (pageId !== this.lastPaintedPageId) {
+        this.paintedKeySigs.clear();
+      }
       console.log(`📄 Updating StreamDeck from page: ${pageId}`);
 
       const db = new DatabaseService();
