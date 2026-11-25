@@ -1,3 +1,29 @@
+# [1.14.0](https://github.com/mikelgmh/BunDeck/compare/v1.13.1...v1.14.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **kiosco:** banner y modal sin solapes en movil + modal siempre visible ([5f921e5](https://github.com/mikelgmh/BunDeck/commit/5f921e58f5a337e8b6b328bf4c0ed0fae5beff69))
+* **profiles:** al cambiar de perfil cada dispositivo va a su pagina asignada ([52da0fc](https://github.com/mikelgmh/BunDeck/commit/52da0fc8959014f4eae7f58d10a274426c3675dd))
+* **relay:** la pagina de sesion no valida enlaza al escaner de QR ([f7a5c4e](https://github.com/mikelgmh/BunDeck/commit/f7a5c4ee50d10e2f855c22d9dc534997ec3cb2b7))
+* **remote:** modal aprobacion compacta + nombre en QR + pendiente se limpia ([4852ea6](https://github.com/mikelgmh/BunDeck/commit/4852ea6c642aee44c8674b8c296a9413fc0b2b01))
+* **remote:** regenerar el QR tras denegar (y tras aprobar en QR) ([abca88a](https://github.com/mikelgmh/BunDeck/commit/abca88ac202bcda368b31724f4382d9226c4896e))
+* **remote:** spinner P2P en vista de aprobado + dialogo sin hueco ([84386b8](https://github.com/mikelgmh/BunDeck/commit/84386b8ef1c13b7b3de2fbb2402d2fb53bc7b852))
+* **security:** revocar corta de verdad la sesion remota ([d5df93b](https://github.com/mikelgmh/BunDeck/commit/d5df93b4c502c0fdeb38150c476a9ef9b27a1c8e))
+* **tests:** aislar BUNDECK_DATA_DIR por fichero para CI determinista ([a15711b](https://github.com/mikelgmh/BunDeck/commit/a15711b7ce59d268fe297929569784a96544d776))
+* **tests:** el test de window-action minimize ya no minimiza de verdad ([c35ced8](https://github.com/mikelgmh/BunDeck/commit/c35ced86e4c94e91fef1321cff43835f69d18db9))
+
+
+### Features
+
+* **logs:** registros por pulsacion (boton, accion, dispositivo) + higiene e2e ([16ee192](https://github.com/mikelgmh/BunDeck/commit/16ee192fa614cfc7ac4ac195f38b9de1ae0979bb))
+* **remote:** nombre del dispositivo al aprobar (sugerido iPad Safari, editable) ([26b8701](https://github.com/mikelgmh/BunDeck/commit/26b8701b79f95a26817b217d639149169d33edd3))
+* **remote:** renombrar dispositivo desde sesiones + revoke limpia la lista ([e39abc7](https://github.com/mikelgmh/BunDeck/commit/e39abc74f5134e4c05d9e4eeb11c9a9e3ce0be08))
+* **remote:** sesiones perennes (sin caducidad) por defecto ([7583704](https://github.com/mikelgmh/BunDeck/commit/7583704bfe5caec24ebb499784e97d3e525f7d1d))
+* **spotify:** login bajo demanda desde cualquier dispositivo + quitar Electrobun muerto ([322d46d](https://github.com/mikelgmh/BunDeck/commit/322d46d5617ae23cfd5f8a147cc7f85acd87a694))
+* **ui:** modal de conexion en tunel + dot de transporte en kiosco ([0d5c81f](https://github.com/mikelgmh/BunDeck/commit/0d5c81fc5f3e2c5e051f23b2358c2d6c58b80923))
+* **ui:** tabs de modo como select en movil (<=700px) ([2b8fb3c](https://github.com/mikelgmh/BunDeck/commit/2b8fb3ce9a2e58ff953d0395d9e7bbf6d6aa34e1))
+
 ## [1.13.1](https://github.com/mikelgmh/BunDeck/compare/v1.13.0...v1.13.1) (2026-11-25)
 
 
