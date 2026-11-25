@@ -132,11 +132,14 @@ export async function listConflictProcesses(): Promise<ConflictProcess[]> {
   }
 }
 
-/** Caché corta: la UI sondea cada pocos segundos y cada sondeo costaría
- *  un powershell/ps nuevo. TTL 5 s + deduplicación in-flight. */
+/** Caché: la UI sondea el status y cada sondeo costaría un powershell nuevo
+ *  en Windows (~0.5-2 s por arranque, bloquea percepción de todo el panel
+ *  por el límite de 6 conexiones). TTL 30 s + deduplicación in-flight.
+ *  Además el endpoint omite el scan por completo cuando ya estamos
+ *  conectados (si tenemos el HID abierto, la app oficial no lo tiene). */
 let cache: { ts: number; data: ConflictProcess[] } | null = null;
 let inFlight: Promise<ConflictProcess[]> | null = null;
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 30_000;
 
 export function clearConflictCache(): void {
   cache = null;
@@ -223,3 +226,10 @@ export function parsePsOutput(stdout: string): ConflictProcess[] {
 }
 
 export { parseNamesFromLines };
+
+/** Motivo del conflicto para el endpoint de status (puro, testeable). */
+export type ConflictReason = 'none' | 'process' | 'hid-busy' | 'both';
+export function conflictReason(detected: boolean, hidBusyHint: boolean): ConflictReason {
+  if (detected) return hidBusyHint ? 'both' : 'process';
+  return hidBusyHint ? 'hid-busy' : 'none';
+}

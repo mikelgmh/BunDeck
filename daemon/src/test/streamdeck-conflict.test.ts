@@ -3,6 +3,7 @@ import {
   isConflictProcessName,
   filterConflictProcesses,
   parsePsOutput,
+  conflictReason,
   ALL_CONFLICT_NAMES,
 } from '../hw-driver/streamdeck-conflict'
 
@@ -40,5 +41,12 @@ describe('streamdeck-conflict', () => {
   it('la allowlist no está vacía y cubre el exe real visto en Windows', () => {
     expect(ALL_CONFLICT_NAMES.length).toBeGreaterThan(0)
     expect(ALL_CONFLICT_NAMES.map((n) => n.toLowerCase())).toContain('streamdeck.exe')
+  })
+
+  it('conflictReason cubre los 4 casos', () => {
+    expect(conflictReason(false, false)).toBe('none')
+    expect(conflictReason(true, false)).toBe('process')
+    expect(conflictReason(false, true)).toBe('hid-busy')
+    expect(conflictReason(true, true)).toBe('both')
   })
 })

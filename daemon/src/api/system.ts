@@ -7,6 +7,7 @@ import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 import {
   getConflictProcessesCached,
   closeConflictProcesses,
+  conflictReason,
 } from '../hw-driver/streamdeck-conflict';
 import { getVersion } from '../version';
 import { jsonResponse } from './http-helpers';
@@ -840,23 +841,27 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
     if (method === 'GET') {
       const grid = streamDeckDriver.getGridGeometry();
       const { guessDeckModel } = await import('../devices');
+      // Si ya tenemos el HID abierto, la app oficial no puede tenerlo:
+      // se omite el scan de procesos (spawn de powershell, ~0.5-2 s) y el
+      // listado HID. Solo se busca conflicto cuando NO estamos conectados.
+      const connected = streamDeckDriver.isConnected();
       let conflictProcesses: Array<{ name: string; pid: number | null }> = [];
-      try {
-        conflictProcesses = await getConflictProcessesCached();
-      } catch {
-        conflictProcesses = [];
-      }
-      // Heurístico HID: la app oficial suele dejar el HID ocupado aunque el
-      // proceso ya muriera (o al revés). Si no estamos conectados y el HID
-      // no lista nada, se marca como pista adicional — nunca como prueba.
       let hidBusyHint = false;
-      try {
-        if (!streamDeckDriver.isConnected()) {
+      if (!connected) {
+        try {
+          conflictProcesses = await getConflictProcessesCached();
+        } catch {
+          conflictProcesses = [];
+        }
+        // Heurístico HID: la app oficial suele dejar el HID ocupado aunque el
+        // proceso ya muriera (o al revés). Si no estamos conectados y el HID
+        // no lista nada, se marca como pista adicional — nunca como prueba.
+        try {
           const devs = await streamDeckDriver.listDevices();
           hidBusyHint = devs.length === 0;
+        } catch {
+          hidBusyHint = false;
         }
-      } catch {
-        hidBusyHint = false;
       }
       const detected = conflictProcesses.length > 0;
       return jsonResponse({
@@ -869,7 +874,7 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           detected,
           processes: conflictProcesses,
           hidBusyHint,
-          reason: detected ? (hidBusyHint ? 'both' : 'process') : hidBusyHint ? 'hid-busy' : 'none',
+          reason: conflictReason(detected, hidBusyHint),
         },
       });
     }
