@@ -74,7 +74,7 @@ const getDataDir = (cmdOptions?: { dataDir?: string }): string => {
   })();
   const chosen = cmdOptions?.dataDir ?? globalDataDir;
   if (chosen) return chosen;
-  return process.env.LIBREDECK_DATA_DIR || resolveDataDir();
+  return process.env.BUNDECK_DATA_DIR || process.env.LIBREDECK_DATA_DIR || resolveDataDir();
 };
 
 const getApiBase = (cmdOptions?: { port?: string | number }): string => {
@@ -221,9 +221,11 @@ program
     // 3) Último recurso: matar por nombre como antes
     try {
       if (process.platform === 'win32') {
+        await runCommand('taskkill', ['/F', '/IM', 'bundeck-daemon.exe']);
+        await runCommand('taskkill', ['/F', '/IM', 'bundeck-daemon*.exe']);
         await runCommand('taskkill', ['/F', '/IM', 'libredeck-daemon.exe']);
-        await runCommand('taskkill', ['/F', '/IM', 'libredeck-daemon*.exe']);
       } else {
+        await runCommand('pkill', ['-f', 'bundeck-daemon']);
         await runCommand('pkill', ['-f', 'libredeck-daemon']);
       }
       spinner.succeed('Daemon detenido por fuerza');
@@ -620,7 +622,7 @@ Este plugin añade las siguientes acciones:
 
 // Main CLI setup
 program
-  .name('libredeck-cli')
+  .name('bundeck-cli')
   .description('BunDeck CLI - Herramientas de línea de comandos para BunDeck')
   .version(getVersion());
 
