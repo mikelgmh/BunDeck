@@ -48,6 +48,15 @@ beforeEach(async () => {
   delete process.env.RELAY_URL;
   await initDatabase();
   db = new DatabaseService();
+  // Aislamiento: en suite completa action-runner.test.ts instala un mock
+  // global de `../db` con un Map compartido (ver remote-ui-policy.test.ts):
+  // la DB "fresca" no basta, se purgan las claves del módulo para que el
+  // orden de ejecución de ficheros no filtre `remote.relay.url` de otros tests.
+  try {
+    for (const k of Object.keys(db.getAllSettings())) {
+      if (k.startsWith('remote.') || k === 'remote.relay.url') db.deleteSetting(k);
+    }
+  } catch { /* sin getAllSettings: nada que purgar */ }
   services = makeServices();
   resetReplay();
   resetLocalSeq();
