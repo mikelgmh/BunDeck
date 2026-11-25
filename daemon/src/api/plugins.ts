@@ -266,35 +266,131 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
       }
     }
     // Captura de token OAuth extraído en local (Electrobun Web Player).
-    // Genérico por plugin pero hoy solo spotify declara oauth en el manifest.
+    // Genérico: spotify (web-player) y discord (code OAuth → intercambio).
     // Guarda TODO el bundle (token + caducidad + tipo) vía savePluginSettings.
     if (sub === 'token-capture' && method === 'POST') {
       try {
         const body = await _req.json().catch(() => ({}));
-        if (pluginId !== 'spotify') {
-          return jsonResponse({ error: `token-capture no soportado para ${pluginId}` }, 400);
+        if (pluginId === 'spotify') {
+          const { normalizeSpotifyTokenCapture } = await import('../plugins/spotify.plugin');
+          const stored = normalizeSpotifyTokenCapture(body ?? {}, Date.now());
+          const values = services.pluginLoader.savePluginSettings(pluginId, stored);
+          // Limpiar las peticiones de login pendientes (explícita y de fondo).
+          try {
+            db.deleteSetting('plugin.spotify.loginRequestedAt');
+          } catch {}
+          try {
+            db.deleteSetting('plugin.spotify.autoRefreshRequestedAt');
+          } catch {}
+          services.wsManager.broadcastPluginSettings(pluginId);
+          return jsonResponse({ success: true, pluginId, values, expiresAt: stored.tokenExpiresAt });
         }
-        const { normalizeSpotifyTokenCapture } = await import('../plugins/spotify.plugin');
-        const stored = normalizeSpotifyTokenCapture(body ?? {}, Date.now());
-        const values = services.pluginLoader.savePluginSettings(pluginId, stored);
-        // Limpiar las peticiones de login pendientes (explícita y de fondo).
-        try {
-          db.deleteSetting('plugin.spotify.loginRequestedAt');
-        } catch {}
-        try {
-          db.deleteSetting('plugin.spotify.autoRefreshRequestedAt');
-        } catch {}
-        services.wsManager.broadcastPluginSettings(pluginId);
-        return jsonResponse({ success: true, pluginId, values, expiresAt: stored.tokenExpiresAt });
+        if (pluginId === 'discord') {
+          const {
+            normalizeDiscordTokenCapture,
+            exchangeDiscordCode,
+            exchangeDiscordCodeViaProxy,
+            resolveDiscordClientId,
+            resolveDiscordRedirectUri,
+            resolveDiscordProxyUrl,
+          } = await import('../plugins/discord-rpc');
+          // Dos formatos: { code } (se intercambia vía relay zero-config o
+          // directo con ID+Secret propios) o tokens directos
+          // { access_token | accessToken, ... }.
+          const code = typeof body?.code === 'string' && body.code.trim() ? body.code.trim() : null;
+          let stored: { accessToken: string; refreshToken: string; tokenType: string; obtainedAt: string; expiresAt: string; expiresIn: string };
+          if (code) {
+            const all = db.getPluginSettings('discord');
+            const userClientId = String(all?.clientId ?? '').trim();
+            const userSecret = String(all?.clientSecret ?? '').trim();
+            const redirectUri = resolveDiscordRedirectUri(String(all?.redirectUri ?? ''));
+            // Power-user con app propia: intercambio directo con discord.com.
+            if (userClientId && userSecret) {
+              stored = await exchangeDiscordCode({ clientId: userClientId, clientSecret: userSecret, code, redirectUri });
+            } else {
+              // Zero-config: el secret vive solo en el relay, nunca en el cliente.
+              const clientCheck = resolveDiscordClientId(userClientId);
+              const proxyUrl = resolveDiscordProxyUrl(String(all?.proxyUrl ?? ''));
+              if (!clientCheck || !proxyUrl) {
+                return jsonResponse({ error: 'discord-not-configured: el maintainer aún no rellenó DEFAULT_DISCORD_CLIENT_ID / DEFAULT_DISCORD_PROXY_URL (ver docs/discord-app-setup.md). Mientras tanto usa el fallback de atajos globales.' }, 400);
+              }
+              stored = await exchangeDiscordCodeViaProxy({ code, redirectUri, proxyUrl });
+            }
+          } else {
+            stored = normalizeDiscordTokenCapture(body ?? {}, Date.now());
+          }
+          const values = services.pluginLoader.savePluginSettings(pluginId, {
+            accessToken: stored.accessToken,
+            refreshToken: stored.refreshToken,
+            tokenExpiresAt: stored.expiresAt,
+          });
+          try {
+            db.deleteSetting('plugin.discord.loginRequestedAt');
+          } catch {}
+          services.wsManager.broadcastPluginSettings(pluginId);
+          return jsonResponse({ success: true, pluginId, values, expiresAt: stored.expiresAt });
+        }
+        return jsonResponse({ error: `token-capture no soportado para ${pluginId}` }, 400);
       } catch (e) {
         return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
       }
     }
     // Señalización de login para el host Electrobun (polling):
     // el dialog pide login, el host lo ve y abre la ventana del Web Player.
+    // Discord: devuelve además la authorizeUrl (el navegador la abre).
     if (sub === 'login-request') {
-      if (pluginId !== 'spotify') {
+      if (pluginId !== 'spotify' && pluginId !== 'discord') {
         return jsonResponse({ error: `login-request no soportado para ${pluginId}` }, 400);
+      }
+      if (pluginId === 'discord') {
+        const { buildDiscordAuthorizeUrl, resolveDiscordClientId, resolveDiscordRedirectUri } = await import('../plugins/discord-rpc');
+        if (method === 'POST') {
+          const all = db.getPluginSettings('discord');
+          const clientId = resolveDiscordClientId(String(all?.clientId ?? ''));
+          const redirectUri = resolveDiscordRedirectUri(String(all?.redirectUri ?? ''));
+          let authorizeUrl: string | null = null;
+          try {
+            authorizeUrl = clientId ? buildDiscordAuthorizeUrl({ clientId, redirectUri }) : null;
+          } catch {
+            authorizeUrl = null;
+          }
+          db.setSetting('plugin.discord.loginRequestedAt', String(Date.now()));
+          const requestedAt = db.getSetting('plugin.discord.loginRequestedAt');
+          try {
+            (services as any).wsManager?.broadcast?.(
+              'plugin.login-requested',
+              { pluginId, requestedAt, authorizeUrl, ts: Date.now() },
+              'plugins'
+            );
+          } catch {}
+          return jsonResponse({ success: true, pluginId, requestedAt, authorizeUrl });
+        }
+        if (method === 'GET') {
+          const requestedAt = db.getSetting('plugin.discord.loginRequestedAt');
+          let bundle: any = null;
+          try {
+            bundle = services.pluginLoader.getPluginSettingsBundle(pluginId);
+          } catch {}
+          const all = db.getPluginSettings('discord');
+          const clientId = resolveDiscordClientId(String(all?.clientId ?? ''));
+          const redirectUri = resolveDiscordRedirectUri(String(all?.redirectUri ?? ''));
+          let authorizeUrl: string | null = null;
+          try {
+            authorizeUrl = clientId ? buildDiscordAuthorizeUrl({ clientId, redirectUri }) : null;
+          } catch {}
+          return jsonResponse({
+            pluginId,
+            pending: requestedAt !== null && requestedAt !== '',
+            requestedAt,
+            authorizeUrl,
+            configured: bundle?.configured ?? false,
+            missing: bundle?.missing ?? [],
+          });
+        }
+        if (method === 'DELETE') {
+          db.deleteSetting('plugin.discord.loginRequestedAt');
+          return jsonResponse({ success: true, pluginId });
+        }
       }
       if (method === 'POST') {
         db.setSetting('plugin.spotify.loginRequestedAt', String(Date.now()));

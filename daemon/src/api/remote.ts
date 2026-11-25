@@ -30,7 +30,7 @@ import { forgetDeviceEverywhere } from './devices';
 import { allowLanRedeem, getLanContext } from '../http/lan-guard';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
-import { resolveRelayUrl } from '../remote/public-relay';
+import { resolveRelayUrl, RELAY_URL_KEY, isValidRelayUrl, isRelayDisabledValue, normalizeRelayUrl, DEFAULT_PUBLIC_RELAY_URL } from '../remote/public-relay';
 
 export const handleRemote: ApiHandler = async (req, { url, method, path, db, services }) => {
   const remote: any = (globalThis as any).__libredeckRemote;
@@ -44,6 +44,7 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
       relay: {
         url: resolveRelayUrl(db),
         status: remote?.relay?.getState?.() ?? 'unknown',
+        envOverride: typeof process.env.RELAY_URL === 'string' && process.env.RELAY_URL.length > 0,
       },
       tunnel: {
         status: remote?.tunnel?.getState?.() ?? 'unknown',
@@ -176,6 +177,44 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     try { remote?.relay?.updateIdentity?.(next.deviceId, next.publicKeyB64); } catch { /* noop */ }
     try { services.wsManager?.broadcast('remote.paired', { rotated: true, fingerprint: next.fingerprint, ts: Date.now() }, 'remote'); } catch { /* noop */ }
     return jsonResponse({ ok: true, deviceId: next.deviceId, fingerprint: next.fingerprint, publicKey: next.publicKeyB64 });
+  }
+
+  // Relay público configurable (`PUT /api/v1/remote/relay { url }`):
+  // - `url: null` (o ausente) → borra el setting → vuelve al relay público
+  //   por defecto (`DEFAULT_PUBLIC_RELAY_URL`).
+  // - `url: 'off'/'none'/'disabled'` → desactiva el relay ('' efectivo).
+  // - URL `ws(s)://` (o `http(s)://`, que se normaliza a `ws(s)://`) →
+  //   relay personalizado. Resto (incluida `''`) → 400.
+  // Tras persistir, reinicia relay+túnel para que relean la URL efectiva.
+  if (path === '/api/v1/remote/relay' && method === 'PUT') {
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const hasUrl = body != null && Object.prototype.hasOwnProperty.call(body, 'url');
+    const url = hasUrl ? (body as any).url : null;
+    if (url === null || url === undefined) {
+      try { db.deleteSetting(RELAY_URL_KEY); } catch { /* noop */ }
+    } else if (typeof url !== 'string') {
+      return jsonResponse({ error: 'url debe ser string o null' }, 400);
+    } else if (!isValidRelayUrl(url)) {
+      return jsonResponse({ error: 'URL de relay inválida: usa ws(s):// (o http(s)://), "off" para desactivar o null para el relay público' }, 400);
+    } else if (isRelayDisabledValue(url)) {
+      try { db.setSetting(RELAY_URL_KEY, String(url).trim().toLowerCase()); } catch { /* noop */ }
+    } else {
+      try { db.setSetting(RELAY_URL_KEY, normalizeRelayUrl(url) as string); } catch { /* noop */ }
+    }
+    const effective = resolveRelayUrl(db);
+    try { remote?.relay?.stop?.(); } catch { /* noop */ }
+    try { remote?.tunnel?.stop?.(); } catch { /* noop */ }
+    try { remote?.relay?.start?.(); } catch { /* noop */ }
+    try { remote?.tunnel?.start?.(); } catch { /* noop */ }
+    try {
+      services.wsManager?.broadcast('remote.relay-changed', {
+        url: effective,
+        status: remote?.relay?.getState?.() ?? 'unknown',
+        ts: Date.now(),
+      }, 'remote');
+    } catch { /* noop */ }
+    return jsonResponse({ ok: true, url: effective, default: DEFAULT_PUBLIC_RELAY_URL });
   }
 
   // Dev/E2E: cifrar un comando al peer y enviarlo por el relay.

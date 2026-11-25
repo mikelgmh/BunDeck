@@ -54,8 +54,20 @@ export function useRemoteRtc() {
 
   async function connect(): Promise<boolean> {
     const tok = getTunnelToken()
-    if (!tok || pc) return false
-    if (!/^[0-9a-fA-F]{32,}$/.test(tok)) return false
+    if (!tok) {
+      console.debug('[rtc] connect omitido: sin token de túnel en la URL')
+      return false
+    }
+    if (pc) {
+      console.debug('[rtc] connect omitido: ya hay RTCPeerConnection')
+      return false
+    }
+    // 64-hex (sessionToken) o urlCode 12 chars (/ui/<code>); se acepta
+    // alfanumérico-url-safe ≥8 para no quedarse en `idle` sin intentar nada.
+    if (!/^[A-Za-z0-9_-]{8,}$/.test(tok)) {
+      console.debug('[rtc] connect omitido: token con formato inesperado')
+      return false
+    }
     sessionToken = tok
     status.value = 'signaling'
     detail.value = 'signaling'

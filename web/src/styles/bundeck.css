@@ -964,7 +964,9 @@
   z-index: 40;
   touch-action: manipulation;
 }
-/* Salida discreta: flotante arriba-derecha, semi-transparente. */
+/* Salida discreta: flotante arriba-derecha. La opacidad de reposo va en los
+   hijos (botones + wake) para que el piloto RTC quede siempre a
+   opacidad plena y legible. */
 .bundeck .bd-kiosk-exit {
   position: fixed;
   top: calc(8px + env(safe-area-inset-top, 0px));
@@ -973,10 +975,19 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  opacity: 1;
+}
+.bundeck .bd-kiosk-exit .bd-kiosk-exit-btn,
+.bundeck .bd-kiosk-exit .bd-ibtn,
+.bundeck .bd-kiosk-exit .bd-kiosk-wake {
   opacity: 0.55;
 }
-.bundeck .bd-kiosk-exit:hover,
-.bundeck .bd-kiosk-exit:focus-within {
+.bundeck .bd-kiosk-exit:hover .bd-kiosk-exit-btn,
+.bundeck .bd-kiosk-exit:hover .bd-ibtn,
+.bundeck .bd-kiosk-exit:hover .bd-kiosk-wake,
+.bundeck .bd-kiosk-exit:focus-within .bd-kiosk-exit-btn,
+.bundeck .bd-kiosk-exit:focus-within .bd-ibtn,
+.bundeck .bd-kiosk-exit:focus-within .bd-kiosk-wake {
   opacity: 1;
 }
 .bundeck .bd-kiosk-exit .bd-kiosk-exit-btn {
@@ -1008,21 +1019,30 @@
   box-shadow: 0 0 6px #fbbf24;
 }
 /* Puntito de transporte en el kiosco (solo ruta túnel): verde = P2P,
-   ámbar = relay, pulsante = probando. No toca el wake-lock existente. */
+   ámbar = relay, rojo = desconectado (WS caído), gris/azul pulsante =
+   conectando/probando. Fuera de la opacidad .55 del cluster (siempre
+   legible) y con anillo para distinguirlo del puntito de wake-lock. */
 .bundeck .bd-kiosk-rtc {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  opacity: 1;
+  border-radius: 50%;
+  outline: 1px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
 }
 .bundeck .bd-kiosk-rtc i {
-  width: 8px;
-  height: 8px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
-  background: var(--bd-ac);
+  background: #6b7280;
   display: block;
   animation: bd-kiosk-pulse 1.2s ease-in-out infinite;
+}
+.bundeck .bd-kiosk-rtc[data-transport='probing'] i {
+  background: var(--bd-ac);
 }
 .bundeck .bd-kiosk-rtc[data-transport='p2p'] i {
   background: #4ade80;
@@ -1034,6 +1054,11 @@
   box-shadow: 0 0 6px #d97706;
   animation: none;
 }
+.bundeck .bd-kiosk-rtc[data-transport='disconnected'] i {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+  animation: none;
+}
 @keyframes bd-kiosk-pulse {
   0%,
   100% {
@@ -1043,31 +1068,30 @@
     opacity: 0.35;
   }
 }
-/* Kiosco por túnel: el banner a ancho completo quedaba bajo el cluster fijo
-   de salida (salir + puntitos + fullscreen) y su X bajo .bd-kiosk-exit /
-   .bd-kiosk-corner (intocable a 390px). Aire arriba para que el texto arranque
-   bajo los fijos; la X sube por encima de la esquina invisible para seguir
+/* Kiosco por túnel: el banner SOLO sale en estado terminal (connected /
+   fallback; durante idle|signaling lo tapa la modal de conexión con v-if,
+   cero solape). Aire arriba + safe-area para que el texto arranque bajo
+   los fijos; la X sube por encima de la esquina invisible para seguir
    siendo pulsable. Solo layout, sin tocar funcionalidad. */
 .bundeck.bd-kiosk .bd-tunnel-banner {
-  padding-top: 60px;
+  padding-top: calc(60px + env(safe-area-inset-top, 0px));
 }
 .bundeck.bd-kiosk .bd-tunnel-banner .bd-tunnel-x {
   position: relative;
   z-index: 42;
 }
-/* La modal de conexión usa el marco .bd-dlg (880x640 de escritorio) y su
-   especificidad ganaba al tamaño compacto del componente: quedaba una caja
-   gigante empujando el grid. Se impone el diseño compacto. Además el <dialog>
-   sin showModal es `absolute` (hoja de estilos UA) y pintaba arriba del todo,
-   bajo los fijos del kiosco (texto y X intocables): se fija como flotante
-   centrado, por encima de .bd-kiosk-exit (41) y .bd-kiosk-corner (40), bajo el
-   banner de transporte. */
+/* La modal de conexión es compacta (el marco .bd-dlg de escritorio es
+   880x640 y su especificidad ganaba al tamaño del componente). <dialog> con
+   showModal pinta en el top layer; sin showModal (fallback con `open`) es
+   `absolute` (hoja UA) y pintaba arriba del todo, bajo los fijos del kiosco:
+   se fija como flotante centrado bajo los fijos (top 112px + safe-area),
+   por encima de .bd-kiosk-exit (41) y .bd-kiosk-corner (40). */
 .bundeck dialog.bd-dlg.bd-tunnel-connect {
   width: min(420px, 94vw);
   height: fit-content;
   max-height: calc(100dvh - 32px);
   position: fixed;
-  top: 112px;
+  top: calc(112px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   margin: 0;

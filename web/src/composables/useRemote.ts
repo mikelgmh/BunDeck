@@ -15,7 +15,7 @@ export interface RemoteStatusView {
   deviceId: string
   fingerprint: string
   publicKey: string
-  relay: { url: string; status: string }
+  relay: { url: string; status: string; envOverride?: boolean }
   pending: number
   trusted: number
   policy: string[]
@@ -149,6 +149,31 @@ export function toggleInList(list: string[], item: string): string[] {
   return list.includes(item) ? list.filter((x) => x !== item) : [...list, item]
 }
 
+/**
+ * Valida una URL de relay en el cliente (espejo de `isValidRelayUrl` del daemon).
+ * Acepta `ws(s)://`, `http(s)://` (el daemon la normaliza a ws/wss) y los
+ * centinelas `off`/`none`/`disabled`. Rechaza `''` y otros esquemas.
+ */
+export function isValidRelayUrlInput(input: string | null | undefined): boolean {
+  if (input == null || typeof input !== 'string') return false
+  const raw = input.trim()
+  if (!raw) return false
+  if (/^(off|none|disabled)$/i.test(raw)) return true
+  let protocol = ''
+  try {
+    protocol = new URL(raw).protocol.toLowerCase()
+  } catch {
+    return false
+  }
+  return protocol === 'ws:' || protocol === 'wss:' || protocol === 'http:' || protocol === 'https:'
+}
+
+/** Centinela de relay desactivado (espejo de `isRelayDisabledValue` del daemon). */
+export function isRelayDisabledInput(input: string | null | undefined): boolean {
+  if (input == null) return false
+  return /^(off|none|disabled)$/i.test(String(input).trim())
+}
+
 export function useRemote() {
   const apiPort = ref(3001)
   const apiBase = () => {
@@ -170,6 +195,14 @@ export function useRemote() {
   const qrDataUrl = ref('')
   const qrUnsupported = ref(false)
   const qrError = ref('')
+
+  // --- Relay público configurable (PUT /api/v1/remote/relay) ---
+  /** URL efectiva del relay (la de `GET /status`). `''` = desactivado. */
+  const relayUrl = ref('')
+  /** `true` si `RELAY_URL` en env ignora lo guardado en Ajustes. */
+  const relayEnvOverride = ref(false)
+  const relayLoading = ref(false)
+  const relayError = ref('')
 
   // --- UI remota vía relay (contrato nuevo; degradación si 404) ---
   const uiEnabled = ref(false)
@@ -307,6 +340,8 @@ export function useRemote() {
     await syncConfig()
     const data = await api('/remote/status')
     status.value = data
+    relayUrl.value = String(data?.relay?.url ?? '')
+    relayEnvOverride.value = (data as { relay?: { envOverride?: unknown } })?.relay?.envOverride === true
     if (typeof (data as { uiEnabled?: unknown })?.uiEnabled === 'boolean') {
       uiEnabled.value = !!(data as { uiEnabled?: boolean }).uiEnabled
     } else {
@@ -425,6 +460,30 @@ export function useRemote() {
     pair.value = null
     await refresh()
     return data
+  }
+
+  /**
+   * Guarda la URL del relay (`PUT /api/v1/remote/relay { url }`) y refresca
+   * el estado. `null` = relay público por defecto; `'off'` = desactivado.
+   * El daemon valida (400 si inválida) y reinicia relay+túnel.
+   */
+  const setRelayUrl = async (url: string | null) => {
+    relayError.value = ''
+    relayLoading.value = true
+    try {
+      const data = await api('/remote/relay', {
+        method: 'PUT',
+        body: JSON.stringify({ url }),
+      })
+      relayUrl.value = String(data?.url ?? '')
+      await loadStatus()
+      return relayUrl.value
+    } catch (e) {
+      relayError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      relayLoading.value = false
+    }
   }
 
   /** Suscripción WS al topic `remote` (mismo patrón que useStreamDeck). */
@@ -656,6 +715,11 @@ export function useRemote() {
     revoke,
     savePolicy,
     rotate,
+    setRelayUrl,
+    relayUrl,
+    relayEnvOverride,
+    relayLoading,
+    relayError,
     connectWs,
     disconnectWs,
     pushEvent,

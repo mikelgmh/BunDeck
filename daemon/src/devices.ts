@@ -236,6 +236,66 @@ export function fixAssignments(opts: {
 }
 
 /**
+ * Resuelve la página que debe mostrar un dispositivo en un perfil:
+ * la asignada si existe y pertenece al perfil, o el fallback dado
+ * (normalmente la primera página del perfil). Puro y testeable.
+ * Misma regla que `pageFor` de `navigateProfileTo` (ws.ts).
+ */
+export function resolveAssignedPageForDevice(opts: {
+  assignments: Record<string, string>;
+  pageProfileIdOf: (pageId: string) => string | null;
+  profileId: string;
+  deviceId: string;
+  firstPageId: string | null;
+}): string | null {
+  const want = opts.assignments[opts.deviceId];
+  if (want) {
+    try {
+      if (opts.pageProfileIdOf(want) === opts.profileId) return want;
+    } catch { /* cae al fallback */ }
+  }
+  return opts.firstPageId;
+}
+
+/**
+ * Diagnostica por qué `pickHwDeckForRepaint` devolvió null (para el warn
+ * del PUT assignments: nunca más un repintado saltado en silencio).
+ */
+export function diagnoseHwPickMiss(opts: {
+  devices: LogicalDevice[];
+  changedDeckIds: string[];
+  connectedPath: string | null;
+  hwGrid: { cols: number; rows: number } | null;
+}): string {
+  const byId = new Map(opts.devices.map((d) => [d.id, d]));
+  const changed = opts.changedDeckIds
+    .map((id) => byId.get(id))
+    .filter((d): d is LogicalDevice => !!d && d.kind === 'deck');
+  if (changed.length === 0) return 'ningún deck cambiado existe como deck lógico';
+  if (opts.connectedPath) {
+    const bound = changed.find((d) => d.hw_path === opts.connectedPath);
+    if (!bound) {
+      return `ningún deck cambiado enlaza hw_path con el path conectado (${opts.connectedPath})`;
+    }
+  }
+  if (opts.devices.some((d) => d.kind === 'deck' && d.hw_path)) {
+    return 'existe un deck con hw_path enlazado y ningún deck cambiado sin enlazar empuja al HW';
+  }
+  if (opts.hwGrid) {
+    const mismatched = changed.filter((d) => {
+      const s = resolveDeckSize(d);
+      return s === null || s.cols !== opts.hwGrid!.cols || s.rows !== opts.hwGrid!.rows;
+    });
+    if (mismatched.length === changed.length) {
+      return `geometría viva ${opts.hwGrid.cols}×${opts.hwGrid.rows} no coincide con ningún deck cambiado (${changed.map((d) => {
+        const s = resolveDeckSize(d);
+        return `${d.id}:${s ? `${s.cols}×${s.rows}` : '?'}${d.model ? '' : ' (model:null→mk2 por defecto)'}`;
+      }).join(', ')})`;
+    }
+  }
+  return 'sin candidato (caso no clasificado)';
+}
+/**
  * ¿A qué deck lógico debe seguir el HW físico al cambiar asignaciones?
  * (puro, testeable). Reglas:
  * - Solo importan los decks con página pedida no-nula (`changedDeckIds`).

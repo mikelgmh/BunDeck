@@ -1,15 +1,16 @@
 <template>
   <dialog
-    open
+    ref="dlg"
     class="bd-dlg bd-tunnel-connect"
     data-cy="tunnel-connect-dialog"
     role="dialog"
     aria-modal="true"
-    :aria-label="t('bd.tunnelTransportProbing')"
+    :aria-label="label"
+    @cancel.prevent="$emit('dismiss')"
   >
     <div class="bd-tunnel-connect__body">
       <LoaderCircle :size="22" stroke-width="2" aria-hidden="true" class="bd-spin" />
-      <span data-cy="tunnel-connect-label">{{ t('bd.tunnelTransportProbing') }}</span>
+      <span data-cy="tunnel-connect-label">{{ label }}</span>
       <button
         class="bd-tunnel-x"
         type="button"
@@ -25,17 +26,50 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { LoaderCircle, X } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 import type { RtcStatus } from '../../composables/useRemoteRtc'
 
-defineProps<{ status: RtcStatus }>()
+const props = defineProps<{ status: RtcStatus }>()
 
 defineEmits<{
   (e: 'dismiss'): void
 }>()
 
 const { t } = useI18nStore()
+
+/** idle = aún sin intento (Conectando); signaling = probando P2P. */
+const label = computed(() =>
+  props.status === 'signaling' ? t('bd.tunnelTransportProbing') : t('bd.tunnelTransportConnecting')
+)
+
+const dlg = ref<HTMLDialogElement | null>(null)
+
+/** Modal real (top layer) donde hay showModal; si no, `open` como
+ *  alternativa para que el diálogo siga visible (CSS fixed + z-index). */
+onMounted(() => {
+  const el = dlg.value
+  if (!el) return
+  try {
+    if (typeof el.showModal === 'function' && !el.open) el.showModal()
+    else if (!el.open) el.setAttribute('open', '')
+  } catch {
+    try {
+      el.setAttribute('open', '')
+    } catch {
+      /* sin dialog: el v-if ya lo desmonta al resolver */
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  try {
+    dlg.value?.close()
+  } catch {
+    /* ya cerrado */
+  }
+})
 </script>
 
 <style scoped>

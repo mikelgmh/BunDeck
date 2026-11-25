@@ -75,6 +75,72 @@
     <h2>{{ t('bd.secRemote') }}</h2>
     <p class="bd-sub">{{ t('bd.remoteSub') }}</p>
 
+    <!-- Relay público configurable -->
+    <section class="bd-card bd-remote-card" data-cy="remote-relay-section" aria-labelledby="bd-remote-relay-title">
+      <h3 id="bd-remote-relay-title" class="bd-remote-heading">
+        <Globe :size="18" aria-hidden="true" />
+        {{ t('bd.remoteRelayTitle') }}
+      </h3>
+      <p class="bd-sub">{{ t('bd.remoteRelaySub') }}</p>
+      <p class="bd-hint" data-cy="remote-relay-current">
+        {{ status?.relay?.url || t('bd.remoteDisabledShort') }} · {{ status?.relay?.status ?? '…' }}
+      </p>
+      <p v-if="relayEnvOverride" class="bd-hint" data-cy="remote-relay-env">{{ t('bd.remoteRelayEnvHint') }}</p>
+      <div class="bd-form" role="radiogroup" :aria-label="t('bd.remoteRelayTitle')">
+        <label class="bd-check">
+          <input
+            type="radio"
+            name="remote-relay-mode"
+            value="public"
+            v-model="relayMode"
+            data-cy="remote-relay-public"
+          />
+          <span>{{ t('bd.remoteRelayPublic') }}</span>
+        </label>
+        <label class="bd-check">
+          <input
+            type="radio"
+            name="remote-relay-mode"
+            value="custom"
+            v-model="relayMode"
+            data-cy="remote-relay-custom"
+          />
+          <span>{{ t('bd.remoteRelayCustom') }}</span>
+        </label>
+        <label class="bd-check">
+          <input
+            type="radio"
+            name="remote-relay-mode"
+            value="off"
+            v-model="relayMode"
+            data-cy="remote-relay-off"
+          />
+          <span>{{ t('bd.remoteRelayOff') }}</span>
+        </label>
+      </div>
+      <div v-if="relayMode === 'custom'" class="bd-form">
+        <input
+          v-model="relayInput"
+          class="bd-inp"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="t('bd.remoteRelayUrlPh')"
+          :aria-label="t('bd.remoteRelayCustom')"
+          data-cy="remote-relay-url"
+        />
+      </div>
+      <p class="bd-hint">{{ t('bd.remoteRelayReconnect') }}</p>
+      <p v-if="relayFormError" class="bd-err" role="alert" data-cy="remote-relay-error">{{ relayFormError }}</p>
+      <div class="bd-ctl bd-remote-qr-actions">
+        <button class="bd-btn bd-pri" :disabled="relayLoading" data-cy="remote-relay-save" @click="onSaveRelay">
+          {{ t('bd.remoteRelaySave') }}
+        </button>
+        <button class="bd-btn" :disabled="relayLoading" data-cy="remote-relay-reset" @click="onResetRelay">
+          {{ t('bd.remoteRelayReset') }}
+        </button>
+      </div>
+    </section>
+
     <!-- Sección 1 — Entrar desde internet (UI remota por túnel): la vía principal -->
     <section class="bd-card bd-remote-card" data-cy="remote-ui-section" aria-labelledby="bd-remote-ui-title">
       <h3 id="bd-remote-ui-title" class="bd-remote-heading">
@@ -631,7 +697,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, reactive, watch, nextTick } from 'vue'
-import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, type RemoteQrPayload, type UiPendingItem } from '../../composables/useRemote'
+import { useRemote, toggleInList, isValidPairCode, parseRemoteQr, isMobileLike, isValidRelayUrlInput, type RemoteQrPayload, type UiPendingItem } from '../../composables/useRemote'
 import { buildLanInviteUrl } from '../../utils/lanInvite'
 import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
@@ -644,7 +710,72 @@ const { t } = useI18nStore()
 const { status, devices, pair, events, loading, error, qr, qrDataUrl, qrUnsupported, qrError, refresh, genCode, fetchQr, acceptCode, revoke, savePolicy, rotate, connectWs, disconnectWs,
   uiEnabled, uiUnsupported, uiLoading, uiError, uiCode, uiCodeDataUrl, uiPending, uiSessions, uiJustToken,
   setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, setSessionDeviceName, clearJustToken, onRemoteEvent,
+  setRelayUrl, relayUrl, relayEnvOverride, relayLoading,
   apiBase, lanInvite, lanSessions, lanLoading, lanError, requestLanInvite, revokeLanInvite, loadLanSessions, revokeLanSession } = useRemote()
+
+/** Relay público por defecto (espejo del daemon `DEFAULT_PUBLIC_RELAY_URL`). */
+const DEFAULT_PUBLIC_RELAY_URL = 'wss://relay.bundeck.app'
+
+// --- Relay configurable (radios público/personalizado/desactivado + URL) ---
+const relayMode = ref<'public' | 'custom' | 'off'>('public')
+const relayInput = ref('')
+const relayFormError = ref('')
+
+/** Refleja la URL efectiva en el formulario (sin pisar lo que se edita). */
+const syncRelayForm = (url?: string | null) => {
+  const effective = typeof url === 'string' ? url : (relayUrl.value || status.value?.relay?.url || '')
+  if (!effective) {
+    relayMode.value = 'off'
+    relayInput.value = ''
+  } else if (effective === DEFAULT_PUBLIC_RELAY_URL) {
+    relayMode.value = 'public'
+    relayInput.value = ''
+  } else {
+    relayMode.value = 'custom'
+    relayInput.value = effective
+  }
+  relayFormError.value = ''
+}
+
+watch(() => status.value?.relay?.url, (url) => {
+  try {
+    const focused = typeof document !== 'undefined' ? document.activeElement : null
+    if (focused && typeof (focused as Element).getAttribute === 'function' &&
+      (focused as Element).getAttribute('data-cy') === 'remote-relay-url') return
+  } catch { /* sin DOM: sincronizar igualmente */ }
+  syncRelayForm(url ?? undefined)
+})
+
+const onSaveRelay = async () => {
+  relayFormError.value = ''
+  try {
+    if (relayMode.value === 'public') {
+      await setRelayUrl(null)
+    } else if (relayMode.value === 'off') {
+      await setRelayUrl('off')
+    } else {
+      const candidate = relayInput.value.trim()
+      if (!isValidRelayUrlInput(candidate)) {
+        relayFormError.value = t('bd.remoteRelayInvalid')
+        return
+      }
+      await setRelayUrl(candidate)
+    }
+    syncRelayForm()
+  } catch (e) {
+    relayFormError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+const onResetRelay = async () => {
+  relayFormError.value = ''
+  try {
+    await setRelayUrl(null)
+    syncRelayForm()
+  } catch (e) {
+    relayFormError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 const approvalDialog = ref<HTMLDialogElement | null>(null)
 const seenApprovalRequests = new Set<string>()
@@ -1210,7 +1341,7 @@ const onCopyLanLink = async () => {
 
 onMounted(() => {
   mobileLike.value = isMobileLike()
-  refresh().catch(() => {})
+  refresh().catch(() => {}).finally(() => { syncRelayForm() })
   loadLanSessions().catch(() => {})
   loadBrowsers().catch(() => {})
   connectWs()

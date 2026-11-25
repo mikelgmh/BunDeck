@@ -7,13 +7,20 @@
  * arrancar. Para usar un relay propio (o desactivarlo):
  *
  * - `RELAY_URL` env o setting `remote.relay.url` → relay propio.
- * - Setting `remote.relay.url` a cadena vacía explícita → desactivado
- *   (`disabled`, el resto del módulo remoto sigue funcionando en local).
+ * - Setting `remote.relay.url` a centinela ('off'/'none'/'disabled') →
+ *   desactivado (`''` efectivo; el resto del módulo remoto sigue
+ *   funcionando en local).
+ * - Ausencia del setting (o `null`: fila borrada) → relay público
+ *   por defecto. Nota: `DatabaseService.getSetting` coacciona '' a
+ *   `null`, así que '' nunca desactiva: se trata como ausente.
  * - `RELAY_TOKEN` env o setting `remote.relay.token` → secreto compartido
  *   si el relay lo exige (el público no pide).
  */
 
 export const DEFAULT_PUBLIC_RELAY_URL = 'wss://relay.bundeck.app';
+
+/** Clave del setting que configura la URL del relay. */
+export const RELAY_URL_KEY = 'remote.relay.url';
 
 export interface RelaySettingsLike {
   getSetting: (key: string) => string | null;
@@ -22,9 +29,58 @@ export interface RelaySettingsLike {
 /** Valores del setting `remote.relay.url` que desactivan el relay. */
 const DISABLED_VALUES = new Set(['off', 'none', 'disabled']);
 
+/** `true` si el valor (setting o cuerpo del PUT) significa "relay apagado". */
+export function isRelayDisabledValue(value: string | null | undefined): boolean {
+  if (value == null) return false;
+  return DISABLED_VALUES.has(String(value).trim().toLowerCase());
+}
+
+/**
+ * Normaliza una URL de relay a su forma canónica `ws(s)://`.
+ * - Acepta `ws://` / `wss://` tal cual.
+ * - Acepta `http://` / `https://` solo para normalizar a `ws://` / `wss://`.
+ * - Acepta los centinelas `off` / `none` / `disabled` (devuelve el
+ *   centinela en minúsculas).
+ * - Devuelve `null` si es inválida (incluida `''`).
+ */
+export function normalizeRelayUrl(input: string): string | null {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (DISABLED_VALUES.has(lower)) return lower;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  let protocol = u.protocol.toLowerCase();
+  if (protocol === 'http:') protocol = 'ws:';
+  else if (protocol === 'https:') protocol = 'wss:';
+  else if (protocol !== 'ws:' && protocol !== 'wss:') return null;
+  try {
+    const out = new URL(u.toString());
+    out.protocol = protocol;
+    out.hash = '';
+    return out.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `true` si el valor es asignable al setting (centinela o URL
+ * ws(s)/http(s) normalizable). `''`, `null` y otros esquemas → `false`.
+ */
+export function isValidRelayUrl(input: string | null | undefined): boolean {
+  if (input == null) return false;
+  if (typeof input !== 'string') return false;
+  return normalizeRelayUrl(input) !== null;
+}
+
 /** URL efectiva: env > settings > relay público por defecto. */
 export function resolveRelayUrl(db: RelaySettingsLike): string {
-  const raw = process.env.RELAY_URL ?? db.getSetting('remote.relay.url') ?? DEFAULT_PUBLIC_RELAY_URL;
+  const raw = process.env.RELAY_URL ?? db.getSetting(RELAY_URL_KEY) ?? DEFAULT_PUBLIC_RELAY_URL;
   // Nota: DatabaseService.getSetting coacciona '' a null, así que el
   // apagado explícito usa centinela ('off'/'none'/'disabled').
   if (DISABLED_VALUES.has(raw.trim().toLowerCase())) return '';

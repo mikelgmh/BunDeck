@@ -12,9 +12,16 @@ describe('useTunnel', () => {
     expect(getTunnelToken('/t/abc123/')).toBe('abc123')
     expect(getTunnelToken('/t/abc123/_astro/index.css')).toBe('abc123')
     expect(getTunnelToken('/')).toBeNull()
-    expect(getTunnelToken('/ui/abc123')).toBeNull()
     expect(isTunnelMode('/t/abc123/')).toBe(true)
     expect(isTunnelMode('/')).toBe(false)
+  })
+
+  it('cubre la URL real del relay: /ui/<code>, query y hash', () => {
+    expect(getTunnelToken('/ui/CODE-abc_123/')).toBe('CODE-abc_123')
+    expect(getTunnelToken('/', '?token=tok12345')).toBe('tok12345')
+    expect(getTunnelToken('/', '?session=tok12345')).toBe('tok12345')
+    expect(getTunnelToken('/', '?sessionToken=tok12345')).toBe('tok12345')
+    expect(isTunnelMode('/ui/CODE-abc/')).toBe(true)
   })
 
   it('construye API/WS/config por el mismo origen del túnel', () => {

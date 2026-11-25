@@ -15,16 +15,28 @@
       <p v-if="loadError" class="bd-err" role="alert">{{ loadError }}</p>
       <template v-else-if="tab === 'settings' || !hasInstructions">
         <div v-if="oauth" class="bd-fld" data-cy="bd-oauth-box">
-          <label><b>{{ t('bd.spotifyConnectTitle') }}</b></label>
-          <p class="bd-hint">{{ oauth.notes ?? t('bd.spotifyConnectHint') }}</p>
-          <p v-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ t('bd.spotifyConnected') }}</p>
+          <label><b>{{ oauthTitle }}</b></label>
+          <p class="bd-hint">{{ oauth.notes ?? oauthHint }}</p>
+          <p v-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
           <div class="bd-r2">
             <button class="bd-btn bd-pri" :disabled="loginBusy" data-cy="bd-oauth-connect" @click="connectOAuth">
-              {{ configured ? t('bd.spotifyReconnect') : t('bd.spotifyConnect') }}
+              {{ configured ? oauthReconnect : oauthConnect }}
             </button>
-            <span v-if="loginBusy" class="bd-hint" role="status">{{ t('bd.spotifyWaiting') }}</span>
+            <span v-if="loginBusy" class="bd-hint" role="status">{{ oauthWaiting }}</span>
           </div>
-          <div v-if="loginBusy" class="bd-hint" data-cy="bd-spotify-host-hint" role="status">
+          <div v-if="loginBusy && isDiscordOauth" class="bd-hint" data-cy="bd-discord-auth-hint" role="status">
+            <p>{{ t('bd.discordAuthorizeHint') }}</p>
+            <p v-if="loginAuthorizeUrl">
+              <a :href="loginAuthorizeUrl" target="_blank" rel="noopener" data-cy="bd-discord-authorize">{{
+                t('bd.discordAuthorizeOpen')
+              }}</a>
+            </p>
+          </div>
+          <details v-if="isDiscordOauth" class="bd-hint" data-cy="bd-discord-advanced">
+            <summary>{{ t('bd.discordAdvancedTitle') }}</summary>
+            <p>{{ t('bd.discordAdvancedBody') }}</p>
+          </details>
+          <div v-else-if="loginBusy" class="bd-hint" data-cy="bd-spotify-host-hint" role="status">
             <p>{{ t('bd.spotifyHostWindow') }}</p>
             <p>
               {{ t('bd.spotifyRemoteHint') }}
@@ -118,6 +130,7 @@ const oauth = ref<any>(null)
 const configured = ref(true)
 const loginBusy = ref(false)
 const loginError = ref('')
+const loginAuthorizeUrl = ref('')
 let loginTimer: ReturnType<typeof setInterval> | null = null
 const form = ref<Record<string, any>>({})
 const revealed = ref<Record<string, boolean>>({})
@@ -130,6 +143,15 @@ const saving = ref(false)
 const title = computed(() => pluginName.value || pluginId.value)
 const hasSettings = computed(() => !!schema.value?.properties && Object.keys(schema.value.properties).length > 0)
 const hasInstructions = computed(() => instructions.value.length > 0)
+
+/** OAuth genérico: Discord pide Client ID + popup explícito; Spotify usa el Web Player. */
+const isDiscordOauth = computed(() => oauth.value?.provider === 'discord')
+const oauthTitle = computed(() => (isDiscordOauth.value ? t('bd.discordConnectTitle') : t('bd.spotifyConnectTitle')))
+const oauthHint = computed(() => (isDiscordOauth.value ? t('bd.discordConnectHint') : t('bd.spotifyConnectHint')))
+const oauthConnect = computed(() => (isDiscordOauth.value ? t('bd.discordConnect') : t('bd.spotifyConnect')))
+const oauthReconnect = computed(() => (isDiscordOauth.value ? t('bd.discordReconnect') : t('bd.spotifyReconnect')))
+const oauthWaiting = computed(() => (isDiscordOauth.value ? t('bd.discordWaiting') : t('bd.spotifyWaiting')))
+const oauthConnected = computed(() => (isDiscordOauth.value ? t('bd.discordConnected') : t('bd.spotifyConnected')))
 
 const fields = computed(() => {
   const propsMap = schema.value?.properties ?? {}
@@ -166,6 +188,7 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   saveError.value = ''
   loginError.value = ''
   loginBusy.value = false
+  loginAuthorizeUrl.value = ''
   stopLoginPoll()
   schema.value = null
   instructions.value = ''
@@ -212,6 +235,7 @@ const stopLoginPoll = () => {
 const connectOAuth = async () => {
   loginError.value = ''
   loginBusy.value = true
+  loginAuthorizeUrl.value = ''
   try {
     const req = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/login-request`, {
       method: 'POST',
@@ -219,6 +243,20 @@ const connectOAuth = async () => {
     if (!req.ok) {
       const d = await req.json().catch(() => ({}))
       throw new Error(d.error ?? `HTTP ${req.status}`)
+    }
+    // Discord devuelve la URL de autorización: abrirla para el permiso explícito.
+    try {
+      const d = await req.json().catch(() => ({}))
+      if (typeof d?.authorizeUrl === 'string' && d.authorizeUrl) {
+        loginAuthorizeUrl.value = d.authorizeUrl
+        try {
+          window.open(d.authorizeUrl, '_blank', 'noopener')
+        } catch {
+          /* popup bloqueado: queda el enlace visible */
+        }
+      }
+    } catch {
+      /* sin authorizeUrl (Spotify): el host abre el Web Player */
     }
     // Poll: el host abre la ventana y el sniffer POSTea token-capture.
     const started = Date.now()

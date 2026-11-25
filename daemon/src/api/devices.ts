@@ -17,6 +17,8 @@ import {
   checkPageCompatibility,
   resolveDeckSize,
   pickHwDeckForRepaint,
+  diagnoseHwPickMiss,
+  guessDeckModel,
   isHardwareDeviceId,
   DECK_MODELS,
   DEFAULT_DECK_MODEL,
@@ -44,12 +46,53 @@ function assignmentsChanged(a: Record<string, string>, b: Record<string, string>
 function ensureHardwareRow(db: any): void {
   try {
     const id = 'streamdeck-local';
-    if (db.getDevice(id)) return;
-    db.createDevice({
-      id, name: 'Stream Deck', kind: 'deck',
-      model: null, cols: null, rows: null, hw_path: null,
-    });
+    if (!db.getDevice(id)) {
+      db.createDevice({
+        id, name: 'Stream Deck', kind: 'deck',
+        model: null, cols: null, rows: null, hw_path: null,
+      });
+    }
+    alignHardwareRowWithLiveGeometry(db);
   } catch { /* carrera: otro hilo la creó */ }
+}
+
+/**
+ * Coherencia fila HW ↔ geometría real: cuando el HW está conectado y su
+ * geometría/path se conocen, rellena los campos NULOS (model/cols/rows/
+ * hw_path) de la fila 'streamdeck-local'. Nunca pisa valores existentes
+ * ni fuerza un modelo ante mismatch: solo evita que el filtro descarte
+ * una asignación válida por model:null (mk2 5×3 por defecto). No rompe
+ * multi-deck (solo toca la fila del HW físico).
+ */
+export function alignHardwareRowWithLiveGeometry(db: any): void {
+  try {
+    const row = db.getDevice('streamdeck-local');
+    if (!row) return;
+    let grid: { cols: number; rows: number } | null = null;
+    let connectedPath: string | null = null;
+    try {
+      grid = streamDeckDriver.getGridGeometry();
+    } catch { grid = null; }
+    try {
+      connectedPath = streamDeckDriver.getConnectedDevice?.() ?? null;
+    } catch { connectedPath = null; }
+    if (!grid && !connectedPath) return;
+    const patch: Record<string, unknown> = {};
+    if (grid && (row.cols == null || row.rows == null)) {
+      patch.cols = grid.cols;
+      patch.rows = grid.rows;
+      if (row.model == null) {
+        const guess = guessDeckModel(grid);
+        if (guess) patch.model = guess;
+      }
+    }
+    if (connectedPath && (row as any).hw_path == null) patch.hw_path = connectedPath;
+    if (Object.keys(patch).length > 0) {
+      try {
+        db.updateDevice('streamdeck-local', patch);
+      } catch { /* noop */ }
+    }
+  } catch { /* noop */ }
 }
 
 /**
@@ -376,6 +419,11 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
           .filter(([id, p]) => p !== null && byId.get(id)?.kind === 'deck')
           .map(([id]) => id);
         if (changedDecks.length > 0) {
+          // Coherencia: la fila HW sigue a la geometría viva conocida para
+          // que el filtro no descarte una asignación válida por model:null.
+          try {
+            alignHardwareRowWithLiveGeometry(db);
+          } catch { /* noop */ }
           const allDevices = db.listDevices().map((d) => ({
             id: d.id,
             name: d.name,
@@ -399,8 +447,27 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
             connectedPath,
             hwGrid,
           });
-          const finalPage = picked ? assignments[picked] : null;
-          if (picked && finalPage) {
+          // Sin pick silencioso: avisar con el motivo y caer a
+          // 'streamdeck-local' (o al primer deck cambiado) para que el caso
+          // común de un solo deck repinte igual. El 200 + guardado se mantiene.
+          let targetDeck = picked;
+          if (!targetDeck) {
+            const reason = diagnoseHwPickMiss({
+              devices: allDevices,
+              changedDeckIds: changedDecks,
+              connectedPath,
+              hwGrid,
+            });
+            const fallbackId = changedDecks.includes('streamdeck-local')
+              ? 'streamdeck-local'
+              : changedDecks[0] ?? null;
+            console.warn(
+              `⚠️ PUT assignments: sin deck para repintar (${reason}); fallback a '${fallbackId ?? 'ninguno'}'.`,
+            );
+            targetDeck = fallbackId;
+          }
+          const finalPage = targetDeck ? assignments[targetDeck] : null;
+          if (targetDeck && finalPage) {
             try {
               // Fija sesión (memoria + tabla) y repinta si hay HW; sin HW
               // conectado igual queda guardado para la reconexión.
@@ -419,6 +486,10 @@ export const handleDevices: ApiHandler = async (_req, { url, method, path, db, s
                 }, 'pages');
               } catch { /* noop */ }
             }
+          } else if (targetDeck) {
+            console.warn(
+              `⚠️ PUT assignments: '${targetDeck}' sin página final tras repair; no se repinta.`,
+            );
           }
         }
       } catch { /* noop */ }

@@ -114,32 +114,34 @@ test.describe('Túnel en kiosco (relay simulado)', () => {
       await gotoTunnelKiosk(page);
       const modal = page.getByTestId('tunnel-connect-dialog');
       await expect(modal).toBeVisible();
-      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'probing');
+      // Durante la prueba (idle|signaling) el proceso vive SOLO en la modal:
+      // el banner queda oculto por v-if (cero solape).
+      await expect(page.getByTestId('tunnel-transport-banner')).toHaveCount(0);
+      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', /^(probing|connecting)$/);
       // Compacta: ya no es la caja gigante del marco .bd-dlg (640px) que
       // empujaba el grid fuera de la pantalla.
       const modalBox = await modal.boundingBox();
       expect(modalBox?.height).toBeLessThan(300);
-      // Sin solape: la etiqueta del banner arranca bajo el cluster fijo de
-      // salida (antes quedaba debajo de salir + puntitos + fullscreen).
-      const labelBox = await page.getByTestId('tunnel-transport-label').boundingBox();
+      // La modal flota bajo los fijos (antes el <dialog> pintaba arriba del
+      // todo, bajo el cluster).
       const exitBox = await page.locator('.bd-kiosk-exit').boundingBox();
       const exitBottom = (exitBox?.y ?? 0) + (exitBox?.height ?? 0);
-      expect(labelBox?.y).toBeGreaterThanOrEqual(exitBottom);
-      // La modal flota bajo los fijos (antes el <dialog> pintaba arriba del
-      // todo, bajo el cluster) y su X es pulsable.
       expect(modalBox?.y).toBeGreaterThanOrEqual(exitBottom);
+      // Espera a signaling (el connect dispara a 1,5 s del montado) para que
+      // el cierre manual no lo reactive el propio cambio idle→signaling.
+      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'probing');
       await page.getByTestId('tunnel-connect-dismiss').click();
       await expect(modal).toHaveCount(0);
-      // La X del banner es pulsable (antes quedaba bajo .bd-kiosk-exit y
-      // .bd-kiosk-corner y no recibía el toque).
-      await page.getByTestId('tunnel-transport-dismiss').click();
+      // Sin estado terminal sigue sin banner; el dot sigue marcando prueba.
       await expect(page.getByTestId('tunnel-transport-banner')).toHaveCount(0);
+      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'probing');
     });
 
     test('al fallar P2P la modal se cierra y queda el banner relay', async ({ page }) => {
       await gotoTunnelKiosk(page);
       const modal = page.getByTestId('tunnel-connect-dialog');
       await expect(modal).toBeVisible();
+      await expect(page.getByTestId('tunnel-transport-banner')).toHaveCount(0);
       // connect() dispara a 1,5 s del montado (el grid ya implica montado):
       // espera a que exista el socket de señalización y fúerzale el fallo.
       // Si P2P ya hubiese resuelto solo, las aserciones siguientes valen igual.
@@ -148,8 +150,20 @@ test.describe('Túnel en kiosco (relay simulado)', () => {
         ((window as unknown as Record<string, unknown>).__zzFailTunnelWs as () => void)();
       });
       await expect(modal).toHaveCount(0);
-      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'relay');
-      await expect(page.getByTestId('tunnel-transport-banner')).toBeVisible();
+      // El stub de WS nunca abre (sin WS vivo el dot marca Desconectado);
+      // el banner terminal relay sí sale, bajo el cluster fijo.
+      await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'disconnected');
+      const banner = page.getByTestId('tunnel-transport-banner');
+      await expect(banner).toBeVisible();
+      await expect(page.getByTestId('tunnel-transport-label')).toContainText(/relay/i);
+      const labelBox = await page.getByTestId('tunnel-transport-label').boundingBox();
+      const exitBox = await page.locator('.bd-kiosk-exit').boundingBox();
+      const exitBottom = (exitBox?.y ?? 0) + (exitBox?.height ?? 0);
+      expect(labelBox?.y).toBeGreaterThanOrEqual(exitBottom);
+      // La X del banner es pulsable (antes quedaba bajo .bd-kiosk-exit y
+      // .bd-kiosk-corner y no recibía el toque).
+      await page.getByTestId('tunnel-transport-dismiss').click();
+      await expect(banner).toHaveCount(0);
     });
   });
 
@@ -157,16 +171,15 @@ test.describe('Túnel en kiosco (relay simulado)', () => {
     await gotoTunnelKiosk(page);
     const modal = page.getByTestId('tunnel-connect-dialog');
     await expect(modal).toBeVisible();
+    await expect(page.getByTestId('tunnel-transport-banner')).toHaveCount(0);
     const modalBox = await modal.boundingBox();
     expect(modalBox?.height).toBeLessThan(300);
-    const labelBox = await page.getByTestId('tunnel-transport-label').boundingBox();
     const exitBox = await page.locator('.bd-kiosk-exit').boundingBox();
     const exitBottom = (exitBox?.y ?? 0) + (exitBox?.height ?? 0);
-    expect(labelBox?.y).toBeGreaterThanOrEqual(exitBottom);
     expect(modalBox?.y).toBeGreaterThanOrEqual(exitBottom);
+    await expect(page.getByTestId('bd-kiosk-rtc')).toHaveAttribute('data-transport', 'probing');
     await page.getByTestId('tunnel-connect-dismiss').click();
     await expect(modal).toHaveCount(0);
-    await page.getByTestId('tunnel-transport-dismiss').click();
     await expect(page.getByTestId('tunnel-transport-banner')).toHaveCount(0);
   });
 });

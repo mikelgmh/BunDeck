@@ -14,11 +14,12 @@ describe('DiscordPlugin manifest', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('discord')
         expect(manifest.name).toBe('Discord')
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toBe('1.2.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.settingsSchema).toBeDefined()
+        expect(manifest.oauth?.provider).toBe('discord')
         const ids = manifest.actions.map((a: any) => a.id).sort()
-        expect(ids).toEqual(['open-channel', 'push-to-talk', 'toggle-deafen', 'toggle-mute'])
+        expect(ids).toEqual(['connect', 'disconnect', 'open-channel', 'push-to-talk', 'status', 'toggle-deafen', 'toggle-mute'])
         for (const action of manifest.actions) {
             expect(action.schema?.type).toBe('object')
             for (const [key, prop] of Object.entries<any>(action.schema.properties)) {
@@ -27,9 +28,9 @@ describe('DiscordPlugin manifest', () => {
         }
     })
 
-    it('registra los 4 handlers', () => {
+    it('registra los 7 handlers', () => {
         const handlers = plugin.getActionHandlers()
-        expect([...handlers.keys()].sort()).toEqual(['open-channel', 'push-to-talk', 'toggle-deafen', 'toggle-mute'])
+        expect([...handlers.keys()].sort()).toEqual(['connect', 'disconnect', 'open-channel', 'push-to-talk', 'status', 'toggle-deafen', 'toggle-mute'])
     })
 })
 
@@ -42,9 +43,11 @@ describe('DiscordPlugin validación (sin tocar el sistema)', () => {
         await expect(sendHotkey('ctrl+shift+')).rejects.toThrow(/tecla principal|vacío/)
     })
 
-    it('push-to-talk sin hotkey pide configurarlo', async () => {
+    it('push-to-talk sin hotkey ni auth devuelve needs-auth (permiso explícito)', async () => {
         const handler = plugin.getActionHandlers().get('push-to-talk')!
-        await expect(handler({}, {})).rejects.toThrow(/Pulsar para hablar/)
+        const res = await handler({}, {})
+        expect(res.status).toBe('needs-auth')
+        expect(res.authorizeUrl).toBeNull()
     })
 
     it('open-channel exige url', async () => {

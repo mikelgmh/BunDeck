@@ -7,14 +7,58 @@
  * van por el mismo origen bajo `/t/<token>/…`.
  */
 
-/** Token de sesión del túnel si el pathname es `/t/<token>/…`. */
-export function getTunnelToken(pathname?: string): string | null {
+/** Token de sesión del túnel.
+ *
+ * Cubre la ruta del daemon (`/t/<sessionToken>/…`, 64-hex) y, en modo
+ * best-effort, la URL real del relay que abre el usuario:
+ * - `/ui/<urlCode>` (página que sirve el relay antes/después de aprobar),
+ * - query `?token=|?sessionToken=|?session=|?t=` (enlaces relay con token),
+ * - hash `#token=…` (algunos relays lo propagan en el fragmento).
+ *
+ * Para `/ui/<code>` se devuelve el `urlCode`: el intento P2P/signaling lo
+ * usará como token y, si el relay no lo mapea, cae a `fallback` (relay)
+ * en vez de quedarse en `idle` para siempre sin mostrar nada.
+ */
+export function getTunnelToken(pathname?: string, search?: string): string | null {
   const path =
     pathname ??
     (typeof window !== 'undefined' ? window.location.pathname : '/')
   const m = /^\/t\/([^/]+)(?:\/|$)/.exec(path)
-  const token = m?.[1] ?? ''
-  return token ? decodeURIComponent(token) : null
+  if (m?.[1]) {
+    try {
+      return decodeURIComponent(m[1])
+    } catch {
+      return m[1]
+    }
+  }
+  const ui = /^\/ui\/([^/]+)(?:\/|$)/.exec(path)
+  if (ui?.[1]) {
+    try {
+      return decodeURIComponent(ui[1])
+    } catch {
+      return ui[1]
+    }
+  }
+  try {
+    const qs = search ?? (typeof window !== 'undefined' ? window.location.search : '')
+    if (qs) {
+      const q = new URLSearchParams(qs)
+      for (const k of ['token', 'sessionToken', 'session', 't']) {
+        const v = q.get(k)
+        if (v) return v
+      }
+    }
+  } catch {
+    /* sin URLSearchParams: no hay token en query */
+  }
+  try {
+    const h = typeof window !== 'undefined' ? window.location.hash : ''
+    const hm = /[#&?](?:token|sessionToken|session|t)=([^&#]+)/.exec(h)
+    if (hm?.[1]) return decodeURIComponent(hm[1])
+  } catch {
+    /* sin hash válido */
+  }
+  return null
 }
 
 /** ¿Corre el frontend dentro del túnel del relay? */

@@ -6,7 +6,7 @@ import { isLoopbackIp, hasValidLanSession, LAN_DENIED_CODE } from './http/lan-gu
 import { redeemLanInvite, validateLanSession } from './remote/lan-invites';
 import { validateUiSession } from './remote/ui-policy';
 import { bindDeviceToToken } from './remote/device-bindings';
-import { parseLayoutMode, resolvePageSize, isHardwareDeviceId } from './devices';
+import { parseLayoutMode, resolvePageSize, isHardwareDeviceId, resolveAssignedPageForDevice } from './devices';
 import { getEventBus, BUS_WS_FORWARD, busWsTopic, type EventBus } from './events/bus';
 import { resolveNavTargets, normalizeDeviceKind, type NavTargets } from './sessions';
 
@@ -518,6 +518,26 @@ export class WebSocketManager {
       },
     });
     try { delete (client as any).lanSessionToken; } catch { /* noop */ }
+    // Apertura inicial: si el HW ya está conectado pero con sesión vieja,
+    // re-sincronizarlo con su asignación del perfil (best-effort).
+    try {
+      this.refreshHardwareToAssignment(profileId);
+    } catch { /* noop */ }
+  }
+
+  /**
+   * Repinta el HW físico con su página asignada del perfil dado (o del
+   * global actual). Cubre la apertura inicial: el primer `hello` del host
+   * re-sincroniza el deck si su sesión quedó vieja. Best-effort: nunca
+   * tumba el handshake.
+   */
+  public refreshHardwareToAssignment(profileId?: string | null): void {
+    try {
+      if (!streamDeckDriver.isConnected()) return;
+      const target = profileId ?? this.currentGlobalProfileId();
+      if (!target) return;
+      void streamDeckDriver.applyProfileAssignment(target, this.db).catch(() => {});
+    } catch { /* noop */ }
   }
 
   /**
@@ -789,16 +809,20 @@ export class WebSocketManager {
     try {
       assigned = this.db.getAssignments(profile.id) ?? {};
     } catch { assigned = {}; }
-    const pageFor = (deviceId: string): string | null => {
-      const want = assigned[deviceId];
-      if (want) {
-        try {
-          const pg = this.db.getPage(want);
-          if (pg && pg.profile_id === profile.id) return want;
-        } catch { /* cae al fallback */ }
-      }
-      return firstPage;
-    };
+    const pageFor = (deviceId: string): string | null =>
+      resolveAssignedPageForDevice({
+        assignments: assigned,
+        pageProfileIdOf: (pageId: string) => {
+          try {
+            return this.db.getPage(pageId)?.profile_id ?? null;
+          } catch {
+            return null;
+          }
+        },
+        profileId: profile.id,
+        deviceId,
+        firstPageId: firstPage,
+      });
 
     const isHwDevice = (id: string): boolean =>
       this.clientsOfDevice(id).some((c) => c.kind === 'hardware') ||

@@ -1,5 +1,6 @@
 import type { StreamDeck } from '@elgato-stream-deck/node';
 import { DatabaseService } from '../db';
+import { resolveAssignedPageForDevice } from '../devices';
 import type { PressType } from '../flow/types';
 import { buttonHasTrigger } from '../flow/migrate';
 import type { Env } from '../variables/expressions';
@@ -219,6 +220,69 @@ export class StreamDeckDriver {
     }
   }
 
+  /**
+   * Página que debe mostrar el HW en un perfil: la asignada a este
+   * dispositivo si es válida (pertenece al perfil), o la primera página
+   * del perfil. Misma regla que `pageFor` de `navigateProfileTo` (ws.ts).
+   */
+  resolveHwAssignedPageId(
+    db: DatabaseService,
+    profileId: string,
+    deviceId: string = this.deviceId,
+  ): string | null {
+    let assignments: Record<string, string> = {};
+    try {
+      assignments = db.getAssignments(profileId) ?? {};
+    } catch { assignments = {}; }
+    let firstPage: string | null = null;
+    try {
+      const pages = db.getPagesByProfile(profileId);
+      firstPage = (pages.find((p) => p.is_folder === 0) || pages[0])?.id ?? null;
+    } catch { firstPage = null; }
+    return resolveAssignedPageForDevice({
+      assignments,
+      pageProfileIdOf: (pageId: string) => {
+        try {
+          return db.getPage(pageId)?.profile_id ?? null;
+        } catch {
+          return null;
+        }
+      },
+      profileId,
+      deviceId,
+      firstPageId: firstPage,
+    });
+  }
+
+  /**
+   * Aplica al HW la página asignada del perfil dado (o del perfil global
+   * actual): resuelve asignación validada + fallback a primera página,
+   * fija la sesión (memoria + tabla) y repinta si hay hardware conectado.
+   * Nunca tumba al llamador (boot/conexión son non-fatal): devuelve la
+   * pageId aplicada o null si no había nada que mostrar o era incompatible.
+   */
+  async applyProfileAssignment(
+    profileId?: string | null,
+    dbArg?: DatabaseService,
+  ): Promise<string | null> {
+    try {
+      const db = dbArg ?? new DatabaseService();
+      const current = profileId ?? db.getCurrentProfile()?.id ?? this.sessionProfileId;
+      if (!current || !db.getProfile(current)) return null;
+      const pageId = this.resolveHwAssignedPageId(db, current);
+      if (!pageId) return null;
+      await this.setSessionView({ profileId: current, pageId });
+      return pageId;
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      console.warn(`⚠️ HW assignment no aplicada: ${reason}`);
+      try {
+        (globalThis as any).__libredeckWs?.broadcast?.('page.blocked', { reason }, 'pages');
+      } catch { /* noop */ }
+      return null;
+    }
+  }
+
   /** Carga la vista propia desde `device_sessions` (o migra la global). */
   private loadSessionView(): void {
     try {
@@ -341,9 +405,17 @@ export class StreamDeckDriver {
 
       // Try to update with current page if available
       // This will be called from the API route after connection
-      // Vista propia de la sesión hardware (no la global de los browsers).
+      // La asignación del perfil actual manda sobre la sesión recordada:
+      // al abrir la app / (re)conectar el HW, el deck muestra SU página
+      // asignada (validada, con fallback a la primera del perfil).
       this.loadSessionView();
-      if (this.sessionPageId) {
+      let painted: string | null = null;
+      try {
+        painted = await this.applyProfileAssignment();
+      } catch {
+        painted = null;
+      }
+      if (!painted && this.sessionPageId) {
         console.log(`🎛️ Restoring hardware session page: ${this.sessionPageId}`);
         await this.updateFromPage(this.sessionPageId);
       }

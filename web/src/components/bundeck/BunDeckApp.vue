@@ -205,7 +205,7 @@
     </header>
 
     <TunnelTransportBanner
-      v-if="isTunnelRoute && showTransportBanner"
+      v-if="isTunnelRoute && showTransportBanner && !showTransportModal && (rtcStatus === 'connected' || rtcStatus === 'fallback')"
       :status="rtcStatus"
       @dismiss="showTransportBanner = false"
     />
@@ -364,7 +364,7 @@
           :title="wakeTitle"
           aria-hidden="true"
         ><i></i></span>
-        <TunnelKioskDot v-if="isTunnelRoute" :status="rtcStatus" />
+        <TunnelKioskDot v-if="isTunnelRoute" :status="rtcStatus" :ws-ok="isConnected" />
         <button
           class="bd-ibtn"
           :title="t('bd.kioskFullscreen')"
@@ -2748,13 +2748,15 @@ onMounted(async () => {
   // WebRTC P2P en túnel: intenta en background sin bloquear la carga (el
   // transporte relay sigue funcionando aunque P2P falle por NAT).
   try {
-    if (getTunnelToken()) {
+    const tunTok = getTunnelToken()
+    if (tunTok) {
       // Entrada por túnel: intento nuevo y determinista. El singleton RTC
       // sobrevive a HMR/remontajes con un estado terminal (fallback) o un
       // `pc` rancio que haría que connect() devolviese false sin transitar:
       // se resetea a idle para que la modal salga desde el primer pintado
       // (una vez por intento; el cierre manual sigue sin reabrir y la modal
       // se cierra sola al resolver).
+      console.debug('[tunnel] ruta túnel detectada, token…', tunTok.slice(0, 8))
       rtc.disconnect()
       showTransportBanner.value = true
       transportModalDismissed.value = false
@@ -2762,6 +2764,13 @@ onMounted(async () => {
         transportConnectTimer = null
         rtc.connect().catch(() => {})
       }, 1500)
+    } else if (
+      typeof window !== 'undefined' &&
+      (/^\/ui\//.test(window.location.pathname) || /(?:[?&](?:token|sessionToken|session|t)=)/.test(window.location.search))
+    ) {
+      // Ruta con pinta de relay pero sin token extraíble: lo deja anotado
+      // para diagnosticar por qué no sale la modal de conexión.
+      console.debug('[tunnel] posible ruta relay sin token extraíble:', window.location.pathname)
     }
   } catch {
     /* RTC opcional */

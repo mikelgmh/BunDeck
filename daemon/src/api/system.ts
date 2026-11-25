@@ -780,27 +780,38 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
         if (success) {
           console.log('🎛️ StreamDeck connected successfully, restoring hardware session...');
 
-          // El driver restaura su propia sesión (device_sessions) al conectar.
-          // Solo como fallback (sesión vacía) se usa la vista global.
-          const view = streamDeckDriver.getSessionView();
-          console.log('🎛️ Hardware session view:', view);
+          // La asignación del perfil actual manda: el deck muestra SU página
+          // asignada (validada + fallback a la primera del perfil). Solo si
+          // no hay nada que aplicar se usa la vista global como fallback.
+          let applied: string | null = null;
+          try {
+            applied = await streamDeckDriver.applyProfileAssignment();
+          } catch {
+            applied = null;
+          }
+          if (applied) {
+            console.log('🎛️ Hardware assignment applied:', applied);
+          } else {
+            const view = streamDeckDriver.getSessionView();
+            console.log('🎛️ Hardware session view:', view);
 
-          if (!view.pageId) {
-            const currentProfile = db.getCurrentProfile();
-            console.log('🎛️ Current profile (fallback):', currentProfile);
+            if (!view.pageId) {
+              const currentProfile = db.getCurrentProfile();
+              console.log('🎛️ Current profile (fallback):', currentProfile);
 
-            if (currentProfile) {
-              const currentPage = db.getCurrentPage(currentProfile.id);
-              console.log('🎛️ Current page (fallback):', currentPage);
+              if (currentProfile) {
+                const currentPage = db.getCurrentPage(currentProfile.id);
+                console.log('🎛️ Current page (fallback):', currentPage);
 
-              if (currentPage) {
-                console.log('🎛️ Updating StreamDeck with fallback page:', currentPage.id);
-                await streamDeckDriver.updateFromPage(currentPage.id);
+                if (currentPage) {
+                  console.log('🎛️ Updating StreamDeck with fallback page:', currentPage.id);
+                  await streamDeckDriver.updateFromPage(currentPage.id);
+                } else {
+                  console.log('🎛️ No current page found');
+                }
               } else {
-                console.log('🎛️ No current page found');
+                console.log('🎛️ No current profile found');
               }
-            } else {
-              console.log('🎛️ No current profile found');
             }
           }
         }

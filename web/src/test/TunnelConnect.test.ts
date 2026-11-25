@@ -14,11 +14,14 @@ vi.mock('../composables/useI18n', () => ({
 }))
 
 describe('TunnelConnectDialog', () => {
-  it('muestra spinner + texto de probando', () => {
-    for (const status of ['idle', 'signaling'] as const) {
+  it('idle = Conectando, signaling = Probando P2P (spinner siempre)', () => {
+    for (const [status, label] of [
+      ['idle', 'bd.tunnelTransportConnecting'],
+      ['signaling', 'bd.tunnelTransportProbing'],
+    ] as const) {
       const wrapper = mount(TunnelConnectDialog, { props: { status } })
       expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
-      expect(wrapper.find('[data-cy="tunnel-connect-label"]').text()).toBe('bd.tunnelTransportProbing')
+      expect(wrapper.find('[data-cy="tunnel-connect-label"]').text()).toBe(label)
       expect(wrapper.find('.bd-spin').exists()).toBe(true)
       wrapper.unmount()
     }
@@ -33,15 +36,17 @@ describe('TunnelConnectDialog', () => {
 })
 
 describe('TunnelKioskDot', () => {
-  it('connected → p2p, fallback → relay, probing en resto', async () => {
+  it('idle gris Conectando, signaling azul Probando, P2P verde, relay ámbar, sin-WS rojo', async () => {
     const cases = [
-      { status: 'connected', transport: 'p2p', title: 'bd.tunnelTransportP2p' },
-      { status: 'fallback', transport: 'relay', title: 'bd.tunnelTransportRelay' },
-      { status: 'signaling', transport: 'probing', title: 'bd.tunnelTransportProbing' },
-      { status: 'idle', transport: 'probing', title: 'bd.tunnelTransportProbing' },
+      { status: 'idle', wsOk: true, transport: 'connecting', title: 'bd.tunnelTransportConnecting' },
+      { status: 'signaling', wsOk: true, transport: 'probing', title: 'bd.tunnelTransportProbing' },
+      { status: 'connected', wsOk: true, transport: 'p2p', title: 'bd.tunnelTransportP2p' },
+      { status: 'connected', wsOk: false, transport: 'p2p', title: 'bd.tunnelTransportP2p' },
+      { status: 'fallback', wsOk: true, transport: 'relay', title: 'bd.tunnelTransportRelay' },
+      { status: 'fallback', wsOk: false, transport: 'disconnected', title: 'bd.tunnelTransportDisconnected' },
     ] as const
     for (const c of cases) {
-      const wrapper = mount(TunnelKioskDot, { props: { status: c.status } })
+      const wrapper = mount(TunnelKioskDot, { props: { status: c.status, wsOk: c.wsOk } })
       const dot = wrapper.find('[data-cy="bd-kiosk-rtc"]')
       expect(dot.exists()).toBe(true)
       expect(dot.attributes('data-transport')).toBe(c.transport)
@@ -49,6 +54,12 @@ describe('TunnelKioskDot', () => {
       expect(dot.attributes('aria-label')).toBe(c.title)
       wrapper.unmount()
     }
+  })
+
+  it('sin wsOk (defecto) el fallback es relay', () => {
+    const wrapper = mount(TunnelKioskDot, { props: { status: 'fallback' } })
+    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('relay')
+    wrapper.unmount()
   })
 })
 
@@ -129,7 +140,7 @@ describe('BunDeckApp: modal de conexión + dot de kiosco en túnel', () => {
     window.history.replaceState(null, '', `/t/${token}/?kiosk=1`)
   }
 
-  it('modal visible probando; se cierra sola en P2P y en relay; cierre manual no reabre', async () => {
+  it('modal visible probando (banner oculto); terminal cierra modal y muestra banner; cierre manual no reabre', async () => {
     const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
     const { getRtcSingleton } = await import('../composables/useRemoteRtc')
     gotoTunnelKiosk()
@@ -138,38 +149,48 @@ describe('BunDeckApp: modal de conexión + dot de kiosco en túnel', () => {
     await nextTick()
     const rtc = getRtcSingleton()
 
-    // Estado inicial idle = probando: modal + dot de kiosco visibles.
+    // Estado inicial idle = Conectando: modal sí, banner NO (cero solape).
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
-    expect(wrapper.find('[data-cy="tunnel-connect-label"]').text()).toBe('bd.tunnelTransportProbing')
-    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('probing')
+    expect(wrapper.find('[data-cy="tunnel-connect-label"]').text()).toBe('bd.tunnelTransportConnecting')
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('connecting')
 
-    // Sigue probando en signaling.
+    // Sigue probando en signaling: modal con texto P2P, banner sigue oculto.
     rtc.status.value = 'signaling'
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="tunnel-connect-label"]').text()).toBe('bd.tunnelTransportProbing')
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('probing')
 
-    // Al conectar (P2P) se cierra sola; dot en verde.
+    // Al conectar (P2P) se cierra sola; dot en verde y banner terminal P2P.
     rtc.status.value = 'connected'
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('p2p')
 
-    // Al caer a relay también se cierra; dot en ámbar.
+    // Al caer a relay también se cierra; banner terminal relay. El stub WS
+    // de este test nunca abre → isConnected false → dot en Desconectado.
     rtc.status.value = 'signaling'
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(false)
     rtc.status.value = 'fallback'
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(false)
-    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('relay')
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').attributes('data-transport')).toBe('disconnected')
 
-    // Nuevo intento → reaparece; cierre manual → no reabre sin nuevo intento.
+    // Nuevo intento → reaparece; cierre manual → no reabre sin nuevo intento,
+    // y el banner sigue oculto al no ser estado terminal.
     rtc.status.value = 'signaling'
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
     await wrapper.find('[data-cy="tunnel-connect-dismiss"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(false)
     // Re-render sin cambio de intento: sigue cerrada.
     await wrapper.vm.$forceUpdate()
     await nextTick()
@@ -195,13 +216,14 @@ describe('BunDeckApp: modal de conexión + dot de kiosco en túnel', () => {
     wrapper.unmount()
   })
 
-  it('sin túnel no hay modal ni dot de transporte', async () => {
+  it('sin túnel no hay modal, ni banner, ni dot de transporte', async () => {
     const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
     window.history.replaceState(null, '', '/?kiosk=1')
     const wrapper = mount(BunDeckApp)
     await flushPromises()
     await nextTick()
     expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="tunnel-transport-banner"]').exists()).toBe(false)
     expect(wrapper.find('[data-cy="bd-kiosk-rtc"]').exists()).toBe(false)
     // El wake-lock existente sigue intacto.
     expect(wrapper.find('[data-cy="bd-kiosk-wake"]').exists()).toBe(true)
