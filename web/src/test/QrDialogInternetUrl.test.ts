@@ -17,6 +17,7 @@ const mockStatus = ref<Record<string, unknown>>({ tunnel: { status: 'connected' 
 const mockAllowPending = vi.fn(async () => 'abcdef12RESTOFTOKEN')
 const mockSetSessionDeviceName = vi.fn(async () => {})
 const mockDenyPending = vi.fn(async () => {})
+const mockRequestUiCode = vi.fn(async () => ({ code: '000000', urlCode: 'NewCode123', url: 'https://relay.example.test/ui/NewCode123', expiresAt: Date.now() + 600000 }))
 const mockLoadUiPending = vi.fn(async () => [])
 const mockLoadUiSessions = vi.fn(async () => [])
 
@@ -31,7 +32,7 @@ vi.mock('../composables/useRemote', () => ({
     uiPending: mockPending,
     uiSessions: mockSessions,
     status: mockStatus,
-    requestUiCode: vi.fn(),
+    requestUiCode: mockRequestUiCode,
     loadUiPending: mockLoadUiPending,
     loadUiSessions: mockLoadUiSessions,
     allowPending: mockAllowPending,
@@ -79,6 +80,7 @@ beforeEach(() => {
   mockSetSessionDeviceName.mockClear()
   mockDenyPending.mockReset()
   mockDenyPending.mockResolvedValue(undefined)
+  mockRequestUiCode.mockClear()
   mockLoadUiPending.mockReset()
   mockLoadUiPending.mockResolvedValue([])
   mockLoadUiSessions.mockReset()
@@ -307,6 +309,40 @@ describe('QrDialog pestaña internet: URL visible sin cámara', () => {
     expect(mockDenyPending).toHaveBeenCalledWith('req-21')
     expect(mockLoadUiPending).toHaveBeenCalled()
     expect(wrapper.find('[data-cy="qr-internet-pending"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('denegar regenera el QR (el denegado ya no vale)', async () => {
+    const wrapper = mount(QrDialog)
+    wrapper.findAll('dialog').forEach((d) => stubDialog(d.element as HTMLDialogElement))
+    await (wrapper.vm as any).show()
+    await flushPromises()
+    mockPending.value = [{ reqId: 'req-22', urlCode: 'AbC123xYz', ua: 'iPad', ip: '9.9.9.9', createdAt: Date.now() }]
+    await flushPromises()
+
+    await wrapper.find('[data-cy="qr-internet-approval-deny"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(mockDenyPending).toHaveBeenCalledWith('req-22')
+    expect(mockRequestUiCode).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('aprobar regenera el QR (el aprobado es de un solo uso)', async () => {
+    const wrapper = mount(QrDialog)
+    wrapper.findAll('dialog').forEach((d) => stubDialog(d.element as HTMLDialogElement))
+    await (wrapper.vm as any).show()
+    await flushPromises()
+    mockPending.value = [{ reqId: 'req-23', urlCode: 'AbC123xYz', ua: 'iPad', ip: '9.9.9.9', createdAt: Date.now() }]
+    await flushPromises()
+
+    await wrapper.find('[data-cy="qr-internet-approval-allow"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(mockAllowPending).toHaveBeenCalledWith('req-23')
+    expect(mockRequestUiCode).toHaveBeenCalled()
     wrapper.unmount()
   })
 })

@@ -298,6 +298,26 @@ describe('RemotePane UI remota', () => {
     wrapper.unmount()
   })
 
+  it('deny regenera el QR (el denegado ya no vale)', async () => {
+    const { fn, calls } = makeFetch({
+      uiEnabled: true,
+      pending: [{ reqId: 'req-9', urlCode: 'zzz999', ua: 'Mobile', ip: '5.6.7.8', createdAt: Date.now() }],
+    })
+    vi.stubGlobal('fetch', fn)
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+    await flushPromises()
+    const postsBefore = calls.filter((c) => c.url.includes('/remote/ui-code') && c.init?.method === 'POST').length
+
+    await wrapper.find('[data-cy="remote-ui-deny"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    const postsAfter = calls.filter((c) => c.url.includes('/remote/ui-code') && c.init?.method === 'POST').length
+    expect(postsAfter).toBeGreaterThan(postsBefore)
+    wrapper.unmount()
+  })
+
   it('sessions → revoke por fila', async () => {
     const { fn, calls } = makeFetch({
       uiEnabled: true,
@@ -316,6 +336,27 @@ describe('RemotePane UI remota', () => {
     await wrapper.find('[data-cy="remote-ui-session-revoke"]').trigger('click')
     await flushPromises()
     expect(calls.some((c) => c.url.includes('/remote/ui-sessions/tokpref1') && c.init?.method === 'DELETE')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('sessions con exp 0 muestran "No caduca" en vez de fecha', async () => {
+    const { fn } = makeFetch({
+      uiEnabled: true,
+      sessions: [
+        { tokenPrefix: 'tokperen', createdAt: Date.now() - 1000, exp: 0, ua: 'Mobile', ip: '9.9.9.9', revoked: false },
+        { tokenPrefix: 'toktempo', createdAt: Date.now() - 1000, exp: Date.now() + 3600000, ua: 'Mobile', ip: '9.9.9.9', revoked: false },
+      ],
+    })
+    vi.stubGlobal('fetch', fn)
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-cy="remote-ui-session-item"]').length).toBe(2)
+    const text = wrapper.find('[data-cy="remote-ui-sessions"]').text()
+    expect(text).toContain('bd.remoteUiSessionNeverExpires')
+    expect(text).toContain('bd.remoteUiSessionExpires')
     wrapper.unmount()
   })
 

@@ -530,6 +530,14 @@ const onCopyUiUrl = async () => {
 const onApprove = async (reqId: string): Promise<string | undefined> => {
   try {
     const token = await allowPending(reqId)
+    // El URL aprobado es de un solo uso: sustituirlo de inmediato para que
+    // al reabrir no se muestre un QR ya consumido.
+    try {
+      await requestUiCode()
+      now.value = Date.now()
+    } catch {
+      /* el error queda en uiError */
+    }
     return typeof token === 'string' ? token : undefined
   } catch {
     /* noop */
@@ -614,6 +622,14 @@ const resolveApproval = async (allow: boolean) => {
     dismissApproval()
     await nextTick()
     await onDeny(requestId)
+    // El QR denegado ya no vale (el relay conserva el denied y no vuelve
+    // a avisar): regenerar para no dejar un QR muerto a la vista.
+    try {
+      await requestUiCode()
+      now.value = Date.now()
+    } catch {
+      /* el error queda en uiError; el poll reintentará */
+    }
     // El contador cae a 0 sin esperar al poll de 5 s (y sin depender del
     // refresco interno de useRemote): la vista ya no lista este reqId.
     try { await loadUiPending() } catch { /* el poll lo reintentará */ }

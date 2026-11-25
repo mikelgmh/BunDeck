@@ -223,7 +223,7 @@
               <p class="bd-remote-meta">
                 <span class="bd-mono">{{ s.ip }}</span>
                 <span>{{ t('bd.remoteUiSessionCreated', { date: formatDateTime(s.createdAt) }) }}</span>
-                <span>{{ t('bd.remoteUiSessionExpires', { date: formatDateTime(s.exp) }) }}</span>
+                <span>{{ s.exp ? t('bd.remoteUiSessionExpires', { date: formatDateTime(s.exp) }) : t('bd.remoteUiSessionNeverExpires') }}</span>
               </p>
               <p class="bd-remote-meta">
                 <span
@@ -867,6 +867,12 @@ const onAllow = async (reqId: string): Promise<string | undefined> => {
 const onDeny = async (reqId: string) => {
   try {
     await denyPending(reqId)
+    // El QR denegado ya no vale: regenerar para no dejar un QR muerto.
+    try {
+      await requestUiCode()
+    } catch {
+      /* el error queda en uiError */
+    }
   } catch {
     /* noop */
   }
