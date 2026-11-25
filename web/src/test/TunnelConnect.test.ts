@@ -178,6 +178,23 @@ describe('BunDeckApp: modal de conexión + dot de kiosco en túnel', () => {
     wrapper.unmount()
   })
 
+  it('entrada con singleton rancio (fallback) resetea a idle y muestra la modal', async () => {
+    const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
+    const { getRtcSingleton } = await import('../composables/useRemoteRtc')
+    const rtc = getRtcSingleton()
+    // Simula un intento anterior ya resuelto (p. ej. HMR/remontaje en dev):
+    // sin reset en onMounted la condición (idle/signaling) no se cumpliría
+    // al entrar y la modal no saldría.
+    rtc.status.value = 'fallback'
+    gotoTunnelKiosk()
+    const wrapper = mount(BunDeckApp)
+    await flushPromises()
+    await nextTick()
+    expect(rtc.status.value).toBe('idle')
+    expect(wrapper.find('[data-cy="tunnel-connect-dialog"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('sin túnel no hay modal ni dot de transporte', async () => {
     const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
     window.history.replaceState(null, '', '/?kiosk=1')

@@ -52,6 +52,10 @@ const { t } = useI18nStore()
   font-size: 14px;
   font-weight: 600;
 }
+.bd-tunnel-connect__body > span {
+  flex: 1;
+  min-width: 0;
+}
 .bd-tunnel-x {
   margin-left: auto;
   border: 0;

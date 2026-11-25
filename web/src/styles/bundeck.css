@@ -1043,6 +1043,36 @@
     opacity: 0.35;
   }
 }
+/* Kiosco por túnel: el banner a ancho completo quedaba bajo el cluster fijo
+   de salida (salir + puntitos + fullscreen) y su X bajo .bd-kiosk-exit /
+   .bd-kiosk-corner (intocable a 390px). Aire arriba para que el texto arranque
+   bajo los fijos; la X sube por encima de la esquina invisible para seguir
+   siendo pulsable. Solo layout, sin tocar funcionalidad. */
+.bundeck.bd-kiosk .bd-tunnel-banner {
+  padding-top: 60px;
+}
+.bundeck.bd-kiosk .bd-tunnel-banner .bd-tunnel-x {
+  position: relative;
+  z-index: 42;
+}
+/* La modal de conexión usa el marco .bd-dlg (880x640 de escritorio) y su
+   especificidad ganaba al tamaño compacto del componente: quedaba una caja
+   gigante empujando el grid. Se impone el diseño compacto. Además el <dialog>
+   sin showModal es `absolute` (hoja de estilos UA) y pintaba arriba del todo,
+   bajo los fijos del kiosco (texto y X intocables): se fija como flotante
+   centrado, por encima de .bd-kiosk-exit (41) y .bd-kiosk-corner (40), bajo el
+   banner de transporte. */
+.bundeck dialog.bd-dlg.bd-tunnel-connect {
+  width: min(420px, 94vw);
+  height: fit-content;
+  max-height: calc(100dvh - 32px);
+  position: fixed;
+  top: 112px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 60;
+}
 @media (max-width: 640px) {
   .bundeck.bd-kiosk .bd-floor {
     padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));

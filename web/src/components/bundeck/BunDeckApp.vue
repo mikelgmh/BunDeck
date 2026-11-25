@@ -755,6 +755,7 @@ const showTransportModal = computed(() =>
   (rtcStatus.value === 'idle' || rtcStatus.value === 'signaling')
 )
 let transportBannerTimer: ReturnType<typeof setTimeout> | null = null
+let transportConnectTimer: ReturnType<typeof setTimeout> | null = null
 watch(rtcStatus, (s) => {
   if (s === 'signaling') transportModalDismissed.value = false
   if (transportBannerTimer !== null) {
@@ -2748,9 +2749,17 @@ onMounted(async () => {
   // transporte relay sigue funcionando aunque P2P falle por NAT).
   try {
     if (getTunnelToken()) {
+      // Entrada por túnel: intento nuevo y determinista. El singleton RTC
+      // sobrevive a HMR/remontajes con un estado terminal (fallback) o un
+      // `pc` rancio que haría que connect() devolviese false sin transitar:
+      // se resetea a idle para que la modal salga desde el primer pintado
+      // (una vez por intento; el cierre manual sigue sin reabrir y la modal
+      // se cierra sola al resolver).
+      rtc.disconnect()
       showTransportBanner.value = true
       transportModalDismissed.value = false
-      setTimeout(() => {
+      transportConnectTimer = setTimeout(() => {
+        transportConnectTimer = null
         rtc.connect().catch(() => {})
       }, 1500)
     }
@@ -2816,6 +2825,10 @@ onUnmounted(() => {
   if (transportBannerTimer !== null) {
     clearTimeout(transportBannerTimer)
     transportBannerTimer = null
+  }
+  if (transportConnectTimer !== null) {
+    clearTimeout(transportConnectTimer)
+    transportConnectTimer = null
   }
   if (unsubVar) {
     unsubVar()
