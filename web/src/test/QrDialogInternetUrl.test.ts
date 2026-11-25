@@ -12,6 +12,7 @@ vi.mock('../composables/useI18n', () => ({
 const UI_URL = 'https://relay.example.test/ui/AbC123xYz'
 
 const mockPending = ref<Array<Record<string, unknown>>>([])
+const mockStatus = ref<Record<string, unknown>>({ tunnel: { status: 'connected' } })
 
 vi.mock('../composables/useRemote', () => ({
   useRemote: () => ({
@@ -23,6 +24,7 @@ vi.mock('../composables/useRemote', () => ({
     uiCodeDataUrl: ref('data:image/png;base64,QR'),
     uiPending: mockPending,
     uiSessions: ref([]),
+    status: mockStatus,
     requestUiCode: vi.fn(),
     loadUiPending: vi.fn(async () => []),
     loadUiSessions: vi.fn(async () => []),
@@ -52,6 +54,7 @@ const realClipboard = navigator.clipboard
 
 beforeEach(() => {
   mockPending.value = []
+  mockStatus.value = { tunnel: { status: 'connected' } }
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: vi.fn(async () => {}) },
     configurable: true,
@@ -107,6 +110,27 @@ describe('QrDialog pestaña internet: URL visible sin cámara', () => {
     expect(wrapper.find('[data-cy="qr-internet-approval-transport"]').text()).toBe(
       'bd.remoteUiTransportNotice'
     )
+    wrapper.unmount()
+  })
+
+  it('avisa si el túnel no está conectado (el QR caducaría en el móvil)', async () => {
+    mockStatus.value = { tunnel: { status: 'disconnected' } }
+    const wrapper = mount(QrDialog)
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show()
+    await flushPromises()
+
+    expect(wrapper.find('[data-cy="qr-internet-tunnel-down"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('no avisa si el túnel está conectado', async () => {
+    const wrapper = mount(QrDialog)
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show()
+    await flushPromises()
+
+    expect(wrapper.find('[data-cy="qr-internet-tunnel-down"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

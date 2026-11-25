@@ -339,7 +339,7 @@ timer=setInterval(poll,POLL_MS);
 }
 
 /** Variante estática (sin poll) para códigos inválidos/desconocidos: no hace eco del código. */
-function renderGonePage(lang: WaitingLang): string {
+export function renderGonePage(lang: WaitingLang): string {
   const t = STR[lang];
   return `<!doctype html>
 <html lang="${t.lang}">
@@ -355,6 +355,9 @@ function renderGonePage(lang: WaitingLang): string {
 </body>
 </html>`;
 }
+
+/** Alias público de la página de enlace caducado/inválido (la usa relay.ts). */
+export const renderUiGonePage = renderGonePage;
 
 /** Motivos por los que un `/t/<token>/` no se puede servir. */
 export type TunnelGoneReason = 'invalid-token' | 'expired' | 'daemon-offline';

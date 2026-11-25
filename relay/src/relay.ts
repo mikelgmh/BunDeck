@@ -14,7 +14,7 @@ import {
   type HttpResult,
   type TunnelSessionPersist,
 } from './tunnel';
-import { renderTunnelGonePage, wantsHtmlPage, waitingLang, type TunnelGoneReason } from './waiting';
+import { renderTunnelGonePage, renderUiGonePage, wantsHtmlPage, waitingLang, type TunnelGoneReason } from './waiting';
 
 export { getUiPageHandler, setUiPageHandler } from './tunnel';
 
@@ -394,6 +394,14 @@ export class RelayServer {
       ip: getClientIp(req, server, this.opts.trustProxy ?? false),
     });
     if ('error' in ensured) {
+      // Navegadores: página amable ("enlace caducado o inválido") en vez
+      // del JSON crudo `{"error":"unknown-code"}` que no explica nada.
+      if (wantsHtmlPage(req)) {
+        return new Response(renderUiGonePage(waitingLang(req)), {
+          status: 404,
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
       return Response.json({ error: ensured.error }, { status: 404 });
     }
     if (ensured.created) {

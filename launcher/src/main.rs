@@ -1595,6 +1595,12 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
             });
         }
         TrayEvent::Quit => {
+            // "Salir" apaga todo: pide al daemon que se detenga (muere en
+            // ~2s) y luego cierra el launcher. Antes solo cerraba la ventana
+            // y los servicios seguían arrancados.
+            if monitor::shutdown_daemon() {
+                eprintln!("[launcher] apagado del daemon solicitado.");
+            }
             if let Some(tray) = state.borrow_mut().tray.take() {
                 tray.shutdown();
             }
@@ -1614,9 +1620,10 @@ fn quit_app(cx: &mut App) {
     cx.quit();
 }
 
-/// Sin tray: salir directamente.
+/// Sin tray: salir directamente (apagando antes el daemon si está en marcha).
 #[cfg(not(windows))]
 fn quit_app(cx: &mut App) {
+    let _ = monitor::shutdown_daemon();
     cx.quit();
 }
 

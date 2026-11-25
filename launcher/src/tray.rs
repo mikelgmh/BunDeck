@@ -4,8 +4,8 @@
 //! y el host Electrobun no pinta ninguno): al hacer
 //! clic se abre la ventana del launcher, y el menú ofrece Abrir panel
 //! (ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
-//! (ventana nativa del host, si lo hay) y Salir (cierra el launcher;
-//! el daemon sigue en marcha y se detiene con Detener).
+//! (ventana nativa del host, si lo hay) y Salir (apaga el daemon y cierra
+//! el launcher).
 //!
 //! Implementación Win32 directa (`Shell_NotifyIconW`) sobre un HWND oculto
 //! con su propio bucle de mensajes en un hilo dedicado. Los eventos viajan
@@ -22,7 +22,7 @@ pub enum TrayEvent {
     OpenPanel,
     /// "Abrir en Electrobun": pedir al host que abra su ventana nativa.
     OpenElectrobun,
-    /// "Salir": cerrar el launcher (el daemon sigue en marcha).
+    /// "Salir": apaga el daemon y cierra el launcher.
     Quit,
 }
 

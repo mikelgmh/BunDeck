@@ -104,6 +104,9 @@
             </button>
           </div>
           <p class="bd-hint" style="text-align: center">{{ t('bd.remoteUiOpenHint') }}</p>
+          <p v-if="tunnelDown" class="bd-err" role="alert" style="text-align: center" data-cy="qr-internet-tunnel-down">
+            {{ t('bd.remoteUiTunnelDown') }}
+          </p>
           <div v-if="uiCode" class="bd-remote-code-row" style="justify-content: center">
             <span class="bd-remote-label">{{ t('bd.remoteUiOneTimeCode') }}</span>
             <code class="bd-remote-one-time-code">{{ uiCode.code }}</code>
@@ -309,6 +312,7 @@ const {
   uiCodeDataUrl,
   uiPending,
   uiSessions,
+  status,
   requestUiCode,
   loadUiPending,
   loadUiSessions,
@@ -334,6 +338,11 @@ const uiSecsLeft = computed(() =>
   uiCode.value ? Math.max(0, Math.ceil((uiCode.value.expiresAt - now.value) / 1000)) : 0
 )
 const uiExpired = computed(() => !!uiCode.value && uiSecsLeft.value <= 0)
+// Igual que Ajustes → Acceso remoto: si el túnel no está conectado, el QR
+// recién generado caducará en el móvil (el relay no conoce el código).
+const tunnelDown = computed(
+  () => uiEnabled.value && !!status.value?.tunnel && status.value.tunnel.status !== 'connected'
+)
 
 // Lo que codifica el QR y se copia: el enlace lleva ?kiosk=1 para que el
 // escaneo aterrice en kiosco. Mostrarlo en texto permite conectarse sin
