@@ -1,3 +1,11 @@
+# [1.15.0](https://github.com/mikelgmh/BunDeck/compare/v1.14.0...v1.15.0) (2026-11-25)
+
+
+### Features
+
+* **discord,remote,hw,kiosco:** Discord RPC zero-config, relay URL configurable, asignacion HW al arranque, dialog P2P en kiosco ([32c142c](https://github.com/mikelgmh/BunDeck/commit/32c142c22a8c292e5dd4ee5bf8d086b1a65a1c78))
+* **discord:** app real zero-config y callback https en relay ([fcd7fff](https://github.com/mikelgmh/BunDeck/commit/fcd7ffffcb0856659023a178e3e9a003c45c520c))
+
 # [1.14.0](https://github.com/mikelgmh/BunDeck/compare/v1.13.1...v1.14.0) (2026-11-25)
 
 
