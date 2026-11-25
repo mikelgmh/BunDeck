@@ -44,15 +44,19 @@ export function __resetWebDistRebuildForTests(): void {
 
 function defaultSpawnWebBuild(webDir: string): void {
   try {
+    console.log(`🔨 web-dist obsoleto: reconstruyendo en segundo plano (npm run build en ${webDir})…`);
+    const t0 = Date.now();
     const cmd =
       process.platform === 'win32' ? ['cmd', '/c', 'npm', 'run', 'build'] : ['npm', 'run', 'build'];
     const proc = Bun.spawn(cmd, { cwd: webDir, stdio: ['ignore', 'ignore', 'ignore'] });
     void proc.exited
       .then(() => {
         webBuildRunning = false;
+        console.log(`✅ web-dist reconstruido en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
       })
-      .catch(() => {
+      .catch((e) => {
         webBuildRunning = false;
+        console.warn(`⚠️ web-dist: falló la reconstrucción en segundo plano: ${e instanceof Error ? e.message : e}`);
       });
   } catch {
     webBuildRunning = false;
