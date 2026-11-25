@@ -70,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { isTunnelMode } from '../../composables/useTunnel'
 
@@ -247,14 +247,59 @@ async function loadLogs(): Promise<void> {
   logsError.value = ''
   try {
     const q = level.value ? `?limit=100&level=${encodeURIComponent(level.value)}` : '?limit=100'
-    const { res } = await timedFetch(`${props.apiBase}/logs${q}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const list = await res.json()
-    logs.value = Array.isArray(list) ? list : []
+    // Registros clásicos + actividad por pulsación (la tabla button_press_logs
+    // es la que SÍ se escribe en ambas vías, web y HW): se fusionan para que
+    // el menú muestre actividad real aunque `logs` esté vacío.
+    const [logsRes, pressRows] = await Promise.all([
+      (async () => {
+        const { res } = await timedFetch(`${props.apiBase}/logs${q}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const list = await res.json()
+        return Array.isArray(list) ? list : []
+      })(),
+      loadPressLogs(),
+    ])
+    const merged: LogRow[] = [...logsRes, ...pressRows]
+      .filter((l) => !level.value || l.level === level.value)
+      .sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    logs.value = merged.slice(0, 100)
   } catch (e) {
     logsError.value = fmtErr(e)
     logs.value = []
   }
+}
+
+/** Una fila por (pulsación × acción): la actividad real de web y HW. */
+async function loadPressLogs(): Promise<LogRow[]> {
+  try {
+    const { res } = await timedFetch(`${props.apiBase}/press-logs?limit=100`)
+    if (!res.ok) return []
+    const data = await res.json()
+    const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : [])
+    return items.map((p: any): LogRow => ({
+      id: typeof p?.id === 'number' ? p.id : undefined,
+      level: p?.success === false ? 'error' : 'info',
+      message: `Press ${p?.buttonId ?? '?'} · ${p?.actionType ?? '?'} → ${
+        p?.success === false ? `FALLO: ${p?.error ?? 'error'}` : 'ok'
+      }${p?.deviceName ?? p?.source ? ` [${p?.deviceName ?? p?.source}]` : ''}`,
+      ts: typeof p?.ts === 'number' ? p.ts : Date.now(),
+    }))
+  } catch {
+    return []
+  }
+}
+
+// En vivo: el cliente principal está suscrito al tópico `logs` y reemite
+// cada `log.created` por ventana (ver useStreamDeck.ts).
+const onLiveLog = (e: Event) => {
+  const p = (e as CustomEvent).detail ?? {}
+  const row: LogRow = {
+    level: typeof p?.level === 'string' ? p.level : 'info',
+    message: typeof p?.message === 'string' ? p.message : JSON.stringify(p),
+    ts: typeof p?.ts === 'number' ? p.ts : Date.now(),
+  }
+  if (level.value && row.level !== level.value) return
+  logs.value = [row, ...logs.value].slice(0, 100)
 }
 
 async function refreshAll(): Promise<void> {
@@ -300,6 +345,15 @@ const formatTime = (ts: number): string => {
 
 onMounted(() => {
   void refreshAll()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('libredeck:log-created', onLiveLog as EventListener)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('libredeck:log-created', onLiveLog as EventListener)
+  }
 })
 
 defineExpose({ refresh: refreshAll })

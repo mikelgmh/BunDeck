@@ -238,13 +238,11 @@ describe('DiscordPlugin voz: RPC primero, hotkey de fallback', () => {
         expect(tapCalls).toEqual([['ctrl+shift+m', 0]])
     })
 
-    it('rpc sin config devuelve needs-auth (no lanza, no toca teclas)', async () => {
+    it('rpc sin auth lanza needs-auth (no toca teclas): el fallo aplanea a success:false', async () => {
         const { ctx } = makeCtx({ mode: 'rpc' })
         let tapped = 0
         const plugin = new DiscordPlugin(ctx, { ...okRpc(), hotkeyTap: async (h, hold) => { tapped++; return { hotkey: h, heldMs: hold ?? 0, platform: 'test' } } })
-        const res = await plugin.getActionHandlers().get('toggle-mute')!({}, {})
-        expect(res.status).toBe('needs-auth')
-        expect(res.instructions).toContain('discord.com/developers/applications')
+        await expect(plugin.getActionHandlers().get('toggle-mute')!({}, {})).rejects.toThrow(/needs-auth|no-token|Discord/)
         expect(tapped).toBe(0)
     })
 
@@ -258,25 +256,21 @@ describe('DiscordPlugin voz: RPC primero, hotkey de fallback', () => {
         expect(tapped).toBe(0)
     })
 
-    it('Discord cerrado: auto cae a hotkey, rpc devuelve error reintentable', async () => {
+    it('Discord cerrado: auto cae a hotkey (con rpcError), rpc lanza error reintentable', async () => {
         const mk = (mode: string) => {
             const { ctx } = makeCtx({ mode, clientId: 'cid', accessToken: 'tok-abcdefghij' })
             return new DiscordPlugin(ctx, { ...okRpc('closed'), hotkeyTap: async (h) => ({ hotkey: h, heldMs: 0, platform: 'test' }) })
         }
         const autoRes = await mk('auto').getActionHandlers().get('toggle-mute')!({}, {})
         expect(autoRes.transport).toBe('hotkey')
-        const rpcRes = await mk('rpc').getActionHandlers().get('toggle-mute')!({}, {})
-        expect(rpcRes.status).toBe('error')
-        expect(rpcRes.code).toBe('discord-closed')
-        expect(rpcRes.retryable).toBe(true)
+        expect(autoRes.rpcError?.code).toBe('discord-closed')
+        await expect(mk('rpc').getActionHandlers().get('toggle-mute')!({}, {})).rejects.toThrow(/discord-closed/)
     })
 
-    it('token caducado sin refresh pide renovar (no cae a hotkey en silencio)', async () => {
+    it('token caducado sin refresh lanza (pide renovar, no cae a hotkey en silencio)', async () => {
         const { ctx } = makeCtx({ mode: 'auto', clientId: 'cid', accessToken: 'tok-abcdefghij', tokenExpiresAt: String(Date.now() - 5000) })
         const plugin = new DiscordPlugin(ctx, okRpc('ok'))
-        const res = await plugin.getActionHandlers().get('toggle-deafen')!({}, {})
-        expect(res.status).toBe('error')
-        expect(res.code).toBe('token-expired')
+        await expect(plugin.getActionHandlers().get('toggle-deafen')!({}, {})).rejects.toThrow(/token-expired|renovar|Discord/)
     })
 
     it('token caducado con refresh+secret se renueva y ejecuta por RPC', async () => {
@@ -293,13 +287,11 @@ describe('DiscordPlugin voz: RPC primero, hotkey de fallback', () => {
         expect(store.refreshToken).toBe('ref-2')
     })
 
-    it('lock de voz por otra app: error claro sin fallback', async () => {
+    it('lock de voz por otra app: lanza error claro sin fallback', async () => {
         for (const mode of ['auto', 'rpc']) {
             const { ctx } = makeCtx({ mode, clientId: 'cid', accessToken: 'tok-abcdefghij' })
             const plugin = new DiscordPlugin(ctx, okRpc('locked'))
-            const res = await plugin.getActionHandlers().get('toggle-mute')!({}, {})
-            expect(res.status, mode).toBe('error')
-            expect(res.code, mode).toBe('voice-locked')
+            await expect(plugin.getActionHandlers().get('toggle-mute')!({}, {}), mode).rejects.toThrow(/voice-locked/)
         }
     })
 
@@ -347,7 +339,7 @@ describe('DiscordPlugin acciones nuevas', () => {
         expect(store.accessToken).toBe('tok-code-abcdef')
     })
 
-    it('status sin config informa needs-auth y status con RPC informa conectado', async () => {
+    it('status sin config informa needs-auth y status con RPC informa conectado + voz', async () => {
         const noconf = new DiscordPlugin(makeCtx().ctx, okRpc())
         expect((await noconf.getActionHandlers().get('status')!({}, {})).status).toBe('needs-auth')
         const { ctx } = makeCtx({ clientId: 'cid', accessToken: 'tok-abcdefghij' })
@@ -355,6 +347,9 @@ describe('DiscordPlugin acciones nuevas', () => {
         const st = await ok.getActionHandlers().get('status')!({}, {})
         expect(st.status).toBe('connected')
         expect(st.transport).toBe('rpc')
+        // Diagnóstico de voz: avisa que el mute solo se nota en canal.
+        expect(typeof st.voiceKnown).toBe('boolean')
+        expect(String(st.voiceHint)).toContain('CANAL DE VOZ')
     })
 
     it('disconnect borra el token', async () => {

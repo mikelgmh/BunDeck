@@ -803,6 +803,21 @@ export class ActionRunner {
       } else {
         for (const row of rows) this.db.addPressLog(row);
       }
+      // Resumen por pulsación en `logs` (una fila): la vía HW y la web dejan
+      // el mismo rastro en el menú Registros, con nivel error si algo falló.
+      try {
+        const ok = leaves.filter((l) => l.success).length;
+        const failed = leaves.length - ok;
+        const firstErr = leaves.find((l) => !l.success)?.error;
+        this.db.addLog({
+          level: failed > 0 ? 'error' : 'info',
+          message: failed > 0
+            ? `Botón ${buttonId} (${source}/${pressType}): ${failed}/${leaves.length} acciones fallaron${firstErr ? `: ${firstErr}` : ''}`
+            : `Botón ${buttonId} (${source}/${pressType}): pulsación ejecutada (${ok}/${leaves.length} acciones ok)`,
+          meta: { buttonId, pageId, pressType, source, runId: res.runId, ok, failed },
+          ts: Date.now(),
+        });
+      } catch { /* mejor esfuerzo */ }
       // Poda oportunista (retención configurable, best-effort).
       try {
         const keepMax = Number(this.db.getSetting('logs.press_keep_max') ?? '10000');

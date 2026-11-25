@@ -678,7 +678,7 @@ export function useStreamDeck() {
     }))
     ws.send(JSON.stringify({
       type: 'subscribe',
-      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings', 'shortcuts'] }
+      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings', 'shortcuts', 'logs'] }
     }))
     return true
   }
@@ -766,6 +766,16 @@ export function useStreamDeck() {
     } catch (error) {
       console.error('Failed to connect WebSocket:', error)
     }
+  }
+
+  // Errores de acción → toast de la app (antes se descartaban en silencio).
+  // Se difunden por evento de ventana: el shell (BunDeckApp) los muestra y
+  // los tests pueden espiarlos sin montar toasts.
+  const notifyActionError = (message: string, extra?: Record<string, any>) => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent('libredeck:action-error', {
+      detail: { message, ...(extra ?? {}) }
+    }))
   }
 
   const handleWebSocketMessage = async (message: any) => {
@@ -962,6 +972,23 @@ export function useStreamDeck() {
       case 'action.finished':
         // Remove executing state after action completes
         break
+      case 'action.error': {
+        // Error de ejecución (daemon): toast visible (antes se descartaba).
+        const p = (message.payload ?? {}) as any
+        const err = p?.error
+        const msg = typeof err === 'string' && err
+          ? err
+          : (err && typeof err.message === 'string' ? err.message : JSON.stringify(err ?? p))
+        notifyActionError(`Error al ejecutar la acción: ${msg}`, { actionId: p?.actionId ?? null, error: err ?? null })
+        break
+      }
+      case 'log.created': {
+        // Actividad en vivo para el menú Registros (DiagnosticsPane escucha).
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('libredeck:log-created', { detail: message.payload }))
+        }
+        break
+      }
       case 'update.completed':
         console.log('🔄 Update completed:', message.payload);
         // Emit custom event for update completion
@@ -1705,13 +1732,18 @@ export function useStreamDeck() {
     try {
       const actions = button.data.actions
       if (actions.length === 1) {
-        await apiRequest('/actions/execute', {
+        const res = await apiRequest('/actions/execute', {
           method: 'POST',
           body: JSON.stringify({ action: actions[0], context: baseContext })
-        })
+        }) as any
+        // El daemon responde 200 con success:false en fallos de acción
+        // (no lanza): hay que mirar el cuerpo para avisar.
+        if (res && res.success === false) {
+          notifyActionError(`Error al ejecutar la acción: ${res.error ?? 'error desconocido'}`, { error: res.error ?? null })
+        }
       } else {
         try {
-          await apiRequest(
+          const res = await apiRequest(
             '/actions/execute-many',
             {
               method: 'POST',
@@ -1719,19 +1751,33 @@ export function useStreamDeck() {
                 buildExecuteManyBody(actions.map((action: any) => ({ action, context: baseContext })))
               )
             }
-          )
+          ) as any
+          const failed = (res?.results ?? []).find((r: any) => r && r.success === false)
+          if (failed) {
+            notifyActionError(`Error al ejecutar la acción: ${failed.error ?? 'error desconocido'}`, { error: failed.error ?? null })
+          }
         } catch (batchError) {
           // Compat con daemons sin batch: serie clásica.
           if (!isBatchUnsupported(batchError)) throw batchError
           for (const action of actions) {
-            await apiRequest('/actions/execute', {
+            const res = await apiRequest('/actions/execute', {
               method: 'POST',
               body: JSON.stringify({ action, context: baseContext })
-            })
+            }) as any
+            if (res && res.success === false) {
+              notifyActionError(`Error al ejecutar la acción: ${res.error ?? 'error desconocido'}`, { error: res.error ?? null })
+              break
+            }
           }
         }
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      // Evita el doble toast cuando ya se notificó el fallo (cuerpo 200):
+      // aquí solo llegan errores de transporte/HTTP 500 (excepciones).
+      if (!/^Error al ejecutar la acción: /.test(msg)) {
+        notifyActionError(`Error al ejecutar la acción: ${msg}`, { error: msg })
+      }
       console.error('Failed to execute button:', error)
     } finally {
       setTimeout(() => {
@@ -3142,6 +3188,9 @@ export function useStreamDeck() {
     isChangingButton,
     isSaving,
     isSwapping,
-    saveTimeout
+    saveTimeout,
+
+    // Manejo de mensajes WS (expuesto para tests del toast de errores)
+    handleWebSocketMessage
   }
 }

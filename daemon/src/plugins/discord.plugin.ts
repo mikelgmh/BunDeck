@@ -611,6 +611,38 @@ export class DiscordPlugin {
     }
 
     /**
+     * Fallback a hotkey (modo auto): nunca silencioso — adjunta el error RPC
+     * real (`rpcError`) y lo deja en warn server-side para diagnóstico.
+     */
+    private rpcFallback(code: string, message: string, retryable: boolean): { handled: boolean; result?: any } {
+        const rpcError = { code, message }
+        this.context.log('warn', `Discord: RPC no disponible (${code}): ${message}. Se usa el atajo global (fallback).`)
+        return { handled: false, result: { status: 'error', code, transport: 'rpc', retryable, message, rpcError } }
+    }
+
+    /**
+     * Si el RPC resolvió con error claro (token-expired, needs-auth,
+     * voice-locked, not-configured, discord-closed…), lanza para que el
+     * fallo aplanee a `success:false` (dispara `action.error`, toast y nivel
+     * error en logs) en vez de un `success:true` ciego.
+     */
+    private throwIfRpcError(result: any, actionLabel: string): any {
+        if (!result || typeof result !== 'object') return result
+        if (result.status === 'error' || result.status === 'needs-auth') {
+            const code = String(result.code ?? result.reason ?? result.status)
+            const hint = typeof result.hint === 'string' && result.hint ? ` ${result.hint}` : ''
+            const url = typeof result.authorizeUrl === 'string' && result.authorizeUrl ? ` Autoriza aquí: ${result.authorizeUrl}` : ''
+            const detail = typeof result.message === 'string' && result.message
+                ? result.message
+                : typeof result.permissionNote === 'string' && result.permissionNote
+                    ? result.permissionNote
+                    : 'falló el control por RPC.'
+            throw new Error(`Discord (${actionLabel}) [${code}]: ${detail}${hint}${url}`)
+        }
+        return result
+    }
+
+    /**
      * Intenta ejecutar `fn` por RPC. Devuelve `{ handled: true, result }`
      * si el modo RPC resolvió (éxito, needs-auth o error claro); con
      * `{ handled: false }` el llamador cae al fallback hotkey (modo auto
@@ -656,9 +688,27 @@ export class DiscordPlugin {
             return { handled: true, result: { status: 'error', code: 'token-expired', transport: 'rpc', message, retryable: false } }
         }
         try {
-            const rpc = await this.ensureRpc()
-            const data = await fn(rpc)
-            return { handled: true, result: data }
+            // Conexión persistente reutilizada que murió en silencio
+            // (half-open sin onclose): el primer uso falla con
+            // discord-closed/timeout. Se reintenta UNA vez con conexión
+            // fresca (drop + connect) antes de rendirse al fallback.
+            const reused = this.rpc !== null
+            let retriedFresh = false
+            for (;;) {
+                try {
+                    const rpc = await this.ensureRpc()
+                    const data = await fn(rpc)
+                    return { handled: true, result: data }
+                } catch (err) {
+                    if (err instanceof DiscordRpcError && err.code === 'discord-closed' && reused && !retriedFresh) {
+                        retriedFresh = true
+                        this.context.log('warn', `Discord: la conexión RPC reutilizada falló (${err.message}); reintentando con conexión fresca…`)
+                        this.dropRpc()
+                        continue
+                    }
+                    throw err
+                }
+            }
         } catch (err) {
             if (err instanceof DiscordRpcError) {
                 if (err.code === 'voice-locked') {
@@ -700,17 +750,18 @@ export class DiscordPlugin {
                             },
                         }
                     }
-                    return { handled: false } // auto: el fallback hotkey lo intentará
+                    // auto: el fallback hotkey lo intentará (con rpcError adjunto)
+                    return this.rpcFallback('discord-closed', err.message, true)
                 }
                 if (mode === 'rpc') {
                     return { handled: true, result: { status: 'error', code: err.code, transport: 'rpc', message: err.message, retryable: err.retryable } }
                 }
-                return { handled: false }
+                return this.rpcFallback(err.code, err.message, err.retryable)
             }
             if (mode === 'rpc') {
                 return { handled: true, result: { status: 'error', code: 'rpc-error', transport: 'rpc', message: err instanceof Error ? err.message : String(err), retryable: false } }
             }
-            return { handled: false }
+            return this.rpcFallback('rpc-error', err instanceof Error ? err.message : String(err), false)
         }
     }
 
@@ -731,16 +782,22 @@ export class DiscordPlugin {
             this.context.log('info', `Discord RPC: micro ${state.mute ? 'silenciado' : 'reactivado'} (background, sin foco)`)
             return { action: 'toggle-mute', transport: 'rpc', mute: state.mute, previousMute: current, port: rpc.connectedPort, pipe: rpc.connectedPipe, rpcTransport: rpc.connectedTransport, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
         })
-        if (attempted.handled) return attempted.result
+        // Error claro del RPC (token, lock de voz, Discord cerrado en modo
+        // rpc…): lanza para aplanar a success:false (toast + log error).
+        if (attempted.handled) return this.throwIfRpcError(attempted.result, 'toggle-mute')
         const hotkey = this.resolveHotkey(params, 'hotkey', 'muteHotkey', 'ctrl+shift+m')
         this.context.log('info', `Discord: alternando micro con atajo "${hotkey}"`)
         try {
             const res = await this.hotkeyTap(hotkey)
+            const rpcError = (attempted.result as any)?.rpcError ?? null
             return {
                 action: 'toggle-mute', hotkey, ...res, transport: 'hotkey',
+                ...(rpcError ? { rpcError } : {}),
                 note: attempted.result?.status === 'needs-auth'
                     ? 'Sin autorización RPC: usado el atajo GLOBAL. Autoriza la app (discord.connect) para controlar en background sin depender del foco.'
-                    : 'Discord debe estar en ejecución con ese atajo GLOBAL configurado (Discord → Ajustes → Atajos de teclado).',
+                    : rpcError
+                        ? `El RPC falló (${rpcError.code}): usado el atajo GLOBAL como fallback. El atajo debe ser GLOBAL en Discord (Ajustes → Atajos de teclado) y Discord debe estar en ejecución.`
+                        : 'Discord debe estar en ejecución con ese atajo GLOBAL configurado (Discord → Ajustes → Atajos de teclado).',
             }
         } catch (error) {
             this.context.log('error', `Discord: no se pudo silenciar: ${error}`)
@@ -755,16 +812,21 @@ export class DiscordPlugin {
             this.context.log('info', `Discord RPC: ensordecer ${state.deaf ? 'activado' : 'desactivado'} (background, sin foco)`)
             return { action: 'toggle-deafen', transport: 'rpc', deaf: state.deaf, previousDeaf: current, port: rpc.connectedPort, pipe: rpc.connectedPipe, rpcTransport: rpc.connectedTransport, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
         })
-        if (attempted.handled) return attempted.result
+        // Error claro del RPC: lanza para aplanar a success:false.
+        if (attempted.handled) return this.throwIfRpcError(attempted.result, 'toggle-deafen')
         const hotkey = this.resolveHotkey(params, 'hotkey', 'deafenHotkey', 'ctrl+shift+d')
         this.context.log('info', `Discord: alternando ensordecer con atajo "${hotkey}"`)
         try {
             const res = await this.hotkeyTap(hotkey)
+            const rpcError = (attempted.result as any)?.rpcError ?? null
             return {
                 action: 'toggle-deafen', hotkey, ...res, transport: 'hotkey',
+                ...(rpcError ? { rpcError } : {}),
                 note: attempted.result?.status === 'needs-auth'
                     ? 'Sin autorización RPC: usado el atajo GLOBAL. Autoriza la app (discord.connect) para controlar en background sin depender del foco.'
-                    : 'Discord debe estar en ejecución con ese atajo GLOBAL configurado (Discord → Ajustes → Atajos de teclado).',
+                    : rpcError
+                        ? `El RPC falló (${rpcError.code}): usado el atajo GLOBAL como fallback. El atajo debe ser GLOBAL en Discord (Ajustes → Atajos de teclado) y Discord debe estar en ejecución.`
+                        : 'Discord debe estar en ejecución con ese atajo GLOBAL configurado (Discord → Ajustes → Atajos de teclado).',
             }
         } catch (error) {
             this.context.log('error', `Discord: no se pudo ensordecer: ${error}`)
@@ -797,11 +859,11 @@ export class DiscordPlugin {
             const state = await rpc.setVoiceSettings({ mute: true })
             return { action: 'push-to-talk', transport: 'rpc', phase: 'hold', heldMs: hold, mute: state.mute }
         })
-        if (attempted.handled) return attempted.result
+        if (attempted.handled) return this.throwIfRpcError(attempted.result, 'push-to-talk')
 
         const hotkey = this.resolveHotkey(params, 'hotkey', 'pushToTalkHotkey', '')
         if (!hotkey) {
-            if (attempted.result?.status === 'needs-auth') return { ...attempted.result, transport: 'rpc' }
+            if (attempted.result?.status === 'needs-auth') return this.throwIfRpcError({ ...attempted.result, transport: 'rpc' }, 'push-to-talk')
             throw new Error('Falta el atajo de "Pulsar para hablar": configúralo en Discord (Ajustes → Atajos de teclado) y ponlo en los ajustes del plugin o en el parámetro "hotkey".')
         }
         const down = this.deps.hotkeyDown ?? hotkeyDown
@@ -965,6 +1027,8 @@ export class DiscordPlugin {
                 tokenExpired: false, rpcReachable: false, voice,
                 message: probeError ?? 'Discord no responde al RPC local.',
                 hint: 'Abre Discord en este equipo y reintenta. Sin RPC, las acciones usan el fallback de atajos globales (modo auto).',
+                voiceKnown: false, inVoice: null,
+                voiceHint: 'El mute por RPC solo se nota si estás EN UN CANAL DE VOZ de Discord: fuera de un canal, Discord acepta el comando pero no hay audio que silenciar.',
             }
         }
         return {
@@ -973,6 +1037,13 @@ export class DiscordPlugin {
             pipe: this.rpc?.connectedPipe ?? null,
             rpcTransport: this.rpc?.connectedTransport ?? null,
             endpoint: this.rpc?.connectedLabel ?? null,
+            // Diagnóstico de voz: el RPC expone mute/deaf, pero NO el canal
+            // actual de forma fiable (sin GET_SELECTED_VOICE_CHANNEL). Si
+            // voiceKnown es false o estás fuera de un canal, el mute no se
+            // nota aunque Discord acepte el comando.
+            voiceKnown: voice !== null && (voice.mute !== null || voice.deaf !== null),
+            inVoice: null,
+            voiceHint: 'El mute por RPC solo se nota si estás EN UN CANAL DE VOZ de Discord: fuera de un canal, Discord acepta el comando pero no hay audio que silenciar. Entra a un canal de voz y reintenta.',
         }
     }
 

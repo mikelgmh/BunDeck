@@ -1549,6 +1549,21 @@ const onPageBlockedMsg = (e: Event) => {
     bdShowToast(t('bd.blockedNav', { page: page?.name ?? d.pageId, device: 'Stream Deck', reason: d.reason ?? '' }))
   }
 }
+// Errores de ejecución del daemon (vía WS `action.error` o respuesta 200 con
+// success:false): toast visible. Dedupe de la ráfaga directo+eco WS.
+let lastActionErrorMsg = ''
+let lastActionErrorAt = 0
+const onActionErrorMsg = (e: Event) => {
+  const d = (e as CustomEvent).detail
+  const msg = typeof d?.message === 'string' && d.message
+    ? d.message
+    : (typeof d?.error === 'string' ? d.error : 'Error al ejecutar la acción')
+  const now = Date.now()
+  if (msg === lastActionErrorMsg && now - lastActionErrorAt < 2000) return
+  lastActionErrorMsg = msg
+  lastActionErrorAt = now
+  bdShowToast(msg)
+}
 
 const onPageDelete = async (page: PageData | null) => {
   if (!page || currentPages.value.length < 2) return
@@ -2740,6 +2755,7 @@ onMounted(async () => {
   devStore.loadHwStatus().catch(() => {})
   window.addEventListener('libredeck:devices-changed', onDevicesChanged)
   window.addEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
+  window.addEventListener('libredeck:action-error', onActionErrorMsg as EventListener)
   loadMarketplace().catch(() => {})
   loadMcpTokens().catch(() => {})
   loadMcpScopes().catch(() => {})
@@ -2827,6 +2843,7 @@ onUnmounted(() => {
   window.removeEventListener('scroll', onViewportChangeCloseProfile, true)
   window.removeEventListener('libredeck:devices-changed', onDevicesChanged)
   window.removeEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
+  window.removeEventListener('libredeck:action-error', onActionErrorMsg as EventListener)
   if (ruleTimer) {
     clearInterval(ruleTimer)
     ruleTimer = null
