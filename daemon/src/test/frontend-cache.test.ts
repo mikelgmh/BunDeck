@@ -14,7 +14,9 @@ import { webDistCacheHeaders, webDistStale, newestMtimeMs, resolveWebDistCandida
 import {
   createDaemonFetch,
   maybeRebuildWebDist,
+  startWebDistWatcher,
   __resetWebDistRebuildForTests,
+  __resetWebDistWatcherForTests,
 } from '../http/handler';
 
 const savedEnv = {
@@ -28,6 +30,7 @@ afterEach(() => {
     else process.env[k] = v;
   }
   __resetWebDistRebuildForTests();
+  __resetWebDistWatcherForTests();
 });
 
 function fakeDeps() {
@@ -181,6 +184,65 @@ describe('maybeRebuildWebDist', () => {
       expect(typeof later).toBe('boolean');
     }
   });
+
+  test('srcDir/distIndex override (solo tests)', async () => {
+    process.env.DEV_MODE = 'true';
+    isolateDb();
+    const { src, distIndex } = fakeWebRoot({ srcNewer: true, withDist: true });
+    let built = '';
+    const r = await maybeRebuildWebDist({
+      nowMs: Date.now(),
+      spawnFn: (webDir: string) => { built = webDir; },
+      srcDir: src,
+      distIndex,
+    });
+    expect(r).toBe(true);
+    expect(built).toBe(join(src, '..'));
+    const fresh = await maybeRebuildWebDist({
+      nowMs: Date.now() + 61_000,
+      spawnFn: () => { throw new Error('no debe relanzar: repo falso al dia'); },
+      srcDir: src,
+      distIndex: join(src, 'App.vue'),
+    });
+    void fresh;
+  });
+});
+
+describe('startWebDistWatcher', () => {
+  test('sin DEV_MODE no vigila nada', () => {
+    delete process.env.DEV_MODE;
+    const dir = mkdtempSync(join(tmpdir(), 'ld-watch-'));
+    let called = 0;
+    startWebDistWatcher({ debounceMs: 20, spawnFn: () => { called++; }, srcDir: dir });
+    expect(called).toBe(0);
+  });
+
+  test('reconstruye al guardar (con debounce) y no duplica watchers', async () => {
+    process.env.DEV_MODE = 'true';
+    isolateDb();
+    const root = mkdtempSync(join(tmpdir(), 'ld-watch-'));
+    const src = join(root, 'src');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'a.vue'), 'x');
+    // Sin dist junto al src inyectado -> obsoleto -> el arranque ya dispara.
+    const calls: string[] = [];
+    startWebDistWatcher({ debounceMs: 40, spawnFn: (w) => { calls.push(w); }, srcDir: src });
+    // Segundo arranque es no-op (mismo watcher).
+    startWebDistWatcher({
+      debounceMs: 40,
+      spawnFn: () => { throw new Error('watcher duplicado'); },
+      srcDir: src,
+    });
+    expect(calls).toEqual([root]);
+    // Cambio real: resetea el throttle, espera al watcher y deja que el debounce dispare.
+    __resetWebDistRebuildForTests();
+    calls.length = 0;
+    await new Promise((r) => setTimeout(r, 300));
+    writeFileSync(join(src, 'b.vue'), 'y');
+    writeFileSync(join(src, 'c.vue'), 'z');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(calls).toEqual([root]);
+  }, 10000);
 });
 
 describe('handler sirve web-dist con no-store en HTML', () => {

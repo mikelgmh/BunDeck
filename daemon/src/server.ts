@@ -130,6 +130,16 @@ class LibreDeckDaemon {
       }
 
       console.log('✓ Services initialized');
+
+      // DEV: vigilar web/src y reconstruir web-dist al guardar (el túnel y el
+      // frontend embebido sirven web/dist; sin esto la UI remota quedaba
+      // obsoleta hasta el siguiente .html + rebuild perezoso en caliente).
+      try {
+        const { startWebDistWatcher } = await import('./http/handler');
+        startWebDistWatcher();
+      } catch (e) {
+        console.error('⚠️ Web-dist watcher failed to init (sigue con rebuild perezoso):', e);
+      }
     } catch (error) {
       abortStartup(error);
     }

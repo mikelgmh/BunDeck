@@ -15,6 +15,7 @@ import {
   getPeerIp,
 } from './lan-guard';
 import { DatabaseService } from '../db';
+import chokidar from 'chokidar';
 import {
   findWebDistFile,
   findWebDistIndex,
@@ -40,6 +41,79 @@ let webBuildLastTrigger = 0;
 export function __resetWebDistRebuildForTests(): void {
   webBuildRunning = false;
   webBuildLastTrigger = 0;
+}
+
+let webDistWatcher: chokidar.FSWatcher | null = null;
+let webDistDebounce: ReturnType<typeof setTimeout> | null = null;
+
+/** Debounce del watcher: reconstruye X ms después del último cambio. */
+export const WEBDIST_WATCH_DEBOUNCE_MS = 8000;
+
+/** Solo tests: cierra el watcher y limpia el debounce. */
+export function __resetWebDistWatcherForTests(): void {
+  if (webDistDebounce) clearTimeout(webDistDebounce);
+  webDistDebounce = null;
+  if (webDistWatcher) {
+    try {
+      void webDistWatcher.close();
+    } catch { /* noop */ }
+    webDistWatcher = null;
+  }
+}
+
+/**
+ * DEV: vigila `web/src` y reconstruye `web/dist` en segundo plano al guardar.
+ *
+ * El rebuild perezoso (al pedir un .html) llegaba tarde — en pleno test del
+ * kiosco por relay — y quemaba CPU en el peor momento. El watcher reconstruye
+ * justo después de editar (con debounce) y respeta el guard de "ya hay un
+ * build en curso" de `maybeRebuildWebDist`. Solo arranca si existe `web/src`
+ * (en prod/instalado no hay fuentes: no hace nada).
+ */
+export function startWebDistWatcher(opts?: {
+  debounceMs?: number;
+  spawnFn?: (webDir: string) => void;
+  /** Solo tests: directorio src a vigilar (sin esto usa los candidatos reales). */
+  srcDir?: string;
+}): void {
+  if (webDistWatcher) return;
+  if (process.env.DEV_MODE !== 'true') return;
+  const srcDir =
+    opts?.srcDir ??
+    (resolveWebSrcCandidates().find((d) => {
+      try {
+        return fs.statSync(d).isDirectory();
+      } catch {
+        return false;
+      }
+    }) ?? null);
+  if (!srcDir) return;
+  // En tests, el dist va junto al srcDir inyectado; en real se resuelve
+  // con los candidatos (web/dist primero en DEV).
+  const testing = opts?.srcDir !== undefined;
+  const sibling = path.join(path.dirname(srcDir), 'dist', 'index.html');
+  const distIndex = testing ? (fs.existsSync(sibling) ? sibling : null) : undefined;
+  const base = {
+    ...(opts?.spawnFn ? { spawnFn: opts.spawnFn } : {}),
+    ...(testing ? { srcDir, distIndex } : {}),
+  };
+  // Si ya está obsoleto al arrancar, una reconstrucción inicial en segundo plano.
+  void maybeRebuildWebDist(base).catch(() => {});
+  const debounceMs = opts?.debounceMs ?? WEBDIST_WATCH_DEBOUNCE_MS;
+  webDistWatcher = chokidar.watch(srcDir, {
+    ignored: /(^|[\/\\])\../,
+    persistent: true,
+    ignoreInitial: true,
+    depth: 12,
+  });
+  webDistWatcher.on('all', () => {
+    if (webDistDebounce) clearTimeout(webDistDebounce);
+    webDistDebounce = setTimeout(() => {
+      webDistDebounce = null;
+      void maybeRebuildWebDist(base).catch(() => {});
+    }, debounceMs);
+  });
+  console.log(`👀 Vigilando ${srcDir} → rebuild de web-dist al guardar (debounce ${debounceMs / 1000}s)`);
 }
 
 function defaultSpawnWebBuild(webDir: string): void {
@@ -73,22 +147,28 @@ function defaultSpawnWebBuild(webDir: string): void {
 export async function maybeRebuildWebDist(opts?: {
   nowMs?: number;
   spawnFn?: (webDir: string) => void;
+  /** Solo tests: override de src/dist (por defecto, candidatos reales). */
+  srcDir?: string | null;
+  distIndex?: string | null;
 }): Promise<boolean> {
   if (process.env.DEV_MODE !== 'true') return false;
   if (webBuildRunning) return false;
   const now = opts?.nowMs ?? Date.now();
   if (now - webBuildLastTrigger < WEB_BUILD_MIN_INTERVAL_MS) return false;
   const srcDir =
-    resolveWebSrcCandidates().find((d) => {
-      try {
-        return fs.statSync(d).isDirectory();
-      } catch {
-        return false;
-      }
-    }) ?? null;
+    opts?.srcDir !== undefined
+      ? opts.srcDir
+      : (resolveWebSrcCandidates().find((d) => {
+          try {
+            return fs.statSync(d).isDirectory();
+          } catch {
+            return false;
+          }
+        }) ?? null);
   if (!srcDir) return false;
   const webDir = path.dirname(srcDir);
-  const distIndex = await findWebDistIndex().catch(() => null);
+  const distIndex =
+    opts?.distIndex !== undefined ? opts.distIndex : await findWebDistIndex().catch(() => null);
   if (!webDistStale(srcDir, distIndex)) return false;
   webBuildRunning = true;
   webBuildLastTrigger = now;
