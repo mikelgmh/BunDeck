@@ -9,6 +9,41 @@ import { importElgatoPlugin } from '../elgato/import';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
 
+/** Resultado de la sonda RPC inmediata tras guardar el token (best-effort). */
+export type DiscordRpcProbe = 'connected' | 'closed' | 'unknown';
+
+/**
+ * Sonda RPC inmediata (best-effort, ~5 s): ejecuta `discord.status` por el
+ * mismo camino que el diálogo (`POST .../key {action:'status'}`) y mapea a
+ * `connected` | `closed` | `unknown`. Nunca lanza: si la sonda falla, el
+ * token queda guardado igual y se devuelve `unknown`.
+ */
+export async function probeDiscordRpc(
+  services: any,
+  timeoutMs = 5000
+): Promise<{ rpc: DiscordRpcProbe; detail?: any }> {
+  try {
+    const exec = services?.actionRunner?.executeAction;
+    if (typeof exec !== 'function') return { rpc: 'unknown' };
+    const run = exec.call(services.actionRunner,
+      { type: 'discord.status', parameters: {} },
+      { timestamp: Date.now(), pressType: 'short', quiet: true } as any
+    );
+    const res: any = await Promise.race([
+      run,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('probe-timeout')), timeoutMs)),
+    ]);
+    const result = res?.result ?? res ?? {};
+    const status = result?.status ?? result?.result?.status;
+    if (status === 'connected') return { rpc: 'connected', detail: result };
+    if (status === 'discord-closed') return { rpc: 'closed', detail: result };
+    if (result?.code === 'discord-closed') return { rpc: 'closed', detail: result };
+    return { rpc: 'unknown', detail: result };
+  } catch {
+    return { rpc: 'unknown' };
+  }
+}
+
 export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, services }) => {
   if (path === '/api/v1/plugins') {
     if (method === 'GET') {
@@ -245,6 +280,18 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
         return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 400);
       }
     }
+    // Sonda RPC de solo-lectura (sin code, sin re-intercambio): la página del
+    // callback la usa para Reintentar tras `token-capture` con `rpc:closed`
+    // (el code OAuth es de un solo uso). Mismo camino que el diálogo
+    // (`discord.status` vía actionRunner).
+    if (sub === 'rpc-probe' && pluginId === 'discord' && method === 'GET') {
+      try {
+        const { rpc, detail } = await probeDiscordRpc(services, 5000);
+        return jsonResponse({ success: true, pluginId, rpc, detail: detail ?? null });
+      } catch (e) {
+        return jsonResponse({ success: true, pluginId, rpc: 'unknown' as DiscordRpcProbe });
+      }
+    }
     // Ajustes generales del plugin (menú ⋯): schema + valores + instrucciones
     if (sub === 'settings') {
       if (method === 'GET') {
@@ -338,7 +385,16 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
             db.deleteSetting('plugin.discord.loginRequestedAt');
           } catch {}
           services.wsManager.broadcastPluginSettings(pluginId);
-          return jsonResponse({ success: true, pluginId, values, expiresAt: stored.expiresAt });
+          // Sonda RPC inmediata (best-effort, ~5 s, sin lanzar): distingue
+          // token-guardado (`closed`) de verificado (`connected`). El token
+          // queda guardado aunque la sonda falle (`unknown`).
+          let rpc: DiscordRpcProbe = 'unknown';
+          try {
+            rpc = (await probeDiscordRpc(services, 5000)).rpc;
+          } catch {
+            rpc = 'unknown';
+          }
+          return jsonResponse({ success: true, pluginId, values, expiresAt: stored.expiresAt, rpc });
         }
         return jsonResponse({ error: `token-capture no soportado para ${pluginId}` }, 400);
       } catch (e) {

@@ -88,6 +88,33 @@ describe('relay discord callback: diagnóstico de auto-entrega', () => {
   });
 });
 
+describe('relay discord callback: rpc tras token-capture (token ok + RPC aparte)', () => {
+  test('distingue conectado de cerrado y expone re-sonda sin code', () => {
+    const es = renderDiscordCallbackPage({ lang: 'es' });
+    const en = renderDiscordCallbackPage({ lang: 'en' });
+    // Mensajes por valor de rpc.
+    expect(es).toContain('Discord quedó conectado');
+    expect(es).toContain('Token guardado, pero Discord no responde');
+    expect(es).toContain('No hace falta autorizar de nuevo');
+    expect(en).toContain('Token saved, but Discord is not responding');
+    // Reintento sin consumir code nuevo: sonda de solo-lectura.
+    expect(es).toContain('/api/v1/plugins/discord/rpc-probe');
+    expect(es).toContain('/api/v1/plugins/discord/key');
+    expect(es).toContain('rpcOf');
+    // Aviso ámbar diferenciado del ✓ y del error de entrega.
+    expect(es).toContain('.warn');
+    // El ok sin campo rpc (daemon viejo) se conserva: deliver() cae a ok().
+    expect(es).toContain('ok(); return');
+  });
+
+  test('checking existe en es y en', () => {
+    const es = renderDiscordCallbackPage({ lang: 'es' });
+    const en = renderDiscordCallbackPage({ lang: 'en' });
+    expect(es).toContain('Comprobando si Discord ya responde');
+    expect(en).toContain('Checking whether Discord answers yet');
+  });
+});
+
 describe('relay discord proxy (POST /api/discord/rpc-token)', () => {
   const discordOk = (seen: Array<{ url: string; body: string }>) =>
     (async (url: any, init: any) => {

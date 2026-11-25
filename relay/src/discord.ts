@@ -50,6 +50,8 @@ const CB_STR = {
     title: 'Conectando Discord con LibreDeck',
     working: 'Enviando el código a tu LibreDeck local…',
     ok: '¡Listo! Discord quedó conectado en tu LibreDeck. Ya puedes cerrar esta pestaña.',
+    okClosed: 'Token guardado, pero Discord no responde en este equipo: ábrelo y pulsa Reintentar. No hace falta autorizar de nuevo.',
+    checking: 'Comprobando si Discord ya responde…',
     failTitle: 'No se pudo entregar el código automáticamente',
     failBody:
       'Tu LibreDeck local no respondió (¿está abierto? ¿el puerto API es otro?). Copia el código y pégalo con la acción discord.connect o en token-capture:',
@@ -67,6 +69,8 @@ const CB_STR = {
     title: 'Connecting Discord to LibreDeck',
     working: 'Sending the code to your local LibreDeck…',
     ok: 'Done! Discord is now connected in your LibreDeck. You can close this tab.',
+    okClosed: 'Token saved, but Discord is not responding on this machine: open it and press Retry. No need to authorize again.',
+    checking: 'Checking whether Discord answers yet…',
     failTitle: 'Could not deliver the code automatically',
     failBody:
       'Your local LibreDeck did not answer (is it running? is the API port different?). Copy the code and paste it with the discord.connect action or into token-capture:',
@@ -113,6 +117,7 @@ p{margin:0 0 12px;font-size:14px;color:#4a4a48}
 button{cursor:pointer;border:1px solid #3b3b3a;border-radius:7px;padding:10px 16px;font-weight:700;font-size:13px;background:#3b3b3a;color:#fff}
 input{border:1px solid #d6d6d3;border-radius:7px;padding:10px 12px;font:inherit;font-size:13px;width:110px;background:#fff;color:#202020}
 .ok{color:#2f7a3d;font-weight:700}
+.warn{color:#8a5a00;font-weight:700}
 .err{color:#b3261e;font-weight:700}
 .hint{font-size:12px;color:#626262}
 [hidden]{display:none!important}
@@ -145,11 +150,57 @@ var qp=q.get('api_port'); if(qp&&/^\\d+$/.test(qp)) apiport.value=qp;
 function showManual(msg){
   status.innerHTML=''; status.className='err'; status.textContent=msg||L.failTitle;
   if(code){ codeEl.textContent=code; manual.hidden=false; }
-  retry.hidden=false;
+  retry.hidden=false; retry.onclick=deliver;
 }
 function ok(){
   status.className='ok'; status.textContent=L.ok;
   manual.hidden=true; retry.hidden=true;
+}
+function showClosed(){
+  status.className='warn'; status.textContent=L.okClosed||L.ok;
+  manual.hidden=true; retry.hidden=false; retry.onclick=probe;
+}
+function rpcOf(data){
+  if(!data||typeof data!=='object') return '';
+  if(typeof data.rpc==='string') return data.rpc;
+  var s=data.result&&typeof data.result==='object'?data.result.status:data.status;
+  if(s==='connected') return 'connected';
+  if(s==='discord-closed') return 'closed';
+  return '';
+}
+async function probe(){
+  manual.hidden=true; retry.hidden=true;
+  status.className=''; status.textContent=L.checking||L.working;
+  var port=/^\\d+$/.test(apiport.value||'')?apiport.value.trim():'3001';
+  var probed=false, closed=false;
+  try{
+    var g=await fetch('http://127.0.0.1:'+port+'/api/v1/plugins/discord/rpc-probe');
+    if(g.ok){
+      var gd=null; try{ gd=await g.json(); }catch(e){}
+      var gr=rpcOf(gd);
+      if(gr==='connected'){ ok(); return; }
+      if(gr==='closed'){ closed=true; probed=true; }
+      else if(gr===''){ probed=false; } else { probed=true; }
+    }
+  }catch(e){}
+  if(!probed){
+    var paths=['/api/v1/plugins/discord/key','/api/plugins/discord/key'];
+    for(var i=0;i<paths.length;i++){
+      try{
+        var r=await fetch('http://127.0.0.1:'+port+paths[i],{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action:'status'})
+        });
+        if(!r.ok) continue;
+        var d=null; try{ d=await r.json(); }catch(e2){}
+        var s=rpcOf(d);
+        if(s==='connected'){ ok(); return; }
+        if(s==='closed'){ closed=true; probed=true; break; }
+      }catch(e){}
+    }
+  }
+  if(closed||probed){ showClosed(); return; }
+  showClosed();
 }
 async function deliver(){
   manual.hidden=true; retry.hidden=true;
@@ -163,7 +214,12 @@ async function deliver(){
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({code:code})
       });
-      if(r.ok){ ok(); return; }
+      if(r.ok){
+        var data=null; try{ data=await r.clone().json(); }catch(e2){ try{ data=await r.json(); }catch(e3){ data=null; } }
+        var rpc=rpcOf(data);
+        if(rpc==='closed'){ showClosed(); return; }
+        ok(); return;
+      }
       var detail='';
       try{ detail=await r.text(); }catch(e2){}
       detail=String(detail||'').slice(0,200);

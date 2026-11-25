@@ -20,14 +20,22 @@
           <p v-if="isDiscordOauth && discordChecking" class="bd-hint" role="status" data-cy="bd-discord-state">
             {{ t('bd.discordStatusChecking') }}
           </p>
-          <p v-else-if="isDiscordOauth && (discordState === 'connected' || discordState === 'authorized')" class="bd-hint" data-cy="bd-oauth-status">
+          <p v-else-if="isDiscordOauth && discordState === 'connected'" class="bd-hint" data-cy="bd-oauth-status">
             ✓ {{ oauthConnected }}
           </p>
+          <div
+            v-else-if="isDiscordOauth && (discordState === 'discord-closed' || discordState === 'authorized')"
+            class="bd-warnbox"
+            role="status"
+            data-cy="bd-discord-state"
+          >
+            <p>{{ discordState === 'discord-closed' ? t('bd.discordClosed') : t('bd.discordAuthorized') }}</p>
+            <button class="bd-btn" :disabled="discordChecking" data-cy="bd-discord-retry" @click="refreshDiscordLive">
+              {{ t('bd.discordRetry') }}
+            </button>
+          </div>
           <p v-else-if="isDiscordOauth && discordState === 'token-expired'" class="bd-err" role="alert" data-cy="bd-discord-state">
             {{ t('bd.discordExpired') }}
-          </p>
-          <p v-else-if="isDiscordOauth && discordState === 'discord-closed'" class="bd-err" role="alert" data-cy="bd-discord-state">
-            {{ t('bd.discordClosed') }}
           </p>
           <p v-else-if="isDiscordOauth" class="bd-hint" data-cy="bd-discord-state">{{ t('bd.discordNotConnected') }}</p>
           <p v-else-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
@@ -174,7 +182,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { X } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
@@ -193,6 +201,8 @@ const emit = defineEmits<{
 const dialog = ref<HTMLDialogElement | null>(null)
 const pluginId = ref('')
 const pluginName = ref('')
+/** El diálogo está abierto: el foco de ventana re-sonda (el token puede haber llegado por la pestaña del callback). */
+const isOpen = ref(false)
 const tab = ref<'settings' | 'instructions'>('settings')
 const schema = ref<any>(null)
 const instructions = ref('')
@@ -320,8 +330,24 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   } catch (e) {
     loadError.value = String((e as Error)?.message ?? e)
   }
+  isOpen.value = true
   dialog.value?.showModal()
 }
+/** Al volver el foco a la ventana, el token puede haber llegado por la pestaña del callback: re-sondar. */
+const onWindowFocus = () => {
+  if (!isOpen.value || !isDiscordOauth.value) return
+  void refreshDiscordLive()
+}
+onMounted(() => {
+  try {
+    window.addEventListener('focus', onWindowFocus)
+  } catch { /* SSR/tests sin window */ }
+})
+onUnmounted(() => {
+  try {
+    window.removeEventListener('focus', onWindowFocus)
+  } catch { /* noop */ }
+})
 /** Sonda en vivo del estado Discord (acción `status`, sin lanzar ni mutar nada). */
 const refreshDiscordLive = async () => {
   if (!isDiscordOauth.value) return
@@ -349,6 +375,7 @@ const refreshDiscordLive = async () => {
 const close = () => {
   stopLoginPoll()
   loginBusy.value = false
+  isOpen.value = false
   dialog.value?.close()
 }
 

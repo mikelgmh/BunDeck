@@ -173,7 +173,7 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
   })
 
-  it('Discord cerrado: mensaje accionable sin ✓', async () => {
+  it('Discord cerrado: aviso ámbar autorizado + Reintentar sonda (sin ✓, sin Reintentar entrega)', async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
@@ -185,6 +185,82 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await (wrapper.vm as any).show('discord')
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
-    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordClosed')
+    const box = wrapper.find('[data-cy="bd-discord-state"]')
+    expect(box.exists()).toBe(true)
+    expect(box.classes()).toContain('bd-warnbox')
+    expect(box.text()).toContain('bd.discordClosed')
+    // Botón Reintentar sonda: re-sonda sin re-autorizar.
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(true)
+  })
+
+  it('autorizado con sonda desconocida: ámbar "Autorizado" + Reintentar (nunca ✓ mentiroso)', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: false, json: async () => ({}) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
+    const box = wrapper.find('[data-cy="bd-discord-state"]')
+    expect(box.classes()).toContain('bd-warnbox')
+    expect(box.text()).toContain('bd.discordAuthorized')
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(true)
+  })
+
+  it('conectado: solo ✓, sin aviso ni Reintentar', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'connected' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+  })
+
+  it('Reintentar sonda vuelve a llamar a la sonda en vivo', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    })
+    globalThis.fetch = fetchMock as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    const before = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    await wrapper.find('[data-cy="bd-discord-retry"]').trigger('click')
+    await flushPromises()
+    const after = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    expect(after).toBeGreaterThan(before)
+  })
+
+  it('volver el foco a la ventana re-sonda (el token pudo llegar por la pestaña del callback)', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    })
+    globalThis.fetch = fetchMock as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    const before = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    const after = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    expect(after).toBeGreaterThan(before)
   })
 })

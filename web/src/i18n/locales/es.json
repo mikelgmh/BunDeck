@@ -726,6 +726,8 @@
         "discordStatusChecking": "Comprobando el estado de Discord…",
         "discordNotConnected": "No conectado: pulsa Autorizar y acepta el permiso en Discord (popup «Authorize»). Sin este paso se usan atajos globales.",
         "discordClosed": "Discord no responde en este equipo: ábrelo y reintenta. Sin RPC se usan atajos globales.",
+        "discordAuthorized": "Autorizado: token guardado. Abre Discord en este equipo para controlarlo en background.",
+        "discordRetry": "Reintentar sonda",
         "discordExpired": "El token caducó: vuelve a autorizar para renovarlo.",
         "spotifyHostWindow": "Se abrió Spotify en el equipo anfitrión: inicia sesión allí y el acceso se completará solo.",
         "spotifyRemoteHint": "Si estás en otro dispositivo, también puedes pegar el token manualmente en ajustes o abrir",
