@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/mikelgmh/BunDeck/compare/v1.13.0...v1.13.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **relay:** pagina amable en /ui/ con codigo desconocido + e2e enlazar-dispositivo ([ed5b5bb](https://github.com/mikelgmh/BunDeck/commit/ed5b5bbb8e4a330f1fd19628006b0f2c2dfd7592))
+
 # [1.13.0](https://github.com/mikelgmh/BunDeck/compare/v1.12.1...v1.13.0) (2026-11-25)
 
 
