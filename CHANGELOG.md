@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/mikelgmh/BunDeck/compare/v1.12.1...v1.13.0) (2026-11-25)
+
+
+### Features
+
+* devices, autostart, shortcuts, display e2e y pulido web ([96b8c3c](https://github.com/mikelgmh/BunDeck/commit/96b8c3cfe66ce778036fdf5b1417dc494d5ca75f))
+
 ## [1.12.1](https://github.com/mikelgmh/BunDeck/compare/v1.12.0...v1.12.1) (2026-11-25)
 
 
