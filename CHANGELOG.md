@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/mikelgmh/BunDeck/compare/v1.11.1...v1.12.0) (2026-11-25)
+
+
+### Features
+
+* rename BunDeck canonico en binarios, envs y docs + trust bundle ([cca3be2](https://github.com/mikelgmh/BunDeck/commit/cca3be29d370682078e43bc75adba3ca0f98b3a3))
+
 ## [1.11.1](https://github.com/mikelgmh/BunDeck/compare/v1.11.0...v1.11.1) (2026-11-24)
 
 
