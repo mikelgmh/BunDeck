@@ -98,7 +98,8 @@ export class DeviceStore {
   }
 
   pruneTunnelSessions(now: number): number {
-    const r = this.db.prepare('DELETE FROM tunnel_sessions WHERE exp <= ?').run(now);
+    // `exp = 0` = sesión perenne: nunca se poda por caducidad.
+    const r = this.db.prepare('DELETE FROM tunnel_sessions WHERE exp != 0 AND exp <= ?').run(now);
     return Number(r?.changes ?? 0);
   }
 

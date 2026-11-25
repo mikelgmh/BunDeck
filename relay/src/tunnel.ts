@@ -278,7 +278,8 @@ export class TunnelState {
     for (const r of rows) {
       if (typeof r?.token !== 'string' || !isHexToken(r.token)) continue;
       if (typeof r?.deviceId !== 'string' || !r.deviceId) continue;
-      if (typeof r?.exp !== 'number' || !Number.isFinite(r.exp) || r.exp <= now) continue;
+      // `exp = 0` = perenne: nunca caduca, se restaura siempre.
+      if (typeof r?.exp !== 'number' || !Number.isFinite(r.exp) || (r.exp !== 0 && r.exp <= now)) continue;
       let turn: TurnCreds | null = null;
       if (typeof r?.turnJson === 'string' && r.turnJson) {
         try {
@@ -366,7 +367,7 @@ export class TunnelState {
     const now = this.now();
     const b = this.bindings.get(urlCode);
     const s = b ? this.sessions.get(b.sessionToken) : undefined;
-    if (b && s && s.exp > now) {
+    if (b && s && (s.exp === 0 || s.exp > now)) {
       return { reqId: '', deviceId: s.deviceId, created: false, state: 'bound', ua: meta.ua, ip: meta.ip };
     }
     if (b) this.bindings.delete(urlCode);
@@ -442,7 +443,8 @@ export class TunnelState {
 
   bind(urlCode: unknown, sessionToken: unknown, exp: unknown, turn?: unknown): 'ok' | string {
     if (!isHexToken(sessionToken)) return 'bad-token';
-    if (typeof exp !== 'number' || !Number.isFinite(exp)) return 'bad-exp';
+    // `exp = 0` = sesión perenne (nunca caduca): se acepta sin tope TTL.
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp < 0) return 'bad-exp';
     if (typeof urlCode !== 'string') return 'unknown-code';
     const entry = this.codes.get(urlCode);
     if (!entry) return 'unknown-code';
@@ -470,13 +472,19 @@ export class TunnelState {
    * consumido o perdido). Lo usa el daemon al (re)conectar para re-anunciar
    * sus sesiones vigentes de settings (`resyncUiState`): así un reinicio del
    * daemon o un micro-corte ya no invalida los `/t/<token>/` existentes.
-   * Solo acepta tokens hex + expiración futura acotada (24 h + margen).
+   * Solo acepta tokens hex + expiración futura acotada (24 h + margen), o
+   * `exp = 0` (perenne: sin caducidad ni tope).
    */
   rebind(deviceId: unknown, sessionToken: unknown, exp: unknown): 'ok' | string {
     if (typeof deviceId !== 'string' || deviceId === '') return 'not-registered';
     if (!isHexToken(sessionToken)) return 'bad-token';
-    if (typeof exp !== 'number' || !Number.isFinite(exp)) return 'bad-exp';
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp < 0) return 'bad-exp';
     const now = this.now();
+    if (exp === 0) {
+      this.sessions.set(sessionToken as string, { deviceId, exp: 0, urlCode: '', turn: null });
+      this.persistSession(sessionToken as string);
+      return 'ok';
+    }
     if (exp <= now) return 'expired';
     if (exp - now > MAX_TUNNEL_SESSION_TTL_MS) return 'bad-exp';
     this.sessions.set(sessionToken as string, { deviceId, exp, urlCode: '', turn: null });
@@ -530,7 +538,7 @@ export class TunnelState {
     const b = this.bindings.get(urlCode);
     if (b) {
       const s = this.sessions.get(b.sessionToken);
-      if (s && s.exp > now) {
+      if (s && (s.exp === 0 || s.exp > now)) {
         if (!b.consumed) {
           b.consumed = true;
           return { status: 'approved', sessionToken: b.sessionToken, ...(b.turn ? { turn: b.turn, rtc: true } : {}) };
@@ -576,10 +584,10 @@ export class TunnelState {
     return e;
   }
 
-  /** Caducidad perezosa de sesión (acceso a `/t/*` con token expirado). */
+  /** Caducidad perezosa de sesión (acceso a `/t/*` con token expirado). `exp = 0` = perenne: nunca se purga. */
   expireSession(token: string): void {
     const s = this.sessions.get(token);
-    if (s && s.exp <= this.now()) this.dropSession(token);
+    if (s && s.exp !== 0 && s.exp <= this.now()) this.dropSession(token);
   }
 
   // ---- puentes WS ----
@@ -750,7 +758,7 @@ export class TunnelState {
       if (e.exp > now) continue;
       const binding = this.bindings.get(code);
       const session = binding ? this.sessions.get(binding.sessionToken) : undefined;
-      if (session && session.exp > now) {
+      if (session && (session.exp === 0 || session.exp > now)) {
         // Expira el QR, no la sesión que ya fue aprobada con él.
         this.codes.delete(code);
         const pendingId = this.pendingByCode.get(code);
@@ -764,7 +772,7 @@ export class TunnelState {
     }
     for (const [code, exp] of [...this.usedCodes]) if (exp <= now) this.usedCodes.delete(code);
     for (const [tok, s] of [...this.sessions]) {
-      if (s.exp <= now) this.dropSession(tok);
+      if (s.exp !== 0 && s.exp <= now) this.dropSession(tok);
     }
     for (const req of this.pending.values()) {
       if (req.state === 'pending' && this.timedOut(req, now)) req.state = 'denied';

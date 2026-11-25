@@ -450,7 +450,7 @@ export class RelayServer {
       if (rest !== '/ws') return Response.json({ error: 'not-found' }, { status: 404 });
       const sess = this.tunnel.sessions.get(token);
       if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
-      if (sess.exp <= this.now()) {
+      if (sess.exp !== 0 && sess.exp <= this.now()) {
         this.tunnel.expireSession(token);
         return Response.json({ error: 'expired' }, { status: 401 });
       }
@@ -482,7 +482,7 @@ export class RelayServer {
   private async handleTunnelProxy(req: Request, token: string, rest: string, search: string): Promise<Response> {
     const sess = this.tunnel.sessions.get(token);
     if (!sess) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
-    if (sess.exp <= this.now()) {
+    if (sess.exp !== 0 && sess.exp <= this.now()) {
       this.tunnel.expireSession(token);
       return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
     }
@@ -701,7 +701,7 @@ export class RelayServer {
 
   private onTunnelBridgeOpen(ws: AnyWs, br: TunnelBridgeData): void {
     const sess = this.tunnel.sessions.get(br.token);
-    if (!sess || sess.exp <= this.now()) {
+    if (!sess || (sess.exp !== 0 && sess.exp <= this.now())) {
       if (sess) this.tunnel.expireSession(br.token);
       try {
         ws.close(4401, 'expired');

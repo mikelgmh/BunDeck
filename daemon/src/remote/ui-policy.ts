@@ -7,6 +7,10 @@
  *   navegador: al aprobarse se consume).
  * - `remote.ui.consumed.<urlCode>`: tombstone con expiración (un solo uso).
  * - `remote.ui.session.<token>`: JSON `{createdAt, exp, ua, ip, revoked}`.
+ *   Convención: `exp = 0` significa SIN caducidad (sesiones perennes: solo
+ *   mueren por revocación explícita del dueño). Las aprobadas nacen con
+ *   `exp = 0`; las antiguas con exp numérico futuro siguen valiendo hasta
+ *   su exp (sin migración).
  *
  * Cola de pendientes (navegadores esperando aprobación): la cola VIVA la
  * lleva el TunnelClient (`remote/tunnel.ts`: `getPending()` /
@@ -354,7 +358,8 @@ export function resolveUiPending(reqId: string): UiPendingRequest | null {
 
 // ---------- Sesiones ----------
 
-/** Crea una sesión (24 h) y devuelve el token COMPLETO (mostrar una sola vez). */
+/** Crea una sesión PERENNE (`exp = 0`: sin caducidad, solo revocación
+ *  explícita) y devuelve el token COMPLETO (mostrar una sola vez). */
 export function createUiSession(
   db: DatabaseService,
   input: { ua?: string; ip?: string },
@@ -363,7 +368,7 @@ export function createUiSession(
   const now = Date.now();
   const session: UiSession = {
     createdAt: now,
-    exp: now + UI_SESSION_TTL_MS,
+    exp: 0,
     ua: String(input.ua ?? ''),
     ip: String(input.ip ?? ''),
     revoked: false,
@@ -389,8 +394,9 @@ function readSession(db: DatabaseService, token: string): UiSession | null {
 
 /**
  * Valida un token presentado por un navegador (lo usa el tunnel-client).
- * Caducada → inválida + auditoría `uso expirado`. Revocada/inexistente →
- * inválida silenciosa (sin log para no amplificar escaneos).
+ * `exp = 0`/falsy = perenne: nunca caduca. Exp numérico futuro caducado →
+ * inválida + auditoría `uso expirado`. Revocada/inexistente → inválida
+ * silenciosa (sin log para no amplificar escaneos).
  */
 export function validateUiSession(
   db: DatabaseService,
@@ -399,7 +405,8 @@ export function validateUiSession(
   const s = readSession(db, String(token ?? ''));
   if (!s) return { ok: false, reason: 'desconocida' };
   if (s.revoked) return { ok: false, reason: 'revocada' };
-  if (s.exp < Date.now()) {
+  const exp = Number(s.exp);
+  if (Number.isFinite(exp) && exp !== 0 && exp < Date.now()) {
     audit(db, '[remote-ui] sesión expirada usada (denegada)');
     return { ok: false, reason: 'expirada' };
   }
@@ -408,7 +415,8 @@ export function validateUiSession(
 
 /** Lista sesiones vigentes SIN el token completo (solo prefijo de 8 chars).
  * Las revocadas y caducadas no se listan (desaparecen del panel); al
- * revocar se borra la fila para que no vuelva a aparecer. */
+ * revocar se borra la fila para que no vuelva a aparecer. `exp = 0` es
+ * perenne: se lista siempre (no se poda). */
 export function listUiSessions(db: DatabaseService): UiSessionView[] {
   const out: UiSessionView[] = [];
   let all: Record<string, string> = {};
@@ -423,8 +431,11 @@ export function listUiSessions(db: DatabaseService): UiSessionView[] {
     const token = k.slice(UI_SESSION_PREFIX.length);
     try {
       const s = JSON.parse(v) as UiSession;
-      if (s.revoked || !(typeof s.exp === 'number') || s.exp <= now) {
+      const exp = (s as { exp?: unknown })?.exp;
+      const expired = typeof exp === 'number' && Number.isFinite(exp) && exp !== 0 && exp <= now;
+      if (s.revoked || expired || typeof exp !== 'number' || !Number.isFinite(exp)) {
         // Higiene oportunista: las filas muertas no se listan ni se conservan.
+        // (exp = 0 es perenne: no entra aquí.)
         try { db.deleteSetting(k); } catch { /* noop */ }
         continue;
       }
@@ -607,7 +618,7 @@ export function approveUiPending(
 ): { ok: boolean; sessionToken?: string; error?: string } {
   const hit = findTunnelPending(reqId);
   if (hit) {
-    const exp = Date.now() + UI_SESSION_TTL_MS;
+    const exp = 0; // Sesiones perennes: sin caducidad (el QR y la ventana de aprobación sí caducan, la sesión aprobada no).
     let d: any = null;
     try {
       d = getTunnelClient()?.decideUiRequest?.(reqId, true, exp);
@@ -686,11 +697,19 @@ export function notifyTunnelUiUnbind(sessionToken: string): void {
  * Encola un `ui-unbind` durable (tombstone con expiración de la sesión).
  * Llamar SIEMPRE al revocar, además de `notifyTunnelUiUnbind`: si el túnel
  * está caído el envío best-effort se pierde y `resyncUiState` lo reintenta
- * en cada reconexión hasta que caduque.
+ * en cada reconexión hasta que caduque. `exp = 0` (perenne) se guarda
+ * como `"0"`: nunca caduca y se re-emite en cada reconexión (un ui-unbind
+ * extra por reconexión, despreciable frente a garantizar la revocación).
  */
 export function queueUiUnbind(db: DatabaseService, sessionToken: string, exp: number): void {
   const token = String(sessionToken ?? '');
   if (!/^[0-9a-fA-F]{32,}$/.test(token)) return;
+  if (Number(exp) === 0) {
+    try {
+      db.setSetting(`${UI_UNBIND_PENDING_PREFIX}${token}`, '0');
+    } catch { /* noop */ }
+    return;
+  }
   const ttl = Number.isFinite(exp) ? exp : Date.now() + UI_SESSION_TTL_MS;
   if (ttl <= Date.now()) return;
   try {
@@ -698,7 +717,7 @@ export function queueUiUnbind(db: DatabaseService, sessionToken: string, exp: nu
   } catch { /* noop */ }
 }
 
-/** Tombstones vigentes (poda oportunista de caducados). Para `resyncUiState`. */
+/** Tombstones vigentes (poda oportunista de caducados; `0` = perenne, nunca caduca). Para `resyncUiState`. */
 export function listUiUnbindPending(db: { getAllSettings?: () => Record<string, string>; deleteSetting?: (k: string) => void }): Array<{ token: string; exp: number }> {
   const out: Array<{ token: string; exp: number }> = [];
   let all: Record<string, string> = {};
@@ -712,6 +731,14 @@ export function listUiUnbindPending(db: { getAllSettings?: () => Record<string, 
     if (!k.startsWith(UI_UNBIND_PENDING_PREFIX)) continue;
     const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
     const exp = Number(v);
+    if (exp === 0) {
+      if (!/^[0-9a-fA-F]{32,}$/.test(token)) {
+        try { db.deleteSetting?.(k); } catch { /* noop */ }
+        continue;
+      }
+      out.push({ token, exp: 0 });
+      continue;
+    }
     if (!/^[0-9a-fA-F]{32,}$/.test(token) || !Number.isFinite(exp) || exp <= now) {
       try { db.deleteSetting?.(k); } catch { /* noop */ }
       continue;

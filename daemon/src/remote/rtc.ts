@@ -220,7 +220,7 @@ export class RtcManager {
       if (!raw) return false;
       const s = JSON.parse(raw) as { exp?: number; revoked?: boolean };
       if (s.revoked) return false;
-      if (typeof s.exp === 'number' && s.exp < Date.now()) return false;
+      if (typeof s.exp === 'number' && s.exp !== 0 && s.exp < Date.now()) return false;
       return true;
     } catch {
       return false;
@@ -281,7 +281,7 @@ export class RtcManager {
           return;
         }
         const s = JSON.parse(raw) as { exp?: number; revoked?: boolean };
-        if (s.revoked || (typeof s.exp === 'number' && s.exp < Date.now())) {
+        if (s.revoked || (typeof s.exp === 'number' && s.exp !== 0 && s.exp < Date.now())) {
           this.sendDc(entry, { t: 'bye', reason: 'expired' });
           return;
         }

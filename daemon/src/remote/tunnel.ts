@@ -431,7 +431,7 @@ export class TunnelClient {
         continue;
       }
       const exp = typeof s?.exp === 'number' ? s.exp : 0;
-      if (!Number.isFinite(exp) || exp <= now) continue;
+      if (exp !== 0 && (!Number.isFinite(exp) || exp <= now)) continue;
       if (s?.revoked === true) {
         // Revocada en local pero quizá el relay no se enteró (caído al
         // revocar): reintento best-effort, el relay ignora lo desconocido.
@@ -453,6 +453,14 @@ export class TunnelClient {
         const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
         if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
         const exp = Number(v);
+        if (exp === 0) {
+          // Tombstone perenne: la sesión revocada no caducaba; el unbind
+          // se re-emite en cada reconexión (el relay ignora lo desconocido).
+          this.bindings.delete(token);
+          this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
+          out.unbound += 1;
+          continue;
+        }
         if (!Number.isFinite(exp) || exp <= now) {
           try { this.db.deleteSetting?.(k); } catch { /* noop */ }
           continue;
@@ -538,13 +546,13 @@ export class TunnelClient {
     try {
       const anyDb = this.db as unknown as { setSetting?: (k: string, v: string) => void; getSetting?: (k: string) => string | null };
       if (typeof anyDb?.setSetting === 'function') {
-        let exp = 0;
+        let exp: number | null = null;
         try {
           const raw = anyDb.getSetting?.(`remote.ui.session.${sessionToken}`);
           if (!raw) throw new Error('sin sesión persistida');
-          exp = Number((JSON.parse(raw) as { exp?: unknown })?.exp ?? 0);
-        } catch { exp = 0; }
-        if (Number.isFinite(exp) && exp > this.now()) {
+          exp = Number((JSON.parse(raw) as { exp?: unknown })?.exp ?? NaN);
+        } catch { exp = null; }
+        if (exp !== null && Number.isFinite(exp) && (exp === 0 || exp > this.now())) {
           try { anyDb.setSetting(`remote.ui.unbind-pending.${sessionToken}`, String(exp)); } catch { /* noop */ }
         }
       }

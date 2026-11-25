@@ -923,6 +923,7 @@
         "remoteUiNoSessions": "Sin sesiones activas.",
         "remoteUiSessionCreated": "Conectada: {date}",
         "remoteUiSessionExpires": "Caduca: {date}",
+        "remoteUiSessionNeverExpires": "No caduca",
         "remoteUiRevoke": "Revocar",
         "remoteUiRename": "Renombrar",
         "remoteUiRevoked": "Revocada",

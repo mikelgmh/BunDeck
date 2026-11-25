@@ -630,4 +630,95 @@ describe('túnel inverso', () => {
     expect(api.status).toBe(401);
     expect(await api.json()).toEqual({ error: 'invalid-token' });
   });
+
+  test('sesión perenne (exp 0): sobrevive al reloj, a prune() y a expireSession(); las expiradas se podan', () => {
+    let now = 1_000;
+    const state = new TunnelState({ now: () => now });
+    const socket = { send: () => true, close: () => {} };
+    state.registerDevice(socket, 'daemon-exp0');
+    expect(state.publish(socket, CODE, 10_000)).toEqual({ deviceId: 'daemon-exp0' });
+    const request = state.ensureRequest(CODE, { ua: 'Mobile', ip: '127.0.0.1' });
+    if (!('reqId' in request)) throw new Error('request was not created');
+    expect(state.decide(request.reqId, true)).toBe('ok');
+    expect(state.bind(CODE, TOK, 0)).toBe('ok');
+    expect(state.status(CODE)).toEqual({ status: 'approved', sessionToken: TOK });
+
+    now = 30 * 3600 * 1000; // 30 h después (más que el TTL máximo normal de 24 h + margen)
+    state.prune();
+    expect(state.status(CODE)).toEqual({ status: 'approved' });
+    state.expireSession(TOK);
+    expect(state.sessions.has(TOK)).toBe(true);
+
+    // Una sesión con exp numérico pasado sí se poda.
+    const TOK2 = 'cd'.repeat(32);
+    state.sessions.set(TOK2, { deviceId: 'daemon-exp0', exp: 2000, urlCode: '' });
+    state.prune();
+    expect(state.sessions.has(TOK2)).toBe(false);
+    expect(state.sessions.has(TOK)).toBe(true);
+  });
+
+  test('rebind con exp 0 aceptado (perenne, sin tope TTL)', async () => {
+    const relay = startRelay();
+    const d = await registeredDaemon(relay.port);
+    d.send({ v: 1, kind: 'ui-rebind', sessionToken: TOK, exp: 0 });
+    const ack = await d.next((m) => m.kind === 'ui-rebound');
+    expect(ack.sessionToken).toBe(TOK);
+  });
+
+  test('sesión perenne (exp 0): bind aceptado, prune la conserva y el proxy /t/ sigue 200', async () => {
+    const relay = startRelay();
+    const base = `http://127.0.0.1:${relay.port}`;
+    const d = await registeredDaemon(relay.port);
+    d.httpHandler = (m) => {
+      d.send({
+        v: 1,
+        kind: 'http-res',
+        id: m.id,
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        bodyB64: Buffer.from('ok-perenne', 'utf8').toString('base64'),
+      });
+    };
+    await publishedCode(d);
+    await fetch(`${base}/ui/${CODE}`);
+    const req = await d.next((m) => m.kind === 'ui-request');
+    d.send({ v: 1, kind: 'ui-decision', reqId: req.reqId, allow: true });
+    await d.next((m) => m.kind === 'ui-decision-ack');
+    d.send({ v: 1, kind: 'ui-bind', urlCode: CODE, sessionToken: TOK, exp: 0 });
+    expect(await d.next((m) => m.kind === 'ui-bound')).toMatchObject({ urlCode: CODE });
+    await statusOf(base, CODE);
+    relay.pruneTunnel();
+    const res = await fetch(`${base}/t/${TOK}/p`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('ok-perenne');
+  });
+
+  test('restorePersistedSessions restaura exp 0 y omite expiradas', () => {
+    const rows = [
+      { token: TOK, deviceId: 'd1', exp: 0, urlCode: '', turnJson: null },
+      { token: 'cd'.repeat(32), deviceId: 'd1', exp: 500, urlCode: '', turnJson: null },
+    ];
+    const state = new TunnelState({
+      now: () => 1000,
+      persist: {
+        saveSession() {},
+        deleteSession() {},
+        deleteDeviceSessions() {},
+        loadSessions: () => rows,
+        pruneExpired() {},
+      },
+    });
+    expect(state.restorePersistedSessions()).toBe(1);
+    expect(state.sessions.has(TOK)).toBe(true);
+  });
+
+  test('persistencia SQLite conserva exp 0 en pruneTunnelSessions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-store-exp0-'));
+    const store = new DeviceStore(dir);
+    stores.push(store);
+    store.saveTunnelSession({ token: TOK, deviceId: 'd1', exp: 0, urlCode: '', turnJson: null });
+    store.saveTunnelSession({ token: 'cd'.repeat(32), deviceId: 'd1', exp: 1000, urlCode: '', turnJson: null });
+    expect(store.pruneTunnelSessions(2000)).toBe(1);
+    expect(store.listTunnelSessions().map((s) => s.token)).toEqual([TOK]);
+  });
 });

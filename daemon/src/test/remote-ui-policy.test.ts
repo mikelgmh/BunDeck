@@ -20,6 +20,8 @@ import { initDatabase, DatabaseService } from '../db';
 import { handleRemote } from '../api/remote';
 import {
   enqueueUiRequest, validateUiSession, clearUiPendingForTests,
+  createUiSession, listUiSessions, approveUiPending,
+  queueUiUnbind, listUiUnbindPending,
 } from '../remote/ui-policy';
 
 let db: DatabaseService;
@@ -350,6 +352,88 @@ describe('remote-ui: delegación al TunnelClient', () => {
     expect((await remoteCall('/api/v1/remote/ui-pending', 'GET')).body.pending).toEqual([]);
     const s = await remoteCall('/api/v1/remote/ui-sessions', 'GET');
     expect(s.body.sessions).toEqual([]);
+  });
+});
+
+describe('remote-ui: sesiones perennes (exp 0 = sin caducidad)', () => {
+  it('createUiSession nace con exp 0 y validate ok', async () => {
+    enableUi();
+    const { token, session } = createUiSession(db, { ua: 'u', ip: '1.1.1.1' });
+    expect(session.exp).toBe(0);
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(validateUiSession(db, token)).toMatchObject({ ok: true });
+  });
+
+  it('approve local (sin túnel) crea sesión perenne visible en el listado con exp 0', async () => {
+    enableUi();
+    const c = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
+    const q = enqueueUiRequest(db, { urlCode: c.body.urlCode, ua: 'u', ip: '2.2.2.2' });
+    const r = approveUiPending(db, q.reqId);
+    expect(r.ok).toBe(true);
+    const raw = JSON.parse(db.getSetting(`remote.ui.session.${r.sessionToken}`)!);
+    expect(raw.exp).toBe(0);
+    expect(validateUiSession(db, r.sessionToken!)).toMatchObject({ ok: true });
+    const rows = listUiSessions(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tokenPrefix: r.sessionToken!.slice(0, 8), exp: 0 });
+  });
+
+  it('approve vía túnel emite bind con exp 0 y persiste la sesión perenne', async () => {
+    enableUi();
+    const c = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
+    const seen: any[] = [];
+    const t: any = {
+      pendings: [
+        { reqId: 'tun-p', urlCode: c.body.urlCode, ua: 'TunUA', ip: '7.7.7.7', receivedAt: Date.now(), expiresAt: Date.now() + 60000 },
+      ],
+      getPending() { return this.pendings; },
+      decideUiRequest(reqId: string, allow: boolean, exp?: number) {
+        const i = this.pendings.findIndex((p: any) => p.reqId === reqId);
+        if (i < 0) return { ok: false, allowed: false, error: 'reqId desconocido' };
+        const [hit] = this.pendings.splice(i, 1);
+        seen.push({ reqId, allow, exp, urlCode: (hit as any).urlCode });
+        if (!allow) return { ok: true, allowed: false };
+        return { ok: true, allowed: true, sessionToken: 'cd'.repeat(32) };
+      },
+    };
+    (globalThis as any).__libredeckRemote = { tunnel: t };
+    const r = approveUiPending(db, 'tun-p');
+    expect(r.ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].exp).toBe(0);
+    const raw = JSON.parse(db.getSetting(`remote.ui.session.${'cd'.repeat(32)}`)!);
+    expect(raw.exp).toBe(0);
+    expect(validateUiSession(db, 'cd'.repeat(32))).toMatchObject({ ok: true });
+  });
+
+  it('list incluye exp 0 y poda solo caducadas reales (legacy con exp pasado)', async () => {
+    enableUi();
+    const { token: perennial } = createUiSession(db, { ua: 'p', ip: '3.3.3.3' });
+    // Sesión legacy con exp numérico futuro: vale hasta su exp.
+    const legacyTok = 'ef'.repeat(32);
+    db.setSetting(`remote.ui.session.${legacyTok}`, JSON.stringify({
+      createdAt: Date.now(), exp: Date.now() + 3600_000, ua: 'l', ip: '4.4.4.4', revoked: false,
+    }));
+    let rows = listUiSessions(db);
+    expect(rows.map((s) => s.tokenPrefix).sort()).toEqual(
+      [perennial.slice(0, 8), legacyTok.slice(0, 8)].sort(),
+    );
+    // La legacy caduca → se poda; la perenne sigue.
+    const raw = JSON.parse(db.getSetting(`remote.ui.session.${legacyTok}`)!);
+    raw.exp = Date.now() - 1000;
+    db.setSetting(`remote.ui.session.${legacyTok}`, JSON.stringify(raw));
+    rows = listUiSessions(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tokenPrefix: perennial.slice(0, 8), exp: 0 });
+  });
+
+  it('tombstone de revocación perenne (exp 0) nunca caduca', async () => {
+    const tok = 'ab'.repeat(32);
+    queueUiUnbind(db, tok, 0);
+    const pending = listUiUnbindPending(db);
+    expect(pending).toContainEqual({ token: tok, exp: 0 });
+    // Sigue vigente tras el tiempo (no se poda como los tombstones con exp).
+    expect(listUiUnbindPending(db)).toContainEqual({ token: tok, exp: 0 });
   });
 });
 

@@ -379,6 +379,42 @@ describe('remote-tunnel', () => {
     try { db.deleteSetting('remote.ui.code'); } catch { /* noop */ }
   });
 
+  it('resyncUiState re-anuncia sesiones perennes (exp 0) con ui-rebind exp 0', async () => {
+    const perennialTok = 'ab'.repeat(32);
+    db.setSetting(`remote.ui.session.${perennialTok}`, JSON.stringify({ createdAt: Date.now(), exp: 0, ua: 't', ip: '1', revoked: false }));
+    received.length = 0;
+    const t3 = new TunnelClient(db as any, mgr, {
+      deviceId: 'dev-resync-perennial',
+      relayUrl: `ws://127.0.0.1:${relayPort}`,
+    });
+    t3.setHttpHandler(httpHandler);
+    t3.start();
+    await waitFor(() => receivedOf('tunnel-register').some((m) => m.deviceId === 'dev-resync-perennial'), 10000);
+    await waitFor(() => receivedOf('ui-rebind').some((m) => m.sessionToken === perennialTok), 10000);
+    const rebind = receivedOf('ui-rebind').find((m) => m.sessionToken === perennialTok)!;
+    expect(rebind.exp).toBe(0);
+    // Llamada directa: reporta el rebound.
+    const r = (t3 as any).resyncUiState();
+    expect(r.rebound).toBeGreaterThanOrEqual(1);
+    t3.stop();
+    try { db.deleteSetting(`remote.ui.session.${perennialTok}`); } catch { /* noop */ }
+  });
+
+  it('decideUiRequest propaga exp 0 al ui-bind (sesión perenne)', async () => {
+    received.length = 0;
+    // Inyección directa (evita el encaminamiento del relay falso multicliente).
+    (tunnel as any).enqueuePending({
+      reqId: 'req-perennial', urlCode: 'CODE-PERENNIAL', ua: 'U', ip: '1.2.3.4',
+      receivedAt: Date.now(), expiresAt: Date.now() + 120_000,
+    });
+    const d = tunnel.decideUiRequest('req-perennial', true, 0);
+    expect(d.ok).toBe(true);
+    expect(d.allowed).toBe(true);
+    await waitFor(() => receivedOf('ui-bind').length >= 1);
+    expect(receivedOf('ui-bind')[0]).toMatchObject({ urlCode: 'CODE-PERENNIAL' });
+    expect(receivedOf('ui-bind')[0].exp).toBe(0);
+  });
+
   it('cleanup', async () => {
     tunnel.stop();
     try {
