@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DeviceStore } from '../src/store';
 import { PairingStore } from '../src/pairing';
 import { RelayServer } from '../src/relay';
-import { relayCallbackUrl } from '../src/discord';
+import { relayCallbackUrl, renderDiscordCallbackPage } from '../src/discord';
 
 const servers: RelayServer[] = [];
 const stores: DeviceStore[] = [];
@@ -60,6 +60,31 @@ describe('relay discord callback (GET /api/discord/callback)', () => {
     const req = new Request('http://localhost:8787/api/discord/callback?code=x');
     expect(relayCallbackUrl(req, 'relay.bundeck.app')).toBe('https://relay.bundeck.app/api/discord/callback');
     expect(relayCallbackUrl(req)).toBe('https://localhost:8787/api/discord/callback');
+  });
+});
+
+describe('relay discord callback: diagnóstico de auto-entrega', () => {
+  test('intenta v1 y fallback legacy, sin sobrescribir errores', () => {
+    const html = renderDiscordCallbackPage({ lang: 'es' });
+    expect(html).toContain('/api/v1/plugins/discord/token-capture');
+    expect(html).toContain('/api/plugins/discord/token-capture');
+    // Cadena completa de intentos (ya no `lastErr` con solo el último).
+    expect(html).toContain('attempts');
+    expect(html).toContain("attempts.join(' | ')");
+    expect(html).not.toContain('lastErr');
+  });
+
+  test('muestra status + extracto del body de error (primeros 200 chars)', () => {
+    const html = renderDiscordCallbackPage({ lang: 'es' });
+    expect(html).toContain('HTTP ');
+    expect(html).toContain('slice(0,200)');
+  });
+
+  test('pista de red local en es y en', () => {
+    const es = renderDiscordCallbackPage({ lang: 'es' });
+    const en = renderDiscordCallbackPage({ lang: 'en', defaultApiPort: 3001 });
+    expect(es).toContain('red local');
+    expect(en).toContain('local-network access');
   });
 });
 
