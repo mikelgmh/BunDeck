@@ -318,6 +318,9 @@ describe('remote-ui: delegación al TunnelClient', () => {
     const a = await remoteCall('/api/v1/remote/ui-pending/tun-1/allow', 'POST', {});
     expect(a.body).toMatchObject({ ok: true, sessionToken: TUN_TOKEN });
     expect(tunnel.decisions).toContainEqual({ reqId: 'tun-1', allow: true, urlCode: c.body.urlCode });
+    // REGRESIÓN BUG3: tras aprobar, el pendiente desaparece del listado
+    // (el contador "Solicitudes pendientes" baja a 0).
+    expect((await remoteCall('/api/v1/remote/ui-pending', 'GET')).body.pending).toEqual([]);
     // Sesión persistida en settings (visible para /ui-sessions y validate).
     expect(validateUiSession(db, TUN_TOKEN)).toMatchObject({ ok: true });
 
@@ -343,6 +346,8 @@ describe('remote-ui: delegación al TunnelClient', () => {
     const d = await remoteCall('/api/v1/remote/ui-pending/tun-1/deny', 'POST', {});
     expect(d.body).toMatchObject({ ok: true });
     expect(tunnel.decisions).toContainEqual({ reqId: 'tun-1', allow: false, urlCode: c.body.urlCode });
+    // REGRESIÓN BUG3 (deny): el pendiente también desaparece del listado.
+    expect((await remoteCall('/api/v1/remote/ui-pending', 'GET')).body.pending).toEqual([]);
     const s = await remoteCall('/api/v1/remote/ui-sessions', 'GET');
     expect(s.body.sessions).toEqual([]);
   });

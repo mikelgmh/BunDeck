@@ -117,6 +117,8 @@ describe('remote-ui-loop: bucle completo navegador↔daemon↔relay', () => {
     expect(decision.ok).toBe(true);
     expect(decision.allowed).toBe(true);
     expect(typeof decision.sessionToken).toBe('string');
+    // REGRESIÓN BUG3: el pendiente decidido ya no se lista.
+    expect(tunnel.getPending()).toEqual([]);
 
     // El poll del navegador recibe approved + token UNA vez.
     const first = await statusOf(base, code);
@@ -144,6 +146,8 @@ describe('remote-ui-loop: bucle completo navegador↔daemon↔relay', () => {
     const decision = tunnel.decideUiRequest(req.reqId, false);
     expect(decision.ok).toBe(true);
     expect(decision.allowed).toBe(false);
+    // REGRESIÓN BUG3 (deny): el pendiente decidido ya no se lista.
+    expect(tunnel.getPending()).toEqual([]);
     expect(await statusOf(base, code)).toEqual({ status: 'denied' });
   });
 

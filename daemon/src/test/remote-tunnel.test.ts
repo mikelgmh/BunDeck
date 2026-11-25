@@ -284,6 +284,9 @@ describe('remote-tunnel', () => {
     expect(receivedOf('ui-decision')[0]).toMatchObject({ reqId: 'req-bind', allow: true });
     await waitFor(() => receivedOf('ui-bind').length >= 1);
     expect(receivedOf('ui-bind')[0]).toMatchObject({ urlCode: 'CODE-XYZ', sessionToken: d.sessionToken });
+    // REGRESIÓN BUG3: al decidir, el pendiente sale del mapa (el contador
+    // `GET /ui-pending` baja a 0): no se sigue listando en getPending().
+    expect(tunnel.getPending().some((p) => p.reqId === 'req-bind')).toBe(false);
 
     // revoke → ui-unbind
     received.length = 0;
@@ -314,6 +317,8 @@ describe('remote-tunnel', () => {
     await waitFor(() => receivedOf('ui-decision').length >= 1);
     expect(receivedOf('ui-decision')[0]).toMatchObject({ reqId: 'req-deny', allow: false });
     expect(receivedOf('ui-bind').length).toBe(0);
+    // REGRESIÓN BUG3 (deny): el pendiente también desaparece de getPending().
+    expect(tunnel.getPending().some((p) => p.reqId === 'req-deny')).toBe(false);
     db.setSetting('remote.ui.enabled', '1');
   });
 

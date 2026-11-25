@@ -184,17 +184,45 @@
         </button>
       </div>
     </template>
+    <template v-else-if="approvedSession">
+      <div class="bd-remote-approval__body">
+        <span class="bd-remote-approval__mark" aria-hidden="true"><Check :size="20" stroke-width="1.75" /></span>
+        <div>
+          <h2 id="bd-qr-approval-title">{{ t('bd.remoteUiApprovedTitle') }}</h2>
+          <p class="bd-sub" data-cy="qr-internet-approval-approved-ua">{{ approvedSession.ua || t('bd.remoteUiEmptyUa') }}</p>
+        </div>
+        <label class="bd-fld" style="grid-column: 1 / -1">
+          <span class="bd-lb">{{ t('bd.deviceName') }}</span>
+          <input
+            class="bd-inp"
+            data-cy="remote-ui-device-name"
+            v-model="deviceNameInput"
+            maxlength="80"
+            :placeholder="t('bd.deviceName')"
+            autocomplete="off"
+          />
+        </label>
+        <p class="bd-hint">{{ t('bd.remoteUiDeviceNameHint') }}</p>
+        <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
+      </div>
+      <div class="bd-remote-approval__actions">
+        <button class="bd-btn bd-pri" data-cy="qr-internet-approval-save" :disabled="!deviceNameInput.trim()" @click="onSaveDeviceName">
+          {{ t('bd.save') }}
+        </button>
+      </div>
+    </template>
   </dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
-import { X, Globe } from 'lucide-vue-next'
+import { X, Globe, Check } from 'lucide-vue-next'
 import QrcodeVue from 'qrcode.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { getTunnelToken, tunnelApiBase } from '../../composables/useTunnel'
 import { buildLanInviteUrl } from '../../utils/lanInvite'
 import { withKioskParam } from '../../composables/useKiosk'
+import { deviceDefaultName } from '../../utils/sessionRouting'
 import { useRemote } from '../../composables/useRemote'
 
 const { t } = useI18nStore()
@@ -318,6 +346,7 @@ const {
   loadUiSessions,
   allowPending,
   denyPending,
+  setSessionDeviceName,
   setUiEnabled,
   refresh,
   connectWs,
@@ -366,6 +395,12 @@ const stopSecTick = () => {
 }
 
 const checkApprovedAndClose = () => {
+  // Con la vista de éxito visible el dueño está poniendo el nombre, y
+  // mientras el allow sigue en vuelo (approvingReqId) la sesión aún no
+  // existe: no cerrar por detrás (poll/otra pestaña) hasta que guarde o
+  // cancele. Sin esto, el poll de 5 s cerraba la modal antes de que el
+  // token volviera y la vista de éxito no llegaba a mostrarse.
+  if (approvedSession.value || approvingReqId) return
   if (initialSessionCount < 0) return
   if (uiSessions.value.length > initialSessionCount) {
     emit('notify', t('bd.qrInternetApproved'))
@@ -492,13 +527,13 @@ const onCopyUiUrl = async () => {
   }
 }
 
-const onApprove = async (reqId: string) => {
+const onApprove = async (reqId: string): Promise<string | undefined> => {
   try {
-    await allowPending(reqId)
-    emit('notify', t('bd.qrInternetApproved'))
-    close()
+    const token = await allowPending(reqId)
+    return typeof token === 'string' ? token : undefined
   } catch {
     /* noop */
+    return undefined
   }
 }
 
@@ -519,6 +554,11 @@ const activeApprovalId = ref('')
 const activeApproval = computed(
   () => uiPending.value.find((item) => item.reqId === activeApprovalId.value) ?? null
 )
+// Tras aprobar, el diálogo no se cierra: vista de éxito con input de nombre
+// (igual que Ajustes → Acceso remoto, sin chip de transporte/P2P).
+const approvedSession = ref<{ prefix: string; ua: string } | null>(null)
+const deviceNameInput = ref('')
+let approvingReqId = ''
 
 const formatDateTime = (timestamp: number) => new Date(timestamp).toLocaleString()
 
@@ -539,15 +579,67 @@ const dismissApproval = () => {
   const requestId = activeApprovalId.value
   if (requestId) approvalQueue.value = approvalQueue.value.filter((id) => id !== requestId)
   activeApprovalId.value = ''
+  approvedSession.value = null
+  approvingReqId = ''
+  deviceNameInput.value = ''
+  const dlg = approvalDialog.value
+  if (dlg && dlg.open && !activeApprovalId.value && !approvedSession.value) {
+    try {
+      if (typeof dlg.close === 'function') dlg.close()
+      else dlg.removeAttribute('open')
+    } catch { /* noop */ }
+  }
+}
+
+// Nombre del dispositivo recién aceptado: el dueño lo confirma con Guardar.
+// Se envía a la sesión y luego se cierra como antes (close() + notify).
+const onSaveDeviceName = async () => {
+  const a = approvedSession.value
+  const name = deviceNameInput.value.trim()
+  if (a && name) {
+    try {
+      await setSessionDeviceName(a.prefix, name)
+    } catch {
+      /* best-effort: el cierre no depende del renombrado */
+    }
+  }
+  emit('notify', t('bd.qrInternetApproved'))
+  close()
 }
 
 const resolveApproval = async (allow: boolean) => {
   const requestId = activeApprovalId.value
   if (!requestId) return
-  dismissApproval()
-  await nextTick()
-  if (allow) await onApprove(requestId)
-  else await onDeny(requestId)
+  if (!allow) {
+    dismissApproval()
+    await nextTick()
+    await onDeny(requestId)
+    // El contador cae a 0 sin esperar al poll de 5 s (y sin depender del
+    // refresco interno de useRemote): la vista ya no lista este reqId.
+    try { await loadUiPending() } catch { /* el poll lo reintentará */ }
+    activateNextApproval()
+    return
+  }
+  // Aprobar sin cerrar: pasar a la vista de éxito con el nombre sugerido.
+  approvingReqId = requestId
+  const ua = activeApproval.value?.ua ?? ''
+  activeApprovalId.value = ''
+  const token = await onApprove(requestId)
+  approvingReqId = ''
+  if (typeof token === 'string' && token) {
+    approvedSession.value = { prefix: token.slice(0, 8), ua }
+    try { deviceNameInput.value = deviceDefaultName(ua || '') } catch { deviceNameInput.value = '' }
+  } else {
+    dismissApproval()
+  }
+  // Refresco explícito tras decidir: el contador baja a 0 de inmediato y la
+  // vista de éxito parte de sesiones vigentes (el guard de
+  // checkApprovedAndClose ya contempla approvedSession/approvingReqId).
+  try { await loadUiPending() } catch { /* el poll lo reintentará */ }
+  if (approvedSession.value) {
+    try { await loadUiSessions() } catch { /* la vista de éxito ya es visible */ }
+  }
+  approvalQueue.value = approvalQueue.value.filter((id) => id !== requestId)
   activateNextApproval()
 }
 
@@ -572,11 +664,13 @@ watch(activeApprovalId, async (requestId) => {
   const dlg = approvalDialog.value
   if (!dlg) return
   if (requestId) {
+    // Nueva solicitud: fuera la vista de éxito anterior.
+    approvedSession.value = null
     if (!dlg.open) {
       if (typeof dlg.showModal === 'function') dlg.showModal()
       else dlg.setAttribute('open', '')
     }
-  } else if (dlg.open) {
+  } else if (dlg.open && !approvedSession.value && !approvingReqId) {
     if (typeof dlg.close === 'function') dlg.close()
     else dlg.removeAttribute('open')
   }
@@ -711,6 +805,9 @@ const close = () => {
   stopSecTick()
   activeApprovalId.value = ''
   approvalQueue.value = []
+  approvedSession.value = null
+  approvingReqId = ''
+  deviceNameInput.value = ''
   try {
     if (approvalDialog.value?.open) approvalDialog.value.close()
   } catch {
