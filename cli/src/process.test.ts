@@ -44,15 +44,15 @@ describe('getLatestDaemonExe', () => {
     mkdirSync(dir, { recursive: true });
     try {
       for (const f of [
-        'libredeck-daemon.exe',
-        'libredeck-daemon-v1.2.0-windows-x64.exe',
-        'libredeck-daemon-v1.10.0-windows-x64.exe',
+        'bundeck-daemon.exe',
+        'bundeck-daemon-v1.2.0-windows-x64.exe',
+        'bundeck-daemon-v1.10.0-windows-x64.exe',
         'README.md',
       ]) {
         writeFileSync(join(dir, f), 'x');
       }
       const exe = await getLatestDaemonExe(dir);
-      expect(exe?.endsWith('libredeck-daemon-v1.10.0-windows-x64.exe')).toBe(true);
+      expect(exe?.endsWith('bundeck-daemon-v1.10.0-windows-x64.exe')).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

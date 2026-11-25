@@ -74,7 +74,7 @@ export interface DaemonExeVersion {
 }
 
 export function extractDaemonVersion(file: string): DaemonExeVersion {
-  const versionMatch = file.match(/libredeck-daemon-v([0-9]+\.[0-9]+\.[0-9]+)/);
+  const versionMatch = file.match(/(?:bundeck|libredeck)-daemon-v([0-9]+\.[0-9]+\.[0-9]+)/);
   if (versionMatch) {
     return { file, version: versionMatch[1], hasVersion: true };
   }
@@ -98,7 +98,7 @@ export function compareDaemonVersions(a: DaemonExeVersion, b: DaemonExeVersion):
 
 export function isDaemonExeFile(file: string): boolean {
   return (
-    file.startsWith('libredeck-daemon') &&
+    (file.startsWith('bundeck-daemon') || file.startsWith('libredeck-daemon')) &&
     (file.endsWith('.exe') || !file.includes('.')) &&
     !file.includes('-backup')
   );
@@ -120,6 +120,7 @@ export function pickLatestDaemonExe(files: string[]): string | null {
 }
 
 export interface DataDirEnv {
+  BUNDECK_DATA_DIR?: string;
   LIBREDECK_DATA_DIR?: string;
   ELECTROBUN_DATA_DIR?: string;
   APPDATA?: string;
@@ -128,8 +129,8 @@ export interface DataDirEnv {
 
 /**
  * Replica la resolución del daemon (daemon/src/config.ts) desde el CLI:
- * LIBREDECK_DATA_DIR > ELECTROBUN_DATA_DIR/libredeck > %APPDATA%/LibreDeck/data
- * (instalado) > <repo>/data (dev).
+ * BUNDECK_DATA_DIR > LIBREDECK_DATA_DIR (deprecated) > ELECTROBUN_DATA_DIR/bundeck
+ * > %APPDATA%/BunDeck/data (instalado) > <repo>/data (dev).
  */
 export function resolveDataDir(opts?: {
   execPath?: string;
@@ -137,17 +138,19 @@ export function resolveDataDir(opts?: {
   env?: DataDirEnv;
 }): string {
   const env = opts?.env ?? (process.env as DataDirEnv);
+  if (env.BUNDECK_DATA_DIR) return env.BUNDECK_DATA_DIR;
   if (env.LIBREDECK_DATA_DIR) return env.LIBREDECK_DATA_DIR;
-  if (env.ELECTROBUN_DATA_DIR) return join(env.ELECTROBUN_DATA_DIR, 'libredeck');
+  if (env.ELECTROBUN_DATA_DIR) return join(env.ELECTROBUN_DATA_DIR, 'bundeck');
   const execPath = opts?.execPath ?? process.execPath ?? '';
   const cwd = opts?.cwd ?? process.cwd();
   const isInstalled =
     execPath.includes('Program Files') ||
     execPath.includes('Program Files (x86)') ||
+    basename(execPath).toLowerCase().startsWith('bundeck') ||
     basename(execPath).toLowerCase().startsWith('libredeck');
   if (isInstalled) {
     const base = env.APPDATA || env.LOCALAPPDATA || cwd;
-    return join(base, 'LibreDeck', 'data');
+    return join(base, 'BunDeck', 'data');
   }
   // Dev: si el CWD es cli/, el data dir es ../data; si no, ./data
   if (basename(resolve(cwd)).toLowerCase() === 'cli') {
