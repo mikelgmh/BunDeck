@@ -385,6 +385,7 @@ import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import { bdAnimations, bdLongPressMs } from '../../composables/useBunDeckUi'
 import { createPressFx, playPressFx, clearHoldFx } from '../../composables/usePressFx'
+import { pressFeedback } from '../../composables/useFeedback'
 import { hasLongContent } from '../../composables/usePressActions'
 import { checkPageCompatibility, parseLayoutMode, resolvePageSize, resolveDeckSize, type LogicalDevice, type CompatView } from '../../composables/useDevices'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
@@ -1078,6 +1079,7 @@ const onKeyClick = (event: MouseEvent | KeyboardEvent, position: number) => {
   if (isVolume(position) || !props.getButton(position)) return
   const el = event.currentTarget as HTMLElement | null
   playPressFx(el, 'click', { animations: animOn() })
+  pressFeedback('click')
   emit('button-tap', position)
 }
 
@@ -1130,6 +1132,7 @@ const onPressStart = (event: PointerEvent, position: number) => {
       clearHoldFx(el)
       playPressFx(el, 'long', { animations: animOn(), point: pt })
     }
+    pressFeedback('long')
     emit('button-long-press', position)
   }, effLongMs())
 }
@@ -1161,6 +1164,7 @@ const onPressUp = (event: PointerEvent, position: number) => {
     animations: animOn(),
     point: { x: event.clientX, y: event.clientY },
   })
+  pressFeedback(kind === 'double' ? 'double' : kind === 'triple' ? 'triple' : 'click')
   emit('button-tap', position)
 }
 const onPressCancel = (event?: Event) => {

@@ -12,14 +12,14 @@ Cada release publica un **bundle gestionado** por plataforma y un
   `{ version, channel, assets: { <target>: { bundle, url, sha256, size, signature } } }`
 
 La firma es ed25519 sobre `"<version>|<target>|<sha256>"`
-(`scripts/build-update-manifest.mjs` firma con `LIBREDECK_UPDATE_PRIVKEY`;
+(`scripts/build-update-manifest.mjs` firma con `BUNDECK_UPDATE_PRIVKEY`;
 la pública vive en `launcher/UPDATE_PUBKEY` y se compila dentro del
 launcher — ver `scripts/gen-update-keys.mjs`).
 
 ## Layout gestionado
 
 ```text
-<install>/                    # junto al launcher, o $LIBREDECK_INSTALL_DIR
+<install>/                    # junto al launcher, o $BUNDECK_INSTALL_DIR
   libredeck-launcher(.exe)    # en ejecución
   libredeck-updater(.exe)     # reemplaza al launcher (fichero bloqueado en Windows)
   versions/<ver>/             # daemon, cli, launcher, updater, web-dist/
@@ -76,22 +76,22 @@ en `<data>/backups/db-<ts>/`. Ninguno de esos datos se elimina al actualizar.
 - `build` (matriz 3 OS): daemon + CLI + launcher + updater + web-dist →
   `dist/` → `scripts/make-bundle.sh` → `bundeck-v<ver>-<target>.zip`.
 - `release`: junta artefactos, `scripts/build-update-manifest.mjs`
-  (firma si existe el secret `LIBREDECK_UPDATE_PRIVKEY`) y
+  (firma si existe el secret `BUNDECK_UPDATE_PRIVKEY`) y
   `semantic-release` publica el instalador Windows, los tres bundles
   gestionados y el manifiesto. Los binarios sueltos se distribuyen dentro
   de los bundles, no como assets duplicados.
-- Secret requerido: `LIBREDECK_UPDATE_PRIVKEY` (seed hex).
-  Opcional en build: `LIBREDECK_UPDATE_PUBKEY` (si no, `UPDATE_PUBKEY`).
+- Secret requerido: `BUNDECK_UPDATE_PRIVKEY` (seed hex).
+  Opcional en build: `BUNDECK_UPDATE_PUBKEY` (si no, `UPDATE_PUBKEY`).
 - macOS necesita firma/notarización para no pedir Gatekeeper en cada
   versión; el instalador por usuario es `scripts/install-macos.sh`
   (Linux: `scripts/install-linux.sh`).
 
 ## Probar un update sin release
 
-1. `cargo run` en `launcher/` (dev, con `LIBREDECK_INSTALL_DIR` temporal).
+1. `cargo run` en `launcher/` (dev, con `BUNDECK_INSTALL_DIR` temporal).
 2. Servir un manifiesto + bundle falsos en local y apuntar
    `MANIFEST_URL`… (hoy la URL es fija; para E2E local, edita temporalmente
    `MANIFEST_URL` en `updater.rs` o usa `libredeck-cli update` contra
-   `LIBREDECK_INSTALL_DIR` con un bundle real renombrado).
+   `BUNDECK_INSTALL_DIR` con un bundle real renombrado).
 3. `cargo test --bins` (versiones, manifiesto, layout) +
    `bun test` en `daemon/` y `cli/`.

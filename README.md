@@ -13,6 +13,9 @@ Automate your computer with physical or virtual buttons. Launch apps, run script
 
 **For developers:** Bun daemon, Astro/Vue control panel, CLI, and native Rust launcher.
 
+![BunDeck dashboard](docs/shots/dashboard.png)
+*Panel local: grid 3×5, biblioteca de acciones, inspector. Playwright `web/tests/e2e/`.*
+
 ## Download BunDeck
 
 Choose your platform. These links always resolve to the latest release.

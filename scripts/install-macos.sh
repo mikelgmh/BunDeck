@@ -24,21 +24,21 @@ DEST="$ROOT/versions/$VER"
 mkdir -p "$DEST"
 echo "→ Extrayendo en $DEST..."
 python3 -c "import zipfile; zipfile.ZipFile('$TMP/bundle.zip').extractall('$DEST')"
-if [ ! -f "$DEST/libredeck-daemon" ]; then
+if [ ! -f "$DEST/bundeck-daemon" ] && [ ! -f "$DEST/libredeck-daemon" ]; then
   SUB="$(find "$DEST" -maxdepth 1 -mindepth 1 -type d | head -1)"
-  if [ -n "$SUB" ] && [ -f "$SUB/libredeck-daemon" ]; then
+  if [ -n "$SUB" ] && { [ -f "$SUB/bundeck-daemon" ] || [ -f "$SUB/libredeck-daemon" ]; }; then
     cp -R "$SUB/." "$DEST/"
     rm -rf "$SUB"
   fi
 fi
-chmod +x "$DEST"/libredeck-* 2>/dev/null || true
+chmod +x "$DEST"/bundeck-* "$DEST"/libredeck-* 2>/dev/null || true
 echo "{\"version\":\"$VER\"}" > "$ROOT/active.json"
 
 # Quita cuarentena de los binarios descargados (evita el diálogo de Gatekeeper).
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
 echo "✅ BunDeck $VER instalado en $ROOT"
-echo "   Abre: $DEST/libredeck-launcher"
+echo "   Abre: $DEST/bundeck-launcher"
 echo "   (Mantenlo en una ruta estable: el updater usa versions/<ver>/ + active.json.)"
 echo "   Las actualizaciones se aplican desde el launcher (ACTUALIZACIÓN)."
 echo "   NOTA: para auto-update sin avisos de Gatekeeper, la release debe estar"

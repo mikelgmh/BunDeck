@@ -17,6 +17,7 @@
 import { computed, onMounted, ref } from 'vue'
 import DeckUseView from './DeckUseView.vue'
 import { useDeckLayouts, type DeckWidget } from '../../composables/useDeckLayouts'
+import { pressFeedback } from '../../composables/useFeedback'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -44,6 +45,7 @@ const onPress = async (widget: DeckWidget) => {
   if (widget.kind !== 'action') return
   const pos = widget.buttonPosition
   if (pos === null || pos === undefined) return
+  pressFeedback('click')
   try {
     const base = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`
     await fetch(`${base}/buttons/press`, {

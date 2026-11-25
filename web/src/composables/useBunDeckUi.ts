@@ -35,6 +35,10 @@ export const bdKeySize = ref<number>(prefs.keySize ?? 76)
 export const bdRadius = ref<number>(prefs.radius ?? 16)
 export const bdBrightness = ref<number>(prefs.brightness ?? 80)
 export const bdAnimations = ref<boolean>(prefs.animations ?? true)
+/** Sonido de clic al pulsar (Web Audio, sin assets). Defecto: apagado. */
+export const bdClickSound = ref<boolean>(prefs.clickSound ?? false)
+/** Vibración al pulsar (navigator.vibrate, sobre todo móvil). Defecto: encendido. */
+export const bdHaptic = ref<boolean>(prefs.haptic ?? true)
 /** Tiempo de hold para la pulsación larga (ms). Antes 600 fijo en StageBoard. */
 export const bdLongPressMs = ref<number>(
   Number.isFinite(+prefs.longPressMs) ? Math.min(1200, Math.max(200, Math.round(+prefs.longPressMs))) : 500,
@@ -105,6 +109,8 @@ function persist() {
         radius: bdRadius.value,
         brightness: bdBrightness.value,
         animations: bdAnimations.value,
+        clickSound: bdClickSound.value,
+        haptic: bdHaptic.value,
         longPressMs: bdLongPressMs.value,
         showLeft: bdShowLeft.value,
         showRight: bdShowRight.value,
@@ -127,6 +133,8 @@ function snapshot(now: number) {
     radius: bdRadius.value,
     brightness: bdBrightness.value,
     animations: bdAnimations.value,
+    clickSound: bdClickSound.value,
+    haptic: bdHaptic.value,
     longPressMs: bdLongPressMs.value,
     // El sistema que manda con `auto` es el del HOST. Los remotos nunca
     // pisan este campo con el suyo propio: lo preservan.
@@ -227,6 +235,8 @@ function persistLocal() {
         radius: bdRadius.value,
         brightness: bdBrightness.value,
         animations: bdAnimations.value,
+        clickSound: bdClickSound.value,
+        haptic: bdHaptic.value,
         longPressMs: bdLongPressMs.value,
         showLeft: bdShowLeft.value,
         showRight: bdShowRight.value,
@@ -273,6 +283,8 @@ export function applyRemoteAppearance(raw: unknown): boolean {
     bdRadius.value = num(body.radius, 8, 32, bdRadius.value)
     bdBrightness.value = num(body.brightness, 0, 100, bdBrightness.value)
     if (typeof body.animations === 'boolean') bdAnimations.value = body.animations
+    if (typeof body.clickSound === 'boolean') bdClickSound.value = body.clickSound
+    if (typeof body.haptic === 'boolean') bdHaptic.value = body.haptic
     const lp = +(body.longPressMs as number)
     if (Number.isFinite(lp)) bdLongPressMs.value = Math.min(1200, Math.max(200, Math.round(lp)))
     if (typeof body.systemLight === 'boolean') hostSystemLight.value = body.systemLight
@@ -347,6 +359,14 @@ export function bdSetBrightness(v: number) {
 }
 export function bdSetAnimations(v: boolean) {
   bdAnimations.value = v
+  persist()
+}
+export function bdSetClickSound(v: boolean) {
+  bdClickSound.value = v
+  persist()
+}
+export function bdSetHaptic(v: boolean) {
+  bdHaptic.value = v
   persist()
 }
 export function bdSetLongPressMs(v: number) {

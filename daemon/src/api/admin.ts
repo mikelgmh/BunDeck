@@ -11,8 +11,35 @@
  */
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
+import { resetDatabaseToDefaults } from '../db';
 
 export const handleAdmin: ApiHandler = async (_req, { method, path, services }) => {
+  // Restablecimiento total a valores de fábrica. Requiere confirmación
+  // explícita ({ "confirm": true }): sin ella responde 400 sin tocar nada.
+  // Borra TODO (perfiles, páginas, botones, variables, ajustes, sesiones…)
+  // y restaura la semilla por defecto (perfil + plugins built-in).
+  if (path === '/api/v1/admin/reset') {
+    if (method === 'POST') {
+      let body: any = {};
+      try { body = await _req.json(); } catch { body = {}; }
+      if (body?.confirm !== true) {
+        return jsonResponse(
+          { error: 'Confirmación requerida', hint: 'Repite la petición con { "confirm": true }.' },
+          400
+        );
+      }
+      try {
+        const result = await resetDatabaseToDefaults();
+        try {
+          services.wsManager?.broadcast('profile.updated', { profileId: result.profileId, reset: true }, 'profiles');
+        } catch { /* noop: el frontend recarga tras el reset */ }
+        return jsonResponse({ success: true, reset: true, ...result });
+      } catch (e) {
+        return jsonResponse({ error: e instanceof Error ? e.message : String(e) }, 500);
+      }
+    }
+  }
+
   if (path === '/api/v1/admin/shutdown') {
     if (method === 'POST') {
       console.log('Shutdown requested via API');

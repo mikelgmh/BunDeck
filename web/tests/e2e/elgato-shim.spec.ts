@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * elgato-shim.spec.ts — E2E del shim Elgato en-Worker (API-level).
@@ -16,7 +17,9 @@ import * as path from 'node:path';
  */
 
 const API = 'http://localhost:3001/api/v1';
-const FIX = path.resolve(__dirname, '..', '..', '..', 'daemon', 'src', 'test', 'fixtures', 'elgato');
+// __dirname no existe en ES modules: se deriva de import.meta.url.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const FIX = path.resolve(HERE, '..', '..', '..', 'daemon', 'src', 'test', 'fixtures', 'elgato');
 
 interface Fixture {
   dir: string;

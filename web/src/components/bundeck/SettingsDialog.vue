@@ -57,20 +57,9 @@
         <p class="bd-sub">{{ t('bd.generalSub') }}</p>
         <div class="bd-srow" data-setting="autostart">
           <div><b>{{ t('bd.startWithSystem') }}</b><p>{{ t('bd.startWithSystemHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.autostart" :aria-label="t('bd.startWithSystem')" /><span></span></label></div>
+          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="autostartEnabled" :disabled="autostartLoading" :aria-label="t('bd.startWithSystem')" @change="toggleAutostart(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
         </div>
-        <div class="bd-srow" data-setting="tray">
-          <div><b>{{ t('bd.keepInTray') }}</b><p>{{ t('bd.keepInTrayHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.tray" :aria-label="t('bd.keepInTray')" /><span></span></label></div>
-        </div>
-        <div v-if="showUpdates" class="bd-srow" data-setting="updates">
-          <div><b>{{ t('bd.checkUpdates') }}</b><p>{{ t('bd.checkUpdatesHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.updates" :aria-label="t('bd.checkUpdates')" /><span></span></label></div>
-        </div>
-        <div class="bd-srow" data-setting="undo">
-          <div><b>{{ t('bd.allowUndo') }}</b><p>{{ t('bd.allowUndoHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.undo" :aria-label="t('bd.allowUndo')" /><span></span></label></div>
-        </div>
+        <p v-if="autostartError" class="bd-err" role="alert">{{ autostartError }}</p>
         <div class="bd-srow" data-setting="autoswitch">
           <div><b>{{ t('bd.autoSwitch') }}</b><p>{{ t('bd.autoSwitchHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="autoCfg.enabled" :aria-label="t('bd.autoSwitch')" @change="toggleAutoSwitch(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
@@ -107,46 +96,44 @@
             </div>
           </div>
 
-          <div class="bd-srow" data-setting="brightness">
-            <div><b>{{ t('bd.brightness') }}</b><p>{{ t('bd.brightnessHint') }}</p></div>
+          <div class="bd-srow" data-setting="hwbrightness">
+            <div><b>{{ t('bd.hwBrightness') }}</b><p>{{ t('bd.hwBrightnessHint') }}</p></div>
             <div class="bd-ctl">
               <div class="bd-rg">
-                <input type="range" class="bd-inp" min="0" max="100" step="1" :value="bdBrightness" :aria-label="t('bd.brightness')" @input="bdSetBrightness(+($event.target as HTMLInputElement).value)" />
-                <output>{{ bdBrightness }}%</output>
+                <input type="range" class="bd-inp" min="0" max="100" step="1" :value="hwBrightness" :disabled="!selectedDevice" :aria-label="t('bd.hwBrightness')" data-cy="bd-hw-brightness" @input="onHwBrightnessInput(+($event.target as HTMLInputElement).value)" />
+                <output>{{ hwBrightness }}%</output>
+              </div>
+              <p v-if="!selectedDevice" class="bd-hint">{{ t('bd.noHwSelected') }}</p>
+            </div>
+          </div>
+
+          <div class="bd-srow" data-setting="dim">
+            <div><b>{{ t('bd.dimAfterMin') }}</b><p>{{ t('bd.dimAfterMinHint') }}</p></div>
+            <div class="bd-ctl">
+              <div class="bd-rg">
+                <input type="number" class="bd-inp" min="0" max="1440" step="1" :value="hwDimMin" :disabled="!selectedDevice || hwDisplayLoading" :aria-label="t('bd.dimAfterMin')" data-cy="bd-hw-dim-min" @change="onHwDimMinChange(+($event.target as HTMLInputElement).value)" />
+                <output>{{ t('bd.minutesUnit') }}</output>
               </div>
             </div>
           </div>
 
-          <div class="bd-srow">
-            <div><b>{{ t('bd.dimAfter') }}</b><p>{{ t('bd.dimAfterHint') }}</p></div>
+          <div class="bd-srow" data-setting="idle">
+            <div><b>{{ t('bd.idleAction') }}</b><p>{{ t('bd.idleActionHint') }}</p></div>
             <div class="bd-ctl">
-              <select class="bd-inp" v-model="mock.dim" :aria-label="t('bd.dimAfter')">
-                <option>{{ t('bd.never') }}</option>
-                <option>1 min</option>
-                <option>5 min</option>
-                <option>15 min</option>
-                <option>1 hora</option>
+              <select class="bd-inp" :value="hwIdleAction" :disabled="!selectedDevice || hwDisplayLoading" :aria-label="t('bd.idleAction')" data-cy="bd-hw-idle-action" @change="onHwIdleActionChange(($event.target as HTMLSelectElement).value)">
+                <option value="off">{{ t('bd.idleOff') }}</option>
+                <option value="dim">{{ t('bd.idleDim') }}</option>
+                <option value="clock">{{ t('bd.idleClock') }}</option>
               </select>
             </div>
           </div>
 
-          <div class="bd-srow">
-            <div><b>{{ t('bd.idleScreen') }}</b><p>{{ t('bd.idleScreenHint') }}</p></div>
+          <div class="bd-srow" data-setting="idlemin">
+            <div><b>{{ t('bd.idleMinutes') }}</b><p>{{ t('bd.idleMinutesHint') }}</p></div>
             <div class="bd-ctl">
-              <select class="bd-inp" v-model="mock.idle" :aria-label="t('bd.idleScreen')">
-                <option>{{ t('bd.screenOff') }}</option>
-                <option>{{ t('bd.clock') }}</option>
-                <option>{{ t('bd.lastState') }}</option>
-                <option>{{ t('bd.ownImage') }}</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="bd-srow">
-            <div><b>{{ t('bd.orientation') }}</b><p>{{ t('bd.orientationHint') }}</p></div>
-            <div class="bd-ctl">
-              <div class="bd-seg">
-                <button v-for="o in ['0°', '90°', '180°', '270°']" :key="o" :aria-pressed="mock.orientation === o" @click="mock.orientation = o">{{ o }}</button>
+              <div class="bd-rg">
+                <input type="number" class="bd-inp" min="0" max="1440" step="1" :value="hwIdleMin" :disabled="!selectedDevice || hwDisplayLoading" :aria-label="t('bd.idleMinutes')" data-cy="bd-hw-idle-min" @change="onHwIdleMinChange(+($event.target as HTMLInputElement).value)" />
+                <output>{{ t('bd.minutesUnit') }}</output>
               </div>
             </div>
           </div>
@@ -161,14 +148,14 @@
             </div>
           </div>
 
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="haptic">
             <div><b>{{ t('bd.haptic') }}</b><p>{{ t('bd.hapticHint') }}</p></div>
-            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.haptic" :aria-label="t('bd.haptic')" /><span></span></label></div>
+            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="bdHaptic" :aria-label="t('bd.haptic')" @change="bdSetHaptic(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
           </div>
 
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="sound">
             <div><b>{{ t('bd.clickSound') }}</b><p>{{ t('bd.clickSoundHint') }}</p></div>
-            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.sound" :aria-label="t('bd.clickSound')" /><span></span></label></div>
+            <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="bdClickSound" :aria-label="t('bd.clickSound')" @change="bdSetClickSound(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
           </div>
         </section>
       </template>
@@ -284,7 +271,7 @@
             <ShieldAlert :size="18" stroke-width="1.75" aria-hidden="true" />
             <p>{{ t('bd.backupSensitiveWarning') }}</p>
           </div>
-          <div class="bd-srow">
+          <div class="bd-srow" data-setting="backup-export">
             <div>
               <b>{{ t('bd.backupFullLabel') }}</b>
               <p>{{ t('bd.backupFullHint') }}</p>
@@ -345,6 +332,15 @@
               <span class="bd-sw4"><i v-for="(c, i) in pal.colors" :key="i" :style="{ background: c }"></i></span>
               {{ pal.label }}
             </button>
+          </div>
+        </div>
+        <div class="bd-srow" data-setting="uibrightness">
+          <div><b>{{ t('bd.uiBrightness') }}</b><p>{{ t('bd.uiBrightnessHint') }}</p></div>
+          <div class="bd-ctl">
+            <div class="bd-rg">
+              <input type="range" class="bd-inp" min="0" max="100" step="1" :value="bdBrightness" :aria-label="t('bd.uiBrightness')" data-cy="bd-ui-brightness" @input="bdSetBrightness(+($event.target as HTMLInputElement).value)" />
+              <output>{{ bdBrightness }}%</output>
+            </div>
           </div>
         </div>
         <div class="bd-srow" data-setting="keysize">
@@ -481,30 +477,44 @@
         <RemotePane />
       </template>
 
-      <!-- Atajos (visual) -->
+      <!-- Atajos (capturables, con listener global in-app) -->
       <template v-else-if="section === 'shortcuts'">
         <h2>{{ t('bd.secShortcuts') }}</h2>
         <p class="bd-sub">{{ t('bd.shortcutsSub') }}</p>
-        <div class="bd-srow" data-setting="showhide">
-          <div><b>{{ t('bd.showHideWindow') }}</b></div>
+        <p class="bd-hint">{{ t('bd.shortcutGlobalHint') }}</p>
+        <div v-if="shortcutConflicts.length" class="bd-backup-warning" role="alert" data-cy="bd-shortcut-conflicts">
+          <b>{{ t('bd.shortcutConflict') }}:</b>
+          {{ shortcutConflicts.map((g) => g.map((id) => shortcutLabel(id)).join(' + ')).join(' · ') }}
+        </div>
+        <div v-for="id in shortcutIds" :key="id" class="bd-srow" :data-setting="`shortcut-${id}`">
+          <div>
+            <b>{{ shortcutLabel(id) }}</b>
+            <p v-if="shortcutHasConflict(id)" class="bd-err">{{ t('bd.shortcutConflict') }}</p>
+          </div>
           <div class="bd-ctl">
-            <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">P</kbd></span>
-            <label class="bd-sw"><input type="checkbox" v-model="mock.k1" :aria-label="t('bd.showHideWindow')" /><span></span></label>
+            <button
+              class="bd-btn"
+              :data-cy="`bd-shortcut-recapture-${id}`"
+              :aria-label="`${shortcutLabel(id)}: ${shortcutsMap[id].combo}`"
+              @click="startCapture(id)"
+            >
+              <template v-if="capturingId === id">{{ t('bd.shortcutPressKeys') }}…</template>
+              <template v-else><kbd v-for="(part, i) in shortcutsMap[id].combo.split('+')" :key="i" class="bd-kbd">{{ part }}</kbd></template>
+            </button>
+            <label class="bd-sw">
+              <input
+                type="checkbox"
+                :checked="shortcutsMap[id].enabled"
+                :data-cy="`bd-shortcut-toggle-${id}`"
+                :aria-label="shortcutLabel(id)"
+                @change="setShortcutEnabled(id, ($event.target as HTMLInputElement).checked)"
+              /><span></span>
+            </label>
           </div>
         </div>
-        <div class="bd-srow" data-setting="nextprofile">
-          <div><b>{{ t('bd.nextProfile') }}</b></div>
-          <div class="bd-ctl">
-            <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">→</kbd></span>
-            <label class="bd-sw"><input type="checkbox" v-model="mock.k2" :aria-label="t('bd.nextProfile')" /><span></span></label>
-          </div>
-        </div>
-        <div class="bd-srow" data-setting="muteall">
-          <div><b>{{ t('bd.muteAll') }}</b></div>
-          <div class="bd-ctl">
-            <span><kbd class="bd-kbd">Ctrl</kbd> <kbd class="bd-kbd">Alt</kbd> <kbd class="bd-kbd">M</kbd></span>
-            <label class="bd-sw"><input type="checkbox" v-model="mock.k3" :aria-label="t('bd.muteAll')" /><span></span></label>
-          </div>
+        <div class="bd-srow" data-setting="shortcuts-reset">
+          <div><b>{{ t('bd.shortcutReset') }}</b><p>{{ t('bd.shortcutHint') }}</p></div>
+          <div class="bd-ctl"><button class="bd-btn" data-cy="bd-shortcuts-reset" @click="resetShortcuts">{{ t('bd.shortcutReset') }}</button></div>
         </div>
       </template>
 
@@ -512,29 +522,11 @@
       <template v-else-if="section === 'advanced'">
         <h2>{{ t('bd.secAdvanced') }}</h2>
         <p class="bd-sub">{{ t('bd.advancedSub') }}</p>
-        <div class="bd-srow" data-setting="port">
-          <div><b>{{ t('bd.localPort') }}</b><p>{{ t('bd.localPortHint') }}</p></div>
-          <div class="bd-ctl"><input type="number" class="bd-inp" v-model.number="mock.port" min="1024" max="65535" :aria-label="t('bd.localPort')" /></div>
-        </div>
-        <div class="bd-srow" data-setting="loglevel">
-          <div><b>{{ t('bd.logLevel') }}</b><p>{{ t('bd.logLevelHint') }}</p></div>
-          <div class="bd-ctl">
-            <select class="bd-inp" v-model="mock.log" :aria-label="t('bd.logLevel')">
-              <option>{{ t('bd.logErrors') }}</option>
-              <option>{{ t('bd.logWarnings') }}</option>
-              <option>{{ t('bd.logInfo') }}</option>
-              <option>{{ t('bd.logDebug') }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="bd-srow" data-setting="devmode">
-          <div><b>{{ t('bd.devMode') }}</b><p>{{ t('bd.devModeHint') }}</p></div>
-          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" v-model="mock.dev" :aria-label="t('bd.devMode')" /><span></span></label></div>
-        </div>
-        <div class="bd-srow" data-setting="reset">
-          <div><b>{{ t('bd.resetSettings') }}</b><p>{{ t('bd.resetSettingsHint') }}</p></div>
-          <div class="bd-ctl"><button class="bd-btn bd-dng" @click="resetAll">{{ t('bd.resetBtn') }}</button></div>
-        </div>
+        <FactoryResetSection
+          :api-base="apiBase()"
+          @notify="(msg) => emit('notify', msg)"
+          @reset-done="handleFactoryResetDone"
+        />
       </template>
 
       <!-- Registros: estado de servicios + logs del daemon (diagnóstico multi-dispositivo) -->
@@ -579,11 +571,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import {
   SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, Upload, Import, ShieldAlert, Sparkles, ScrollText, Search, X
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
+import FactoryResetSection from './FactoryResetSection.vue'
 // Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
 // show('plugins') necesita setTab de forma síncrona tras nextTick.
 const McpPane = defineAsyncComponent(() => import('./McpPane.vue'))
@@ -592,10 +585,21 @@ const DiagnosticsPane = defineAsyncComponent(() => import('./DiagnosticsPane.vue
 const AutoProfileDialog = defineAsyncComponent(() => import('./AutoProfileDialog.vue'))
 import { useI18nStore } from '../../composables/useI18n'
 import {
-  bdPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs,
-  bdSetPalette, bdSetLabelMode, bdSetKeySize, bdSetRadius, bdSetBrightness, bdSetAnimations, bdSetLongPressMs
+  bdPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs, bdClickSound, bdHaptic,
+  bdSetPalette, bdSetLabelMode, bdSetKeySize, bdSetRadius, bdSetBrightness, bdSetAnimations, bdSetLongPressMs, bdSetClickSound, bdSetHaptic,
+  bdShowLeft, bdShowRight, bdSetPanels
 } from '../../composables/useBunDeckUi'
 import { useAutoProfile } from '../../composables/useAutoProfile'
+import {
+  DEVICE_DISPLAY_DEFAULTS,
+  clampHwBrightness,
+  clampIdleMinutes,
+  fetchDeviceDisplay,
+  saveDeviceDisplay,
+  webIdleMinutes,
+  type DeviceIdleAction,
+} from '../../composables/useDeviceDisplay'
+import { loadAutostart, saveAutostart } from '../../composables/useAutostart'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
 import {
   fetchDetectedProfiles, importDetectedProfiles, importStreamDeckFile, summarizeImportPlan,
@@ -603,6 +607,13 @@ import {
 } from '../../composables/useStreamDeckImport'
 import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
 import { IDRE, RES } from '../../composables/useExpressions'
+import {
+  SHORTCUT_IDS, DEFAULT_SHORTCUTS, SHORTCUTS_CONFIG_KEY,
+  loadShortcutsState, saveShortcutsState, parseDaemonShortcutsConfig, serializeDaemonShortcutsConfig,
+  findShortcutConflicts, comboFromEvent, stepProfile,
+  installGlobalShortcuts,
+  type ShortcutId, type ShortcutMap, type KeyEventLike,
+} from '../../composables/useShortcuts'
 import type { ProfileData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
@@ -613,6 +624,8 @@ interface Props {
   currentLocale: string
   showUpdates: boolean
   profiles: ProfileData[]
+  /** Perfil activo (para perfil siguiente/anterior por atajo). */
+  activeProfileId?: string | null
   plugins?: any[]
   detailed?: any[]
   busyId?: string | null
@@ -702,13 +715,16 @@ const searchIndex = computed<SearchEntry[]>(() => {
     ...navItems.value.map((n) => L(n.id, `sec-${n.id}`, n.label)),
     // General
     L('general', 'autostart', t('bd.startWithSystem'), t('bd.startWithSystemHint')),
-    L('general', 'tray', t('bd.keepInTray'), t('bd.keepInTrayHint')),
-    L('general', 'undo', t('bd.allowUndo'), t('bd.allowUndoHint')),
     L('general', 'autoswitch', t('bd.autoSwitch'), t('bd.autoSwitchHint')),
     // Dispositivos
     L('devices', 'device', t('bd.streamdeckDevice'), t('bd.streamdeckDeviceHint')),
-    L('devices', 'brightness', t('bd.brightness'), t('bd.brightnessHint')),
+    L('devices', 'hwbrightness', t('bd.hwBrightness'), t('bd.hwBrightnessHint')),
+    L('devices', 'dim', t('bd.dimAfterMin'), t('bd.dimAfterMinHint')),
+    L('devices', 'idle', t('bd.idleAction'), t('bd.idleActionHint')),
+    L('devices', 'idlemin', t('bd.idleMinutes'), t('bd.idleMinutesHint')),
     L('devices', 'longpress', t('bd.longPressTime'), t('bd.longPressTimeHint')),
+    L('devices', 'haptic', t('bd.haptic'), t('bd.hapticHint')),
+    L('devices', 'sound', t('bd.clickSound'), t('bd.clickSoundHint')),
     // Copias
     L('backup', 'backup-export', t('bd.backupExportTitle'), t('bd.backupExportSub')),
     L('backup', 'backup-streamdeck', t('bd.sdImportTitle'), t('bd.sdFromBackup')),
@@ -717,18 +733,18 @@ const searchIndex = computed<SearchEntry[]>(() => {
     // Apariencia (incluye el idioma movido desde General)
     L('appearance', 'language', t('bd.language'), t('bd.interfaceLang')),
     L('appearance', 'palette', t('bd.palette'), t('bd.paletteHint')),
+    L('appearance', 'uibrightness', t('bd.uiBrightness'), t('bd.uiBrightnessHint')),
     L('appearance', 'keysize', t('bd.keySize'), t('bd.keySizeHint')),
     L('appearance', 'rounding', t('bd.rounding'), t('bd.roundingHint')),
     L('appearance', 'labels', t('bd.keyLabels'), t('bd.keyLabelsHint')),
     L('appearance', 'animations', t('bd.animations'), t('bd.animationsHint')),
     // Atajos
-    L('shortcuts', 'showhide', t('bd.showHideWindow')),
-    L('shortcuts', 'nextprofile', t('bd.nextProfile')),
-    L('shortcuts', 'muteall', t('bd.muteAll')),
+    L('shortcuts', 'shortcut-toggle-panels', t('bd.showHideWindow'), t('bd.shortcutGlobalHint')),
+    L('shortcuts', 'shortcut-next-profile', t('bd.nextProfile')) ,
+    L('shortcuts', 'shortcut-prev-profile', t('bd.prevProfile')),
+    L('shortcuts', 'shortcut-mute-all', t('bd.muteAll')),
+    L('shortcuts', 'shortcut-toggle-kiosk', t('bd.toggleKiosk')),
     // Avanzado
-    L('advanced', 'port', t('bd.localPort'), t('bd.localPortHint')),
-    L('advanced', 'loglevel', t('bd.logLevel'), t('bd.logLevelHint')),
-    L('advanced', 'devmode', t('bd.devMode'), t('bd.devModeHint')),
     L('advanced', 'reset', t('bd.resetSettings'), t('bd.resetSettingsHint')),
   ]
   // Sin duplicados sección+id (las entradas de sección usan `sec-*`)
@@ -776,30 +792,181 @@ const palettes = computed(() => [
   { id: 'arena' as const, label: t('bd.palArena'), colors: ['#f0ebe2', '#f8f5ee', '#3a362e', '#5b7b38'] }
 ])
 
-// Preferencias solo visuales (el daemon no las soporta): persisten en localStorage
-const MOCK_KEY = 'bundeck:settings-mock'
-function loadMock() {
+// (Sin estado mock: todos los ajustes de este diálogo son reales —
+//  daemon, localStorage con clave propia o composables dedicados.)
+
+// ---- Atajos de teclado (Fase 1 in-app + registro para el launcher) ----
+// El estado vive aquí (el diálogo siempre está montado): combos + toggles,
+// listener keydown global, recaptura por botón y sincronización con el
+// daemon (`settings` → `shortcuts.config`, que el launcher Rust sondea).
+const shortcutIds = SHORTCUT_IDS
+const shortcutsMap = ref<ShortcutMap>(loadShortcutsState())
+const capturingId = ref<ShortcutId | null>(null)
+const seenShortcutExecutions = new Set<string>()
+const shortcutConflicts = computed(() => findShortcutConflicts(shortcutsMap.value))
+const shortcutHasConflict = (id: ShortcutId) => shortcutConflicts.value.some((g) => g.includes(id))
+const shortcutLabel = (id: ShortcutId): string =>
+  id === 'toggle-panels' ? t('bd.showHideWindow')
+  : id === 'next-profile' ? t('bd.nextProfile')
+  : id === 'prev-profile' ? t('bd.prevProfile')
+  : id === 'mute-all' ? t('bd.muteAll')
+  : t('bd.toggleKiosk')
+
+let shortcutSyncTimer: ReturnType<typeof setTimeout> | null = null
+const syncShortcutsToDaemon = () => {
+  if (shortcutSyncTimer) return
+  shortcutSyncTimer = setTimeout(() => {
+    shortcutSyncTimer = null
+    try {
+      void fetch(`${apiBase()}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: SHORTCUTS_CONFIG_KEY, value: serializeDaemonShortcutsConfig(shortcutsMap.value) }),
+      }).catch(() => {})
+    } catch { /* sin daemon: el estado local sigue mandando */ }
+  }, 400)
+}
+const persistShortcuts = () => {
+  saveShortcutsState(shortcutsMap.value)
+  syncShortcutsToDaemon()
+}
+const loadShortcutsFromDaemon = async () => {
   try {
-    return JSON.parse(localStorage.getItem(MOCK_KEY) ?? '{}')
-  } catch {
-    return {}
+    const res = await fetch(`${apiBase()}/settings?key=${encodeURIComponent(SHORTCUTS_CONFIG_KEY)}`)
+    if (!res.ok) return
+    const parsed = parseDaemonShortcutsConfig((await res.json())?.value)
+    if (parsed) {
+      shortcutsMap.value = parsed
+      saveShortcutsState(parsed)
+    }
+  } catch { /* sin daemon */ }
+}
+const setShortcutEnabled = (id: ShortcutId, on: boolean) => {
+  shortcutsMap.value[id].enabled = on
+  persistShortcuts()
+}
+const resetShortcuts = () => {
+  shortcutsMap.value = JSON.parse(JSON.stringify(DEFAULT_SHORTCUTS))
+  capturingId.value = null
+  persistShortcuts()
+  emit('notify', t('bd.settingsReset'))
+}
+const startCapture = (id: ShortcutId) => {
+  capturingId.value = id
+}
+const onCaptureKeydown = (ev: KeyboardEvent) => {
+  const id = capturingId.value
+  if (!id) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  if (ev.key === 'Escape') {
+    capturingId.value = null
+    return
+  }
+  const combo = comboFromEvent(ev as unknown as KeyEventLike)
+  if (combo) {
+    shortcutsMap.value[id].combo = combo
+    capturingId.value = null
+    persistShortcuts()
   }
 }
-const mock = ref({
-  autostart: false, tray: true, updates: true, undo: true,
-  dim: '5 min', idle: '', orientation: '0°', haptic: true, sound: false,
-  k1: true, k2: true, k3: false, port: 4455, log: '', dev: false,
-  ...loadMock()
-})
-watch(
-  mock,
-  (v) => {
+
+const runShortcutLocal = async (id: ShortcutId): Promise<void> => {
+  if (id === 'next-profile' || id === 'prev-profile') {
+    const ids = props.profiles.map((p) => p.id)
+    const target = stepProfile(ids, props.activeProfileId ?? null, id === 'next-profile' ? 1 : -1)
+    if (target) emit('activate-profile', target)
+    return
+  }
+  if (id === 'toggle-panels') {
+    const hidden = !bdShowLeft.value && !bdShowRight.value
+    bdSetPanels(hidden, hidden)
+    return
+  }
+  if (id === 'toggle-kiosk') {
+    window.dispatchEvent(new CustomEvent('bundeck:toggle-kiosk'))
+    return
+  }
+  if (id === 'mute-all') {
     try {
-      localStorage.setItem(MOCK_KEY, JSON.stringify(v))
+      const res = await fetch(`${apiBase()}/actions/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: { type: 'app-volume', pluginId: 'audio-mixer', parameters: { mute: 'true' } },
+          context: { source: 'shortcut', shortcutId: id },
+        }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (error) {
+      emit('notify', `${t('bd.muteAll')}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+}
+
+// Ejecuta un atajo con anti-doble-ejecución por `executionId`.
+// - local (tecla pulsada aquí): se ejecuta + se avisa al daemon en modo
+//   `notifyOnly` para que difunda a otros clientes sin re-ejecutar.
+// - remoto (`bundeck:shortcut` desde el broadcast del daemon, p. ej.
+//   hotkey global del launcher): el daemon ya aplicó las acciones de
+//   servidor; aquí solo se aplican las solo-UI (paneles, kiosco).
+const SERVER_SHORTCUTS: ShortcutId[] = ['next-profile', 'prev-profile', 'mute-all']
+const triggerShortcut = (id: ShortcutId, executionId: string, remote: boolean) => {
+  if (seenShortcutExecutions.has(executionId)) return
+  seenShortcutExecutions.add(executionId)
+  if (seenShortcutExecutions.size > 200) {
+    const first = seenShortcutExecutions.values().next().value
+    if (first) seenShortcutExecutions.delete(first)
+  }
+  if (remote && SERVER_SHORTCUTS.includes(id)) return
+  void runShortcutLocal(id)
+  if (!remote) {
+    try {
+      void fetch(`${apiBase()}/shortcuts/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, source: 'web', executionId, notifyOnly: true }),
+      }).catch(() => {})
     } catch { /* noop */ }
-  },
-  { deep: true }
-)
+  }
+}
+let uninstallShortcuts: (() => void) | null = null
+const onRemoteShortcut = (ev: Event) => {
+  const d = (ev as CustomEvent).detail ?? {}
+  if (typeof d?.id !== 'string' || !(SHORTCUT_IDS as readonly string[]).includes(d.id)) return
+  triggerShortcut(d.id as ShortcutId, typeof d?.executionId === 'string' && d.executionId ? d.executionId : `remote-${Date.now()}`, true)
+}
+
+// Arranque con el sistema: setting real `system.autostart` del daemon
+// (ver daemon/src/system-autostart.ts). Lo aplica el launcher Rust en el
+// SO; aquí solo se lee/escribe la preferencia, con estado de carga y error.
+const autostartEnabled = ref(false)
+const autostartLoading = ref(false)
+const autostartError = ref('')
+const loadAutostartState = async () => {
+  autostartLoading.value = true
+  autostartError.value = ''
+  try {
+    autostartEnabled.value = await loadAutostart(apiBase())
+  } catch {
+    autostartError.value = t('bd.autostartError')
+  } finally {
+    autostartLoading.value = false
+  }
+}
+const toggleAutostart = async (on: boolean) => {
+  autostartLoading.value = true
+  autostartError.value = ''
+  try {
+    await saveAutostart(apiBase(), on)
+    autostartEnabled.value = on
+  } catch (error) {
+    autostartError.value = t('bd.autostartError')
+    emit('notify', `${t('bd.autostartError')}: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    autostartLoading.value = false
+  }
+}
 
 // Cambio automático de perfil (real, persistido en el daemon vía settings)
 const { config: autoCfg, loadConfiguration: loadAutoCfg, persist: persistAutoCfg } = useAutoProfile()
@@ -817,6 +984,23 @@ const toggleAutoSwitch = async (on: boolean) => {
 }
 onMounted(() => {
   loadAutoCfg().catch(() => {})
+  loadShortcutsFromDaemon().catch(() => {})
+  uninstallShortcuts = installGlobalShortcuts(
+    (id, executionId) => triggerShortcut(id, executionId, false),
+    { getMap: () => shortcutsMap.value, isCapturing: () => capturingId.value !== null },
+  )
+  window.addEventListener('bundeck:shortcut', onRemoteShortcut)
+  window.addEventListener('keydown', onCaptureKeydown, true)
+})
+onUnmounted(() => {
+  uninstallShortcuts?.()
+  uninstallShortcuts = null
+  window.removeEventListener('bundeck:shortcut', onRemoteShortcut)
+  window.removeEventListener('keydown', onCaptureKeydown, true)
+  if (shortcutSyncTimer) {
+    clearTimeout(shortcutSyncTimer)
+    shortcutSyncTimer = null
+  }
 })
 const parseProfileData = (p: ProfileData) => {
   let d: any = p.data
@@ -1122,6 +1306,7 @@ const handleDeviceChange = async () => {
       if (result.success) {
         deviceStatus.value = result.connectedDevice ?? ''
         emit('streamdeck-connected')
+        void loadHwDisplay()
       } else {
         selectedDevice.value = ''
         deviceStatus.value = ''
@@ -1136,21 +1321,82 @@ const handleDeviceChange = async () => {
     deviceStatus.value = ''
   }
 }
+// ---- Pantalla HW por dispositivo (brillo + dim + idle, ver daemon) ----
+const hwBrightness = ref<number>(DEVICE_DISPLAY_DEFAULTS.brightness)
+const hwDimMin = ref<number>(Math.round(DEVICE_DISPLAY_DEFAULTS.dimAfterSec / 60))
+const hwIdleMin = ref<number>(DEVICE_DISPLAY_DEFAULTS.idleMinutes)
+const hwIdleAction = ref<DeviceIdleAction>(DEVICE_DISPLAY_DEFAULTS.idleAction)
+const hwDisplayLoading = ref(false)
+let hwSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+const loadHwDisplay = async () => {
+  if (!selectedDevice.value) return
+  hwDisplayLoading.value = true
+  try {
+    const s = await fetchDeviceDisplay(apiBase(), selectedDevice.value)
+    hwBrightness.value = s.brightness
+    hwDimMin.value = Math.round(s.dimAfterSec / 60)
+    hwIdleMin.value = s.idleMinutes
+    hwIdleAction.value = s.idleAction
+    // El velo web/remoto sigue estos mismos minutos de reposo.
+    webIdleMinutes.value = s.idleMinutes
+  } catch {
+    /* sin daemon o sin ajustes: se mantienen los defaults */
+  } finally {
+    hwDisplayLoading.value = false
+  }
+}
+const pushHwDisplay = async (patch: Record<string, unknown>) => {
+  if (!selectedDevice.value || hwDisplayLoading.value) return
+  try {
+    const s = await saveDeviceDisplay(apiBase(), selectedDevice.value, patch as any)
+    hwBrightness.value = s.brightness
+    hwDimMin.value = Math.round(s.dimAfterSec / 60)
+    hwIdleMin.value = s.idleMinutes
+    hwIdleAction.value = s.idleAction
+    webIdleMinutes.value = s.idleMinutes
+  } catch (e) {
+    emit('notify', String((e as Error)?.message ?? e))
+    // Releer para no dejar el control en un valor no guardado.
+    void loadHwDisplay()
+  }
+}
+const scheduleHwSave = (patch: Record<string, unknown>) => {
+  if (hwSaveTimer) clearTimeout(hwSaveTimer)
+  hwSaveTimer = setTimeout(() => {
+    hwSaveTimer = null
+    void pushHwDisplay(patch)
+  }, 400)
+}
+const onHwBrightnessInput = (v: number) => {
+  hwBrightness.value = clampHwBrightness(v)
+  scheduleHwSave({ brightness: hwBrightness.value })
+}
+const onHwDimMinChange = (v: number) => {
+  hwDimMin.value = clampIdleMinutes(v)
+  void pushHwDisplay({ dimAfterSec: hwDimMin.value * 60 })
+}
+const onHwIdleMinChange = (v: number) => {
+  hwIdleMin.value = clampIdleMinutes(v)
+  void pushHwDisplay({ idleMinutes: hwIdleMin.value })
+}
+const onHwIdleActionChange = (v: string) => {
+  const a = (['off', 'dim', 'clock'] as DeviceIdleAction[]).includes(v as DeviceIdleAction)
+    ? (v as DeviceIdleAction)
+    : DEVICE_DISPLAY_DEFAULTS.idleAction
+  hwIdleAction.value = a
+  void pushHwDisplay({ idleAction: a })
+}
 const testDevice = async () => {
   try {
     await fetch(`${apiBase()}/devices/streamdeck/test`, { method: 'POST' })
   } catch { /* noop */ }
 }
 
-const resetAll = () => {
-  bdSetPalette('auto')
-  bdSetLabelMode('a')
-  bdSetKeySize(76)
-  bdSetRadius(16)
-  bdSetBrightness(80)
-  bdSetAnimations(true)
-  bdSetLongPressMs(500)
-  emit('notify', t('bd.settingsReset'))
+const handleFactoryResetDone = () => {
+  // El daemon ya restauró la instalación fresca y se limpió el
+  // localStorage: recargar deja la UI en el estado por defecto.
+  window.location.reload()
 }
 
 const show = (at?: Section, pluginTab?: PluginsTab) => {
@@ -1166,7 +1412,8 @@ const show = (at?: Section, pluginTab?: PluginsTab) => {
   dialog.value?.showModal()
   void syncApiPort().then(() => {
     loadDevices()
-    loadStatus()
+    loadStatus().then(() => loadHwDisplay()).catch(() => {})
+    loadAutostartState().catch(() => {})
   })
   loadVersion()
 }

@@ -25,6 +25,7 @@ import { handleMcp } from './mcp';
 import { handleBackups } from './backups';
 import { handleStreamDeck } from './streamdeck';
 import { handleSessions } from './sessions';
+import { handleShortcuts } from './shortcuts';
 import { handleJobs } from './jobs';
 import { handleAdmin } from './admin';
 import { handleRemote } from './remote';
@@ -46,8 +47,9 @@ const HANDLERS: ApiHandler[] = [
   handleBackups, // /api/v1/backups/* (export/validate/restore + progreso WS)
   handleStreamDeck, // /api/v1/streamdeck/* (detect/validate/import + progreso WS)
   handleSessions, // /api/v1/sessions/* + /api/v1/navigate (vistas por dispositivo)
+  handleShortcuts, // /api/v1/shortcuts/* (atajos globales: trigger + lista)
   handleJobs,
-  handleAdmin, // /admin/shutdown + /update (501)
+  handleAdmin, // /admin/shutdown + /admin/reset + /update (501)
   handleRemote, // /api/v1/remote/* (E2E relay client)
 ];
 

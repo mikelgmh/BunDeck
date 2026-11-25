@@ -563,7 +563,7 @@ export function useStreamDeck() {
     }))
     ws.send(JSON.stringify({
       type: 'subscribe',
-      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings'] }
+      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings', 'shortcuts'] }
     }))
     return true
   }
@@ -889,6 +889,16 @@ export function useStreamDeck() {
           }
         } catch {
           /* best-effort */
+        }
+        break
+      }
+      case 'shortcut.triggered': {
+        // Atajo disparado en el daemon (launcher global u otro cliente):
+        // las acciones de servidor ya las aplicó el daemon; aquí solo se
+        // reenvían a la UI local (paneles/kiosco). El consumidor (Ajustes)
+        // ignora ecos con executionId ya visto.
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('bundeck:shortcut', { detail: message.payload }))
         }
         break
       }

@@ -389,6 +389,7 @@
       :install-progress="installProgress"
       :ws-connected="isConnected"
       :ws-url="WS_URL"
+      :active-profile-id="selectedProfile"
       @language-changed="switchLanguage"
       @streamdeck-connected="onSdConnected"
       @streamdeck-disconnected="onSdDisconnected"
@@ -525,6 +526,8 @@
       <span>{{ bdToast.message }}</span>
       <button v-if="bdToast.undo" @click="doUndo">{{ t('bd.undo') }}</button>
     </div>
+    <!-- Velo de inactividad (web/remotos): opacidad según minutos de reposo. -->
+    <BdIdleVeil />
     </template>
   </div>
 </template>
@@ -585,6 +588,7 @@ const PluginSettingsDialog = defineAsyncComponent(() => import('./PluginSettings
 const SettingsDialog = defineAsyncComponent(() => import('./SettingsDialog.vue'))
 const IconPickerDialog = defineAsyncComponent(() => import('./IconPickerDialog.vue'))
 const QrDialog = defineAsyncComponent(() => import('./QrDialog.vue'))
+const BdIdleVeil = defineAsyncComponent(() => import('./BdIdleVeil.vue'))
 const WelcomeDialog = defineAsyncComponent(() => import('./WelcomeDialog.vue'))
 const UpdateModal = defineAsyncComponent(() => import('../UpdateModal.vue'))
 import type { PageData } from '../../types/streamdeck'
@@ -665,6 +669,15 @@ const onKioskCornerTap = () => {
     kioskCornerTaps = []
     void requestKioskExit('corner')
   }
+}
+// Atajos globales (Ajustes → Atajos, o broadcast `shortcut.triggered` del
+// daemon cuando el launcher captura la hotkey): salida directa sin
+// confirmación, la pulsación ya es un gesto explícito del usuario.
+if (typeof window !== 'undefined') {
+  window.addEventListener('bundeck:toggle-kiosk', () => {
+    if (kiosk.value) exitKiosk()
+    else enterKiosk()
+  })
 }
 /** Pantalla completa bajo demanda (gesto del usuario; si falla, se sigue sin ella). */
 const onKioskFullscreen = () => {

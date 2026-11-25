@@ -25,6 +25,8 @@
 //!   (ventana nativa del host) y Salir.
 
 mod monitor;
+mod autostart;
+mod shortcuts;
 mod theme;
 mod tray;
 pub mod updater;
@@ -582,7 +584,7 @@ impl LauncherView {
     }
 
     /// Acción de reinicio: activa la versión descargada con backup +
-    /// rollback y luego cambia el launcher vía `libredeck-updater`.
+    /// rollback y luego cambia el launcher vía `bundeck-updater`.
     /// Devuelve true si hay que cerrar la ventanita.
     fn apply_update(&mut self) -> bool {
         // 0) Reinicio pendiente para completar el self-update del launcher.
@@ -773,6 +775,10 @@ fn start_monitor_thread(
             if snapshot.api.state == State::Ok {
                 pending_start = false;
             }
+            // Autostart del SO según `system.autostart` del daemon (solo
+            // actúa cuando el valor cambió; en DEV_MODE solo registra).
+            // Ver autostart.rs y daemon/src/system-autostart.ts.
+            crate::autostart::sync_from_daemon();
             let installed = monitor::installed_version();
             let host = monitor::host_alive();
             if events
@@ -1956,6 +1962,8 @@ fn pending_update_for_startup() -> Option<String> {
 }
 
 fn main() {
+    // Atajos globales (hilo dedicado; no bloquea el arranque ni la UI).
+    shortcuts::start_shortcuts();
     // Las actualizaciones se descargan mientras la app está abierta, pero se
     // activan al reiniciar. Si el usuario cerró BunDeck sin reiniciarlo,
     // aplica aquí el stage antes de abrir la ventana o arrancar el daemon.

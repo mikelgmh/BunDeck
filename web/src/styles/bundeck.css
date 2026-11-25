@@ -1044,6 +1044,18 @@
   line-height: 1.5;
   margin: 0 0 8px;
 }
+/* Velo de inactividad (web/remotos): pantalla completa negra, la opacidad la
+   pone el componente según el tiempo sin interactuar; el primer toque
+   despierta (poke) sin atravesar. Por encima del contenido pero por debajo
+   de los <dialog> nativos (top-layer). */
+.bundeck .bd-idle-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: #000;
+  pointer-events: auto;
+  transition: opacity 0.6s ease;
+}
 /* Enlace de invitacion LAN (QR/enlace): mismo codigo, copiable. */
 .bundeck .bd-lan-link-row {
   display: flex;

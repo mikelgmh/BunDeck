@@ -317,10 +317,18 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
 
     if (method === 'POST') {
       const body = await _req.json();
-      const { key, value } = body;
+      let { key, value } = body;
 
       if (!key || value === undefined) {
         return jsonResponse({ error: 'key and value required' }, 400);
+      }
+
+      // `system.autostart`: normalizar a 'true'/'false' para que la web
+      // (JSON.stringify) y el launcher Rust (parseo tolerante) siempre se
+      // entiendan. Ver daemon/src/system-autostart.ts.
+      if (key === 'system.autostart') {
+        const { parseAutostart, formatAutostart } = await import('../system-autostart');
+        value = formatAutostart(parseAutostart(typeof value === 'string' ? value : JSON.stringify(value)));
       }
 
       db.setSetting(key, value);
@@ -869,6 +877,47 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
       } catch (error) {
         console.error('Failed to test StreamDeck:', error);
         return jsonResponse({ error: 'Failed to test StreamDeck' }, 500);
+      }
+    }
+  }
+
+  // Pantalla por dispositivo: brillo + dim + idle (persistidos en settings
+  // como `devices.<id>.*`, nunca globales). Sin `device` se usa el deck
+  // conectado (o la sesión local si no hay HW).
+  if (path === '/api/v1/devices/streamdeck/display') {
+    if (method === 'GET') {
+      const device = url.searchParams.get('device') || streamDeckDriver.getDisplayDeviceId();
+      try {
+        const settings = streamDeckDriver.getDisplaySettings(device, db);
+        return jsonResponse({ device, ...settings });
+      } catch (error) {
+        console.error('Failed to read StreamDeck display settings:', error);
+        return jsonResponse({ error: 'Failed to read display settings' }, 500);
+      }
+    }
+    if (method === 'POST') {
+      const body = ((await _req.json()) as any) ?? {};
+      const device =
+        typeof body.device === 'string' && body.device ? body.device : streamDeckDriver.getDisplayDeviceId();
+      const { brightness, dimAfterSec, idleMinutes, idleAction } = body;
+      try {
+        const settings = await streamDeckDriver.setDisplaySettings(
+          { brightness, dimAfterSec, idleMinutes, idleAction },
+          device,
+          db,
+        );
+        try {
+          services.wsManager?.broadcast('device.display', { device, ...settings }, 'devices');
+        } catch {
+          /* noop */
+        }
+        return jsonResponse({ device, ...settings });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Failed to save display settings';
+        // Validación (claves/fuera de rango) → 400; el resto → 500.
+        const status = /debe ser|must be|integer|entre/i.test(msg) ? 400 : 500;
+        if (status === 500) console.error('Failed to save StreamDeck display settings:', error);
+        return jsonResponse({ error: msg }, status);
       }
     }
   }

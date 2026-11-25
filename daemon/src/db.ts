@@ -497,7 +497,10 @@ export async function initDatabase() {
     { key: 'ws.port', value: '3003' },
     { key: 'security.cors_origins', value: 'http://localhost:4321,http://127.0.0.1:4321' },
     { key: 'current.profile_id', value: '' },
-    { key: 'current.page_id', value: '' }
+    { key: 'current.page_id', value: '' },
+    // Preferencia de arranque con el sistema (ver system-autostart.ts):
+    // la web la edita, el launcher Rust la aplica en el SO.
+    { key: 'system.autostart', value: 'false' }
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -945,13 +948,13 @@ export function purgeManualDevices(svc: DatabaseService): string[] {
   return removed;
 }
 
-async function installBuiltInPlugins(db: Database) {
-  console.log('🔌 Installing built-in plugins...');
+type BuiltInPluginEntry = { id: string; class: any };
 
-  // Import built-in plugins statically to avoid dynamic import issues
+async function loadBuiltInPluginEntries(): Promise<BuiltInPluginEntry[]> {
+  // Import estático para evitar problemas de dynamic import
   const { ShellPlugin, HttpPlugin, HotkeyPlugin, TypeTextPlugin, MultimediaPlugin, OpenAppPlugin, PagePlugin, UtilityPlugin, BrowserPlugin, PCVitalsPlugin, ObsPlugin, HomeAssistantPlugin, SpotifyPlugin, DiscordPlugin, TwitchPlugin, YoutubePlugin, SoundboardPlugin, VoicemodPlugin, VoicemeeterPlugin, ShadowplayPlugin, WebcamPlugin, PhotoshopPlugin, PremierePlugin, DavinciPlugin, BlenderPlugin, MidiOscPlugin, SteamPlugin, MinecraftPlugin, HueExtraPlugin, GoveePlugin, AudioMixerPlugin, WindowManagerPlugin, MeetingsPlugin, SlackPlugin, CalendarPlugin, TimerPlugin, ClipboardPlugin, FlowControlPlugin, MultiactionPlugin, ProfileAutoPlugin, WeatherPlugin, EmailPlugin } = await import('./plugins/index');
 
-  const builtInPlugins = [
+  return [
     { id: 'shell', class: ShellPlugin },
     { id: 'http', class: HttpPlugin },
     { id: 'hotkey', class: HotkeyPlugin },
@@ -995,7 +998,10 @@ async function installBuiltInPlugins(db: Database) {
     { id: 'weather', class: WeatherPlugin },
     { id: 'email', class: EmailPlugin }
   ];
+}
 
+/** Inserta/actualiza los plugins built-in (preserva `enabled`). Síncrono: apto para transacciones. */
+function seedBuiltInPlugins(db: Database, builtInPlugins: BuiltInPluginEntry[]) {
   const insertIgnore = db.prepare(`
     INSERT OR IGNORE INTO plugins (id, name, version, manifest, enabled, installed_at, updated_at, source_type, origin, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', 'builtin', 'active')
@@ -1026,8 +1032,122 @@ async function installBuiltInPlugins(db: Database) {
       console.error(`❌ Failed to install built-in plugin ${pluginInfo.id}:`, error);
     }
   }
+}
 
+async function installBuiltInPlugins(db: Database) {
+  console.log('🔌 Installing built-in plugins...');
+  seedBuiltInPlugins(db, await loadBuiltInPluginEntries());
   console.log('✅ Built-in plugins installation completed');
+}
+
+export interface FactoryResetResult {
+  profileId: string;
+  profiles: number;
+  pages: number;
+  buttons: number;
+  plugins: number;
+}
+
+/**
+ * Restablecimiento total a valores de fábrica.
+ *
+ * Vacía TODO el contenido (perfiles, páginas, botones/widgets, flows,
+ * automatizaciones, variables, plugins, assets, sesiones, logs y ajustes)
+ * y vuelve a ejecutar la semilla de instalación fresca: ajustes por
+ * defecto + plugins built-in + perfil/páginas por defecto
+ * (`ensureDefaultProfile`). El veto `default.dismissed` se ignora: un
+ * reseteo de fábrica siempre recrea el perfil por defecto.
+ *
+ * Todo el borrado+reseed corre en UNA transacción: o queda como una
+ * instalación fresca, o no toca nada (nunca deja la BD vacía).
+ */
+export async function resetDatabaseToDefaults(): Promise<FactoryResetResult> {
+  const { ensureDefaultProfile, DEFAULT_DISMISSED_KEY } = await import('./default-profile');
+  const entries = await loadBuiltInPluginEntries();
+  const svc = new DatabaseService();
+
+  const summary = svc.transaction(() => {
+    const raw = getDatabase();
+    // Borrado: hijos antes que padres (las FK son documentales en SQLite).
+    const wipes = [
+      'DELETE FROM buttons',
+      'DELETE FROM pages',
+      'DELETE FROM profile_assignments',
+      'DELETE FROM profiles',
+      'DELETE FROM device_sessions',
+      'DELETE FROM client_sessions',
+      'DELETE FROM triggers',
+      'DELETE FROM flow_runs',
+      'DELETE FROM flows',
+      'DELETE FROM automations',
+      'DELETE FROM flow_scripts',
+      'DELETE FROM flow_automations',
+      'DELETE FROM flow_vars',
+      'DELETE FROM variables',
+      'DELETE FROM widgets',
+      'DELETE FROM assets',
+      'DELETE FROM logs',
+      'DELETE FROM plugins',
+      'DELETE FROM devices',
+      'DELETE FROM settings',
+    ];
+    for (const sql of wipes) {
+      try { raw.prepare(sql).run(); } catch { /* tabla ausente en DBs antiguas: noop */ }
+    }
+
+    // Ajustes por defecto (misma semilla que initDatabase).
+    const defaultSettings = [
+      { key: 'app.version', value: '0.1.0' },
+      { key: 'api.port', value: '3001' },
+      { key: 'ws.port', value: '3003' },
+      { key: 'security.cors_origins', value: 'http://localhost:4321,http://127.0.0.1:4321' },
+      { key: 'current.profile_id', value: '' },
+      { key: 'current.page_id', value: '' }
+    ];
+    const insertSetting = raw.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+    for (const setting of defaultSettings) {
+      insertSetting.run(setting.key, setting.value);
+    }
+    try {
+      raw.prepare('UPDATE settings SET value = ? WHERE key = ?').run(getVersion(), 'app.version');
+    } catch { /* mejor esfuerzo */ }
+
+    // Plugins built-in frescos (todos activados, como instalación nueva).
+    seedBuiltInPlugins(raw, entries);
+
+    // El reseteo ignora el veto de borrado del perfil default.
+    try { raw.prepare('DELETE FROM settings WHERE key = ?').run(DEFAULT_DISMISSED_KEY); } catch { /* noop */ }
+    const r = ensureDefaultProfile(svc);
+    if (!r) throw new Error('No se pudo recrear el perfil por defecto');
+    return r;
+  });
+
+  // Ficheros de assets: best-effort fuera de la transacción.
+  try {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const { getAssetsDir } = await import('./paths');
+    const dir = getAssetsDir();
+    if (fs.existsSync(dir)) {
+      for (const f of fs.readdirSync(dir)) {
+        try { fs.rmSync(path.join(dir, f), { recursive: true, force: true }); } catch { /* noop */ }
+      }
+    }
+  } catch { /* noop: los metadatos ya están limpios */ }
+
+  try {
+    svc.addLog({ level: 'info', message: 'admin:factory-reset', meta: { profileId: summary.profileId }, ts: Date.now() });
+  } catch { /* noop */ }
+
+  const profiles = svc.getProfiles();
+  let pages = 0;
+  let buttons = 0;
+  for (const p of profiles) {
+    const pgs = svc.getPagesByProfile(p.id);
+    pages += pgs.length;
+    for (const pg of pgs) buttons += svc.getButtonsByPage(pg.id).length;
+  }
+  return { profileId: summary.profileId, profiles: profiles.length, pages, buttons, plugins: svc.getPlugins().length };
 }
 
 // Funciones de utilidad para acceso a datos

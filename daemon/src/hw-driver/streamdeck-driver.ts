@@ -11,6 +11,15 @@ import {
   resolvedSignature,
   resolveKeyDisplay,
 } from './key-display';
+import {
+  DeviceIdleTracker,
+  dimLevelFor,
+  displaySettingKey,
+  normalizeBrightness,
+  parseDisplaySettings,
+  validateDisplayPatch,
+  type DeviceDisplaySettings,
+} from './device-display';
 
 // Carga perezosa de las libs nativas (node-hid): si faltan o fallan,
 // el driver queda "sin hardware" en vez de tumbar el daemon/API.
@@ -126,6 +135,14 @@ async function getSimpleIconPath(iconName: string): Promise<string | null> {
 export class StreamDeckDriver {
   private streamDeck: StreamDeck | null = null;
   private connectedDevice: string | null = null;
+
+  /**
+   * Brillo por dispositivo + dim + idle (devices.<id>.* en settings).
+   * Sin timers propios: `idleTimer` sondea `tracker.poll()` cada 5 s;
+   * los tests avanzan el reloj llamando a `checkIdleState(nowMs)`.
+   */
+  private readonly idleTracker = new DeviceIdleTracker();
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Sesión propia del hardware (independiente de los browsers/relay).
@@ -330,6 +347,9 @@ export class StreamDeckDriver {
         console.log(`🎛️ Restoring hardware session page: ${this.sessionPageId}`);
         await this.updateFromPage(this.sessionPageId);
       }
+      // Brillo por dispositivo + bucle dim/idle de este deck.
+      this.refreshDisplaySettings();
+      this.startIdleLoop();
       return true;
     } catch (error) {
       console.error('❌ Failed to connect to StreamDeck:', error);
@@ -339,6 +359,7 @@ export class StreamDeckDriver {
   }
 
   async disconnect(): Promise<void> {
+    this.stopIdleLoop();
     for (const [, iv] of this.dynamicIntervals.entries()) {
       clearInterval(iv);
     }
@@ -407,6 +428,7 @@ export class StreamDeckDriver {
   private async handleKeyDown(keyIndex: number): Promise<void> {
     this.keyDownAt.set(keyIndex, Date.now());
     this.longFired.delete(keyIndex);
+    void this.noteHwActivity();
     // Si había un short pendiente (posible doble), se cancela: la segunda
     // pulsación decide (double), no se ejecuta el short anterior.
     const pending = this.pendingShort.get(keyIndex);
@@ -441,6 +463,7 @@ export class StreamDeckDriver {
       this.longTimers.delete(keyIndex);
     }
     this.keyDownAt.delete(keyIndex);
+    void this.noteHwActivity();
     // touch-end (best-effort, solo con reglas).
     try {
       const target = this.resolvePressTarget(keyIndex);
@@ -524,8 +547,159 @@ export class StreamDeckDriver {
     return null;
   }
 
-  async testStreamDeck(): Promise<void> {
-    if (!this.streamDeck) {
+  // ---- Brillo por dispositivo + dim + idle ----
+
+  /** Id usado en las claves `devices.<id>.*`. Sin HW conectado, sesión local. */
+  getDisplayDeviceId(): string {
+    return this.connectedDevice ?? 'streamdeck-local';
+  }
+
+  /** Ajustes de pantalla del dispositivo (los suyos, no globales). */
+  getDisplaySettings(
+    deviceId: string = this.getDisplayDeviceId(),
+    store?: { getSetting(k: string): string | null },
+  ): DeviceDisplaySettings {
+    const db = store ?? new DatabaseService();
+    return parseDisplaySettings((k) => db.getSetting(k), deviceId);
+  }
+
+  /** Recarga los ajustes del deck conectado en el tracker (tras conectar o POST). */
+  refreshDisplaySettings(
+    deviceId: string = this.getDisplayDeviceId(),
+    store?: { getSetting(k: string): string | null },
+  ): DeviceDisplaySettings {
+    const s = this.getDisplaySettings(deviceId, store);
+    this.idleTracker.updateSettings(s);
+    return s;
+  }
+
+  /**
+   * Guarda un patch parcial (`brightness`, `dimAfterSec`, `idleMinutes`,
+   * `idleAction`) para un dispositivo y lo aplica en vivo si es el conectado.
+   */
+  async setDisplaySettings(
+    patch: Record<string, unknown>,
+    deviceId: string = this.getDisplayDeviceId(),
+    store?: { getSetting(k: string): string | null; setSetting(k: string, v: string): void },
+  ): Promise<DeviceDisplaySettings> {
+    const valid = validateDisplayPatch(patch);
+    const db = store ?? new DatabaseService();
+    for (const [field, value] of Object.entries(valid)) {
+      db.setSetting(displaySettingKey(deviceId, field as 'brightness'), String(value));
+    }
+    this.idleTracker.updateSettings(valid);
+    // Cualquier cambio manual despierta: restaura brillo y repinta.
+    if (deviceId === this.getDisplayDeviceId()) {
+      this.idleTracker.noteActivity(Date.now());
+      if (this.streamDeck) {
+        await this.applyHwBrightness(this.idleTracker.getSettings().brightness);
+        const view = this.getSessionView();
+        if (view.pageId) await this.updateFromPage(view.pageId);
+      }
+    }
+    return this.idleTracker.getSettings();
+  }
+
+  /** Atajo: fija el brillo (0-100) de un dispositivo. */
+  async setBrightness(
+    deviceId: string,
+    brightness: number,
+    store?: { getSetting(k: string): string | null; setSetting(k: string, v: string): void },
+  ): Promise<DeviceDisplaySettings> {
+    return this.setDisplaySettings({ brightness: normalizeBrightness(brightness) }, deviceId, store);
+  }
+
+  /** ¿Pantalla apagada por reposo? (los repintados periódicos la respetan). */
+  isScreenOff(): boolean {
+    const s = this.idleTracker.getSettings();
+    return this.idleTracker.currentPhase() === 'idle' && s.idleAction === 'off';
+  }
+
+  /** Actividad HW: despierta de dim/idle restaurando brillo y página. */
+  async noteHwActivity(): Promise<void> {
+    const was = this.idleTracker.currentPhase();
+    this.idleTracker.noteActivity(Date.now());
+    if (was === 'active' || !this.streamDeck) return;
+    await this.applyHwBrightness(this.idleTracker.getSettings().brightness);
+    const view = this.getSessionView();
+    if (view.pageId) await this.updateFromPage(view.pageId);
+  }
+
+  private startIdleLoop(): void {
+    this.stopIdleLoop();
+    this.idleTracker.noteActivity(Date.now());
+    // Aplica el brillo guardado al conectar (la lib lo resetea al abrir).
+    void this.applyHwBrightness(this.idleTracker.getSettings().brightness);
+    this.idleTimer = setInterval(() => {
+      void this.checkIdleState().catch((e) => console.error('❌ Idle check failed:', e));
+    }, 5000);
+    if (typeof (this.idleTimer as unknown as { unref?: () => void }).unref === 'function') {
+      (this.idleTimer as unknown as { unref: () => void }).unref();
+    }
+  }
+
+  private stopIdleLoop(): void {
+    if (this.idleTimer) {
+      clearInterval(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  /**
+   * Avanza dim/idle al instante `nowMs` (el bucle usa Date.now()).
+   * Devuelve la fase nueva si cambió, null si sigue igual.
+   */
+  async checkIdleState(nowMs: number = Date.now()): Promise<'active' | 'dimmed' | 'idle' | null> {
+    const changed = this.idleTracker.poll(nowMs);
+    if (!changed || !this.streamDeck) return changed;
+    const s = this.idleTracker.getSettings();
+    if (changed === 'dimmed') {
+      await this.applyHwBrightness(s.idleAction === 'clock' ? s.brightness : dimLevelFor(s.brightness));
+    } else if (changed === 'idle') {
+      if (s.idleAction === 'off') {
+        try {
+          await this.streamDeck.clearPanel();
+        } catch (e) {
+          console.warn('⚠️ clearPanel falló:', e instanceof Error ? e.message : e);
+        }
+      } else if (s.idleAction === 'dim') {
+        await this.applyHwBrightness(dimLevelFor(s.brightness));
+      } else {
+        await this.paintClockIdle();
+      }
+    }
+    return changed;
+  }
+
+  /** Brillo nativo (`setBrightness` existe en todos los modelos, ver core/types). */
+  private async applyHwBrightness(n: number): Promise<void> {
+    if (!this.streamDeck) return;
+    try {
+      await (this.streamDeck as StreamDeck).setBrightness(normalizeBrightness(n));
+    } catch (e) {
+      // Modelos/lib antiguas sin soporte: el dim se emula apagando en idle.
+      console.warn('⚠️ setBrightness no soportado:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  /** Reposo `clock`: pinta HH:MM en todas las teclas con el render normal. */
+  private async paintClockIdle(): Promise<void> {
+    if (!this.streamDeck) return;
+    try {
+      const d = new Date();
+      const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const size = this.getIconSize();
+      const keyCount = this.getKeyCount();
+      for (let i = 0; i < keyCount; i++) {
+        const buf = await this.generateButtonImage({ label, backgroundColor: '#000000', textColor: '#f1f5f9' }, size);
+        await this.setButtonImage(i, buf);
+      }
+    } catch (e) {
+      console.warn('⚠️ Reloj idle falló:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  async testStreamDeck(): Promise<void> {    if (!this.streamDeck) {
       console.log('❌ StreamDeck not connected, cannot run test');
       return;
     }
@@ -735,13 +909,14 @@ export class StreamDeckDriver {
     const centerY = topH + (height - topH - botH) / 2;
     const maxW = width - 10 * U;
 
+    const FONT_FAMILY = `Arial, "DejaVu Sans", "Liberation Sans", sans-serif`;
     const fitFont = (text: string, base: number, weight = ''): number => {
       let fs = base;
       try {
-        ctx.font = `${weight ? weight + ' ' : ''}${fs}px Arial`;
+        ctx.font = `${weight ? weight + ' ' : ''}${fs}px ${FONT_FAMILY}`;
         while (fs > 7 * U && ctx.measureText(text).width > maxW) {
           fs -= 1;
-          ctx.font = `${weight ? weight + ' ' : ''}${fs}px Arial`;
+          ctx.font = `${weight ? weight + ' ' : ''}${fs}px ${FONT_FAMILY}`;
         }
       } catch { /* medida no disponible: tamaño base */ }
       return fs;
@@ -786,7 +961,7 @@ export class StreamDeckDriver {
           if (t.length > 8 && t.includes(' ')) {
             const parts = t.split(' ');
             const mid = Math.ceil(parts.length / 2);
-            ctx.font = `${12 * U}px Arial`;
+            ctx.font = `${12 * U}px Arial, "DejaVu Sans", "Liberation Sans", sans-serif`;
             ctx.fillText(ellipsis(parts.slice(0, mid).join(' ')), cx, centerY - 8 * U);
             ctx.fillText(ellipsis(parts.slice(mid).join(' ')), cx, centerY + 8 * U);
           } else {
@@ -1319,6 +1494,12 @@ export class StreamDeckDriver {
       console.log('❌ StreamDeck not connected, skipping button update');
       return;
     }
+    // Reposo con pantalla apagada: no repintar (encendería el panel).
+    // El despertar repinta la página al pulsar (noteHwActivity).
+    if (this.isScreenOff()) {
+      console.log('💤 StreamDeck en reposo (pantalla apagada): repintado omitido');
+      return;
+    }
 
     console.log(`🎛️ Updating StreamDeck buttons with data for ${buttons.length} buttons`);
     const keyCount = this.getKeyCount();
@@ -1420,6 +1601,13 @@ export class StreamDeckDriver {
         });
       }
     } catch { /* best-effort */ }
+
+    // Reposo con pantalla apagada: se conserva la sesión pero no se pinta
+    // (al despertar se repinta la página vigente).
+    if (this.isScreenOff()) {
+      console.log('💤 StreamDeck en reposo (pantalla apagada): repintado omitido');
+      return;
+    }
 
     // Coalescar repintados concurrentes: si ya hay uno en vuelo (p.ej. un
     // vaciado seguido de un reorder), encolar el último pageId y volver.
