@@ -3,8 +3,8 @@
  *
  * Replica el comportamiento del plugin oficial de Elgato: en vez de enviar
  * teclas a la ventana con foco, habla con el cliente Discord local a través
- * de su servidor RPC (WebSocket en 127.0.0.1:6463-6472, equivalente al IPC
- * `discord-ipc-0..9`) usando comandos SET_VOICE_SETTINGS / AUTHENTICATE /
+ * de su pipe IPC (`discord-ipc-0..9`, primario) con fallback al servidor RPC
+ * WebSocket en 127.0.0.1:6463-6472 usando comandos SET_VOICE_SETTINGS / AUTHENTICATE /
  * SUBSCRIBE, con OAuth2 (scopes `identify`, `rpc` y `rpc.voice.write`).
  * Zero-config para el usuario final: SOLO pulsa Autorizar. La app de Discord
  * la crea el maintainer una vez (docs/discord-app-setup.md) y el
@@ -14,7 +14,7 @@
  * discord.com. Discord pide permiso explícito UNA vez (popup "Authorize");
  * el token se guarda en local y se renueva.
  *
- * Sin dependencias externas: solo builtins (WebSocket/fetch). Todo lo
+ * Sin dependencias externas: solo builtins (WebSocket/fetch/node:net). Todo lo
  * específico de Bun/Node se inyecta para poder testear sin red.
  */
 
@@ -379,50 +379,148 @@ export function nextRpcNonce(): string {
     return `libredeck-${Date.now().toString(36)}-${rpcNonceCounter}`
 }
 
-/** HANDSHAKE inicial (op 0): versión + client_id. */
-export function buildRpcHandshake(clientId: string): { op: number; d: { v: number; client_id: string } } {
+/** HANDSHAKE inicial: versión + client_id (JSON PLANO, sin envoltorio `{op,d}`).
+ * El formato `{op:0,d:{...}}` es del gateway, NO del RPC: el pipe lo rechaza
+ * (`4000 No Client ID Specified`) y el WS documentado también usa JSON plano.
+ * El opcode viaja fuera del JSON (header del frame en pipe, implícito en WS). */
+export function buildRpcHandshake(clientId: string): { v: number; client_id: string } {
     const id = String(clientId ?? '').trim()
     if (!id) throw new Error('Falta el Client ID para el handshake RPC.')
-    return { op: RPC_OP_HANDSHAKE, d: { v: 1, client_id: id } }
+    return { v: 1, client_id: id }
 }
 
-/** AUTHENTICATE (op 1 + cmd): valida el access token contra el cliente. */
-export function buildRpcAuthenticate(accessToken: string, nonce: string = nextRpcNonce()): { op: number; d: Record<string, unknown> } {
+/** AUTHENTICATE: valida el access token contra el cliente (payload plano). */
+export function buildRpcAuthenticate(accessToken: string, nonce: string = nextRpcNonce()): Record<string, unknown> {
     const token = String(accessToken ?? '').trim()
     if (!token) throw new Error('Falta el access token para AUTHENTICATE.')
-    return { op: RPC_OP_FRAME, d: { cmd: 'AUTHENTICATE', args: { access_token: token }, nonce } }
+    return { cmd: 'AUTHENTICATE', args: { access_token: token }, nonce }
 }
 
-/** SET_VOICE_SETTINGS: mute/deaf reales, sin foco ni teclas. */
+/** SET_VOICE_SETTINGS: mute/deaf reales, sin foco ni teclas (payload plano). */
 export function buildRpcSetVoiceSettings(
     voice: { mute?: boolean | null; deaf?: boolean | null },
     nonce: string = nextRpcNonce(),
-): { op: number; d: Record<string, unknown> } {
+): Record<string, unknown> {
     const args: Record<string, unknown> = {}
     if (typeof voice.mute === 'boolean') args.mute = voice.mute
     if (typeof voice.deaf === 'boolean') args.deaf = voice.deaf
     if (Object.keys(args).length === 0) {
         throw new Error('SET_VOICE_SETTINGS requiere al menos mute o deaf (boolean).')
     }
-    return { op: RPC_OP_FRAME, d: { cmd: 'SET_VOICE_SETTINGS', args, nonce } }
+    return { cmd: 'SET_VOICE_SETTINGS', args, nonce }
 }
 
 /** SUBSCRIBE a VOICE_SETTINGS_UPDATE: estado real de voz (para toggles). */
-export function buildRpcSubscribeVoiceSettings(nonce: string = nextRpcNonce()): { op: number; d: Record<string, unknown> } {
-    return { op: RPC_OP_FRAME, d: { cmd: 'SUBSCRIBE', evt: 'VOICE_SETTINGS_UPDATE', args: {}, nonce } }
+export function buildRpcSubscribeVoiceSettings(nonce: string = nextRpcNonce()): Record<string, unknown> {
+    return { cmd: 'SUBSCRIBE', evt: 'VOICE_SETTINGS_UPDATE', args: {}, nonce }
 }
 
-/** SELECT_VOICE_CHANNEL: mover al usuario a un canal de voz. */
+/** SELECT_VOICE_CHANNEL: mover al usuario a un canal de voz (payload plano). */
 export function buildRpcSelectVoiceChannel(
     sel: { guildId?: string | null; channelId: string | null; timeout?: number | null },
     nonce: string = nextRpcNonce(),
-): { op: number; d: Record<string, unknown> } {
+): Record<string, unknown> {
     const channelId = sel.channelId === null ? null : String(sel.channelId ?? '').trim()
     if (channelId !== null && !channelId) throw new Error('SELECT_VOICE_CHANNEL requiere channelId (o null para desconectar).')
     const args: Record<string, unknown> = { channel_id: channelId }
     if (sel.guildId) args.guild_id = String(sel.guildId)
     if (typeof sel.timeout === 'number' && Number.isFinite(sel.timeout)) args.timeout = sel.timeout
-    return { op: RPC_OP_FRAME, d: { cmd: 'SELECT_VOICE_CHANNEL', args, nonce } }
+    return { cmd: 'SELECT_VOICE_CHANNEL', args, nonce }
+}
+
+// ---------------- Pipe IPC (transporte primario) ----------------
+
+/** Índices IPC que se prueban, en orden (0..9, según Docs de Discord). */
+export const DISCORD_IPC_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const
+
+function readIpcEnv(name: string): string | null {
+    try {
+        const v = (globalThis as any)?.process?.env?.[name]
+        return typeof v === 'string' && v.trim() ? v.trim() : null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * Ruta del pipe IPC n según Docs de Discord:
+ * - Windows: `\\?\pipe\discord-ipc-{n}`
+ * - Linux/macOS: `${XDG_RUNTIME_DIR|TMPDIR|TMP|TEMP|/tmp}/discord-ipc-{n}`
+ */
+export function discordIpcPipePath(n: number): string {
+    const idx = Math.max(0, Math.floor(Number(n) || 0))
+    const proc = (globalThis as any)?.process
+    if (proc?.platform === 'win32') return `\\\\?\\pipe\\discord-ipc-${idx}`
+    const base = readIpcEnv('XDG_RUNTIME_DIR')
+        ?? readIpcEnv('TMPDIR')
+        ?? readIpcEnv('TMP')
+        ?? readIpcEnv('TEMP')
+        ?? '/tmp'
+    return `${base.replace(/\/+$/, '')}/discord-ipc-${idx}`
+}
+
+/** Codifica un frame de pipe: `[opcode u32LE][len u32LE][JSON utf8]`. */
+export function encodeRpcPipeFrame(opcode: number, payload: unknown): Uint8Array {
+    const json = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    const body = typeof Buffer !== 'undefined' ? Buffer.from(json, 'utf8') : new TextEncoder().encode(json)
+    const out = new Uint8Array(8 + body.length)
+    const view = new DataView(out.buffer, out.byteOffset, out.byteLength)
+    view.setUint32(0, (Number(opcode) || 0) >>> 0, true)
+    view.setUint32(4, body.length >>> 0, true)
+    out.set(body, 8)
+    return out
+}
+
+/**
+ * Infiere el opcode de un payload JSON plano para el pipe:
+ * handshake (`{v,client_id}` sin `cmd`) → 0, resto (con `cmd`) → 1.
+ */
+export function inferRpcPipeOpcode(payloadJson: string): number {
+    try {
+        const o = JSON.parse(payloadJson)
+        if (o && typeof o === 'object') {
+            if (typeof (o as any).cmd === 'string') return RPC_OP_FRAME
+            if ('client_id' in (o as any) && !('cmd' in (o as any))) return RPC_OP_HANDSHAKE
+        }
+    } catch { /* noop: por defecto frame */ }
+    return RPC_OP_FRAME
+}
+
+/**
+ * Reensambla frames de pipe a partir de chunks arbitrarios (un `data` puede
+ * traer medio frame o varios). `push()` devuelve los JSON completos en orden.
+ */
+export class RpcPipeFrameDecoder {
+    private buf: Uint8Array = new Uint8Array(0)
+
+    public push(chunk: Uint8Array): Array<{ opcode: number; json: string }> {
+        const next = new Uint8Array(this.buf.length + chunk.length)
+        next.set(this.buf, 0)
+        next.set(chunk, this.buf.length)
+        this.buf = next
+        const out: Array<{ opcode: number; json: string }> = []
+        while (this.buf.length >= 8) {
+            const view = new DataView(this.buf.buffer, this.buf.byteOffset, this.buf.byteLength)
+            const opcode = view.getUint32(0, true)
+            const len = view.getUint32(4, true)
+            if (!Number.isFinite(len) || len > 16 * 1024 * 1024) {
+                // Longitud absurda: descarta el buffer para no atascarse.
+                this.buf = new Uint8Array(0)
+                break
+            }
+            if (this.buf.length < 8 + len) break // frame parcial: espera más data
+            const body = this.buf.slice(8, 8 + len)
+            this.buf = this.buf.slice(8 + len)
+            let json = ''
+            try {
+                json = typeof Buffer !== 'undefined' ? Buffer.from(body).toString('utf8') : new TextDecoder().decode(body)
+            } catch {
+                continue
+            }
+            out.push({ opcode, json })
+        }
+        return out
+    }
 }
 
 export type RpcParsedFrame =
@@ -500,7 +598,10 @@ export interface MinimalRpcSocket {
 
 export type RpcConnectFn = (port: number, clientId: string) => Promise<MinimalRpcSocket>
 
-async function defaultConnectFn(port: number, clientId: string, timeoutMs = 3000): Promise<MinimalRpcSocket> {
+/** Conecta al pipe IPC n (`discord-ipc-{n}`): framing + reensamblado + handshake. */
+export type RpcPipeConnectFn = (ipcIndex: number, clientId: string) => Promise<MinimalRpcSocket>
+
+async function defaultWsConnectFn(port: number, clientId: string, timeoutMs = 3000): Promise<MinimalRpcSocket> {
     const url = `ws://127.0.0.1:${port}/?v=1&client_id=${encodeURIComponent(clientId)}`
     return new Promise<MinimalRpcSocket>((resolve, reject) => {
         let ws: any
@@ -524,11 +625,158 @@ async function defaultConnectFn(port: number, clientId: string, timeoutMs = 3000
     })
 }
 
+/**
+ * Conexión real al pipe IPC de Discord (transporte primario).
+ * Usa `Bun.connect({ unix })` cuando está disponible (verificado en Windows
+ * contra `\\?\pipe\discord-ipc-0`) y cae a `node:net` en otros runtimes.
+ * Envuelve el socket crudo en `MinimalRpcSocket`: `send(jsonPlano)` infiere
+ * el opcode (handshake → 0, resto → 1) y los chunks entrantes se reensamblan
+ * por frame antes de llamar a `onmessage({ data: json })`.
+ */
+export async function defaultPipeConnectFn(ipcIndex: number, _clientId: string, timeoutMs = 3000): Promise<MinimalRpcSocket> {
+    const pipePath = discordIpcPipePath(ipcIndex)
+    const BunGlobal = (globalThis as any)?.Bun
+    if (BunGlobal?.connect) {
+        return new Promise<MinimalRpcSocket>((resolve, reject) => {
+            const decoder = new RpcPipeFrameDecoder()
+            let raw: any = null
+            let settled = false
+            const timer = setTimeout(() => {
+                if (settled) return
+                settled = true
+                try { raw?.end?.() } catch { /* noop */ }
+                try { raw?.close?.() } catch { /* noop */ }
+                reject(new DiscordRpcError('discord-closed', `Discord no responde en el pipe ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true }))
+            }, timeoutMs)
+            const adapter: MinimalRpcSocket = {
+                send(data: string) {
+                    if (!raw) throw new Error('Pipe IPC aún no conectado')
+                    raw.write(encodeRpcPipeFrame(inferRpcPipeOpcode(data), data))
+                },
+                close() {
+                    try { raw?.end?.() } catch { /* noop */ }
+                    try { raw?.close?.() } catch { /* noop */ }
+                },
+                onopen: null,
+                onmessage: null,
+                onerror: null,
+                onclose: null,
+            }
+            const feed = (chunk: unknown) => {
+                const bytes = chunk instanceof Uint8Array ? chunk
+                    : typeof Buffer !== 'undefined' && typeof (chunk as any)?.length === 'number' ? Uint8Array.from(chunk as any)
+                        : null
+                if (!bytes) return
+                for (const frame of decoder.push(bytes)) {
+                    try { adapter.onmessage?.({ data: frame.json }) } catch { /* noop */ }
+                }
+            }
+            Promise.resolve(BunGlobal.connect({
+                unix: pipePath,
+                socket: {
+                    open(sock: unknown) {
+                        raw = sock
+                        if (settled) return
+                        settled = true
+                        clearTimeout(timer)
+                        resolve(adapter)
+                        try { adapter.onopen?.() } catch { /* noop */ }
+                    },
+                    data(_sock: unknown, data: unknown) { feed(data) },
+                    close(sock: unknown, err: unknown) {
+                        if (!settled) {
+                            settled = true
+                            clearTimeout(timer)
+                            reject(new DiscordRpcError('discord-closed', `No se pudo abrir el pipe IPC ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true, detail: err }))
+                            return
+                        }
+                        try { adapter.onclose?.(err ?? {}) } catch { /* noop */ }
+                    },
+                    error(sock: unknown, err: unknown) {
+                        if (!settled) {
+                            settled = true
+                            clearTimeout(timer)
+                            reject(new DiscordRpcError('discord-closed', `No se pudo abrir el pipe IPC ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true, detail: err }))
+                            return
+                        }
+                        try { adapter.onerror?.(err) } catch { /* noop */ }
+                    },
+                },
+            })).catch((err: unknown) => {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                reject(new DiscordRpcError('discord-closed', `No se pudo abrir el pipe IPC ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true, detail: err }))
+            })
+        })
+    }
+    // Fallback sin Bun (Node): named pipe / unix socket vía node:net.
+    const { createConnection } = await import('node:net')
+    return new Promise<MinimalRpcSocket>((resolve, reject) => {
+        const decoder = new RpcPipeFrameDecoder()
+        let raw: any = null
+        const timer = setTimeout(() => {
+            try { raw?.destroy?.() } catch { /* noop */ }
+            reject(new DiscordRpcError('discord-closed', `Discord no responde en el pipe ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true }))
+        }, timeoutMs)
+        const adapter: MinimalRpcSocket = {
+            send(data: string) {
+                if (!raw) throw new Error('Pipe IPC aún no conectado')
+                raw.write(encodeRpcPipeFrame(inferRpcPipeOpcode(data), data))
+            },
+            close() { try { raw?.destroy?.() } catch { /* noop */ } },
+            onopen: null,
+            onmessage: null,
+            onerror: null,
+            onclose: null,
+        }
+        try {
+            raw = createConnection(pipePath)
+        } catch (err) {
+            clearTimeout(timer)
+            reject(new DiscordRpcError('discord-closed', `No se pudo abrir el pipe IPC ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true, detail: err }))
+            return
+        }
+        raw.once('connect', () => {
+            clearTimeout(timer)
+            resolve(adapter)
+            try { adapter.onopen?.() } catch { /* noop */ }
+        })
+        raw.on('data', (chunk: Uint8Array) => {
+            for (const frame of decoder.push(chunk instanceof Uint8Array ? chunk : Uint8Array.from(chunk as any))) {
+                try { adapter.onmessage?.({ data: frame.json }) } catch { /* noop */ }
+            }
+        })
+        raw.once('error', (err: unknown) => {
+            clearTimeout(timer)
+            try { raw?.destroy?.() } catch { /* noop */ }
+            reject(new DiscordRpcError('discord-closed', `No se pudo abrir el pipe IPC ${pipePath}: ¿está abierto Discord en este equipo?`, { retryable: true, detail: err }))
+        })
+        raw.once('close', (hadError: unknown) => {
+            try { adapter.onclose?.(hadError ?? {}) } catch { /* noop */ }
+        })
+    })
+}
+
+export type RpcTransport = 'pipe' | 'ws'
+
+export interface RpcConnectResult {
+    transport: RpcTransport
+    /** Puerto WS (solo cuando transport === 'ws'). */
+    port: number | null
+    /** Ruta del pipe IPC (solo cuando transport === 'pipe'). */
+    pipe: string | null
+}
+
 export interface RpcConnectionOptions {
     clientId: string
     accessToken?: string | null
     ports?: readonly number[] | number[]
+    /** WS (fallback). Alias histórico: `connectFn` sigue siendo el WS. */
     connectFn?: RpcConnectFn
+    /** Pipe IPC (primario). Si se omite se usa el pipe real. */
+    pipeConnectFn?: RpcPipeConnectFn
+    ipcIds?: readonly number[] | number[]
     timeoutMs?: number
 }
 
@@ -539,18 +787,26 @@ interface PendingRequest {
 }
 
 /**
- * Conexión RPC mínima al cliente Discord local. Prueba los puertos
- * 6463-6472 en orden, hace handshake, espera READY y expone comandos
- * con promesas por nonce. El socket se inyecta en tests.
+ * Conexión RPC mínima al cliente Discord local. Prueba los pipes IPC
+ * `discord-ipc-0..9` PRIMERO (transporte primario: funciona en Bun vía
+ * `Bun.connect({ unix })`) y cae al WebSocket 127.0.0.1:6463-6472 como
+ * fallback. Hace handshake plano, espera READY y expone comandos con
+ * promesas por nonce. Ambos transportes se abstraen bajo MinimalRpcSocket
+ * (el pipe encaja: send/close/onmessage/onerror/onclose). Los sockets se
+ * inyectan en tests (`pipeConnectFn` / `connectFn`).
  */
 export class DiscordRpcConnection {
     private readonly clientId: string
     private accessToken: string | null
     private readonly ports: number[]
-    private readonly connectFn: RpcConnectFn
+    private readonly ipcIds: number[]
+    private readonly wsConnectFn: RpcConnectFn
+    private readonly pipeConnectFn: RpcPipeConnectFn
     private readonly timeoutMs: number
     private socket: MinimalRpcSocket | null = null
     private port: number | null = null
+    private pipePath: string | null = null
+    private transport: RpcTransport | null = null
     private ready = false
     private pending = new Map<string, PendingRequest>()
     private voiceCache: RpcVoiceState = { mute: null, deaf: null }
@@ -560,33 +816,75 @@ export class DiscordRpcConnection {
         if (!this.clientId) throw new Error('DiscordRpcConnection requiere clientId.')
         this.accessToken = typeof opts.accessToken === 'string' && opts.accessToken.trim() ? opts.accessToken.trim() : null
         this.ports = [...(opts.ports ?? DISCORD_RPC_PORTS)]
-        this.connectFn = opts.connectFn ?? ((p, id) => defaultConnectFn(p, id, opts.timeoutMs ?? 3000))
+        this.ipcIds = [...(opts.ipcIds ?? DISCORD_IPC_IDS)]
+        this.wsConnectFn = opts.connectFn ?? ((p, id) => defaultWsConnectFn(p, id, opts.timeoutMs ?? 3000))
+        this.pipeConnectFn = opts.pipeConnectFn ?? ((i, id) => defaultPipeConnectFn(i, id, opts.timeoutMs ?? 3000))
         this.timeoutMs = opts.timeoutMs ?? 8000
     }
 
     public get connectedPort(): number | null { return this.port }
+    public get connectedPipe(): string | null { return this.pipePath }
+    public get connectedTransport(): RpcTransport | null { return this.transport }
+    /** Etiqueta legible del transporte activo (ruta pipe o `ws:port`). */
+    public get connectedLabel(): string | null {
+        if (this.transport === 'pipe' && this.pipePath) return this.pipePath
+        if (this.transport === 'ws' && this.port !== null) return `ws:127.0.0.1:${this.port}`
+        return null
+    }
     public get isReady(): boolean { return this.ready && this.socket !== null }
     public get lastVoiceState(): RpcVoiceState { return { ...this.voiceCache } }
 
-    /** Conecta al primer puerto disponible y espera READY. */
-    public async connect(): Promise<{ port: number }> {
-        if (this.isReady && this.port !== null) return { port: this.port }
+    /**
+     * Conecta al primer transporte disponible (pipes 0..9 primero, luego WS
+     * 6463..6472) y espera READY. Misma API que antes: `ensureRpc()` y las
+     * sondas no cambian, solo ganan el pipe.
+     */
+    public async connect(): Promise<RpcConnectResult> {
+        if (this.isReady && this.transport !== null) return { transport: this.transport, port: this.port, pipe: this.pipePath }
         let lastError: unknown = null
-        for (const port of this.ports) {
+        // 1) Pipes IPC (primario).
+        for (const ipcIndex of this.ipcIds) {
             try {
-                const socket = await this.connectFn(port, this.clientId)
+                const socket = await this.pipeConnectFn(ipcIndex, this.clientId)
                 this.socket = socket
-                this.port = port
+                this.transport = 'pipe'
+                this.pipePath = discordIpcPipePath(ipcIndex)
+                this.port = null
                 this.attach(socket)
-                // Handshake inmediato (op 0). El servidor responde READY.
+                // Handshake PLANO (sin `{op,d}`): el pipe lo exige.
                 socket.send(JSON.stringify(buildRpcHandshake(this.clientId)))
                 await this.waitReady()
-                return { port }
+                return { transport: 'pipe', port: null, pipe: this.pipePath }
+            } catch (err) {
+                lastError = err
+                try { this.socket?.close() } catch { /* noop */ }
+                this.socket = null
+                this.pipePath = null
+                this.transport = null
+                this.ready = false
+                if (err instanceof DiscordRpcError && (err.code === 'needs-auth' || err.code === 'token-expired')) throw err
+                continue // probar siguiente pipe
+            }
+        }
+        // 2) WebSocket (fallback donde funcione).
+        for (const port of this.ports) {
+            try {
+                const socket = await this.wsConnectFn(port, this.clientId)
+                this.socket = socket
+                this.transport = 'ws'
+                this.port = port
+                this.pipePath = null
+                this.attach(socket)
+                // Handshake plano también en WS (JSON por mensaje, sin `{op,d}`).
+                socket.send(JSON.stringify(buildRpcHandshake(this.clientId)))
+                await this.waitReady()
+                return { transport: 'ws', port, pipe: null }
             } catch (err) {
                 lastError = err
                 try { this.socket?.close() } catch { /* noop */ }
                 this.socket = null
                 this.port = null
+                this.transport = null
                 this.ready = false
                 if (err instanceof DiscordRpcError && (err.code === 'needs-auth' || err.code === 'token-expired')) throw err
                 continue // probar siguiente puerto
@@ -595,7 +893,7 @@ export class DiscordRpcConnection {
         if (lastError instanceof DiscordRpcError) throw lastError
         throw new DiscordRpcError(
             'discord-closed',
-            'No se encontró el cliente Discord (RPC 6463-6472 sin respuesta). Abre Discord en este equipo y reintenta.',
+            'No se encontró el cliente Discord (sin pipe IPC ni RPC 6463-6472 con respuesta). Abre Discord en este equipo y reintenta.',
             { retryable: true, detail: lastError },
         )
     }
@@ -637,6 +935,8 @@ export class DiscordRpcConnection {
         try { this.socket?.close() } catch { /* noop */ }
         this.socket = null
         this.port = null
+        this.pipePath = null
+        this.transport = null
         this.ready = false
     }
 
@@ -685,12 +985,12 @@ export class DiscordRpcConnection {
         })
     }
 
-    private request(msg: { op: number; d: Record<string, unknown> }, cmd: string): Promise<any> {
+    private request(msg: Record<string, unknown>, cmd: string): Promise<any> {
         if (!this.socket) {
             return Promise.reject(new DiscordRpcError('discord-closed', 'Sin conexión RPC: llama a connect() primero.', { retryable: true }))
         }
-        const nonce = String((msg.d as any)?.nonce ?? nextRpcNonce())
-        ;(msg.d as any).nonce = nonce
+        const nonce = String((msg as any)?.nonce ?? nextRpcNonce())
+        ;(msg as any).nonce = nonce
         return new Promise<any>((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pending.delete(nonce)

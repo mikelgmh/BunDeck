@@ -22,6 +22,8 @@ describe('DiscordRpcConnection waitReady (carrera disconnect/timeout)', () => {
       clientId: '123',
       ports: [6463],
       timeoutMs: 60,
+      // Sin Discord real en CI: los pipes fallan al instante y se ejerce el path WS.
+      pipeConnectFn: async () => { throw new DiscordRpcError('discord-closed', 'sin pipe (test)', { retryable: true }) },
       connectFn: async () => hangingSocket(),
     });
     const p = conn.connect();
@@ -42,6 +44,7 @@ describe('DiscordRpcConnection waitReady (carrera disconnect/timeout)', () => {
       clientId: '123',
       ports: [6463],
       timeoutMs: 40,
+      pipeConnectFn: async () => { throw new DiscordRpcError('discord-closed', 'sin pipe (test)', { retryable: true }) },
       connectFn: async () => hangingSocket(),
     });
     let err: unknown = null;

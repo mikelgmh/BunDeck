@@ -125,31 +125,30 @@ describe('discord-rpc: protocolo', () => {
         expect([...DISCORD_RPC_PORTS]).toEqual([6463, 6464, 6465, 6466, 6467, 6468, 6469, 6470, 6471, 6472])
     })
 
-    it('handshake op 0 con versión y client_id', () => {
-        expect(buildRpcHandshake('abc')).toEqual({ op: 0, d: { v: 1, client_id: 'abc' } })
+    it('handshake plano con versión y client_id (sin envoltorio {op,d})', () => {
+        expect(buildRpcHandshake('abc')).toEqual({ v: 1, client_id: 'abc' })
         expect(() => buildRpcHandshake('')).toThrow(/Client ID/)
     })
 
-    it('authenticate op 1 con cmd y nonce', () => {
+    it('authenticate plano con cmd y nonce', () => {
         const m = buildRpcAuthenticate('tok-123')
-        expect(m.op).toBe(1)
-        expect((m.d as any).cmd).toBe('AUTHENTICATE')
-        expect((m.d as any).args.access_token).toBe('tok-123')
-        expect(typeof (m.d as any).nonce).toBe('string')
+        expect((m as any).cmd).toBe('AUTHENTICATE')
+        expect((m as any).args.access_token).toBe('tok-123')
+        expect(typeof (m as any).nonce).toBe('string')
     })
 
     it('setVoiceSettings exige al menos un booleano', () => {
         const m = buildRpcSetVoiceSettings({ mute: true })
-        expect((m.d as any).cmd).toBe('SET_VOICE_SETTINGS')
-        expect((m.d as any).args).toEqual({ mute: true })
+        expect((m as any).cmd).toBe('SET_VOICE_SETTINGS')
+        expect((m as any).args).toEqual({ mute: true })
         expect(() => buildRpcSetVoiceSettings({})).toThrow(/mute o deaf/)
     })
 
     it('subscribe y select-voice tienen el cmd correcto', () => {
-        expect((buildRpcSubscribeVoiceSettings().d as any).cmd).toBe('SUBSCRIBE')
+        expect((buildRpcSubscribeVoiceSettings() as any).cmd).toBe('SUBSCRIBE')
         const sel = buildRpcSelectVoiceChannel({ guildId: 'g1', channelId: 'c9' })
-        expect((sel.d as any).cmd).toBe('SELECT_VOICE_CHANNEL')
-        expect((sel.d as any).args.channel_id).toBe('c9')
+        expect((sel as any).cmd).toBe('SELECT_VOICE_CHANNEL')
+        expect((sel as any).args.channel_id).toBe('c9')
     })
 
     it('parseRpcFrame clasifica READY / AUTH / VOICE / ERROR / desconocido', () => {

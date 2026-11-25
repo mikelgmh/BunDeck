@@ -729,7 +729,7 @@ export class DiscordPlugin {
             const current = rpc.lastVoiceState.mute ?? false
             const state = await rpc.setVoiceSettings({ mute: !current })
             this.context.log('info', `Discord RPC: micro ${state.mute ? 'silenciado' : 'reactivado'} (background, sin foco)`)
-            return { action: 'toggle-mute', transport: 'rpc', mute: state.mute, previousMute: current, port: rpc.connectedPort, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
+            return { action: 'toggle-mute', transport: 'rpc', mute: state.mute, previousMute: current, port: rpc.connectedPort, pipe: rpc.connectedPipe, rpcTransport: rpc.connectedTransport, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
         })
         if (attempted.handled) return attempted.result
         const hotkey = this.resolveHotkey(params, 'hotkey', 'muteHotkey', 'ctrl+shift+m')
@@ -753,7 +753,7 @@ export class DiscordPlugin {
             const current = rpc.lastVoiceState.deaf ?? false
             const state = await rpc.setVoiceSettings({ deaf: !current })
             this.context.log('info', `Discord RPC: ensordecer ${state.deaf ? 'activado' : 'desactivado'} (background, sin foco)`)
-            return { action: 'toggle-deafen', transport: 'rpc', deaf: state.deaf, previousDeaf: current, port: rpc.connectedPort, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
+            return { action: 'toggle-deafen', transport: 'rpc', deaf: state.deaf, previousDeaf: current, port: rpc.connectedPort, pipe: rpc.connectedPipe, rpcTransport: rpc.connectedTransport, note: 'Controlado en background vía RPC: funciona con el juego en primer plano.' }
         })
         if (attempted.handled) return attempted.result
         const hotkey = this.resolveHotkey(params, 'hotkey', 'deafenHotkey', 'ctrl+shift+d')
@@ -879,8 +879,7 @@ export class DiscordPlugin {
                 // queda guardado igualmente (el permiso ya está concedido).
                 try {
                     const rpc = await this.ensureRpc()
-                    const port = rpc.connectedPort
-                    return { status: 'connected', transport: 'rpc', port, verified: true, note: 'Autorizado y verificado contra el cliente Discord local.' }
+                    return { status: 'connected', transport: 'rpc', port: rpc.connectedPort, pipe: rpc.connectedPipe, rpcTransport: rpc.connectedTransport, verified: true, note: 'Autorizado y verificado contra el cliente Discord local.' }
                 } catch (verifyErr) {
                     const message = verifyErr instanceof Error ? verifyErr.message : String(verifyErr)
                     const codeErr = verifyErr instanceof DiscordRpcError ? verifyErr.code : 'rpc-error'
@@ -971,6 +970,9 @@ export class DiscordPlugin {
         return {
             status: 'connected', mode, transport: 'rpc', hasClientId, hasToken,
             tokenExpired: false, rpcReachable: true, voice, port: this.rpc?.connectedPort ?? null,
+            pipe: this.rpc?.connectedPipe ?? null,
+            rpcTransport: this.rpc?.connectedTransport ?? null,
+            endpoint: this.rpc?.connectedLabel ?? null,
         }
     }
 
