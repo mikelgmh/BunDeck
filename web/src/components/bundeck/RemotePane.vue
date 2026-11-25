@@ -49,7 +49,7 @@
             <p class="bd-sub" data-cy="remote-ui-approved-ua">{{ approvedSession.ua || t('bd.remoteUiEmptyUa') }}</p>
           </div>
           <p class="bd-hint">
-            <span class="bd-tag-def" :data-transport="approvedTransport" data-cy="remote-ui-approved-transport">{{ approvedTransportLabel }}</span>
+            <span class="bd-tag-def" :data-transport="approvedTransport" data-cy="remote-ui-approved-transport"><LoaderCircle v-if="approvedTransport === 'connecting'" :size="12" class="bd-spin" aria-hidden="true" />{{ approvedTransportLabel }}</span>
           </p>
           <p v-if="uiError" class="bd-err" role="alert">{{ uiError }}</p>
         </div>
@@ -581,7 +581,7 @@ import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
 import { useDevices, type LogicalDevice } from '../../composables/useDevices'
 import { getOrCreateDeviceId } from '../../utils/sessionRouting'
-import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check } from 'lucide-vue-next'
+import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check, LoaderCircle } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()

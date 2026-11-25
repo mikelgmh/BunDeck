@@ -604,7 +604,7 @@
 .bundeck .bd-remote-expiry { margin: 0; color: var(--bd-mu); font: 12px/18px var(--bd-mono); font-variant-numeric: tabular-nums; }
 .bundeck .bd-remote-qr-actions { flex-wrap: wrap; }
 .bundeck .bd-remote-pair-qr { margin-top: 0; }
-.bundeck .bd-remote-approval { width: min(480px, calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); overflow: auto; }
+.bundeck dialog.bd-dlg.bd-remote-approval { width: min(480px, calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); overflow: auto; }
 .bundeck .bd-remote-approval__body { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 24px; }
 .bundeck .bd-remote-approval__mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--bd-as); color: var(--bd-ac); }
 .bundeck .bd-remote-approval h2 { margin: 0; font-size: 20px; line-height: 28px; }
@@ -715,7 +715,7 @@
 .bundeck .bd-pauto-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500; background: var(--bd-bg); border: 1px solid var(--bd-ln); color: var(--bd-mu); }
 .bundeck .bd-pauto-badge.on { background: var(--bd-as); border-color: color-mix(in srgb, var(--bd-ac) 35%, transparent); color: var(--bd-ac); }
 .bundeck .bd-pauto-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.bundeck .bd-tag-def { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 6px; background: var(--bd-as); color: var(--bd-ac); white-space: nowrap; }
+.bundeck .bd-tag-def { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 6px; background: var(--bd-as); color: var(--bd-ac); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .bundeck dialog.bd-pauto { width: min(780px, 94vw); height: min(660px, 90vh); }
 .bundeck .bd-simbox { background: var(--bd-bg); border: 1px solid var(--bd-ln); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .bundeck .bd-sim-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

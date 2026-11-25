@@ -427,6 +427,8 @@ describe('RemotePane UI remota', () => {
       expect(badge.exists()).toBe(true)
       expect(badge.attributes('data-transport')).toBe('connecting')
       expect(badge.text()).toContain('bd.remoteUiApprovedConnecting')
+      // Spinner de carga mientras se intenta el P2P.
+      expect(badge.find('.bd-spin').exists()).toBe(true)
       // Cerrar vuelve a dejar el diálogo oculto.
       await wrapper.find('[data-cy="remote-ui-approval-close"]').trigger('click')
       await flushPromises()
@@ -448,6 +450,8 @@ describe('RemotePane UI remota', () => {
       const badge = wrapper.find('[data-cy="remote-ui-approved-transport"]')
       expect(badge.attributes('data-transport')).toBe('p2p')
       expect(badge.text()).toContain('bd.remoteUiTransportP2p')
+      // Conectado: ya no hay spinner.
+      expect(badge.find('.bd-spin').exists()).toBe(false)
       wrapper.unmount()
     })
 
@@ -464,6 +468,8 @@ describe('RemotePane UI remota', () => {
       const badge = wrapper.find('[data-cy="remote-ui-approved-transport"]')
       expect(badge.attributes('data-transport')).toBe('relay')
       expect(badge.text()).toContain('bd.remoteUiTransportRelay')
+      // Fallback a relay: tampoco hay spinner.
+      expect(badge.find('.bd-spin').exists()).toBe(false)
       wrapper.unmount()
     })
   })
