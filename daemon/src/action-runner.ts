@@ -47,6 +47,7 @@ import {
   type NativePlugin
 } from './plugins';
 import { PluginSandbox } from './plugin-system/sandbox';
+import { isSafeModeEnabled, isGatedActionType } from './e2e-safe';
 import { VariableStore } from './variables/store';
 import {
   FlowEngine,
@@ -85,6 +86,63 @@ export interface ActionResult {
   result?: any;
   error?: string;
   duration: number;
+}
+
+interface PressActionLeaf {
+  actionType: string;
+  actionId: string | null;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Aplana (nodos, resultados) del motor a hojas ejecutables para press logs.
+ * Recorre sequence/if/switch/repeat/script/parallel; las hojas `action`
+ * conservan su type, y set-var/toggle-var/log se mapean a sus `local.*`
+ * originales. Los `wait` estructurales no generan fila. Sin `parameters`:
+ * nunca salen de aquí hacia la BD.
+ */
+function flattenPressActionLeaves(
+  nodes: FlowNode[],
+  results: Array<{ kind: string; type?: string; success: boolean; error?: string; result?: any }>,
+): PressActionLeaf[] {
+  const out: PressActionLeaf[] = [];
+  const push = (node: any, r: any) => {
+    if (!r || typeof r !== 'object') return;
+    if (r.kind === 'action' || node?.kind === 'action') {
+      const t = String(node?.type ?? r?.type ?? '');
+      if (t) out.push({ actionType: t, actionId: node?.id ?? null, success: r.success !== false, error: r.error });
+      return;
+    }
+    if (node?.kind === 'set-var') {
+      out.push({ actionType: 'local.set-var', actionId: node?.id ?? null, success: r.success !== false, error: (r as any).error });
+      return;
+    }
+    if (node?.kind === 'toggle-var') {
+      out.push({ actionType: 'local.toggle-var', actionId: node?.id ?? null, success: r.success !== false, error: (r as any).error });
+      return;
+    }
+    if (node?.kind === 'log') {
+      out.push({ actionType: 'local.toast', actionId: node?.id ?? null, success: r.success !== false, error: (r as any).error });
+      return;
+    }
+    if (node?.kind === 'wait') return; // retardo estructural, no acción
+    // Contenedores: sequence/if/switch/repeat/script/parallel.
+    const subResults: any[] = Array.isArray(r?.result?.results)
+      ? r.result.results
+      : Array.isArray(r?.result?.branches)
+        ? (r.result.branches as Array<{ results?: any[] }>).flatMap((b) => b?.results ?? [])
+        : [];
+    const subNodes: any[] = Array.isArray(node?.nodes)
+      ? node.nodes
+      : Array.isArray(node?.branches)
+        ? (node.branches as any[][]).flat()
+        : [];
+    if (!subResults.length) return;
+    subResults.forEach((sub, i) => push(subNodes[i], sub));
+  };
+  results.forEach((r, i) => push((nodes as any[])[i], r));
+  return out;
 }
 
 export class ActionRunner {
@@ -315,6 +373,29 @@ export class ActionRunner {
   ): Promise<ActionResult> {
     const actionId = action.id || uuidv4();
     const startTime = Date.now();
+
+    // Modo seguro E2E (ver e2e-safe.ts): bajo la suite Playwright las
+    // acciones con efectos fuera de la app (ventanas, teclas, shell,
+    // sonido, red…) son no-ops logueados. Punto único de filtrado: aquí
+    // confluyen /actions/execute, /buttons/press (motor de flujos),
+    // pulsos MCP/remotos y los pasos anidados de utility.macro/multiaction.
+    // Se responde éxito con `skipped` para no romper secuencias ni tests.
+    if (isGatedActionType(action.type) && isSafeModeEnabled(this.db)) {
+      const duration = Date.now() - startTime;
+      try {
+        this.db.addLog({
+          level: 'info',
+          message: `Action omitida (modo seguro e2e): ${action.type}`,
+          meta: { action: { type: action.type }, context, safeMode: true },
+          ts: Date.now(),
+        });
+      } catch { /* mejor esfuerzo: la omisión ya está decidida */ }
+      return {
+        success: true,
+        result: { skipped: 'e2e-safe-mode', type: action.type },
+        duration,
+      };
+    }
 
     try {
       // Check cooldown
@@ -651,7 +732,86 @@ export class ActionRunner {
     if (!hasContent || finalNodes.length === 0) {
       return { success: true, runId: uuidv4(), cancelled: false, results: [], duration: 0, empty: true };
     }
-    return this.runFlowNodes('button', `button:${buttonId ?? '?'}:${pressType}`, finalNodes, fullCtx, opts);
+    const res = await this.runFlowNodes('button', `button:${buttonId ?? '?'}:${pressType}`, finalNodes, fullCtx, opts);
+    this.writePressLogs(button, fullCtx, finalNodes, res);
+    return res;
+  }
+
+  /** ¿Registrar logs por pulsación? (`logs.press_enabled`, por defecto sí). */
+  private pressLogsEnabled(): boolean {
+    try {
+      return this.db.getSetting('logs.press_enabled') !== 'false';
+    } catch { return true; }
+  }
+
+  /** deviceId desde el contexto + deviceName de `devices`/`device_sessions`. */
+  private resolvePressDevice(ctx: any): { deviceId: string | null; deviceName: string | null } {
+    const raw = ctx?.deviceId ?? ctx?.device_id ?? ctx?.clientId ?? null;
+    const deviceId = raw === null || raw === undefined ? null : String(raw);
+    let deviceName: string | null = null;
+    if (deviceId) {
+      try {
+        deviceName = this.db.getDevice(deviceId)?.name
+          ?? this.db.getDeviceSession(deviceId)?.name ?? null;
+      } catch { /* mejor esfuerzo */ }
+    }
+    return { deviceId, deviceName };
+  }
+
+  /**
+   * Escribe una fila por (pulsación × acción hoja) con el mismo runId.
+   * Best-effort total (try/catch): nunca rompe la ejecución. No escribe si
+   * el botón está vacío, si el contexto es `quiet` (polling silencioso) o si
+   * `logs.press_enabled` es 'false'. NUNCA persiste `parameters` (secretos).
+   */
+  private writePressLogs(
+    button: any, ctx: FlowContext, nodes: FlowNode[],
+    res: { runId: string; duration: number; results: Array<{ kind: string; type?: string; success: boolean; error?: string; result?: any }> },
+  ): void {
+    try {
+      if (!nodes.length || !res?.results?.length) return;
+      if ((ctx as any)?.quiet) return;
+      if (!this.pressLogsEnabled()) return;
+      const leaves = flattenPressActionLeaves(nodes, res.results);
+      if (!leaves.length) return;
+      const { deviceId, deviceName } = this.resolvePressDevice(ctx);
+      let profileId: string | null = (ctx as any)?.profileId ?? null;
+      const pageId: string | null = (ctx as any)?.pageId ?? button?.page_id ?? button?.pageId ?? null;
+      if (!profileId && pageId) {
+        try { profileId = this.db.getPage(pageId)?.profile_id ?? null; }
+        catch { /* sin página: null */ }
+      }
+      const ts = Date.now();
+      const pressType = (ctx as any)?.pressType ?? 'short';
+      const source = (ctx as any)?.source ?? 'button';
+      const buttonId = String(button?.id ?? (ctx as any)?.buttonId ?? '');
+      if (!buttonId) return;
+      const position = button?.position ?? (ctx as any)?.position ?? null;
+      const rows = leaves.map((leaf, i) => ({
+        ts, buttonId, pageId, profileId, position,
+        pressType, deviceId, deviceName, source,
+        actionType: leaf.actionType, actionIndex: i,
+        actionId: leaf.actionId, runId: res.runId,
+        success: leaf.success,
+        error: typeof leaf.error === 'string' ? leaf.error.slice(0, 500) : null,
+        durationMs: res.duration ?? null,
+        meta: { pressType, source },
+      }));
+      const tx = (this.db as any)?.transaction?.bind(this.db);
+      if (typeof tx === 'function') {
+        tx(() => { for (const row of rows) this.db.addPressLog(row); });
+      } else {
+        for (const row of rows) this.db.addPressLog(row);
+      }
+      // Poda oportunista (retención configurable, best-effort).
+      try {
+        const keepMax = Number(this.db.getSetting('logs.press_keep_max') ?? '10000');
+        const keepDays = Number(this.db.getSetting('logs.press_keep_days') ?? '30');
+        if (Number.isFinite(keepMax) || Number.isFinite(keepDays)) {
+          this.db.prunePressLogs(keepMax, keepDays);
+        }
+      } catch { /* mejor esfuerzo */ }
+    } catch { /* mejor esfuerzo: el press ya se ejecutó */ }
   }
 
   private normalizePressType(v: unknown): PressType | null {

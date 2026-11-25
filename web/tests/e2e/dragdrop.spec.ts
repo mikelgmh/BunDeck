@@ -21,7 +21,10 @@ test.beforeAll(async ({ playwright }) => {
     const profilesRes = await api.get(`${API}/profiles`);
     expect(profilesRes.ok()).toBeTruthy();
     const profiles = await profilesRes.json();
-    const profile = profiles[0];
+    // Perfil dedicado de la suite: nunca tocar un perfil del usuario
+    // (antes se usaba profiles[0], que podía ser cualquiera).
+    const profile = (profiles as any[]).find((p) => p?.name === 'E2E Runner');
+    expect(profile?.id, 'perfil "E2E Runner" creado por global-setup').toBeTruthy();
 
     // Página propia (no depende del modo de la primera página del perfil:
     // si es libre no hay slots swapy y el drag clásico no aplica).

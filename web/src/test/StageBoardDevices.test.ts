@@ -44,7 +44,7 @@ const baseProps = {
 
 describe('StageBoard: dispositivos y pantallas', () => {
   it('muestra filas/columnas también en modo libre y píldora + añadir', async () => {
-    const free = mount(StageBoard, { props: { ...baseProps, layoutMode: 'gridstack' } })
+    const free = mount(StageBoard, { props: { ...baseProps, layoutMode: 'gridstack', devices: [deck] } })
     expect(free.find('[data-cy=bd-free-note]').exists()).toBe(true)
     expect(free.find('[data-cy=bd-gs-add-tool]').exists()).toBe(true)
     // El tamaño de la cuadrícula se puede cambiar también en modo libre.

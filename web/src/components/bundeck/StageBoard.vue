@@ -87,7 +87,7 @@
         <p class="bd-hint">{{ t('bd.deviceNoScreenHint', { name: previewDevice?.name ?? '', profile: profileName }) }}</p>
       </div>
       <template v-else>
-      <div v-if="isGsMode && mode === 'edit'" class="bd-freenote" data-cy="bd-free-note"><Smartphone :size="15" stroke-width="1.75" aria-hidden="true" /><span><b>{{ t('bd.freeNote') }}</b></span></div>
+      <div v-if="showFreeNote" class="bd-freenote" data-cy="bd-free-note"><Smartphone :size="15" stroke-width="1.75" aria-hidden="true" /><span><b>{{ t('bd.freeNote') }}</b></span></div>
       <div v-if="navTrail.length > 1" class="bd-crumb">
         <button class="bd-btn" @click="$emit('nav-back')">
           <ArrowLeft :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.back') }}
@@ -369,7 +369,7 @@ import 'gridstack/dist/gridstack.min.css'
 // imports estáticos engordan el chunk inicial y gridstack rompe el SSR
 // de Astro (gridstack-engine sin extensión).
 import {
-  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone
+  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, ScrollText
 } from 'lucide-vue-next'
 import VolumeRange from './VolumeRange.vue'
 import { findControlAction } from '../../composables/useActionPresentation'
@@ -423,6 +423,10 @@ interface Props {
   /** Dispositivos lógicos + qué pantalla muestra cada uno en este perfil. */
   devices?: LogicalDevice[]
   assignments?: Record<string, string>
+  /** HW físico detectado (GET /devices/streamdeck/status → isConnected).
+   *  Se pasa desde BunDeckApp junto a `devices`: cubre el caso en que el
+   *  HW está conectado pero su fila lógica aún no existe en la lista. */
+  hwConnected?: boolean
   /** Dispositivo simulado en modo uso ("Probar en"). */
   previewDeviceId?: string | null
   /** `profiles.data` del perfil actual (herencia del tamaño de página). */
@@ -440,6 +444,7 @@ interface Emits {
   (e: 'button-delete', position: number): void
   (e: 'button-export', position: number): void
   (e: 'button-import', position: number): void
+  (e: 'button-logs', position: number): void
   (e: 'swap', event: any): void
   (e: 'grid-size-change', deltaX: number, deltaY: number): void
   (e: 'mode-change', mode: 'edit' | 'use'): void
@@ -467,6 +472,7 @@ const props = withDefaults(defineProps<Props>(), {
   kiosk: false,
   devices: () => [],
   assignments: () => ({}),
+  hwConnected: false,
   previewDeviceId: null,
   profileData: undefined,
 })
@@ -512,6 +518,17 @@ const gsTotalRows = computed(() =>
 )
 
 const isGsMode = computed(() => (props.layoutMode ?? 'classic') === 'gridstack')
+
+/** Aviso "modo libre": solo si hay un Stream Deck detectado. Criterio OR:
+ *  - algún dispositivo lógico con kind === 'deck' (HW con fila lógica), O
+ *  - `hwConnected` (HW conectado según GET /devices/streamdeck/status,
+ *    aunque su fila lógica aún no exista). Sin deck no se muestra. */
+const hasDeckDetected = computed(
+  () => (props.devices ?? []).some((d) => d?.kind === 'deck') || !!props.hwConnected
+)
+const showFreeNote = computed(
+  () => isGsMode.value && props.mode === 'edit' && hasDeckDetected.value
+)
 
 // ---- Dispositivos y pantallas por perfil ----
 const devOpen = ref(false)
@@ -1311,6 +1328,7 @@ const contextMenuItems = computed(() => {
   if (button) {
     const items = [
       { id: 'execute', label: t('bd.pressKey'), icon: Play, danger: false },
+      { id: 'logs', label: t('bd.viewLogs'), icon: ScrollText, danger: false },
       { id: 'export', label: t('bd.exportKey'), icon: FileUp, danger: false },
       { id: 'import', label: t('bd.importKey'), icon: FileDown, danger: false }
     ]
@@ -1335,6 +1353,7 @@ const hideContextMenu = () => {
 }
 const handleContextMenuItem = (item: any) => {
   if (item.id === 'execute') emit('button-execute', contextMenu.value.position)
+  else if (item.id === 'logs') emit('button-logs', contextMenu.value.position)
   else if (item.id === 'delete') emit('button-delete', contextMenu.value.position)
   else if (item.id === 'export') emit('button-export', contextMenu.value.position)
   else if (item.id === 'import') emit('button-import', contextMenu.value.position)

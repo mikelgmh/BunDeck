@@ -1,25 +1,9 @@
 import { request as baseRequest, type FullConfig } from '@playwright/test';
 import * as fs from 'node:fs';
-import { RUNNER_PROFILE, RUNNER_STATE_FILE } from './global-setup';
+import { RUNNER_STATE_FILE } from './global-setup';
+import { sweepTestResidue } from './cleanup';
 
 const API = 'http://localhost:3001/api/v1';
-
-/** Borra un perfil con todas sus páginas y botones. */
-async function deleteProfileTree(ctx: any, profileId: string) {
-  const pagesRes = await ctx.get(`${API}/pages?profileId=${encodeURIComponent(profileId)}`);
-  if (!pagesRes.ok()) return;
-  const pages = await pagesRes.json();
-  for (const p of pages ?? []) {
-    try {
-      const btns = await (await ctx.get(`${API}/buttons?pageId=${encodeURIComponent(p.id)}`)).json();
-      for (const b of btns ?? []) {
-        await ctx.delete(`${API}/buttons/${encodeURIComponent(b.id)}`);
-      }
-    } catch { /* mejor esfuerzo */ }
-    await ctx.delete(`${API}/pages/${encodeURIComponent(p.id)}`);
-  }
-  await ctx.delete(`${API}/profiles/${encodeURIComponent(profileId)}`);
-}
 
 async function globalTeardown(_config: FullConfig) {
   const ctx = await baseRequest.newContext();
@@ -29,10 +13,14 @@ async function globalTeardown(_config: FullConfig) {
       orig = JSON.parse(fs.readFileSync(RUNNER_STATE_FILE, 'utf8'));
     } catch { /* sin estado previo: mejor esfuerzo */ }
 
-    const profiles = (await (await ctx.get(`${API}/profiles`)).json()) as any[];
-    for (const p of profiles ?? []) {
-      if (p?.name === RUNNER_PROFILE) await deleteProfileTree(ctx, p.id);
-    }
+    // Post-limpieza: barrido compartido (perfiles E2E/MD-*, 'E2E Drag Page',
+    // plugins com.ld.*). Mantiene la restauración de la vista del usuario.
+    await sweepTestResidue(ctx);
+
+    // Desactivar el modo seguro e2e (lo activó el global-setup): el daemon
+    // de dev vuelve a ejecutar acciones con normalidad. Best-effort y
+    // antes de restaurar la vista, para no dejar el dev capado si algo falla.
+    await ctx.post(`${API}/settings`, { data: { key: 'e2e.safe_mode', value: '0' } }).catch(() => {});
 
     if (orig.origProfile) {
       await ctx.post(`${API}/settings`, { data: { key: 'current.profile_id', value: orig.origProfile } });

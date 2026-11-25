@@ -19,6 +19,7 @@ import DeckUseView from './DeckUseView.vue'
 import { useDeckLayouts, type DeckWidget } from '../../composables/useDeckLayouts'
 import { pressFeedback } from '../../composables/useFeedback'
 import { useI18nStore } from '../../composables/useI18n'
+import { getOrCreateDeviceId } from '../../utils/sessionRouting'
 
 const { t } = useI18nStore()
 const { layouts } = useDeckLayouts()
@@ -51,7 +52,13 @@ const onPress = async (widget: DeckWidget) => {
     await fetch(`${base}/buttons/press`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ position: pos })
+      body: JSON.stringify({
+        buttonId: null,
+        pageId: layout.value?.pageId ?? null,
+        position: pos,
+        pressType: 'short',
+        context: { deviceId: getOrCreateDeviceId(), source: 'mobile' }
+      })
     })
   } catch (e) {
     error.value = String((e as Error)?.message ?? e)

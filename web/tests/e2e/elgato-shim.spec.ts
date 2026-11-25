@@ -41,6 +41,19 @@ const FIXTURES: Fixture[] = [
 ];
 
 test.describe('shim Elgato (import → key → state → settings)', () => {
+  test.afterAll(async ({ playwright }) => {
+    // Limpieza best-effort de los fixtures (el sweep global también los
+    // cubre, pero el spec debe ser re-ejecutable por sí solo).
+    const api = await playwright.request.newContext();
+    try {
+      for (const fx of FIXTURES) {
+        await api.delete(`${API}/plugins/${encodeURIComponent(fx.pluginId)}`);
+      }
+    } finally {
+      await api.dispose();
+    }
+  });
+
   for (const fx of FIXTURES) {
     test(`${fx.dir}: import + key + state`, async ({ request }) => {
       // Re-ejecutable: limpiar instalación previa si existe.

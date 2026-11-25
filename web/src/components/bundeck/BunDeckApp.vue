@@ -218,6 +218,7 @@
             :plugins="plugins"
             :detailed="pluginsDetailed"
             @action-pick="onActionPick"
+            @action-logs="(p) => onActionTypeLogs(p)"
             @open-plugin-settings="(id) => openPluginSettings(id, 'settings')"
             @open-plugin-instructions="(id) => openPluginSettings(id, 'instructions')"
           />
@@ -259,6 +260,7 @@
         :profile-data="(currentProfile as any)?.data"
         :devices="devStore.devices.value"
         :assignments="devStore.assignments.value"
+        :hw-connected="devStore.hwStatus.value.connected"
         :preview-device-id="previewDeviceId"
         :busy="pageBusy"
         :long-press-ms="bdLongPressMs"
@@ -283,6 +285,7 @@
         @action-drop="onActionDrop"
         @button-export="(pos) => openExport(pos)"
         @button-import="(pos) => openImport(pos)"
+        @button-logs="(pos) => onButtonLogs(pos)"
         @device-assign="onDeviceAssign"
         @preview-device-change="onPreviewDeviceChange"
         @manage-devices="() => settingsDialog?.show('devices')"
@@ -314,6 +317,8 @@
             @clear="onClearKey"
             @export-key="openExport(selectedButton ?? undefined)"
             @import-key="openImport(selectedButton ?? undefined)"
+            @view-logs="onKeyViewLogs"
+            @action-logs="(p) => onKeyActionLogs(p)"
             @open-icon-picker="openIconPicker"
             @open-look-icon="(i) => openLookIconPicker(i)"
              @clear-image="onClearImage"
@@ -433,6 +438,8 @@
     />
 
     <QrDialog ref="qrDialog" @notify="(msg) => bdShowToast(msg)" />
+
+    <PressLogsDialog ref="pressLogsDialog" :api-base="API_BASE" />
 
     <ActionCommandPalette
       ref="palette"
@@ -588,6 +595,7 @@ const PluginSettingsDialog = defineAsyncComponent(() => import('./PluginSettings
 const SettingsDialog = defineAsyncComponent(() => import('./SettingsDialog.vue'))
 const IconPickerDialog = defineAsyncComponent(() => import('./IconPickerDialog.vue'))
 const QrDialog = defineAsyncComponent(() => import('./QrDialog.vue'))
+const PressLogsDialog = defineAsyncComponent(() => import('./PressLogsDialog.vue'))
 const BdIdleVeil = defineAsyncComponent(() => import('./BdIdleVeil.vue'))
 const WelcomeDialog = defineAsyncComponent(() => import('./WelcomeDialog.vue'))
 const UpdateModal = defineAsyncComponent(() => import('../UpdateModal.vue'))
@@ -687,6 +695,7 @@ const onKioskFullscreen = () => {
 const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null)
 const iconPickerDialog = ref<InstanceType<typeof IconPickerDialog> | null>(null)
 const qrDialog = ref<InstanceType<typeof QrDialog> | null>(null)
+const pressLogsDialog = ref<InstanceType<typeof PressLogsDialog> | null>(null)
 const actionsPanel = ref<InstanceType<typeof ActionsPanel> | null>(null)
 const updateModal = ref<InstanceType<typeof UpdateModal> | null>(null)
 const pluginSettingsDialog = ref<InstanceType<typeof PluginSettingsDialog> | null>(null)
@@ -704,6 +713,7 @@ const {
   connectionStatus, connectionText, profiles, selectedProfile, currentProfile,
   currentPage, currentPages, currentButtons, plugins, gridCols, gridRows,
   selectedButton, executingButtons, buttonConfig, buttonConfigVersion, bumpConfigVersion, API_BASE, WS_URL,
+  deviceId,
   getButtonData, getButton, selectProfile, loadProfiles, loadProfile,
   selectButton, executeButton, deleteButton, saveButtonConfig, addAction, createAction, executeSingleAction,
   removeAction, reorderActions, updateActionParameter, createProfile, updateProfile, deleteProfile,
@@ -1591,7 +1601,13 @@ const engine = createKeyEngine({
   getExecData: (pos: number) =>
     selectedButton.value === pos ? { ...buttonConfig.value } : (getButton(pos)?.data ?? null),
   execRemote: (action: any, ctx: Record<string, any>) =>
-    executeSingleAction(action, { ...ctx, profileId: currentProfile.value?.id }),
+    executeSingleAction(action, {
+      deviceId: deviceId.value,
+      pressType: 'press',
+      source: 'web',
+      ...ctx,
+      profileId: currentProfile.value?.id,
+    }),
   toast: (msg: string) => bdShowToast(msg),
   noActionsToast: () => bdShowToast(t('bd.noActionsToast')),
   profileName: () => currentProfile.value?.name ?? '',
@@ -2212,6 +2228,36 @@ const openImport = (position?: number) => {
   ioParseErrorKey.value = ''
   ioImportPos.value = position ?? selectedButton.value ?? null
   ioDialog.value?.show()
+}
+
+// Registros de pulsación: el StageBoard emite la posición; aquí se resuelve
+// el buttonId y se abre el diálogo (que pide GET /buttons/:id/logs).
+const onButtonLogs = (position: number) => {
+  const btn = getButton(position)
+  if (!btn) return
+  // getButtonData es un computed en useStreamDeck: el data plano sale del botón.
+  const data = (btn as any)?.data ?? null
+  const label = String(data?.label ?? data?.textTop ?? data?.textBottom ?? '')
+  void pressLogsDialog.value?.show({ buttonId: btn.id, buttonLabel: label || null })
+}
+// «Ver registros» del inspector: la tecla en edición.
+const onKeyViewLogs = () => {
+  if (selectedButton.value === null || selectedButton.value === undefined) return
+  onButtonLogs(selectedButton.value)
+}
+// Contextmenu sobre una acción del inspector: filtra por botón + tipo.
+const onKeyActionLogs = (p: { kind: string; index: number; actionType: string }) => {
+  const pos = selectedButton.value
+  const btn = pos !== null && pos !== undefined ? getButton(pos) : undefined
+  void pressLogsDialog.value?.show({
+    buttonId: btn?.id ?? null,
+    actionType: p?.actionType || null,
+  })
+}
+// Contextmenu en la biblioteca: solo tipo de acción (columna botón visible).
+const onActionTypeLogs = (p: { actionType: string }) => {
+  if (!p?.actionType) return
+  void pressLogsDialog.value?.show({ actionType: p.actionType })
 }
 
 const onIoText = (txt: string) => {

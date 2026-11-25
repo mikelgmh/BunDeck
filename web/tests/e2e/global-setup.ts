@@ -2,8 +2,9 @@ import { request as baseRequest, type FullConfig } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { RUNNER_PROFILE, sweepTestResidue } from './cleanup';
 
-export const RUNNER_PROFILE = 'E2E Runner';
+export { RUNNER_PROFILE };
 export const RUNNER_STATE_FILE = path.join(os.tmpdir(), 'libredeck-e2e-runner.json');
 
 const API = 'http://localhost:3001/api/v1';
@@ -11,23 +12,6 @@ const API = 'http://localhost:3001/api/v1';
 async function api() {
   const ctx = await baseRequest.newContext();
   return ctx;
-}
-
-/** Borra un perfil con todas sus páginas y botones. */
-async function deleteProfileTree(ctx: any, profileId: string) {
-  const pagesRes = await ctx.get(`${API}/pages?profileId=${encodeURIComponent(profileId)}`);
-  if (!pagesRes.ok()) return;
-  const pages = await pagesRes.json();
-  for (const p of pages ?? []) {
-    try {
-      const btns = await (await ctx.get(`${API}/buttons?pageId=${encodeURIComponent(p.id)}`)).json();
-      for (const b of btns ?? []) {
-        await ctx.delete(`${API}/buttons/${encodeURIComponent(b.id)}`);
-      }
-    } catch { /* mejor esfuerzo */ }
-    await ctx.delete(`${API}/pages/${encodeURIComponent(p.id)}`);
-  }
-  await ctx.delete(`${API}/profiles/${encodeURIComponent(profileId)}`);
 }
 
 async function globalSetup(_config: FullConfig) {
@@ -48,11 +32,10 @@ async function globalSetup(_config: FullConfig) {
     } catch { /* sin settings: se queda en null */ }
     fs.writeFileSync(RUNNER_STATE_FILE, JSON.stringify({ origProfile, origPage }));
 
-    // Limpieza de restos de runs anteriores (p. ej. crash a mitad).
-    const profiles = (await (await ctx.get(`${API}/profiles`)).json()) as any[];
-    for (const p of profiles ?? []) {
-      if (p?.name === RUNNER_PROFILE) await deleteProfileTree(ctx, p.id);
-    }
+    // Limpieza de restos de runs anteriores (p. ej. crash a mitad):
+    // barrido compartido (ver cleanup.ts): perfiles 'E2E Runner'/'E2E *'/'MD-*',
+    // páginas sueltas 'E2E Drag Page' y plugins 'com.ld.*'.
+    await sweepTestResidue(ctx);
 
     // Perfil dedicado para toda la suite: los tests no tocan los perfiles
     // del usuario y este puede seguir usando la app mientras corren.
@@ -67,6 +50,11 @@ async function globalSetup(_config: FullConfig) {
 
     await ctx.post(`${API}/settings`, { data: { key: 'current.profile_id', value: profile.id } });
     await ctx.post(`${API}/settings`, { data: { key: 'current.page_id', value: home.id } });
+    // Modo seguro e2e (ver daemon/src/e2e-safe.ts): mientras la suite corre
+    // contra este daemon compartido, las acciones con efectos fuera de la
+    // app (minimizar ventanas, hotkeys, shell, volumen…) son no-ops
+    // logueados. El teardown lo desactiva (`e2e.safe_mode='0'`).
+    await ctx.post(`${API}/settings`, { data: { key: 'e2e.safe_mode', value: '1' } });
     // eslint-disable-next-line no-console
     console.log(`[e2e] perfil dedicado "${RUNNER_PROFILE}" (${profile.id}), vista original guardada`);
   } finally {

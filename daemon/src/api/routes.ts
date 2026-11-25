@@ -16,6 +16,7 @@ import { handleDevices } from './devices';
 import { handlePages } from './pages';
 import { handleButtons } from './buttons';
 import { handleActions } from './actions';
+import { handlePressLogs } from './press-logs';
 import { handleFlows } from './flows';
 import { handleVariables } from './variables';
 import { handleCatalog } from './catalog';
@@ -37,6 +38,10 @@ const HANDLERS: ApiHandler[] = [
   handleDevices, // ANTES que perfiles: /profiles/:id/assignments matchea su prefijo
   handleProfiles,
   handlePages,
+  // press-logs ANTES que buttons: el prefijo `/api/v1/buttons/:id`
+  // (GET/DELETE) se tragaría `/buttons/:id/logs` y el DELETE borraría el
+  // botón en vez del historial.
+  handlePressLogs,
   handleButtons, // incluye /buttons/reorder (antes que /buttons/:id)
   handleActions,
   handleFlows, // /api/v1/buttons/press, /flows/*, /flow-scripts/*, /flow-automations/*, /flow-vars/*

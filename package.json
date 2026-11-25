@@ -30,6 +30,7 @@
     "test:cli": "cd cli && bun run test",
     "test:e2e:open": "start-server-and-test 'bun run dev' http://localhost:4321 'wait-on http://localhost:3001/health && cd web && npm run test:e2e:open'",
     "test:e2e": "start-server-and-test 'bun run dev' http://localhost:4321 'wait-on http://localhost:3001/health && cd web && npm run test:e2e'",
+    "test:e2e:cleanup": "bun cleanup-e2e.ts",
     "test:coverage": "bun run test:coverage:daemon && bun run test:coverage:web",
     "test:coverage:daemon": "cd daemon && bun run test:coverage",
     "test:coverage:web": "cd web && npm run test:coverage",

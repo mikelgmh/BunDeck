@@ -2,9 +2,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
+import type { DatabaseService } from '../db';
 import { resolveNavTargets } from '../sessions';
 
-export const handleActions: ApiHandler = async (_req, { method, path, services }) => {
+export const handleActions: ApiHandler = async (_req, { method, path, db, services }) => {
   if (path === '/api/v1/actions/execute') {
     if (method === 'POST') {
       const body = await _req.json();
@@ -23,6 +24,43 @@ export const handleActions: ApiHandler = async (_req, { method, path, services }
           ...context,
           timestamp: Date.now(),
         });
+
+        // Log por pulsación (1 fila, runId null): solo si hay buttonId en el
+        // contexto y no es polling silencioso. Best-effort, sin parameters.
+        if ((context as any)?.buttonId && !(context as any)?.quiet) {
+          try {
+            const svc: DatabaseService | null = db ?? null;
+            const enabled = (() => { try { return svc?.getSetting('logs.press_enabled') !== 'false'; } catch { return true; } })();
+            if (enabled && svc && typeof (svc as any).addPressLog === 'function') {
+              const rawDev = (context as any)?.deviceId ?? (context as any)?.device_id ?? (context as any)?.clientId ?? null;
+              const deviceId = rawDev === null || rawDev === undefined ? null : String(rawDev);
+              let deviceName: string | null = null;
+              if (deviceId) {
+                try {
+                  deviceName = svc.getDevice(deviceId)?.name
+                    ?? svc.getDeviceSession(deviceId)?.name ?? null;
+                } catch { /* mejor esfuerzo */ }
+              }
+              const err = typeof result.error === 'string' ? result.error.slice(0, 500) : null;
+              svc.addPressLog({
+                buttonId: String((context as any).buttonId),
+                pageId: (context as any)?.pageId ?? null,
+                profileId: (context as any)?.profileId ?? null,
+                position: (context as any)?.position ?? null,
+                pressType: (context as any)?.pressType ?? 'short',
+                deviceId, deviceName,
+                source: (context as any)?.source ?? 'api',
+                actionType: String((action as any)?.type ?? 'unknown'),
+                actionIndex: 0,
+                actionId: (action as any)?.id ?? null,
+                runId: null,
+                success: result.success !== false,
+                error: err,
+                durationMs: typeof result.duration === 'number' ? result.duration : null,
+              });
+            }
+          } catch { /* mejor esfuerzo: la acción ya se ejecutó */ }
+        }
 
         if (result.success) {
           if (!quiet) {

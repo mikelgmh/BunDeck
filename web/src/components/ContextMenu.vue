@@ -15,6 +15,7 @@
       :key="item.id"
       ref="itemRefs"
       role="menuitem"
+      :data-cy="`bd-ctx-${item.id}`"
       @click="handleItemClick(item)"
       :class="[
         'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 mx-0 text-left text-[13px] font-medium transition-[background-color,color] duration-150 hover:bg-base-300/60',

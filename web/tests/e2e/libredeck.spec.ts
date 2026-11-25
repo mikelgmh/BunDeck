@@ -89,18 +89,28 @@ test.describe('BunDeck E2E Tests', () => {
     await expect(page.getByText('Elige una tecla')).toBeVisible();
   });
 
-  test('should support multiple pages', async ({ page }) => {
+  test('should support multiple pages', async ({ page, request }) => {
     await expect(page.getByTestId('bd-profile-tab').first()).toBeVisible({ timeout: 10000 });
 
     // Add a new page (created with a default name)
+    const pageCreated = page.waitForResponse(
+      (res) => res.url().includes('/api/v1/pages') && res.request().method() === 'POST',
+    );
     await page.getByTestId('bd-page-add').click();
 
     // The new page chip appears and becomes active (puede haber varias).
     await expect(page.getByText(/Página/).first()).toBeVisible({ timeout: 10000 });
 
-    // NOTA: no se borra la página creada (el spec Cypress original tampoco
-    // limpia). Si hiciera falta, borrar vía API del daemon:
-    // DELETE http://localhost:3001/api/v1/... desde este mismo test.
+    // Limpieza: borrar la página creada para no dejar residuos en la DB
+    // del usuario (el spec Cypress original no limpiaba).
+    try {
+      const res = await pageCreated;
+      const body = await res.json().catch(() => null);
+      const pageId = (body as any)?.id;
+      if (pageId) {
+        await request.delete(`http://localhost:3001/api/v1/pages/${encodeURIComponent(pageId)}`);
+      }
+    } catch { /* mejor esfuerzo: el sweep global lo cubre */ }
   });
 
   test('should rename a page from its context menu', async ({ page }) => {

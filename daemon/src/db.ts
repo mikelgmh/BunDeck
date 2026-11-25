@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { v4 as uuidv4 } from 'uuid';
 import { getVersion } from './version';
 import { fixAssignments } from './devices';
 
@@ -171,6 +172,45 @@ export interface LogEntry {
   message: string;
   meta: any; // JSON additional data
   ts: number;
+}
+
+/**
+ * Log por pulsación × acción (tabla `button_press_logs`, migración 10).
+ * Una fila por cada acción ejecutada en una pulsación de botón.
+ * NUNCA incluye `parameters` (pueden contener secretos).
+ */
+export interface PressLog {
+  id: string;
+  ts: number;
+  buttonId: string;
+  pageId: string | null;
+  profileId: string | null;
+  position: number | null;
+  pressType: string;
+  deviceId: string | null;
+  deviceName: string | null;
+  source: string | null;
+  actionType: string;
+  actionIndex: number | null;
+  actionId: string | null;
+  runId: string | null;
+  success: boolean;
+  error: string | null;
+  durationMs: number | null;
+  meta?: any; // JSON adicional (sin secretos)
+}
+
+/** Filtros combinables para `listPressLogs` / `clearPressLogs`. */
+export interface PressLogFilters {
+  buttonId?: string;
+  actionType?: string;
+  deviceId?: string;
+  success?: boolean;
+  pressType?: string;
+  since?: number;
+  until?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface Setting {
@@ -500,7 +540,11 @@ export async function initDatabase() {
     { key: 'current.page_id', value: '' },
     // Preferencia de arranque con el sistema (ver system-autostart.ts):
     // la web la edita, el launcher Rust la aplica en el SO.
-    { key: 'system.autostart', value: 'false' }
+    { key: 'system.autostart', value: 'false' },
+    // Retención/activación de logs por pulsación (migración 10).
+    { key: 'logs.press_enabled', value: 'true' },
+    { key: 'logs.press_keep_max', value: '10000' },
+    { key: 'logs.press_keep_days', value: '30' }
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -924,6 +968,48 @@ function runMigrations(db: Database) {
     console.error('❌ Migration 9 failed:', error);
   }
 
+  // Migration 10: logs por pulsación × acción (una fila por acción
+  // ejecutada en cada press). Tabla + índices, uno por uno con try/catch
+  // (patrón migración 8: un índice fallido no aborta el arranque).
+  // Semillas: logs.press_enabled='true', keep_max='10000', keep_days='30'.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS button_press_logs (
+      id TEXT PRIMARY KEY, ts INTEGER NOT NULL, button_id TEXT NOT NULL,
+      page_id TEXT, profile_id TEXT, position INTEGER,
+      press_type TEXT NOT NULL DEFAULT 'short',
+      device_id TEXT, device_name TEXT, source TEXT,
+      action_type TEXT NOT NULL, action_index INTEGER, action_id TEXT, run_id TEXT,
+      success INTEGER NOT NULL DEFAULT 1, error TEXT, duration_ms INTEGER, meta TEXT
+    )`);
+    console.log('✅ Migration 10: button_press_logs table');
+  } catch (error) {
+    console.error('❌ Migration 10 failed (table):', error);
+  }
+  try {
+    const idx = [
+      'CREATE INDEX IF NOT EXISTS idx_bpl_button_ts ON button_press_logs(button_id, ts DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_bpl_action_ts ON button_press_logs(action_type, ts DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_bpl_ts ON button_press_logs(ts DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_bpl_run ON button_press_logs(run_id)',
+      'CREATE INDEX IF NOT EXISTS idx_bpl_device_ts ON button_press_logs(device_id, ts DESC)',
+    ];
+    for (const ddl of idx) {
+      try { db.exec(ddl); }
+      catch (e) { console.warn(`⚠️ Migration 10: omitido (${ddl}):`, (e as Error)?.message ?? e); }
+    }
+    console.log('✅ Migration 10 completed: índices de press logs');
+  } catch (error) {
+    console.error('❌ Migration 10 failed (indexes):', error);
+  }
+  try {
+    const seedPress = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+    seedPress.run('logs.press_enabled', 'true');
+    seedPress.run('logs.press_keep_max', '10000');
+    seedPress.run('logs.press_keep_days', '30');
+  } catch (error) {
+    console.error('❌ Migration 10 failed (settings):', error);
+  }
+
   console.log('✅ Database migrations completed');
 }
 
@@ -1087,6 +1173,7 @@ export async function resetDatabaseToDefaults(): Promise<FactoryResetResult> {
       'DELETE FROM widgets',
       'DELETE FROM assets',
       'DELETE FROM logs',
+      'DELETE FROM button_press_logs',
       'DELETE FROM plugins',
       'DELETE FROM devices',
       'DELETE FROM settings',
@@ -1487,10 +1574,16 @@ export class DatabaseService {
   }
 
   deleteProfile(id: string): void {
-    const stmt = this.db.prepare('DELETE FROM profiles WHERE id = ?');
-    stmt.run(id);
-    // Limpieza manual (las FK son documentales: SQLite no las aplica sin PRAGMA).
-    this.db.prepare('DELETE FROM profile_assignments WHERE profile_id = ?').run(id);
+    this.transaction(() => {
+      // Cascada manual (las FK son documentales: SQLite no las aplica sin PRAGMA).
+      // Borra todas las páginas del perfil con su árbol (botones+hijas+asignaciones).
+      const rows = this.db.prepare('SELECT id FROM pages WHERE profile_id = ?').all(id) as { id: string }[];
+      for (const r of rows) {
+        try { this.deletePageCascade(r.id); } catch { /* fila ya borrada como hija: seguir */ }
+      }
+      this.db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
+      this.db.prepare('DELETE FROM profile_assignments WHERE profile_id = ?').run(id);
+    });
   }
 
   // ---- Dispositivos lógicos + asignaciones por perfil ----
@@ -1718,8 +1811,21 @@ export class DatabaseService {
   }
 
   deletePage(id: string): void {
-    const stmt = this.db.prepare('DELETE FROM pages WHERE id = ?');
-    stmt.run(id);
+    // Transacción única: el borrado recursivo usa savepoints anidados de
+    // bun:sqlite (igual que resetDatabaseToDefaults ya anida transaction).
+    this.transaction(() => {
+      this.deletePageCascade(id);
+    });
+  }
+
+  /** Borrado en cascada de una página: hijas, botones y asignaciones. Sin transacción propia. */
+  private deletePageCascade(id: string): void {
+    const children = this.db.prepare('SELECT id FROM pages WHERE parent_id = ?').all(id) as { id: string }[];
+    for (const c of children) {
+      this.deletePageCascade(c.id);
+    }
+    this.db.prepare('DELETE FROM buttons WHERE page_id = ?').run(id);
+    this.db.prepare('DELETE FROM pages WHERE id = ?').run(id);
     // Las asignaciones que apuntaban a esta página quedan sin pantalla.
     this.db.prepare('DELETE FROM profile_assignments WHERE page_id = ?').run(id);
   }
@@ -2435,6 +2541,103 @@ export class DatabaseService {
 
     const stmt = this.db.prepare(query);
     return stmt.all(...params) as LogEntry[];
+  }
+
+  // ---- Logs por pulsación × acción (tabla `button_press_logs`) ----
+  // Una fila por acción ejecutada en cada press. NUNCA se persisten
+  // `parameters` (pueden contener secretos): solo tipo/resultado.
+
+  private pressRowToLog(r: any): PressLog {
+    let meta: any = undefined;
+    if (r.meta !== null && r.meta !== undefined) {
+      try { meta = JSON.parse(r.meta); } catch { meta = r.meta; }
+    }
+    return {
+      id: r.id, ts: r.ts, buttonId: r.button_id,
+      pageId: r.page_id ?? null, profileId: r.profile_id ?? null,
+      position: r.position ?? null, pressType: r.press_type ?? 'short',
+      deviceId: r.device_id ?? null, deviceName: r.device_name ?? null,
+      source: r.source ?? null, actionType: r.action_type,
+      actionIndex: r.action_index ?? null, actionId: r.action_id ?? null,
+      runId: r.run_id ?? null, success: Number(r.success ?? 1) === 1,
+      error: r.error ?? null, durationMs: r.duration_ms ?? null,
+      meta,
+    };
+  }
+
+  addPressLog(e: Omit<PressLog, 'id' | 'ts' | 'success'> & { id?: string; ts?: number; success?: boolean }): void {
+    if (!e.buttonId || typeof e.buttonId !== 'string') throw new Error('buttonId requerido');
+    if (!e.actionType || typeof e.actionType !== 'string') throw new Error('actionType requerido');
+    this.db.prepare(`INSERT INTO button_press_logs
+      (id, ts, button_id, page_id, profile_id, position, press_type,
+       device_id, device_name, source, action_type, action_index, action_id,
+       run_id, success, error, duration_ms, meta)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      e.id ?? uuidv4(), e.ts ?? Date.now(), e.buttonId,
+      e.pageId ?? null, e.profileId ?? null, e.position ?? null,
+      e.pressType ?? 'short', e.deviceId ?? null, e.deviceName ?? null,
+      e.source ?? null, e.actionType, e.actionIndex ?? null, e.actionId ?? null,
+      e.runId ?? null, e.success === false ? 0 : 1,
+      typeof e.error === 'string' ? e.error.slice(0, 500) : (e.error ?? null),
+      e.durationMs ?? null,
+      e.meta === undefined || e.meta === null ? null
+        : typeof e.meta === 'string' ? e.meta : JSON.stringify(e.meta),
+    );
+  }
+
+  /** Lista con filtros combinables + total (para paginación). */
+  listPressLogs(f: PressLogFilters = {}): { items: PressLog[]; total: number } {
+    const where: string[] = [];
+    const params: any[] = [];
+    if (f.buttonId !== undefined) { where.push('button_id = ?'); params.push(f.buttonId); }
+    if (f.actionType !== undefined) { where.push('action_type = ?'); params.push(f.actionType); }
+    if (f.deviceId !== undefined) { where.push('device_id = ?'); params.push(f.deviceId); }
+    if (f.success !== undefined) { where.push('success = ?'); params.push(f.success ? 1 : 0); }
+    if (f.pressType !== undefined) { where.push('press_type = ?'); params.push(f.pressType); }
+    if (f.since !== undefined) { where.push('ts >= ?'); params.push(f.since); }
+    if (f.until !== undefined) { where.push('ts <= ?'); params.push(f.until); }
+    const suffix = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const totalRow = this.db.prepare(`SELECT COUNT(*) as c FROM button_press_logs ${suffix}`).get(...params) as { c: number };
+    const limit = Math.min(Math.max(0, Math.floor(f.limit ?? 50)), 500);
+    const offset = Math.max(0, Math.floor(f.offset ?? 0));
+    const rows = this.db.prepare(
+      `SELECT * FROM button_press_logs ${suffix} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as any[];
+    return { items: rows.map((r) => this.pressRowToLog(r)), total: totalRow?.c ?? 0 };
+  }
+
+  /** Borra por filtros (sin filtros = todo). Devuelve filas eliminadas. */
+  clearPressLogs(f: { buttonId?: string; actionType?: string; before?: number } = {}): number {
+    const where: string[] = [];
+    const params: any[] = [];
+    if (f.buttonId !== undefined) { where.push('button_id = ?'); params.push(f.buttonId); }
+    if (f.actionType !== undefined) { where.push('action_type = ?'); params.push(f.actionType); }
+    if (f.before !== undefined) { where.push('ts < ?'); params.push(f.before); }
+    const suffix = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const r = this.db.prepare(`DELETE FROM button_press_logs ${suffix}`).run(...params);
+    return Number((r as any)?.changes ?? 0);
+  }
+
+  /**
+   * Poda por antigüedad (ts < ahora - keepDays) y por tope (conserva los
+   * `keepMax` más recientes). Valores <= 0 o no finitos = esa poda no aplica.
+   * Devuelve filas eliminadas.
+   */
+  prunePressLogs(keepMax: number, keepDays: number): number {
+    let deleted = 0;
+    try {
+      if (Number.isFinite(keepDays) && keepDays > 0) {
+        const cutoff = Date.now() - keepDays * 86400000;
+        const r = this.db.prepare('DELETE FROM button_press_logs WHERE ts < ?').run(cutoff);
+        deleted += Number((r as any)?.changes ?? 0);
+      }
+      if (Number.isFinite(keepMax) && keepMax > 0) {
+        const r = this.db.prepare(`DELETE FROM button_press_logs WHERE id NOT IN
+          (SELECT id FROM button_press_logs ORDER BY ts DESC, rowid DESC LIMIT ?)`).run(Math.floor(keepMax));
+        deleted += Number((r as any)?.changes ?? 0);
+      }
+    } catch { /* mejor esfuerzo */ }
+    return deleted;
   }
 
   // Assets

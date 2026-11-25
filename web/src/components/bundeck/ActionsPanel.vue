@@ -60,8 +60,10 @@
           :aria-disabled="isUnconfigured(action.pid)"
           :title="isUnconfigured(action.pid) ? t('bd.pluginNotConfigured') : action.name"
           data-cy="bd-action-item"
+          :data-action-type="action.type"
           @dragstart="onDragStart($event, action)"
           @click="onPick(action)"
+          @contextmenu.prevent="onCtx($event, action)"
         >
           <component :is="action.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
           <span>{{ action.name }}</span>
@@ -86,12 +88,21 @@
       </template>
       <p v-if="!flat.length" class="bd-hint">{{ t('bd.noActionMatch') }}</p>
     </div>
+    <ContextMenu
+      :show="menu.show"
+      :x="menu.x"
+      :y="menu.y"
+      :items="menuItems"
+      @item-click="onMenuItem"
+      @close="menu.show = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-next'
+import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare, ScrollText } from 'lucide-vue-next'
+import ContextMenu from '../ContextMenu.vue'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import { useI18nStore } from '../../composables/useI18n'
 import { actionSurfaceKind, matchesActionQuery } from '../../composables/useActionPresentation'
@@ -106,6 +117,7 @@ interface Props {
 
 interface Emits {
   (e: 'action-pick', actionType: string): void
+  (e: 'action-logs', payload: { actionType: string }): void
   (e: 'open-plugin-settings', pluginId: string): void
   (e: 'open-plugin-instructions', pluginId: string): void
 }
@@ -219,6 +231,20 @@ const onPick = (action: { type: string; pid: string }) => {
 
 const focusSearch = () => {
   searchInput.value?.focus()
+}
+
+// Menú contextual sobre filas de acción: «Ver registros» emite el tipo
+// de acción (sin buttonId: el diálogo muestra la columna botón).
+const menu = ref({ show: false, x: 0, y: 0, actionType: '' })
+const menuItems = computed(() => [
+  { id: 'action-logs', label: t('bd.viewLogs'), icon: ScrollText, danger: false },
+])
+const onCtx = (e: MouseEvent, action: { type: string }) => {
+  menu.value = { show: true, x: e.clientX, y: e.clientY, actionType: action.type }
+}
+const onMenuItem = () => {
+  emit('action-logs', { actionType: menu.value.actionType })
+  menu.value.show = false
 }
 
 // Cierra el menú ⋯ al pulsar fuera

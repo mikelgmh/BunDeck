@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { ev, evb, intp, usedVarNames, type LookLike } from './useExpressions'
 import { getVar, setVarValue, toggleVar, vars, getEnv, displayTick, varsVersion } from './useVars'
+import { getOrCreateDeviceId } from '../utils/sessionRouting'
 import type { ButtonEntity } from '../types/streamdeck'
 import {
   TAP_WINDOW_MS,
@@ -123,9 +124,17 @@ export function createKeyEngine(deps: EngineDeps) {
     }
   }
 
-  function ctxFor(pos: number): Record<string, any> {
+  function ctxFor(pos: number, trigger?: Trigger): Record<string, any> {
     const b = deps.getButton(pos)
-    return { buttonId: b?.id ?? null, pageId: deps.pageId(), profileId: '', position: pos }
+    return {
+      buttonId: b?.id ?? null,
+      pageId: deps.pageId(),
+      profileId: '',
+      position: pos,
+      pressType: trigger ?? 'press',
+      deviceId: getOrCreateDeviceId(),
+      source: 'web',
+    }
   }
 
   async function execKey(pos: number, trigger: Trigger = 'press'): Promise<void> {
@@ -146,7 +155,7 @@ export function createKeyEngine(deps: EngineDeps) {
     }
     if (!deps.executing.value.includes(pos)) deps.executing.value.push(pos)
     try {
-      const ctx = ctxFor(pos)
+      const ctx = ctxFor(pos, trigger)
       if (acts.length) {
         if ((K.mode ?? 'seq') === 'par') await runList(acts, true, ctx)
         // `alt` (rotar) solo aplica al click, igual que el daemon.
@@ -228,7 +237,7 @@ export function createKeyEngine(deps: EngineDeps) {
         const K = deps.getExecData(pos)
         if (!K) continue
         for (const r of K.rules ?? []) {
-          if (r?.on && r?.when === 'load') void runRule(K, r, ctxFor(pos))
+          if (r?.on && r?.when === 'load') void runRule(K, r, ctxFor(pos, 'load'))
         }
       }
     } finally {
@@ -245,7 +254,7 @@ export function createKeyEngine(deps: EngineDeps) {
       for (const r of K.rules ?? []) {
         if (r?.on && r?.when === 'timer') {
           const every = Math.max(1, Math.round(+r.every || 5))
-          if (displayTick.value % every === 0) void runRule(K, r, ctxFor(pos))
+          if (displayTick.value % every === 0) void runRule(K, r, ctxFor(pos, 'timer'))
         }
       }
     }
@@ -260,7 +269,7 @@ export function createKeyEngine(deps: EngineDeps) {
         const K = deps.getExecData(pos)
         if (!K) continue
         for (const r of K.rules ?? []) {
-          if (r?.on && r?.when === 'var' && r?.vn === name) void runRule(K, r, ctxFor(pos))
+          if (r?.on && r?.when === 'var' && r?.vn === name) void runRule(K, r, ctxFor(pos, 'var'))
         }
       }
     } finally {

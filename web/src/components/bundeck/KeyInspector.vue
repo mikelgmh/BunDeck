@@ -66,6 +66,9 @@
           <button role="menuitem" @click="onMenuAction('test')">
             <Play :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.pressKey') }}</span>
           </button>
+          <button v-if="hasButton" role="menuitem" data-cy="bd-key-menu-logs" @click="onMenuAction('logs')">
+            <ScrollText :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.viewLogs') }}</span>
+          </button>
           <button role="menuitem" :disabled="!hasButton" @click="onMenuAction('export')">
             <FileUp :size="16" stroke-width="1.75" aria-hidden="true" /><span>{{ t('bd.exportKey') }}</span>
           </button>
@@ -164,6 +167,7 @@
               class="bd-ac"
               data-cy="bd-action-row"
               :data-swapy-slot="`slot-${action.id ?? i}`"
+              @contextmenu.prevent="onActionCtx($event, pressTab, i, action?.type)"
             >
               <div :data-swapy-item="`item-${action.id ?? i}`">
                 <ActionCard
@@ -289,7 +293,7 @@
           </div>
           <p class="bd-sh2">{{ t('bd.ruleThen') }}</p>
           <div class="bd-al">
-            <div v-for="(o, i) in asList(r.then)" :key="o.id ?? i" class="bd-ac">
+            <div v-for="(o, i) in asList(r.then)" :key="o.id ?? i" class="bd-ac" @contextmenu.prevent="onActionCtx($event, `r${ri}.then`, i, o?.type)">
               <ActionCard
                 :action="o"
                 :index="i"
@@ -307,7 +311,7 @@
           </button>
           <p class="bd-sh2">{{ t('bd.ruleElse') }}</p>
           <div class="bd-al">
-            <div v-for="(o, i) in asList(r.else)" :key="o.id ?? i" class="bd-ac">
+            <div v-for="(o, i) in asList(r.else)" :key="o.id ?? i" class="bd-ac" @contextmenu.prevent="onActionCtx($event, `r${ri}.else`, i, o?.type)">
               <ActionCard
                 :action="o"
                 :index="i"
@@ -669,15 +673,25 @@
         <FileDown :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.importKey') }}
       </button>
     </div>
+
+    <ContextMenu
+      :show="actionMenu.show"
+      :x="actionMenu.x"
+      :y="actionMenu.y"
+      :items="actionMenuItems"
+      @item-click="onActionMenuItem"
+      @close="actionMenu.show = false"
+    />
   </template>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { ChevronUp, ChevronDown, Plus, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2, ImagePlus, Zap } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Plus, GripVertical, Ellipsis, Play, FileUp, FileDown, Trash2, ImagePlus, Zap, ScrollText } from 'lucide-vue-next'
 import type { Swapy } from 'swapy'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import ActionCard from './ActionCard.vue'
+import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import {
   normalizePressActions,
@@ -727,6 +741,8 @@ interface Emits {
   (e: 'open-look-icon', index: number): void
   (e: 'clear-image'): void
   (e: 'action-drop-selected', actionType: string, kind?: PressKind): void
+  (e: 'view-logs'): void
+  (e: 'action-logs', payload: { kind: string; index: number; actionType: string }): void
 }
 
 const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '' })
@@ -1389,9 +1405,10 @@ const onGripKey = (e: KeyboardEvent, i: number) => {
   })
 }
 
-const onMenuAction = (a: 'test' | 'export' | 'import' | 'clear') => {
+const onMenuAction = (a: 'test' | 'export' | 'import' | 'clear' | 'logs') => {
   menuOpen.value = false
   if (a === 'test') emit('test')
+  else if (a === 'logs') emit('view-logs')
   else if (a === 'export') emit('export-key')
   else if (a === 'import') emit('import-key')
   else emit('clear')
@@ -1416,5 +1433,37 @@ const onMenuKey = (e: KeyboardEvent) => {
     menuOpen.value = false
     menuBtn.value?.focus()
   }
+}
+
+// Menú contextual sobre filas de acción: un único item «Ver registros»
+// que emite la acción concreta (kind + índice + tipo) al contenedor.
+const actionMenu = ref({
+  show: false,
+  x: 0,
+  y: 0,
+  kind: '',
+  index: -1,
+  actionType: '',
+})
+const actionMenuItems = computed(() => [
+  { id: 'action-logs', label: t('bd.viewLogs'), icon: ScrollText, danger: false },
+])
+const onActionCtx = (e: MouseEvent, kind: string, index: number, actionType?: string) => {
+  actionMenu.value = {
+    show: true,
+    x: e.clientX,
+    y: e.clientY,
+    kind: String(kind ?? ''),
+    index,
+    actionType: String(actionType ?? ''),
+  }
+}
+const onActionMenuItem = () => {
+  emit('action-logs', {
+    kind: actionMenu.value.kind,
+    index: actionMenu.value.index,
+    actionType: actionMenu.value.actionType,
+  })
+  actionMenu.value.show = false
 }
 </script>
