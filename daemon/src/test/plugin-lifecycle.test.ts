@@ -7,9 +7,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-lifecycle-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+const CLAIM = claimDataDir('ld-lifecycle-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase } from '../db';
@@ -32,6 +33,7 @@ function manifest(id: string, version: string, extra: any = {}) {
 }
 
 beforeAll(async () => {
+  setDataDir(TMP);
   await initDatabase();
   loader = new PluginLoader();
   const anyLoader = loader as any;
@@ -41,6 +43,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   try { loader.dispose(); } catch {}
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 describe('Plugin lifecycle (marketplace)', () => {

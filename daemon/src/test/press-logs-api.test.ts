@@ -7,13 +7,11 @@
  *
  * Patrón: tmpdir + BUNDECK_DATA_DIR=TMP antes de importar db.
  */
-import { describe, it, expect, beforeAll, beforeEach, mock } from 'bun:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, mock } from 'bun:test';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-press-logs-api-test-'));
-process.env.BUNDECK_DATA_DIR = TMP;
+const CLAIM = claimDataDir('ld-press-logs-api-test-');
+const TMP = CLAIM.dir;
 
 import { initDatabase, DatabaseService } from '../db';
 import { ActionRunner } from '../action-runner';
@@ -44,7 +42,7 @@ async function json(res: Response | null) {
 }
 
 beforeAll(async () => {
-  process.env.BUNDECK_DATA_DIR = TMP;
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
   db.createProfile({ id: 'prof1', name: 'P1', data: {} });
@@ -52,6 +50,11 @@ beforeAll(async () => {
   try {
     db.createDevice({ id: 'dev1', name: 'Deck Mini', kind: 'deck', model: 'mini', cols: null, rows: null, hw_path: null } as any);
   } catch { /* ya existe en re-runs del fichero */ }
+});
+
+afterAll(() => {
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 beforeEach(() => {

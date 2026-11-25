@@ -17,13 +17,16 @@
  * con la DB real; con el mock se siembra el estado legacy equivalente por
  * API pública y se verifica el mismo contrato de compatibilidad.
  */
-import { describe, it, expect, beforeAll } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-phase1-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+const CLAIM = claimDataDir('ld-phase1-test-');
+const TMP = CLAIM.dir;
+// Dirs de migración creados a mitad de fichero (también propios; se limpian en afterAll).
+const OLD_DIRS: string[] = [];
 
 import { Database } from 'bun:sqlite';
 import { initDatabase, DatabaseService, LEGACY_GRID_COLS } from '../db';
@@ -34,11 +37,20 @@ let db: DatabaseService;
 
 beforeAll(async () => {
   // Re-afirma el data dir: otros ficheros de test usan el mismo patrón y
-  // el orden de importación no debe desviarnos a su TMP.
-  process.env.LIBREDECK_DATA_DIR = TMP;
+  // el orden de descubrimiento depende del SO; AMBAS vars (la canónica
+  // BUNDECK_ gana sobre la deprecated LIBREDECK_ en resolveDataDir).
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
 }, 120_000);
+
+afterAll(() => {
+  CLAIM.restore();
+  CLAIM.cleanup();
+  for (const d of OLD_DIRS) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
 
 function tableCols(svc: DatabaseService, table: string): string[] {
   const raw = (svc as any).db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -84,6 +96,7 @@ describe('Fase 1: migración desde DB antigua (pre-Fase-1)', () => {
       return;
     }
     const OLD = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-phase1-old-'));
+    OLD_DIRS.push(OLD);
     const oldPath = path.join(OLD, 'db.sqlite');
     // Schema antiguo: sin parent_id/grid_*, sin columnas widget, sin
     // triggers/flow_runs nuevos ni client_sessions.
@@ -109,7 +122,7 @@ describe('Fase 1: migración desde DB antigua (pre-Fase-1)', () => {
     );
     old.close();
 
-    process.env.LIBREDECK_DATA_DIR = OLD;
+    setDataDir(OLD);
     await initDatabase();
     const migrated = new DatabaseService();
 
@@ -127,7 +140,7 @@ describe('Fase 1: migración desde DB antigua (pre-Fase-1)', () => {
     expect(tables).toEqual(expect.arrayContaining(['triggers', 'flow_runs', 'client_sessions']));
 
     // Vuelve a la DB del resto del fichero
-    process.env.LIBREDECK_DATA_DIR = TMP;
+    setDataDir(TMP);
     await initDatabase();
     db = new DatabaseService();
   }, 120_000);

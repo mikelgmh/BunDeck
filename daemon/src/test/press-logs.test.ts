@@ -6,13 +6,11 @@
  *
  * Patrón: tmpdir + BUNDECK_DATA_DIR=TMP antes de importar db.
  */
-import { describe, it, expect, beforeAll } from 'bun:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-press-logs-test-'));
-process.env.BUNDECK_DATA_DIR = TMP;
+const CLAIM = claimDataDir('ld-press-logs-test-');
+const TMP = CLAIM.dir;
 
 import { initDatabase, getDatabase, DatabaseService } from '../db';
 
@@ -37,9 +35,14 @@ function isRealDb(): boolean {
 }
 
 beforeAll(async () => {
-  process.env.BUNDECK_DATA_DIR = TMP;
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
+});
+
+afterAll(() => {
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 function seedRow(over: Record<string, any> = {}) {

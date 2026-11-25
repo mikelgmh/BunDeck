@@ -105,7 +105,10 @@ export class WebcamPlugin {
                     'powershell.exe', '-NoProfile', '-Command',
                     "Get-PnpDevice -Class Camera,Image -Status OK -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName",
                 ])
-                if (exitCode !== 0) throw new Error(`PowerShell no pudo enumerar cámaras: ${stderr.trim() || `código ${exitCode}`}`)
+                // Sin cámaras (o sin clase PnP de cámara en el equipo)
+                // Get-PnpDevice sale con código != 0 y stderr vacío: es lista
+                // vacía, no error. Solo se lanza si hay mensaje de error real.
+                if (exitCode !== 0 && stderr.trim()) throw new Error(`PowerShell no pudo enumerar cámaras: ${stderr.trim()}`)
                 const cameras = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
                 return {
                     action: 'list-cameras', platform: 'windows', count: cameras.length,

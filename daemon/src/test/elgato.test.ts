@@ -2,13 +2,14 @@
  * elgato.test.ts — conversor Elgato (Fase 0): análisis, conversión y rechazo.
  * Fixture con la forma real del manifest de DeckCal (com.ewels.deckcal).
  */
-import { describe, it, expect, beforeAll } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-elgato-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+const CLAIM = claimDataDir('ld-elgato-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase, DatabaseService } from '../db';
@@ -17,8 +18,14 @@ import { importElgatoPlugin } from '../elgato/import';
 
 let db: DatabaseService;
 beforeAll(async () => {
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
+});
+
+afterAll(() => {
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 // Forma real (campos relevantes) del manifest de DeckCal

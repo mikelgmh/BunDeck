@@ -15,8 +15,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-shim-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
+
+const CLAIM = claimDataDir('ld-shim-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase, DatabaseService } from '../db';
@@ -71,6 +73,7 @@ function fakeApi(calls: any[] = []): ShimApi {
 }
 
 beforeAll(async () => {
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
   loader = new PluginLoader();
@@ -88,6 +91,8 @@ afterAll(async () => {
     try { loader.unloadPlugin(id); } catch {}
   }
   try { (loader as any).dispose?.(); } catch {}
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 describe('shim: feature-flag y utilidades', () => {

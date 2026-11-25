@@ -18,28 +18,36 @@
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'bun:test'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { createHash } from 'node:crypto'
 
-// Aislar la DB real del daemon en un dir temporal (ActionRunner usa DatabaseService real).
-process.env.LIBREDECK_DATA_DIR ??= join(tmpdir(), `libredeck-e2e-${process.pid}`)
-await mkdir(process.env.LIBREDECK_DATA_DIR, { recursive: true })
+import { claimDataDir, setDataDir } from './helpers/test-data-dir'
+
+// Aislar la DB real del daemon en un dir temporal PROPIO (ActionRunner usa
+// DatabaseService real). Propio y con AMBAS vars: heredar el dir de otro
+// fichero (`??=`) o dejar BUNDECK_DATA_DIR ajeno mezclaba DB y sonidos con
+// otro tmpdir (flakes solo-CI según orden de ficheros del SO).
+const CLAIM = claimDataDir(`libredeck-e2e-`)
+const TMP_E2E = CLAIM.dir
+setDataDir(TMP_E2E)
+await mkdir(TMP_E2E, { recursive: true })
 
 import { ActionRunner } from '../action-runner'
 
-const TMP_SOUNDS = join(process.env.LIBREDECK_DATA_DIR, `sounds-e2e-${Date.now()}`)
+const TMP_SOUNDS = join(TMP_E2E, `sounds-e2e-${Date.now()}`)
 
 let runner: ActionRunner
 beforeAll(async () => {
+    setDataDir(TMP_E2E)
     const { initDatabase } = await import('../db')
     await initDatabase()
     runner = new ActionRunner({ setActionCallbacks: () => {} } as any)
 })
 afterAll(async () => {
     try { runner?.dispose() } catch { /* noop */ }
-    await rm(process.env.LIBREDECK_DATA_DIR!, { recursive: true, force: true }).catch(() => {})
+    CLAIM.restore()
+    CLAIM.cleanup()
 })
 
 async function run(type: string, parameters: Record<string, any> = {}) {
