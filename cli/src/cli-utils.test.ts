@@ -75,30 +75,32 @@ describe('parseHealth', () => {
 
 describe('daemon exe version sorting', () => {
   test('extractDaemonVersion distingue versionados de genéricos', () => {
-    expect(extractDaemonVersion('libredeck-daemon-v1.3.0-windows-x64.exe')).toEqual({
-      file: 'libredeck-daemon-v1.3.0-windows-x64.exe',
+    expect(extractDaemonVersion('bundeck-daemon-v1.3.0-windows-x64.exe')).toEqual({
+      file: 'bundeck-daemon-v1.3.0-windows-x64.exe',
       version: '1.3.0',
       hasVersion: true,
     });
-    expect(extractDaemonVersion('libredeck-daemon.exe')).toMatchObject({
+    expect(extractDaemonVersion('bundeck-daemon.exe')).toMatchObject({
       version: '0.0.0',
       hasVersion: false,
     });
+    // compat: nombres antiguos libredeck-* siguen reconociéndose
+    expect(extractDaemonVersion('libredeck-daemon-v1.3.0-windows-x64.exe').hasVersion).toBe(true);
   });
   test('ordena semver descendente, versionados primero', () => {
     const sorted = sortDaemonExes([
-      'libredeck-daemon.exe',
-      'libredeck-daemon-v1.2.0-windows-x64.exe',
-      'libredeck-daemon-v1.10.0-windows-x64.exe',
-      'libredeck-daemon-v1.3.0-windows-x64.exe',
-      'libredeck-daemon-v1.3.0-windows-x64-backup.exe',
+      'bundeck-daemon.exe',
+      'bundeck-daemon-v1.2.0-windows-x64.exe',
+      'bundeck-daemon-v1.10.0-windows-x64.exe',
+      'bundeck-daemon-v1.3.0-windows-x64.exe',
+      'bundeck-daemon-v1.3.0-windows-x64-backup.exe',
       'README.md',
     ]);
     expect(sorted).toEqual([
-      'libredeck-daemon-v1.10.0-windows-x64.exe',
-      'libredeck-daemon-v1.3.0-windows-x64.exe',
-      'libredeck-daemon-v1.2.0-windows-x64.exe',
-      'libredeck-daemon.exe',
+      'bundeck-daemon-v1.10.0-windows-x64.exe',
+      'bundeck-daemon-v1.3.0-windows-x64.exe',
+      'bundeck-daemon-v1.2.0-windows-x64.exe',
+      'bundeck-daemon.exe',
     ]);
   });
   test('pickLatestDaemonExe devuelve null sin candidatos', () => {
@@ -108,15 +110,23 @@ describe('daemon exe version sorting', () => {
   test('compareDaemonVersions es estable ante patch/minor/major', () => {
     expect(
       compareDaemonVersions(
-        extractDaemonVersion('libredeck-daemon-v2.0.0-windows-x64.exe'),
-        extractDaemonVersion('libredeck-daemon-v1.99.99-windows-x64.exe'),
+        extractDaemonVersion('bundeck-daemon-v2.0.0-windows-x64.exe'),
+        extractDaemonVersion('bundeck-daemon-v1.99.99-windows-x64.exe'),
       ),
     ).toBe(-1);
   });
 });
 
 describe('data dir / pidfile', () => {
-  test('respeta LIBREDECK_DATA_DIR', () => {
+  test('respeta BUNDECK_DATA_DIR', () => {
+    const dir = resolveDataDir({
+      execPath: '/usr/bin/bun',
+      cwd: '/repo/cli',
+      env: { BUNDECK_DATA_DIR: '/custom/data' },
+    });
+    expect(dir).toBe('/custom/data');
+  });
+  test('respeta LIBREDECK_DATA_DIR (deprecated)', () => {
     const dir = resolveDataDir({
       execPath: '/usr/bin/bun',
       cwd: '/repo/cli',
@@ -130,14 +140,14 @@ describe('data dir / pidfile', () => {
       cwd: '/repo/cli',
       env: { ELECTROBUN_DATA_DIR: '/electro/data' },
     });
-    expect(dir).toContain('libredeck');
+    expect(dir).toContain('bundeck');
     expect(dir.replace(/\\/g, '/').startsWith('/electro/data')).toBe(true);
   });
-  test('LIBREDECK_DATA_DIR tiene prioridad sobre ELECTROBUN_DATA_DIR', () => {
+  test('BUNDECK_DATA_DIR tiene prioridad sobre ELECTROBUN_DATA_DIR', () => {
     const dir = resolveDataDir({
       execPath: '/usr/bin/bun',
       cwd: '/repo/cli',
-      env: { LIBREDECK_DATA_DIR: '/custom/data', ELECTROBUN_DATA_DIR: '/electro/data' },
+      env: { BUNDECK_DATA_DIR: '/custom/data', ELECTROBUN_DATA_DIR: '/electro/data' },
     });
     expect(dir).toBe('/custom/data');
   });

@@ -98,7 +98,7 @@ describe('downloadStandaloneDaemon (servidor local)', () => {
 
   beforeAll(() => {
     const daemonBin = Buffer.from('#!/bin/sh\necho fake-daemon\n', 'utf8');
-    bundle = tinyZip('libredeck-daemon', daemonBin);
+    bundle = tinyZip('bundeck-daemon', daemonBin);
     sha = createHash('sha256').update(bundle).digest('hex');
     const url = `http://127.0.0.1:0/bundle.zip`;
     void url;
@@ -123,7 +123,7 @@ describe('downloadStandaloneDaemon (servidor local)', () => {
   it('descarga, verifica sha256 y extrae el daemon', async () => {
     const port = (server as any).port as number;
     const { downloadStandaloneDaemon } = await import('./update');
-    process.env.LIBREDECK_INSTALL_DIR = dir;
+    process.env.BUNDECK_INSTALL_DIR = dir;
     const dest = await downloadStandaloneDaemon(
       {
         current: '1.5.0',
@@ -140,16 +140,16 @@ describe('downloadStandaloneDaemon (servidor local)', () => {
       () => {},
     );
     const ext = process.platform === 'win32' ? '.exe' : '';
-    expect(dest.endsWith(`libredeck-daemon-v9.9.9${ext}`)).toBe(true);
+    expect(dest.endsWith(`bundeck-daemon-v9.9.9${ext}`)).toBe(true);
     expect(existsSync(dest)).toBe(true);
     expect(readFileSync(dest, 'utf8')).toContain('fake-daemon');
-    delete process.env.LIBREDECK_INSTALL_DIR;
+    delete process.env.BUNDECK_INSTALL_DIR;
   });
 
   it('rechaza sha256 incorrecto', async () => {
     const port = (server as any).port as number;
     const { downloadStandaloneDaemon } = await import('./update');
-    process.env.LIBREDECK_INSTALL_DIR = dir;
+    process.env.BUNDECK_INSTALL_DIR = dir;
     await expect(
       downloadStandaloneDaemon({
         current: '1.5.0',
@@ -164,6 +164,6 @@ describe('downloadStandaloneDaemon (servidor local)', () => {
         },
       }),
     ).rejects.toThrow();
-    delete process.env.LIBREDECK_INSTALL_DIR;
+    delete process.env.BUNDECK_INSTALL_DIR;
   });
 });
