@@ -654,17 +654,24 @@ export class DiscordRpcConnection {
 
     private waitReady(): Promise<void> {
         return new Promise<void>((resolve, reject) => {
+            const sock = this.socket
+            if (!sock) {
+                reject(new DiscordRpcError('discord-closed', 'Sin conexión RPC: llama a connect() primero.', { retryable: true }))
+                return
+            }
             const timer = setTimeout(() => {
-                this.socket!.onmessage = null
+                // El socket puede ser null si disconnect() corrió antes (p. ej.
+                // una sonda best-effort abandonó la conexión): no debe reventar.
+                try { if (this.socket) this.socket.onmessage = null } catch { /* noop */ }
                 reject(new DiscordRpcError('discord-closed', 'Discord no completó el handshake RPC a tiempo: ¿está abierto y actualizado?', { retryable: true }))
             }, this.timeoutMs)
-            const prev = this.socket!.onmessage
-            this.socket!.onmessage = (ev) => {
+            const prev = sock.onmessage
+            sock.onmessage = (ev) => {
                 const frame = parseRpcFrame(String((ev as any)?.data ?? ''))
                 if (frame.kind === 'ready') {
                     clearTimeout(timer)
                     this.ready = true
-                    this.socket!.onmessage = prev
+                    try { if (this.socket) this.socket.onmessage = prev } catch { /* noop */ }
                     resolve()
                     return
                 }
