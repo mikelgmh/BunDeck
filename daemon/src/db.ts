@@ -524,6 +524,20 @@ export async function initDatabase() {
 
   db = new Database(dbPath);
 
+  // WAL + busy_timeout: lectores nunca bloqueados por escritores y los
+  // escritores esperan (5 s) en vez de fallar con SQLITE_BUSY al primer
+  // intento. Sin esto, dos accesos concurrentes (p. ej. segunda instancia
+  // olvidada, backup, o escritura larga + API) abortan con code 5.
+  try {
+    db.exec('PRAGMA journal_mode=WAL;');
+  } catch { /* noop: sigue en rollback journal */ }
+  try {
+    db.exec('PRAGMA busy_timeout=5000;');
+  } catch { /* noop */ }
+  try {
+    db.exec('PRAGMA synchronous=NORMAL;');
+  } catch { /* noop */ }
+
   // Ejecutar schema
   db.exec(SQL_SCHEMA);
 
@@ -1358,6 +1372,22 @@ export class DatabaseService {
   /** Todos los ajustes como mapa clave → valor (para MCP list_settings). */
   getAllSettings(): Record<string, string> {
     const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const out: Record<string, string> = {};
+    for (const r of rows) out[r.key] = r.value;
+    return out;
+  }
+
+  /**
+   * Lectura acotada por prefijo (`WHERE key LIKE 'prefix%'`): evita el
+   * volcado completo de `getAllSettings()` en caminos calientes (resync del
+   * túnel, listados de sesiones). El prefijo viaja como parámetro (sin
+   * interpolación SQL); `%`/`_` literales del prefijo se escapan.
+   */
+  getSettingsByPrefix(prefix: string): Record<string, string> {
+    const esc = String(prefix ?? '').replace(/[\\%_]/g, (c) => `\\${c}`);
+    const rows = this.db.prepare(
+      "SELECT key, value FROM settings WHERE key LIKE ? ESCAPE '\\'"
+    ).all(`${esc}%`) as { key: string; value: string }[];
     const out: Record<string, string> = {};
     for (const r of rows) out[r.key] = r.value;
     return out;
