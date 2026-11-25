@@ -210,6 +210,12 @@
       @dismiss="showTransportBanner = false"
     />
 
+    <TunnelConnectDialog
+      v-if="showTransportModal"
+      :status="rtcStatus"
+      @dismiss="transportModalDismissed = true"
+    />
+
     <main class="bd-main">
       <aside v-if="!kiosk" id="bd-drw" class="bd-side" :class="{ 'bd-collapsed': !bdShowLeft }" :aria-label="t('bd.libraryLabel')">
         <div v-if="bdShowLeft">
@@ -358,6 +364,7 @@
           :title="wakeTitle"
           aria-hidden="true"
         ><i></i></span>
+        <TunnelKioskDot v-if="isTunnelRoute" :status="rtcStatus" />
         <button
           class="bd-ibtn"
           :title="t('bd.kioskFullscreen')"
@@ -583,6 +590,8 @@ import {
 import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
 import TunnelTransportBanner from './TunnelTransportBanner.vue'
+import TunnelConnectDialog from './TunnelConnectDialog.vue'
+import TunnelKioskDot from './TunnelKioskDot.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
@@ -737,8 +746,17 @@ const isTunnelRoute = computed(() => getTunnelToken() !== null)
 // Banner de transporte al entrar por túnel: visible hasta que el usuario lo
 // cierre o pasen 8 s desde un estado terminal (connected/fallback).
 const showTransportBanner = ref(false)
+// Modal centrada de conexión: una vez por intento (se resetea al iniciar una
+// conexión; el cierre manual no reabre hasta el próximo intento).
+const transportModalDismissed = ref(false)
+const showTransportModal = computed(() =>
+  isTunnelRoute.value &&
+  !transportModalDismissed.value &&
+  (rtcStatus.value === 'idle' || rtcStatus.value === 'signaling')
+)
 let transportBannerTimer: ReturnType<typeof setTimeout> | null = null
 watch(rtcStatus, (s) => {
+  if (s === 'signaling') transportModalDismissed.value = false
   if (transportBannerTimer !== null) {
     clearTimeout(transportBannerTimer)
     transportBannerTimer = null
@@ -2731,6 +2749,7 @@ onMounted(async () => {
   try {
     if (getTunnelToken()) {
       showTransportBanner.value = true
+      transportModalDismissed.value = false
       setTimeout(() => {
         rtc.connect().catch(() => {})
       }, 1500)

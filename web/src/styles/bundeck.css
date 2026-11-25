@@ -1007,6 +1007,42 @@
   background: #fbbf24;
   box-shadow: 0 0 6px #fbbf24;
 }
+/* Puntito de transporte en el kiosco (solo ruta túnel): verde = P2P,
+   ámbar = relay, pulsante = probando. No toca el wake-lock existente. */
+.bundeck .bd-kiosk-rtc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+}
+.bundeck .bd-kiosk-rtc i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bd-ac);
+  display: block;
+  animation: bd-kiosk-pulse 1.2s ease-in-out infinite;
+}
+.bundeck .bd-kiosk-rtc[data-transport='p2p'] i {
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+  animation: none;
+}
+.bundeck .bd-kiosk-rtc[data-transport='relay'] i {
+  background: #d97706;
+  box-shadow: 0 0 6px #d97706;
+  animation: none;
+}
+@keyframes bd-kiosk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
 @media (max-width: 640px) {
   .bundeck.bd-kiosk .bd-floor {
     padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
