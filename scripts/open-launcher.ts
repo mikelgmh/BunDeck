@@ -30,14 +30,14 @@ if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND
   process.exit(0);
 }
 
-const exe = process.platform === "win32" ? "libredeck-launcher.exe" : "libredeck-launcher";
+const exe = process.platform === "win32" ? "bundeck-launcher.exe" : "bundeck-launcher";
 const candidates = ["release", "debug"].map((p) =>
   path.join(root, "launcher", "target", p, exe),
 );
 const binary = candidates.find((c) => existsSync(c));
 
 if (!binary) {
-  console.log("[launcher] sin compilar: `cd launcher && cargo run --bin libredeck-launcher` para la primera vez (luego `bun run dev` ya la abre sola).");
+  console.log("[launcher] sin compilar: `cd launcher && cargo run --bin bundeck-launcher` para la primera vez (luego `bun run dev` ya la abre sola).");
   process.exit(0);
 }
 

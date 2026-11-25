@@ -1,10 +1,14 @@
 # Ejemplo de despliegue con reverse proxy TLS delante (wss en prod).
 # Dominio previsto: relay.bundeck.app -> este servicio.
+# Privacidad: este relay solo enruta sobres E2E opacos (nunca ve contenidos),
+# pero sí metadatos (deviceIds online, IPs, tiempos, tamaños). Ver relay/README.md
+# "Privacidad: lo que ve el operador". El host antiguo bundeck.mikelgranero.com
+# sigue siendo válido como respaldo del relay público.
 services:
   relay:
     build: .
     # O con imagen publicada:
-    # image: ghcr.io/mikelgmh/libredeck-relay:0.1.0
+    # image: ghcr.io/mikelgmh/bundeck-relay:0.1.0
     container_name: bundeck-relay
     restart: unless-stopped
     environment:

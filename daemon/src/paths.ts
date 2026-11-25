@@ -1,6 +1,8 @@
 /**
- * Centralized path management for LibreDeck
- * Handles development vs production environment paths
+ * Centralized path management for BunDeck
+ * Handles development vs production environment paths.
+ * Data-dir canónica: %APPDATA%/BunDeck/data con read-fallback a
+ * %APPDATA%/LibreDeck/data (ver resolveDataDir en ./config).
  */
 
 import { join } from 'path';
@@ -20,12 +22,25 @@ export function getDataDir(): string {
     const { resolveDataDir } = require('./config');
     return resolveDataDir();
   } catch {
-    if (process.env.LIBREDECK_DATA_DIR) {
-      return process.env.LIBREDECK_DATA_DIR;
+    const custom = process.env.BUNDECK_DATA_DIR || process.env.LIBREDECK_DATA_DIR;
+    if (custom) {
+      return custom;
     }
     if (isInstalled) {
       const appDataDir = process.env.APPDATA || process.env.LOCALAPPDATA || process.cwd();
-      return join(appDataDir, 'LibreDeck', 'data');
+      // Réplica mínima del fallback de config.resolveDataDir: no huérfanas
+      // %APPDATA%/LibreDeck/data si ya contiene la DB (esta rama solo se
+      // alcanza si require('./config') falla).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const fs = require('node:fs') as typeof import('node:fs');
+        const canonical = join(appDataDir, 'BunDeck', 'data');
+        const legacy = join(appDataDir, 'LibreDeck', 'data');
+        if (!fs.existsSync(join(canonical, 'db.sqlite')) && fs.existsSync(join(legacy, 'db.sqlite'))) {
+          return legacy;
+        }
+      } catch {}
+      return join(appDataDir, 'BunDeck', 'data');
     }
     return join(process.cwd(), '..', 'data');
   }

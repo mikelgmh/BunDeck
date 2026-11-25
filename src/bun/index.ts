@@ -31,8 +31,13 @@ function log(msg: string) {
     appendFileSync(path.join(process.cwd(), "electrobun-debug.log"), line);
   } catch {}
 }
+// Env canónico BUNDECK_* con fallback deprecated LIBREDECK_* (tests e
+// instalaciones antiguas aún usan el prefijo viejo).
+function envCompat(name: string): string | undefined {
+  return process.env[`BUNDECK_${name}`] ?? process.env[`LIBREDECK_${name}`];
+}
 if (import.meta.main) {
-  if (process.env.LIBREDECK_HOST_TEST !== '1') {
+  if (envCompat('HOST_TEST') !== '1') {
   log(`[electrobun] main.ts loaded cwd=${process.cwd()} execPath=${process.execPath} dir=${import.meta.dir} DEV=${DEV_MODE} isMain=${import.meta.main}`);
 }
 }
@@ -82,16 +87,17 @@ function findProjectRoot(): string {
  * ¿Debe el host spawnear/supervisar el daemon? En prod el dueño es el
  * launcher Rust: el host no spawnea para evitar doble daemon. Solo dev
  * (o override explícito) lo gestiona.
- * - LIBREDECK_HOST_MANAGE_DAEMON=1 fuerza, =0 lo prohíbe.
- * - LIBREDECK_MANAGED=1 lo pone el launcher al spawnear (nunca duplicar).
+ * - BUNDECK_HOST_MANAGE_DAEMON=1 fuerza, =0 lo prohíbe (LIBREDECK_* deprecated vale igual).
+ * - BUNDECK_MANAGED=1 lo pone el launcher al spawnear (nunca duplicar).
  */
 export function shouldHostManageDaemon(
   env: NodeJS.ProcessEnv = process.env,
   devMode: boolean = DEV_MODE,
 ): boolean {
-  if (env.LIBREDECK_HOST_MANAGE_DAEMON === "1") return true;
-  if (env.LIBREDECK_HOST_MANAGE_DAEMON === "0") return false;
-  if (env.LIBREDECK_MANAGED === "1") return false;
+  const hostManage = env.BUNDECK_HOST_MANAGE_DAEMON ?? env.LIBREDECK_HOST_MANAGE_DAEMON;
+  if (hostManage === "1") return true;
+  if (hostManage === "0") return false;
+  if ((env.BUNDECK_MANAGED ?? env.LIBREDECK_MANAGED) === "1") return false;
   return devMode;
 }
 
@@ -130,7 +136,7 @@ async function spawnDaemon(): Promise<void> {
       const daemonDir = path.join(projectRoot, "daemon");
       daemonProcess = spawn(hostBun, ["run", "--watch", "src/server.ts"], {
         cwd: daemonDir,
-        env: { ...process.env, DEV_MODE: "true", LIBREDECK_BIND_LAN: process.env.LIBREDECK_BIND_LAN ?? "1" },
+        env: { ...process.env, DEV_MODE: "true", BUNDECK_BIND_LAN: process.env.BUNDECK_BIND_LAN ?? process.env.LIBREDECK_BIND_LAN ?? "1", LIBREDECK_BIND_LAN: process.env.BUNDECK_BIND_LAN ?? process.env.LIBREDECK_BIND_LAN ?? "1" },
         stdio: "inherit",
         shell: false,
         detached: false,
@@ -295,14 +301,14 @@ async function applyAppUpdate() {
   }
 }
 
-const LAUNCHER_EXE = process.platform === "win32" ? "libredeck-launcher.exe" : "libredeck-launcher";
+const LAUNCHER_EXE = process.platform === "win32" ? "bundeck-launcher.exe" : "bundeck-launcher";
 
 /**
  * Localiza el binario del launcher GPUI (ventana de estado):
- * 1) override LIBREDECK_LAUNCHER, 2) junto al host (instalado),
+ * 1) override BUNDECK_LAUNCHER (o LIBREDECK_LAUNCHER deprecated), 2) junto al host (instalado),
  * 3) launcher/target/{release,debug} en dev. null si no existe.
  */
-export function findLauncherBinary(envBin: string | undefined = process.env.LIBREDECK_LAUNCHER): string | null {
+export function findLauncherBinary(envBin: string | undefined = process.env.BUNDECK_LAUNCHER || process.env.LIBREDECK_LAUNCHER): string | null {
   if (envBin && existsSync(envBin)) return envBin;
   const nextToHost = path.join(path.dirname(process.execPath), LAUNCHER_EXE);
   if (existsSync(nextToHost)) return nextToHost;
@@ -552,7 +558,7 @@ async function main() {
 
   // Login de Spotify sin Client ID: el host pollea login-request y abre
   // la ventana del Web Player oficial para extraer el token en local.
-  // No interfiere con tests (LIBREDECK_HOST_TEST=1 no llega a main()).
+  // No interfiere con tests (BUNDECK_HOST_TEST=1 —o LIBREDECK_HOST_TEST=1— no llega a main()).
   try {
     startSpotifyLoginPolling({ apiPort: API_PORT, BrowserWindowCtor: BrowserWindow as any, onLog: log });
   } catch (e) {
@@ -565,7 +571,7 @@ async function main() {
 // Arranque incondicional: el launcher de Electrobun evalúa este fichero
 // como módulo (import.meta.main === false) y si no se arranca main() la app
 // se queda colgada sin ventana ni logs. Los tests ponen
-// LIBREDECK_HOST_TEST=1 e importan dinámicamente para no arrancar nada.
-if (process.env.LIBREDECK_HOST_TEST !== '1') {
+// BUNDECK_HOST_TEST=1 (o LIBREDECK_HOST_TEST=1) e importan dinámicamente para no arrancar nada.
+if (envCompat('HOST_TEST') !== '1') {
   main().catch(e => console.error("[electrobun] Fatal en main():", e));
 }

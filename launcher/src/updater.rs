@@ -6,13 +6,13 @@
 //!
 //! Layout gestionado (todas las plataformas):
 //! ```text
-//! <install>/                    # junto al launcher, o $LIBREDECK_INSTALL_DIR
-//!   libredeck-launcher(.exe)    # binario en ejecución
-//!   libredeck-updater(.exe)     # ayudante que reemplaza al launcher (fichero bloqueado en Windows)
+//! <install>/                    # junto al launcher, o $BUNDECK_INSTALL_DIR
+//!   bundeck-launcher(.exe)    # binario en ejecución
+//!   bundeck-updater(.exe)     # ayudante que reemplaza al launcher (fichero bloqueado en Windows)
 //!   versions/
 //!     1.6.0/
-//!       libredeck-daemon(.exe) | libredeck-cli(.exe)
-//!       libredeck-launcher(.exe) | libredeck-updater(.exe)
+//!       bundeck-daemon(.exe) | bundeck-cli(.exe)
+//!       bundeck-launcher(.exe) | bundeck-updater(.exe)
 //!       web-dist/
 //!     1.5.0/ ...
 //!   active.json                 # {"version":"1.6.0"}
@@ -33,19 +33,21 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub const GITHUB_REPO: &str = "mikelgmh/libredeck";
+pub const GITHUB_REPO: &str = "mikelgmh/BunDeck";
 pub const MANIFEST_URL: &str =
-    "https://github.com/mikelgmh/libredeck/releases/latest/download/bundeck-update-manifest.json";
+    "https://github.com/mikelgmh/BunDeck/releases/latest/download/bundeck-update-manifest.json";
 const MANIFEST_TIMEOUT_SECS: u64 = 15;
 
 /// Pubkey ed25519 compilada (hex 32 bytes). La inyecta build.rs desde
-/// `LIBREDECK_UPDATE_PUBKEY` o `launcher/UPDATE_PUBKEY`; en runtime gana
+/// `BUNDECK_UPDATE_PUBKEY` o `launcher/UPDATE_PUBKEY`; en runtime gana
 /// el env del mismo nombre. Sin pubkey la verificación de firma se omite
 /// (solo sha256) y se avisa en la UI. Ver `scripts/gen-update-keys.mjs`.
 pub fn update_pubkey() -> Option<String> {
-    std::env::var("LIBREDECK_UPDATE_PUBKEY")
+    std::env::var("BUNDECK_UPDATE_PUBKEY")
         .ok()
         .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("LIBREDECK_UPDATE_PUBKEY").ok().filter(|s| !s.trim().is_empty()))
+        .or_else(|| option_env!("BUNDECK_UPDATE_PUBKEY").map(|s| s.to_string()))
         .or_else(|| option_env!("LIBREDECK_UPDATE_PUBKEY").map(|s| s.to_string()))
         .filter(|s| !s.trim().is_empty())
 }
@@ -142,7 +144,7 @@ pub fn fetch_manifest() -> Result<(UpdateManifest, Vec<u8>), String> {
     //    (releases antiguas sin este sistema).
     match agent()
         .get(MANIFEST_URL)
-        .set("User-Agent", "libredeck-launcher")
+        .set("User-Agent", "bundeck-launcher")
         .call()
     {
         Ok(res) => {
@@ -228,9 +230,9 @@ impl UpdateProgress {
 // Layout gestionado
 // ---------------------------------------------------------------------------
 
-/// Raíz de instalación: `$LIBREDECK_INSTALL_DIR` o el directorio del exe.
+/// Raíz de instalación: `$BUNDECK_INSTALL_DIR` (o `LIBREDECK_INSTALL_DIR` deprecated) o el directorio del exe.
 pub fn install_root() -> PathBuf {
-    if let Ok(d) = std::env::var("LIBREDECK_INSTALL_DIR") {
+    if let Ok(d) = std::env::var("BUNDECK_INSTALL_DIR").or_else(|_| std::env::var("LIBREDECK_INSTALL_DIR")) {
         if !d.trim().is_empty() {
             return PathBuf::from(d);
         }
@@ -287,9 +289,9 @@ pub fn staged_update_is_complete(root: &Path, version: &str) -> bool {
     let stage = versions_dir(root).join(version);
     [
         daemon_file_name(),
-        format!("libredeck-cli{}", exe_suffix()),
-        format!("libredeck-launcher{}", exe_suffix()),
-        format!("libredeck-updater{}", exe_suffix()),
+        format!("bundeck-cli{}", exe_suffix()),
+        format!("bundeck-launcher{}", exe_suffix()),
+        format!("bundeck-updater{}", exe_suffix()),
     ]
     .iter()
     .all(|name| stage.join(name).is_file())
@@ -379,18 +381,23 @@ fn friendly_fs_error(root: &Path, ctx: &str, e: std::io::Error) -> String {
 }
 
 fn daemon_file_name() -> String {
-    format!("libredeck-daemon{}", exe_suffix())
+    format!("bundeck-daemon{}", exe_suffix())
 }
 
 fn legacy_daemon_next_to_launcher(root: &Path) -> Option<PathBuf> {
     let c = root.join(daemon_file_name());
-    c.is_file().then_some(c)
+    if c.is_file() {
+        return Some(c);
+    }
+    // compat: instalaciones antiguas con nombre libredeck-*
+    let old = root.join(daemon_file_name().replacen("bundeck-", "libredeck-", 1));
+    old.is_file().then_some(old)
 }
 
 /// Resuelve el exe del daemon: `versions/<activa>/` > legacy plano > None.
 /// (El modo dev —`bun run daemon/src/server.ts`— lo decide `monitor`, no aquí.)
 pub fn resolve_daemon_exe() -> Option<PathBuf> {
-    if let Ok(o) = std::env::var("LIBREDECK_DAEMON_EXE") {
+    if let Ok(o) = std::env::var("BUNDECK_DAEMON_EXE").or_else(|_| std::env::var("LIBREDECK_DAEMON_EXE")) {
         let p = PathBuf::from(o);
         if p.is_file() {
             return Some(p);
@@ -421,10 +428,10 @@ pub fn resolve_web_dist() -> Option<PathBuf> {
 
 /// Data-dir del usuario (NO se toca en updates salvo backup de la DB).
 /// Réplica de `daemon/src/config.ts::resolveDataDir` (el launcher no
-/// puede importar TS): LIBREDECK_DATA_DIR > %APPDATA%/LibreDeck/data >
+/// puede importar TS): BUNDECK_DATA_DIR (o LIBREDECK_DATA_DIR) > %APPDATA%/BunDeck/data (con fallback LibreDeck) >
 /// <repo>/data (dev).
 pub fn user_data_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("LIBREDECK_DATA_DIR") {
+    if let Ok(d) = std::env::var("BUNDECK_DATA_DIR").or_else(|_| std::env::var("LIBREDECK_DATA_DIR")) {
         if !d.trim().is_empty() {
             return PathBuf::from(d);
         }
@@ -434,15 +441,22 @@ pub fn user_data_dir() -> PathBuf {
         let base = std::env::var("APPDATA")
             .or_else(|_| std::env::var("LOCALAPPDATA"))
             .unwrap_or_else(|_| ".".to_string());
-        let p = PathBuf::from(base).join("LibreDeck").join("data");
+        let p = PathBuf::from(base.clone()).join("BunDeck").join("data");
+        let legacy = PathBuf::from(base).join("LibreDeck").join("data");
+        // Migración: si BunDeck/ no existe pero LibreDeck/ sí, usar el antiguo.
+        let candidate = if !p.join("db.sqlite").is_file() && legacy.join("db.sqlite").is_file() {
+            legacy
+        } else {
+            p
+        };
         // En dev (sin instalación) el daemon usa <repo>/data; si el
         // candidato instalado no existe y hay un repo cerca, preferirlo.
-        if !p.join("db.sqlite").is_file() {
+        if !candidate.join("db.sqlite").is_file() {
             if let Some(repo) = find_repo_data() {
                 return repo;
             }
         }
-        return p;
+        return candidate;
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -550,7 +564,7 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
 
     let res = agent()
         .get(&check.asset.url)
-        .set("User-Agent", "libredeck-launcher")
+        .set("User-Agent", "bundeck-launcher")
         .call()
         .map_err(|e| {
             let msg = format!("descarga fallida: {e}");
@@ -692,9 +706,9 @@ fn set_executable_permissions(stage: &Path) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         for name in [
             daemon_file_name(),
-            "libredeck-cli".to_string(),
-            "libredeck-launcher".to_string(),
-            "libredeck-updater".to_string(),
+            "bundeck-cli".to_string(),
+            "bundeck-launcher".to_string(),
+            "bundeck-updater".to_string(),
         ] {
             let path = stage.join(name);
             if path.is_file() {
@@ -814,7 +828,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
 fn staged_launcher_differs(root: &Path, version: &str) -> bool {
     let staged = versions_dir(root)
         .join(version)
-        .join(format!("libredeck-launcher{}", exe_suffix()));
+        .join(format!("bundeck-launcher{}", exe_suffix()));
     staged.is_file()
 }
 
@@ -850,7 +864,7 @@ fn migrate_legacy(root: &Path) -> Result<(), String> {
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
     for name in [
         daemon_file_name(),
-        format!("libredeck-cli{}", exe_suffix()),
+        format!("bundeck-cli{}", exe_suffix()),
         "web-dist".to_string(),
     ] {
         let src = root.join(&name);
@@ -860,7 +874,7 @@ fn migrate_legacy(root: &Path) -> Result<(), String> {
         }
     }
     // El launcher en ejecución no se puede mover en Windows: se copia.
-    let me = format!("libredeck-launcher{}", exe_suffix());
+    let me = format!("bundeck-launcher{}", exe_suffix());
     let dst = dest.join(&me);
     if !dst.exists() {
         if let Ok(exe) = std::env::current_exe() {
@@ -920,16 +934,16 @@ fn cmp_versions(a: &str, b: &str) -> std::cmp::Ordering {
 // Helper de self-update del launcher
 // ---------------------------------------------------------------------------
 
-/// ¿Hay helper `libredeck-updater` junto al launcher (o staged)?
+/// ¿Hay helper `bundeck-updater` junto al launcher (o staged)?
 pub fn helper_path() -> Option<PathBuf> {
     let root = install_root();
     for c in [
-        root.join(format!("libredeck-updater{}", exe_suffix())),
+        root.join(format!("bundeck-updater{}", exe_suffix())),
         std::env::current_exe()
             .ok()
             .and_then(|e| e.parent().map(|p| p.to_path_buf()))
             .unwrap_or_default()
-            .join(format!("libredeck-updater{}", exe_suffix())),
+            .join(format!("bundeck-updater{}", exe_suffix())),
     ] {
         if c.is_file() {
             return Some(c);
@@ -940,13 +954,13 @@ pub fn helper_path() -> Option<PathBuf> {
 
 /// Lanza el helper para reemplazar el launcher en caliente y sale.
 /// El helper espera a que este pid muera, copia
-/// `versions/<ver>/libredeck-launcher` sobre el exe actual y relanza.
+/// `versions/<ver>/bundeck-launcher` sobre el exe actual y relanza.
 pub fn handoff_self_update(version: &str) -> Result<(), String> {
-    let helper = helper_path().ok_or_else(|| "sin helper libredeck-updater".to_string())?;
+    let helper = helper_path().ok_or_else(|| "sin helper bundeck-updater".to_string())?;
     let root = install_root();
     let staged = versions_dir(&root)
         .join(version)
-        .join(format!("libredeck-launcher{}", exe_suffix()));
+        .join(format!("bundeck-launcher{}", exe_suffix()));
     if !staged.is_file() {
         return Err("el bundle no trae nuevo launcher".to_string());
     }
@@ -1056,9 +1070,9 @@ mod tests {
         std::fs::create_dir_all(stage.join("web-dist")).unwrap();
         for file in [
             daemon_file_name(),
-            format!("libredeck-cli{}", exe_suffix()),
-            format!("libredeck-launcher{}", exe_suffix()),
-            format!("libredeck-updater{}", exe_suffix()),
+            format!("bundeck-cli{}", exe_suffix()),
+            format!("bundeck-launcher{}", exe_suffix()),
+            format!("bundeck-updater{}", exe_suffix()),
         ] {
             std::fs::write(stage.join(file), b"test").unwrap();
         }
@@ -1110,14 +1124,14 @@ mod tests {
         let seed = [7u8; 32];
         let sk = SigningKey::from_bytes(&seed);
         let pub_hex = hex::encode(sk.verifying_key().to_bytes());
-        std::env::set_var("LIBREDECK_UPDATE_PUBKEY", &pub_hex);
+        std::env::set_var("BUNDECK_UPDATE_PUBKEY", &pub_hex);
         let sha = "ab".repeat(32);
         let msg = format!("1.6.0|linux-x64|{sha}");
         let sig_hex = hex::encode(sk.sign(msg.as_bytes()).to_bytes());
         assert!(verify_signature("1.6.0", "linux-x64", &sha, &sig_hex).is_ok());
         // Otro mensaje no valida con la misma firma.
         assert!(verify_signature("9.9.9", "linux-x64", &sha, &sig_hex).is_err());
-        std::env::remove_var("LIBREDECK_UPDATE_PUBKEY");
+        std::env::remove_var("BUNDECK_UPDATE_PUBKEY");
     }
 
     #[test]
@@ -1130,7 +1144,7 @@ mod tests {
             let mut w = zip::ZipWriter::new(f);
             let opts: zip::write::FileOptions<'_, ()> =
                 zip::write::FileOptions::default();
-            w.start_file("libredeck-daemon", opts).unwrap();
+            w.start_file("bundeck-daemon", opts).unwrap();
             use std::io::Write;
             w.write_all(b"fake").unwrap();
             w.start_file("web-dist/index.html", opts).unwrap();
@@ -1140,7 +1154,7 @@ mod tests {
         let dest = dir.join("out");
         std::fs::create_dir_all(&dest).unwrap();
         extract_bundle(&zip_path, &dest).unwrap();
-        assert!(dest.join("libredeck-daemon").is_file());
+        assert!(dest.join("bundeck-daemon").is_file());
         assert!(dest.join("web-dist").join("index.html").is_file());
         let _ = std::fs::remove_dir_all(&dir);
     }

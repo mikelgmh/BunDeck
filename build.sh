@@ -8,8 +8,9 @@ set -e
 echo "🚀 Building BunDeck for production..."
 
 # Versión única desde package.json (temprano: la usan daemon/CLI/launcher/bundle).
-APP_VERSION="${LIBREDECK_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")}"
+APP_VERSION="${BUNDECK_VERSION:-${LIBREDECK_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")}"
 echo "📌 App version: $APP_VERSION"
+export BUNDECK_VERSION="$APP_VERSION"
 export LIBREDECK_VERSION="$APP_VERSION"
 
 # Clean dist directory
@@ -43,14 +44,14 @@ if [ "$(uname -s)" = "MINGW"* ] || [ "$(uname -s)" = "MSYS"* ] || [ -n "${WINDIR
 else
   bun run build
 fi
-mv libredeck-daemon ../dist/
+mv bundeck-daemon ../dist/
 cd ..
 
 # CLI as compiled executable
 echo "📦 Building CLI..."
 cd cli
 bun run build
-mv libredeck-cli ../dist/
+mv bundeck-cli ../dist/
 cd ..
 
 # Launcher GPUI (ventana de estado). Requiere Rust; si no está, se omite
@@ -58,19 +59,19 @@ cd ..
 echo "📦 Building Launcher (Rust)..."
 if command -v cargo &> /dev/null; then
     (cd launcher && cargo build --release)
-    cp launcher/target/release/libredeck-launcher dist/ 2>/dev/null || cp launcher/target/release/libredeck-launcher.exe dist/ 2>/dev/null || echo "⚠️ Launcher compilado pero no copiado a dist/"
-    cp launcher/target/release/libredeck-updater dist/ 2>/dev/null || cp launcher/target/release/libredeck-updater.exe dist/ 2>/dev/null || echo "⚠️ Updater compilado pero no copiado a dist/"
+    cp launcher/target/release/bundeck-launcher dist/ 2>/dev/null || cp launcher/target/release/bundeck-launcher.exe dist/ 2>/dev/null || echo "⚠️ Launcher compilado pero no copiado a dist/"
+    cp launcher/target/release/bundeck-updater dist/ 2>/dev/null || cp launcher/target/release/bundeck-updater.exe dist/ 2>/dev/null || echo "⚠️ Updater compilado pero no copiado a dist/"
 else
     echo "⚠️ cargo no encontrado: se omite el launcher (instala Rust o usa bun run dev:launcher)"
 fi
 
 # active.json gestionado (el updater migra instalaciones planas a versions/).
-if [ -f dist/libredeck-daemon ] || [ -f dist/libredeck-daemon.exe ]; then
+if [ -f dist/bundeck-daemon ] || [ -f dist/bundeck-daemon.exe ]; then
     echo "{\"version\":\"$APP_VERSION\"}" > dist/active.json
 fi
 
 # Bundle gestionado (daemon+cli+launcher+updater+web) para auto-update.
-if [ -f dist/libredeck-daemon ] || [ -f dist/libredeck-daemon.exe ]; then
+if [ -f dist/bundeck-daemon ] || [ -f dist/bundeck-daemon.exe ]; then
     if [ "$(uname -s)" = "MINGW"* ] || [ "$(uname -s)" = "MSYS"* ] || [ -n "${WINDIR:-}" ]; then
         bash scripts/make-bundle.sh "$APP_VERSION" "windows-x64" || echo "⚠️ no se pudo crear el bundle"
     elif [ "$(uname)" = "Darwin" ]; then
@@ -83,8 +84,8 @@ fi
 echo "📦 Building Installer..."
 ISCC_PATH="/c/Users/Mikel/AppData/Local/Programs/Inno Setup 6/ISCC.exe"
 # version.iss desde APP_VERSION (evita /DAppVersion en CLI, que ISCC bajo
-# Git Bash interpreta como segundo fichero de script). LIBREDECK_VERSION ya
-# se exportó arriba para daemon/CLI/launcher.
+# Git Bash interpreta como segundo fichero de script). BUNDECK_VERSION y
+# LIBREDECK_VERSION ya se exportaron arriba para daemon/CLI/launcher.
 echo "#define AppVersion \"$APP_VERSION\"" > version.iss
 if [ -f "$ISCC_PATH" ]; then
     "$ISCC_PATH" installer.iss

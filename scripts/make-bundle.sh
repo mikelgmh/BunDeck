@@ -2,8 +2,8 @@
 # make-bundle.sh — empaqueta dist/ en bundeck-v<ver>-<target>.zip
 # Uso: ./scripts/make-bundle.sh <version> <target>
 #   target: windows-x64 | linux-x64 | darwin-x64
-# Requiere que dist/ contenga: libredeck-daemon*, libredeck-cli*,
-# libredeck-launcher*, libredeck-updater* y web-dist/.
+# Requiere que dist/ contenga: bundeck-daemon*, bundeck-cli*,
+# bundeck-launcher*, bundeck-updater* y web-dist/.
 set -e
 VER="${1:?falta version}"
 TARGET="${2:?falta target}"

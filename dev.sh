@@ -158,6 +158,9 @@ start_dev() {
     export DEV_MODE=true
     # Dev necesita LAN para QR/panel en móvil: opt-in explícito (el daemon
     # por defecto solo escucha en loopback; ver daemon/src/config.ts).
+    # BUNDECK_BIND_LAN es el canónico; se exporta también el legacy por si
+    # el daemon en ejecución es un binario anterior al rename.
+    export BUNDECK_BIND_LAN=1
     export LIBREDECK_BIND_LAN=1
     cd daemon && bun run start &
     DAEMON_PID=$!
@@ -214,7 +217,7 @@ start_dev() {
     # "Abrir panel"). Si se lanza, ya no hace falta auto-abrir el navegador.
     LAUNCHER_OPENED=0
     if [ "${NO_LAUNCHER:-0}" != "1" ]; then
-        for _exe in "launcher/target/release/libredeck-launcher" "launcher/target/release/libredeck-launcher.exe" "launcher/target/debug/libredeck-launcher" "launcher/target/debug/libredeck-launcher.exe"; do
+        for _exe in "launcher/target/release/bundeck-launcher" "launcher/target/release/bundeck-launcher.exe" "launcher/target/debug/bundeck-launcher" "launcher/target/debug/bundeck-launcher.exe" "launcher/target/release/libredeck-launcher" "launcher/target/release/libredeck-launcher.exe" "launcher/target/debug/libredeck-launcher" "launcher/target/debug/libredeck-launcher.exe"; do
             if [ -x "$_exe" ]; then
                 echo -e "${BLUE}🪟 Abriendo ventana de estado (GPUI)...${NC}"
                 # Job directo (sin subshell) para que el trap de EXIT lo cierre con Ctrl+C.
@@ -224,7 +227,7 @@ start_dev() {
             fi
         done
         if [ "$LAUNCHER_OPENED" = "0" ]; then
-            echo -e "${YELLOW}Launcher GPUI sin compilar: 'cd launcher && cargo run --bin libredeck-launcher' (luego ./dev.sh dev ya lo abre solo)${NC}"
+            echo -e "${YELLOW}Launcher GPUI sin compilar: 'cd launcher && cargo run --bin bundeck-launcher' (luego ./dev.sh dev ya lo abre solo)${NC}"
         fi
     fi
 

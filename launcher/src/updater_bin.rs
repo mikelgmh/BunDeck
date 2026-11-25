@@ -1,14 +1,14 @@
-//! libredeck-updater — ayudante de self-update del launcher.
+//! bundeck-updater — ayudante de self-update del launcher.
 //!
 //! Un proceso no puede reemplazarse a sí mismo en caliente (bloqueo de
 //! fichero en Windows). Flujo:
 //!   launcher descarga + verifica + stagea `versions/<ver>/`
 //!   launcher hace `handoff_self_update(ver)` y sale
-//!   helper espera al pid, copia `versions/<ver>/libredeck-launcher[.exe]`
+//!   helper espera al pid, copia `versions/<ver>/bundeck-launcher[.exe]`
 //!   sobre el exe objetivo, relanza el launcher y sale.
 //!
 //! Uso:
-//!   libredeck-updater --wait-pid <pid> --install-dir <dir>
+//!   bundeck-updater --wait-pid <pid> --install-dir <dir>
 //!                     --version <ver> --target <exe-actual>
 
 use std::path::PathBuf;
@@ -63,8 +63,8 @@ fn main() {
     let staged = root
         .join("versions")
         .join(&version)
-        .join(format!("libredeck-launcher{exe_suffix}"));
-    let dest = target.unwrap_or_else(|| root.join(format!("libredeck-launcher{exe_suffix}")));
+        .join(format!("bundeck-launcher{exe_suffix}"));
+    let dest = target.unwrap_or_else(|| root.join(format!("bundeck-launcher{exe_suffix}")));
 
     // Espera a que el launcher salga (máx ~30s).
     for _ in 0..150 {

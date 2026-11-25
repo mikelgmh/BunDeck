@@ -12,7 +12,7 @@
  * calcula), y emite:
  *   { version, channel, publishedAt, minUpdaterVersion, notesUrl, assets }
  *
- * Firma: si existe `LIBREDECK_UPDATE_PRIVKEY` (ed25519, hex de 64 bytes o
+ * Firma: si existe `BUNDECK_UPDATE_PRIVKEY` (o `LIBREDECK_UPDATE_PRIVKEY` deprecated)
  * PEM) firma cada asset sobre el mensaje "<version>|<target>|<sha256>" y
  * añade `signature` + `pubkeyHint` (primeros 8 hex de la pubkey). Si no hay
  * clave, `signature: null` y `signed: false` (solo dev / releases sin firma).
@@ -36,13 +36,13 @@ const args = Object.fromEntries(
 
 const isMain = process.argv[1] && /build-update-manifest\.mjs$/.test(process.argv[1]);
 
-const version = (args.version || process.env.LIBREDECK_VERSION || '').replace(/^v/, '');
+const version = (args.version || process.env.BUNDECK_VERSION || process.env.LIBREDECK_VERSION || '').replace(/^v/, '');
 const assetsDir = args.assets || './artifacts';
 const out = args.out || './bundeck-update-manifest.json';
 const channel = args.channel || 'stable';
 
 if (isMain && !version) {
-  console.error('Falta --version (o LIBREDECK_VERSION)');
+  console.error('Falta --version (o BUNDECK_VERSION)');
   process.exit(1);
 }
 
@@ -56,7 +56,7 @@ function sha256File(path) {
 
 /** Devuelve { signHex(msg) -> sigHex } o null si no hay clave. */
 function loadSigner() {
-  const raw = (process.env.LIBREDECK_UPDATE_PRIVKEY || '').trim();
+  const raw = (process.env.BUNDECK_UPDATE_PRIVKEY || process.env.LIBREDECK_UPDATE_PRIVKEY || '').trim();
   if (!raw) return null;
   try {
     let keyObj;
@@ -77,7 +77,7 @@ function loadSigner() {
       },
     };
   } catch (e) {
-    console.error(`Aviso: LIBREDECK_UPDATE_PRIVKEY inválida (${e.message}); manifiesto sin firma.`);
+    console.error(`Aviso: BUNDECK_UPDATE_PRIVKEY inválida (${e.message}); manifiesto sin firma.`);
     return null;
   }
 }
@@ -110,7 +110,7 @@ export function buildManifest({ version, assetsDir, channel = 'stable' }) {
     }
     assets[target] = {
       bundle: name,
-      url: `https://github.com/mikelgmh/libredeck/releases/download/v${version}/${name}`,
+      url: `https://github.com/mikelgmh/BunDeck/releases/download/v${version}/${name}`,
       sha256,
       size,
       signature,
@@ -127,7 +127,7 @@ export function buildManifest({ version, assetsDir, channel = 'stable' }) {
     channel,
     publishedAt: new Date().toISOString(),
     minUpdaterVersion: '1.6.0',
-    notesUrl: `https://github.com/mikelgmh/libredeck/releases/tag/v${version}`,
+    notesUrl: `https://github.com/mikelgmh/BunDeck/releases/tag/v${version}`,
     signed: signedCount > 0,
     assets,
   };
@@ -137,7 +137,7 @@ const manifest = isMain ? buildManifest({ version, assetsDir, channel }) : null;
 
 if (isMain) {
   if (!version) {
-    console.error('Falta --version (o LIBREDECK_VERSION)');
+    console.error('Falta --version (o BUNDECK_VERSION)');
     process.exit(1);
   }
   writeFileSync(out, JSON.stringify(manifest, null, 2) + '\n');

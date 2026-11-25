@@ -327,24 +327,12 @@ class LibreDeckDaemon {
     console.log(`🔌 WebSocket: ws://localhost:${WS_PORT}`);
     console.log(`🩺 Health: http://localhost:${PORT}/health`);
 
-    // Abrir navegador automáticamente solo en producción
+    // Abrir navegador automáticamente solo en producción (siempre localhost;
+    // el bind LAN opt-in no cambia: solo afecta a la URL abierta, no a la escucha)
     if (!DEV_MODE) {
       const { spawn } = require('child_process');
-      const os = require('os');
-      const interfaces = os.networkInterfaces() as any;
-      let localIP = 'localhost';
-      for (const iface of Object.values(interfaces)) {
-        for (const addr of iface as any[]) {
-          if (addr.family === 'IPv4' && !addr.internal) {
-            localIP = addr.address;
-            break;
-          }
-          if (localIP !== 'localhost') break;
-        }
-      }
-      const frontendPort = process.env.PORT_FRONTEND || FRONTEND_PORT;
       try {
-        spawn('cmd', ['/c', 'start', '', `http://${localIP}:${frontendPort}`], { detached: true, stdio: 'ignore', windowsHide: true } as any).unref?.();
+        spawn('cmd', ['/c', 'start', '', `http://localhost:${FRONTEND_PORT}`], { detached: true, stdio: 'ignore', windowsHide: true } as any).unref?.();
       } catch (error) {
         console.error('Failed to open browser:', error);
       }

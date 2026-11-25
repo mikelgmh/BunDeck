@@ -1,12 +1,15 @@
 # BunDeck — Open Stream Deck Alternative
 
-[![Build](https://github.com/mikelgmh/libredeck/workflows/Release/badge.svg)](https://github.com/mikelgmh/libredeck/actions)
-[![Release](https://img.shields.io/github/v/release/mikelgmh/libredeck)](https://github.com/mikelgmh/libredeck/releases)
+[![Release](https://github.com/mikelgmh/BunDeck/actions/workflows/release.yml/badge.svg)](https://github.com/mikelgmh/BunDeck/actions)
+[![Version](https://img.shields.io/github/v/release/mikelgmh/BunDeck)](https://github.com/mikelgmh/BunDeck/releases)
+[![Status](https://img.shields.io/badge/status-beta-orange)](https://github.com/mikelgmh/BunDeck/issues)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Automate your computer with physical or virtual buttons. Launch apps, run scripts, control OBS, Spotify, Home Assistant, media, and more—all locally, with no cloud account required.
 
-**For users:** install BunDeck, open the status window, and select **Open panel**.
+*BunDeck está en beta: funciona para el uso diario, pero la API y los bundles gestionados aún pueden cambiar. Faltan cosas — ver [qué falta / roadmap](#status-beta--whats-missing).*
+
+**For users:** install BunDeck, open the status window, and select **Open panel**. Start at the landing page: **[bundeck.app](https://bundeck.app)** ([features](https://bundeck.app/features)).
 
 **For developers:** Bun daemon, Astro/Vue control panel, CLI, and native Rust launcher.
 
@@ -16,9 +19,9 @@ Choose your platform. These links always resolve to the latest release.
 
 | Windows | macOS | Linux |
 |---|---|---|
-| **Windows installer**<br>Daemon, CLI, launcher, and panel<br>[**Download BunDeck-Setup.exe**](https://github.com/mikelgmh/libredeck/releases/latest/download/BunDeck-Setup.exe) | **Managed bundle · x64**<br>Install with `scripts/install-macos.sh`<br>[**View latest macOS download**](https://github.com/mikelgmh/libredeck/releases/latest) | **Managed bundle · x64**<br>Install with `scripts/install-linux.sh`<br>[**View latest Linux download**](https://github.com/mikelgmh/libredeck/releases/latest) |
+| **Windows installer**<br>Daemon, CLI, launcher, and panel<br>[**Download BunDeck-Setup.exe**](https://github.com/mikelgmh/BunDeck/releases/latest/download/BunDeck-Setup.exe) | **Managed bundle · x64**<br>Install with `scripts/install-macos.sh`<br>[**View latest macOS download**](https://github.com/mikelgmh/BunDeck/releases/latest) | **Managed bundle · x64**<br>Install with `scripts/install-linux.sh`<br>[**View latest Linux download**](https://github.com/mikelgmh/BunDeck/releases/latest) |
 
-> macOS and Linux downloads are managed bundles rather than native installers. See [installation notes](#installation) for setup details and [the latest release](https://github.com/mikelgmh/libredeck/releases/latest) for the platform bundles.
+> macOS and Linux downloads are managed bundles rather than native installers. See [installation notes](#installation) for setup details and [the latest release](https://github.com/mikelgmh/BunDeck/releases/latest) for the platform bundles.
 
 ## Contents
 
@@ -29,14 +32,16 @@ Choose your platform. These links always resolve to the latest release.
 5. [Installation](#installation)
 6. [Daily use](#daily-use)
 7. [Ports, bind and data](#ports-bind-and-data)
-8. [CLI](#cli-libredeck-cli)
-9. [API and WebSocket](#api-and-websocket)
-10. [Plugins](#plugins)
-11. [Development](#development)
-12. [Build and release](#build-and-release)
-13. [Environment variables](#environment-variables)
-14. [Troubleshooting](#troubleshooting)
-15. [FAQ](#faq-why-not-electron)
+8. [Remote access & relay privacy](#remote-access--relay-privacy)
+9. [CLI](#cli-bundeck-cli)
+10. [API and WebSocket](#api-and-websocket)
+11. [Plugins](#plugins)
+12. [Development](#development)
+13. [Build and release](#build-and-release)
+14. [Status (beta) & what's missing](#status-beta--whats-missing)
+15. [Environment variables](#environment-variables)
+16. [Troubleshooting](#troubleshooting)
+17. [FAQ](#faq-why-not-electron)
 
 ---
 
@@ -78,7 +83,7 @@ The panel is a local website (`http://localhost:3002` in prod, `:4321` in dev). 
 
 Deliberate choices:
 
-- **No double supervisor:** either the launcher starts the daemon, or you do. Never both (`LIBREDECK_MANAGED`, pre-flight health check).
+- **No double supervisor:** either the launcher starts the daemon, or you do. Never both (`BUNDECK_MANAGED`, pre-flight health check).
 - **Single tray:** the GPUI launcher owns the only tray icon (`launcher/src/tray.rs`). The daemon has no tray code at all — no double icons, not even in dev.
 - **One shutdown path:** `POST /api/v1/admin/shutdown` → `lifecycle.ts` → stops API, frontend, WS and tray in order. CLI, launcher and host all request the same thing.
 - **One contract:** the API lives under `/api/v1`. CLI and panel use the same endpoints.
@@ -92,8 +97,8 @@ Measured in this repo on a 64-bit desktop OS at idle (resident set size):
 | Component | Idle RAM | Disk size | Notes |
 |---|---|---|---|
 | Daemon `bun run daemon/src/server.ts` | **~55 MB** | — | Dev, SQLite + native plugins loaded |
-| Compiled daemon `libredeck-daemon` | **~46 MB** | **~138 MB** | Includes Bun runtime + SQLite + natives; less RAM than dev (`.exe` on Windows, no extension on macOS/Linux) |
-| Launcher `libredeck-launcher` (release) | **~54 MB** with window | **~6.5 MB** | Native GPUI, 2 s polling (`.exe` on Windows) |
+| Compiled daemon `bundeck-daemon` | **~46 MB** | **~138 MB** | Includes Bun runtime + SQLite + natives; less RAM than dev (`.exe` on Windows, no extension on macOS/Linux) |
+| Launcher `bundeck-launcher` (release) | **~54 MB** with window | **~6.5 MB** | Native GPUI, 2 s polling (`.exe` on Windows) |
 | Compiled CLI | short-lived (only while running) | **~110 MB** | Not resident |
 | Panel `web/dist` | 0 (lives in your browser) | **~1.3 MB**, 10 files | Static Astro output |
 
@@ -111,7 +116,7 @@ Measured in this repo on a 64-bit desktop OS at idle (resident set size):
 
 Why Electron costs more: every app ships its own Chromium even if Chrome/Edge is already installed, and every window is a full renderer with its own JS heap, compositor and often a GPU process. For a panel that stays closed 90% of the time and a backend that must always be alive, paying for a resident Chromium makes no sense. BunDeck splits both concerns: an always-on cheap backend (Bun), on-demand UI (browser) and minimal native control (Rust).
 
-> Honest note: Electron figures are typical ecosystem ranges, not a measurement of a clone of ours. BunDeck figures are measurements from this repo (see table). To reproduce, let the stack idle for 1 min with the same `LIBREDECK_DATA_DIR` and compare (`Get-Process` on PowerShell, `ps -o pid,rss,comm -p <pid>` on macOS/Linux).
+> Honest note: Electron figures are typical ecosystem ranges, not a measurement of a clone of ours. BunDeck figures are measurements from this repo (see table). To reproduce, let the stack idle for 1 min with the same `BUNDECK_DATA_DIR` and compare (`Get-Process` on PowerShell, `ps -o pid,rss,comm -p <pid>` on macOS/Linux).
 
 What about Electrobun? It uses the OS WebView (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), far lighter than embedded Chromium. Even so, in prod it would be a third resident process just to wrap the panel. Since the panel already opens fine in the browser and the launcher covers status/tray/updates, Electrobun stays **dev-only**. Fewer processes = less RAM and fewer things that can break.
 
@@ -121,13 +126,23 @@ What about Electrobun? It uses the OS WebView (WebView2 on Windows, WebKit on ma
 
 BunDeck is cross-platform: **Windows, macOS and Linux** are first-class citizens. Pick your OS below — every link always points at the latest release.
 
-The latest platform downloads are at the top of this README. The [latest release](https://github.com/mikelgmh/libredeck/releases/latest) contains the installers, managed bundles, and update manifest.
+**Requirements: nothing to install.** Every bundle ships self-contained binaries (the Bun runtime is compiled in) — no Node, Bun, or admin rights needed. Windows installs per-user; macOS/Linux install scripts default to your home directory (`~/.local/share/bundeck`, `~/Applications/BunDeck`).
+
+The latest platform downloads are at the top of this README. The [latest release](https://github.com/mikelgmh/BunDeck/releases/latest) contains the installers, managed bundles, and update manifest.
+
+**Supported Stream Deck hardware:** Mini, Original/Classic, MK.2, XL and Plus families (6/15/32-key layouts), detected automatically via `@elgato-stream-deck/node`. No hardware? The browser panel is a fully virtual deck.
 
 ### Per-OS notes
 
 - **Windows:** run the installer, open **BunDeck** → **Open panel**. It installs in your user profile (no administrator permission needed) and sets up daemon + CLI + launcher + panel. A system tray icon is available (Windows-only).
-- **macOS:** run the installer script from Terminal: `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-macos.sh && bash install-macos.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
-- **Linux:** run `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/libredeck/master/scripts/install-linux.sh && bash install-linux.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
+- **macOS:** run the installer script from Terminal: `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/BunDeck/master/scripts/install-macos.sh && bash install-macos.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
+- **Linux:** run `curl -fsSLO https://raw.githubusercontent.com/mikelgmh/BunDeck/master/scripts/install-linux.sh && bash install-linux.sh`. It downloads and verifies the latest managed bundle. You can also download the bundle from the latest release page linked above.
+
+> **Honest installer note:** the install scripts verify the bundle's **sha256 integrity only, not authorship** — a matching hash proves the download wasn't corrupted, not who built it. Authorship **is** verified where it matters: the launcher's updater checks an Ed25519 signature on every bundle before applying it (see `UPDATE_SYSTEM.md` and `SECURITY.md`). Verifying that signature inside a plain `bash` script isn't cleanly feasible (no Ed25519 in coreutils or the Python stdlib), so the scripts deliberately stay integrity-only.
+>
+> **Antivirus false positives:** the binaries are built with `bun build --compile`, which bundles a runtime the way packers do — some AV heuristics flag that. If your AV quarantines a BunDeck binary, allow-list it; the hash in the release manifest lets you confirm the file is intact.
+>
+> **LAN / firewall:** everything works on loopback with no firewall changes. Opening the panel from your phone needs LAN bind (`BUNDECK_BIND_LAN=1`, set automatically by the launcher) **and** allowing the frontend port (`3002`) through your OS firewall on private networks.
 
 ### Updates
 
@@ -136,13 +151,13 @@ the launcher checks automatically at startup and periodically, then downloads
 and verifies updates in the background. When ready, **Reiniciar para actualizar**
 installs the staged version; if left pending, it is applied on the next launch.
 Updates include database backup and automatic rollback.
-Standalone binaries: `libredeck-cli update` (see `UPDATE_SYSTEM.md`).
+Standalone binaries: `bundeck-cli update` (see `UPDATE_SYSTEM.md`).
 
 ### From source
 
 ```bash
-git clone https://github.com/mikelgmh/libredeck.git
-cd libredeck
+git clone https://github.com/mikelgmh/BunDeck.git
+cd BunDeck
 bun run install:all   # daemon+cli with bun, web with npm (on purpose)
 bun run dev           # daemon + Astro panel + launcher
 ```
@@ -170,32 +185,45 @@ bun run dev           # daemon + Astro panel + launcher
 
 Secure by default:
 
-- The daemon listens on **`127.0.0.1`**. For LAN (phone/QR): `LIBREDECK_BIND_LAN=1` or `LIBREDECK_BIND=0.0.0.0`. `dev.sh`, the Rust launcher and the dev host already set it when needed.
+- The daemon listens on **`127.0.0.1`**. For LAN (phone/QR): `BUNDECK_BIND_LAN=1` or `BUNDECK_BIND=0.0.0.0`. `dev.sh`, the Rust launcher and the dev host already set it when needed.
 - CORS never uses `*` with credentials: it echoes `Origin` only when local (`localhost`, `127.0.0.1`, `::1`, `10/8`, `172.16/12`, `192.168/16`).
 - `POST /api/v1/admin/shutdown` is local by design; don’t expose it to WAN.
 
 Data (`daemon/src/config.ts:resolveDataDir`):
 
 ```
-LIBREDECK_DATA_DIR > ELECTROBUN_DATA_DIR/libredeck > %APPDATA%/LibreDeck/data (installed) > <repo>/data (dev)
+BUNDECK_DATA_DIR > ELECTROBUN_DATA_DIR/bundeck > %APPDATA%/BunDeck/data (installed) > <repo>/data (dev)
 ```
 
 That holds `db.sqlite`, `assets/`, `plugins/` and `logs/`. `data/` is local state: never committed.
 
 ---
 
-## CLI `libredeck-cli`
+## Remote access & relay privacy
+
+Your phone can drive BunDeck from outside your LAN through the public relay — **end-to-end encrypted, P2P when possible**:
+
+- **Default relay:** `wss://relay.bundeck.app` (no setup needed). The old host `wss://bundeck.mikelgranero.com` still works as a fallback.
+- **What the relay operator can see:** routing metadata only — which device IDs are online, IPs, connection times, message sizes/timing. **Never message contents:** payloads are NaCl `box` envelopes (X25519 + XSalsa20-Poly1305) the relay forwards opaquely and cannot decrypt. Self-host it if you prefer (`relay/` + `relay/docker-compose.example.yml`).
+- **P2P:** once peers establish a direct channel, traffic never passes through the relay at all.
+- **Disable it:** set `remote.relay.url` to `off` (also accepts `none` / `disabled`). Local and LAN features keep working.
+
+Only the invitation-redeem endpoint is rate-limited (anti-scan); the local API is throttle-free by design on loopback. Full model: [`SECURITY.md`](SECURITY.md).
+
+---
+
+## CLI `bundeck-cli`
 
 ```bash
-libredeck-cli start --detach        # background (pidfile + log under data/)
-libredeck-cli status               # API + WS (discovers WS via /config → /health)
-libredeck-cli stop                 # 1) API shutdown 2) pidfile 3) targeted kill by PID
-libredeck-cli plugin list
-libredeck-cli plugin install ./my-plugin        # local folder
-libredeck-cli plugin install ./my-plugin.zip    # local zip (upload)
-libredeck-cli plugin install https://github.com/org/plugin.git --ref v1.2.0
-libredeck-cli logs -n 50 --level error
-libredeck-cli logs --follow        # live WS (logs topic), falls back to 2 s polling
+bundeck-cli start --detach        # background (pidfile + log under data/)
+bundeck-cli status               # API + WS (discovers WS via /config → /health)
+bundeck-cli stop                 # 1) API shutdown 2) pidfile 3) targeted kill by PID
+bundeck-cli plugin list
+bundeck-cli plugin install ./my-plugin        # local folder
+bundeck-cli plugin install ./my-plugin.zip    # local zip (upload)
+bundeck-cli plugin install https://github.com/org/plugin.git --ref v1.2.0
+bundeck-cli logs -n 50 --level error
+bundeck-cli logs --follow        # live WS (logs topic), falls back to 2 s polling
 ```
 
 The CLI is just another client: it never touches the DB directly, everything goes through `http://localhost:<port>/api/v1`.
@@ -235,7 +263,7 @@ WebSocket `ws://localhost:3003`:
 Install a local folder without zipping:
 
 ```bash
-libredeck-cli plugin install ./my-plugin --force
+bundeck-cli plugin install ./my-plugin --force
 # same as POST /api/v1/plugins/install { sourceType:'directory', path:'<abs>' }
 ```
 
@@ -275,9 +303,23 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 # (Windows: Inno Setup installer; macOS/Linux: bundle + install scripts)
 ```
 
-- Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`LIBREDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` (now `{ version, channel: 'stable', buildDate }`) use `getVersion()`, no hardcoded `0.1.0`. Launcher version comes from `build.rs` (`LIBREDECK_VERSION` or root JSON).
+- Single version source: root `package.json`. Daemon/CLI read it from `*/src/version.ts` (`BUNDECK_VERSION` > embedded root JSON > `dev`). `/health` and `/api/v1/version` (now `{ version, channel: 'stable', buildDate }`) use `getVersion()`, no hardcoded `0.1.0`. Launcher version comes from `build.rs` (`BUNDECK_VERSION` or root JSON).
 - CI (`.github/workflows/release.yml`): test → per-OS build (daemon + CLI + launcher + updater + `web-dist` → `bundeck-v<ver>-<target>.zip`; Windows also `BunDeck-Setup`) → manifest (`scripts/build-update-manifest.mjs`, signed with `LIBREDECK_UPDATE_PRIVKEY` secret) → `semantic-release` on `master`.
 - Auto-update owner is the launcher (`launcher/src/updater.rs`, details in `UPDATE_SYSTEM.md`). Electrobun stays out of the canonical release.
+
+---
+
+## Status (beta) & what's missing
+
+BunDeck is in **beta**: it works for daily use, but expect rough edges, changing APIs, and gaps. Concretely:
+
+- Managed bundles for macOS/Linux instead of native installers; macOS builds aren't notarized yet (one-time Gatekeeper approval per version).
+- Remote access and the internet-exposed UI tunnel are functional but young — review [`SECURITY.md`](SECURITY.md) before exposing anything beyond your LAN.
+- Plugin ecosystem is small; external-plugin sandboxing exists but **treat external plugins as arbitrary code**.
+
+What's next is tracked in the open: **[roadmap & issues](https://github.com/mikelgmh/BunDeck/issues)** — feature requests and bug reports are welcome there.
+
+**No telemetry, ever.** BunDeck collects nothing: no analytics, no crash reports, no phone-home. The only network traffic is what you trigger (updater manifest/release checks, relay traffic when remote access is enabled).
 
 ---
 
@@ -287,13 +329,13 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 |---|---|
 | `PORT` / `WS_PORT` / `FRONTEND_PORT` / `HOST_PORT` | Ports (see table) |
 | `DEV_MODE=true` | No embedded frontend; UI on Astro `:4321` |
-| `LIBREDECK_DATA_DIR` | Explicit data dir (also tests) |
-| `LIBREDECK_INSTALL_DIR` | Managed install root (updater layout); defaults to launcher dir |
-| `LIBREDECK_BIND` / `LIBREDECK_BIND_LAN=1` | `0.0.0.0` for LAN; loopback by default |
-| `LIBREDECK_VERSION` | Version override (build/CI inject it) |
-| `LIBREDECK_UPDATE_PUBKEY` | Update signing pubkey override (else compiled `UPDATE_PUBKEY`) |
-| `LIBREDECK_MANAGED=1` | Daemon skips self-management (set by launcher) |
-| `LIBREDECK_HOST_MANAGE_DAEMON=0/1` | Forbid/force Electrobun daemon management |
+| `BUNDECK_DATA_DIR` | Explicit data dir (also tests) |
+| `BUNDECK_INSTALL_DIR` | Managed install root (updater layout); defaults to launcher dir |
+| `BUNDECK_BIND` / `BUNDECK_BIND_LAN=1` | `0.0.0.0` for LAN; loopback by default |
+| `BUNDECK_VERSION` | Version override (build/CI inject it) |
+| `BUNDECK_UPDATE_PUBKEY` | Update signing pubkey override (else compiled `UPDATE_PUBKEY`) |
+| `BUNDECK_MANAGED=1` | Daemon skips self-management (set by launcher) |
+| `BUNDECK_HOST_MANAGE_DAEMON=0/1` | Forbid/force Electrobun daemon management |
 | `BUN_PATH` | Alternate bun for the dev host |
 | `NO_LAUNCHER=1` / `NO_BROWSER=1` | Don’t open launcher / browser in dev |
 
@@ -304,12 +346,12 @@ Canonical prod = **Rust launcher + compiled daemon + web-dist**:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Panel won’t open on `:3002` | Daemon in `DEV_MODE` or busy port | In dev use `:4321`; check `http://localhost:3001/health` and `HOST_PORT` |
-| Phone can’t reach panel | Loopback bind without LAN | Start with `LIBREDECK_BIND_LAN=1` (dev.sh/launcher already do) |
+| Phone can’t reach panel | Loopback bind without LAN | Start with `BUNDECK_BIND_LAN=1` (dev.sh/launcher already do) |
 | Folder `plugin install` fails | Relative path or missing `manifest.json` | Pass an absolute path with `manifest.json` + `main.js`; the CLI already absolutizes it |
 | Old DB with odd version | Stale `app.version` | Self-heals on boot (`getVersion()`); otherwise `./dev.sh clean` |
-| Busy port | Another daemon running | `libredeck-cli status` / `stop`, or change `PORT`/`WS_PORT` |
+| Busy port | Another daemon running | `bundeck-cli status` / `stop`, or change `PORT`/`WS_PORT` |
 
-Logs: `libredeck-cli logs --follow` or `<data>/logs/daemon.log` (detached mode).
+Logs: `bundeck-cli logs --follow` or `<data>/logs/daemon.log` (detached mode).
 
 ---
 

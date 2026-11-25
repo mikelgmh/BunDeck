@@ -3,12 +3,13 @@
 // (ver daemon/scripts/build.mjs): `bun build --compile` no propaga el env
 // del build al binario, así que sin --define reportaría el package.json
 // previo al bump de semantic-release y el updater haría rollback.
-// En dev se lee en vivo. LIBREDECK_VERSION en runtime la sobrescribe
-// en ambos casos (útil para overrides puntuales, no para el build).
+// En dev se lee en vivo. BUNDECK_VERSION en runtime la sobrescribe
+// en ambos casos (útil para overrides puntuales, no para el build;
+// LIBREDECK_VERSION deprecated vale igual).
 import rootPkg from "../../package.json";
 
 export function getVersion(): string {
-  const env = process.env.LIBREDECK_VERSION;
+  const env = process.env.BUNDECK_VERSION || process.env.LIBREDECK_VERSION;
   if (env) return env;
   const v = (rootPkg as { version?: string } | undefined)?.version;
   return v || "dev";

@@ -223,10 +223,10 @@ fn hide_console(cmd: &mut std::process::Command) {
 /// DUEÑO DEL CICLO DE VIDA: en instalado/producción este launcher es el
 /// único que spawnea el daemon (el host Electrobun no spawnea en prod: ver
 /// shouldHostManageDaemon en `src/bun/index.ts`). Marca al hijo con
-/// LIBREDECK_MANAGED=1 para que nadie lo duplique (el icono de bandeja
+/// BUNDECK_MANAGED=1 para que nadie lo duplique (el icono de bandeja
 /// lo pone este launcher: `tray.rs`; el daemon no tiene tray propio).
 /// Orden: 1) dev (`bun run daemon/src/server.ts`, espejo de `spawnDaemon()`
-/// en `src/bun/index.ts`); 2) instalado (`libredeck-daemon(.exe)` junto al
+/// en `src/bun/index.ts`); 2) instalado (`bundeck-daemon(.exe)` junto al
 /// launcher, como lo deja installer.iss en {app}).
 /// No bloquea: devuelve inmediatamente tras lanzar el hijo detached.
 /// Devuelve líneas de registro para la UI y si se intentó un arranque
@@ -253,9 +253,9 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
                 .current_dir(&root)
                 .env("DEV_MODE", std::env::var("DEV_MODE").unwrap_or("false".into()))
                 // Gestionado por el launcher: sin supervisión ajena.
-                .env("LIBREDECK_MANAGED", "1")
+                .env("BUNDECK_MANAGED", "1")
                 // Panel LAN/QR en dev: opt-in explícito (daemon por defecto loopback).
-                .env("LIBREDECK_BIND_LAN", "1")
+                .env("BUNDECK_BIND_LAN", "1")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
@@ -281,9 +281,9 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             // Gestionado por el launcher: sin supervisión ajena.
-            .env("LIBREDECK_MANAGED", "1")
+            .env("BUNDECK_MANAGED", "1")
             // Instalado con panel LAN: opt-in explícito (daemon por defecto loopback).
-            .env("LIBREDECK_BIND_LAN", "1");
+            .env("BUNDECK_BIND_LAN", "1");
         #[cfg(windows)]
         hide_console(&mut cmd);
         match cmd.spawn()
@@ -298,7 +298,7 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
             }
         }
     }
-    log.push("Sin daemon a la vista: ni fuentes (daemon/src/server.ts) ni libredeck-daemon junto al launcher.".to_string());
+    log.push("Sin daemon a la vista: ni fuentes (daemon/src/server.ts) ni bundeck-daemon junto al launcher.".to_string());
     (log, false)
 }
 
@@ -374,8 +374,8 @@ pub fn latest_release() -> Option<LatestRelease> {
         .build();
     // La API de GitHub exige User-Agent.
     let res = agent
-        .get("https://api.github.com/repos/mikelgmh/libredeck/releases/latest")
-        .set("User-Agent", "libredeck-launcher")
+        .get("https://api.github.com/repos/mikelgmh/BunDeck/releases/latest")
+        .set("User-Agent", "bundeck-launcher")
         .set("Accept", "application/vnd.github+json")
         .call()
         .ok()?;
@@ -385,7 +385,7 @@ pub fn latest_release() -> Option<LatestRelease> {
         url: v
             .get("html_url")?
             .as_str()
-            .unwrap_or("https://github.com/mikelgmh/libredeck/releases/latest")
+            .unwrap_or("https://github.com/mikelgmh/BunDeck/releases/latest")
             .to_string(),
     })
 }
@@ -490,7 +490,7 @@ fn find_installed_daemon() -> Option<std::path::PathBuf> {
         return Some(exe);
     }
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    for name in ["libredeck-daemon.exe", "libredeck-daemon"] {
+    for name in ["bundeck-daemon.exe", "bundeck-daemon", "libredeck-daemon.exe", "libredeck-daemon"] {
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);

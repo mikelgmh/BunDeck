@@ -1,16 +1,16 @@
 [package]
-name = "libredeck-launcher"
+name = "bundeck-launcher"
 version = "1.6.0"
 edition = "2021"
 description = "BunDeck launcher/status window (Rust + GPUI)"
 license = "MIT"
 
 [[bin]]
-name = "libredeck-launcher"
+name = "bundeck-launcher"
 path = "src/main.rs"
 
 [[bin]]
-name = "libredeck-updater"
+name = "bundeck-updater"
 path = "src/updater_bin.rs"
 
 [dependencies]

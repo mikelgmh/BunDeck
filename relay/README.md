@@ -14,6 +14,35 @@ Sin cola: si el destino está offline responde error (no guarda comandos).
 - Persistencia mínima: SQLite `relay.db` con `devices(id, pub_key, name, last_seen)`.
   JAMÁS claves privadas en el servidor.
 
+## Privacidad: lo que ve el operador (y lo que no)
+
+El relay por defecto es `wss://relay.bundeck.app` (el host antiguo
+`wss://bundeck.mikelgranero.com` sigue siendo válido como respaldo).
+Daemons y clientes lo usan sin configurar nada; con `RELAY_DOMAIN`
+puedes rotular tu propia instancia (ver `docker-compose.example.yml`).
+
+- **El operador SÍ ve (metadatos de enrutado):** qué `deviceId`
+  están online, IPs de origen, tiempos de conexión, tamaño y
+  cadencia de los mensajes, y conteos de `GET /stats`
+  (`online`, `devices`, `pairingPending`). Los logs solo guardan
+  conteos y errores, nunca contenidos.
+- **El operador NO ve (contenido):** los `payloadEncrypted` son
+  sobres NaCl `box` opacos que el relay reenvía sin abrir —
+  **nunca pasan descifrados por el servidor**. Los mensajes
+  `invite` / `pair-accept` del handshake sí viajan en claro
+  (solo sirven para establecer el canal).
+- **P2P primero:** cuando los pares establecen un canal directo,
+  el tráfico deja de pasar por el relay por completo.
+- **Sin cola:** destino offline ⇒ `error offline`, el mensaje se
+  pierde (el relay no almacena nada reenviable).
+- **Opt-out del cliente:** setting `remote.relay.url` a `off`
+  (`none` / `disabled` también valen) desactiva el relay; LAN
+  y local siguen funcionando.
+
+Si operas tu propia instancia: exige `RELAY_TOKEN` secreto,
+sirve siempre tras TLS (`wss://`) y trata `relay.db` como lo que
+es — un directorio de dispositivos, no un buzón.
+
 ## Estructura
 
 ```
