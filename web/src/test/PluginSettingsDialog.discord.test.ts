@@ -1,0 +1,126 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import PluginSettingsDialog from '../components/bundeck/PluginSettingsDialog.vue'
+
+vi.mock('../composables/useI18n', () => ({
+  useI18nStore: () => ({
+    t: (key: string) => key,
+  }),
+}))
+
+function stubDialog(el: HTMLDialogElement | null) {
+  if (!el) return
+  if (!('showModal' in el) || typeof (el as any).showModal !== 'function') {
+    ;(el as any).showModal = vi.fn()
+  }
+  if (!('close' in el) || typeof (el as any).close !== 'function') {
+    ;(el as any).close = vi.fn()
+  } else {
+    vi.spyOn(el, 'close').mockImplementation(() => {})
+    vi.spyOn(el, 'showModal' as any).mockImplementation(() => {})
+  }
+}
+
+const realFetch = globalThis.fetch
+
+const discordBundle = {
+  schema: {
+    properties: {
+      mode: { title: 'Modo', type: 'string', enum: ['auto', 'rpc', 'hotkey'] },
+      clientId: { title: 'Client ID', type: 'string' },
+      clientSecret: { title: 'Client Secret', type: 'string' },
+      redirectUri: { title: 'Redirect URI', type: 'string' },
+      proxyUrl: { title: 'Relay URL', type: 'string' },
+      accessToken: { title: 'Access token', type: 'string' },
+    },
+    required: [],
+  },
+  values: {},
+  instructions: 'x',
+  oauth: { provider: 'discord', method: 'oauth-code' },
+  configured: false,
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  globalThis.fetch = realFetch
+  vi.restoreAllMocks()
+})
+
+describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () => {
+  it('muestra Client ID / Redirect / Modo / Proxy con defaults baked-in como placeholder', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => discordBundle })) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await Promise.resolve()
+    const box = wrapper.find('[data-cy="bd-discord-fields"]')
+    expect(box.exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-client-id"]').attributes('placeholder')).toBe('1575201215791497256')
+    expect(wrapper.find('[data-cy="bd-discord-redirect-uri"]').attributes('placeholder')).toBe('http://127.0.0.1:6463')
+    expect(wrapper.find('[data-cy="bd-discord-proxy-url"]').attributes('placeholder')).toBe(
+      'https://relay.bundeck.app/api/discord/rpc-token',
+    )
+    expect(wrapper.find('[data-cy="bd-discord-mode"]').exists()).toBe(true)
+    // Sin duplicados del loop genérico: las claves las edita la sección dedicada.
+    expect(wrapper.find('#ps-clientId').exists()).toBe(false)
+    expect(wrapper.find('#ps-redirectUri').exists()).toBe(false)
+    expect(wrapper.find('#ps-proxyUrl').exists()).toBe(false)
+  })
+
+  it('el Client Secret vive en <details> avanzado (power-user)', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => discordBundle })) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await Promise.resolve()
+    const details = wrapper.find('[data-cy="bd-discord-secret"]')
+    expect(details.exists()).toBe(true)
+    expect(details.find('[data-cy="bd-discord-client-secret"]').exists()).toBe(true)
+    expect(details.find('[data-cy="bd-discord-client-secret"]').attributes('type')).toBe('password')
+  })
+
+  it('guardar envía los valores discord (settings discord.*)', async () => {
+    const puts: any[] = []
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'PUT') {
+        puts.push(JSON.parse(init.body))
+        return { ok: true, json: async () => ({ success: true }) }
+      }
+      return { ok: true, json: async () => discordBundle }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await Promise.resolve()
+    await wrapper.find('[data-cy="bd-discord-client-id"]').setValue('cid-propia')
+    await wrapper.find('[data-cy="bd-discord-redirect-uri"]').setValue('http://127.0.0.1:6463')
+    await wrapper.find('[data-cy="bd-discord-client-secret"]').setValue('sec-propio')
+    await wrapper.find('[data-cy="bd-discord-mode"]').setValue('rpc')
+    await (wrapper.vm as any).save()
+    await flushPromises()
+    expect(puts).toHaveLength(1)
+    expect(puts[0].values).toMatchObject({
+      clientId: 'cid-propia',
+      redirectUri: 'http://127.0.0.1:6463',
+      clientSecret: 'sec-propio',
+      mode: 'rpc',
+    })
+  })
+
+  it('plugins no-discord no muestran la sección', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ schema: { properties: { token: { title: 'Token' } } }, values: {}, instructions: '', configured: true }),
+    })) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('spotify')
+    await Promise.resolve()
+    expect(wrapper.find('[data-cy="bd-discord-fields"]').exists()).toBe(false)
+  })
+})

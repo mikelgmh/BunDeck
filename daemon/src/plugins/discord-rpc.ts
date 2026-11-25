@@ -41,18 +41,24 @@ export const DISCORD_DEFAULT_REDIRECT_URI = 'http://127.0.0.1:6463'
  *
  * Resolución: ajuste del usuario si lo puso (power-user) ?? env ?? baked-in.
  */
-// TODO(maintainer): sustituir por el Client ID real de la app de LibreDeck
-// (discord.com/developers/applications → OAuth2 → General). Mientras siga el
-// placeholder, `resolveDiscordClientId()` devuelve null y el plugin responde
-// `discord-not-configured` con fallback a atajos globales.
-export const DEFAULT_DISCORD_CLIENT_ID = '__BUNDECK_DISCORD_CLIENT_ID__'
-// TODO(maintainer): debe ser EXACTO el redirect registrado en OAuth2 → Redirects
-// de la app de LibreDeck. Por defecto el loopback local.
+export const DISCORD_MAINTAINER_CLIENT_ID = '1575201215791497256'
+export const DEFAULT_DISCORD_CLIENT_ID = DISCORD_MAINTAINER_CLIENT_ID
+/** Redirect registrado en OAuth2 → Redirects de la app (ver docs/discord-app-setup.md). */
 export const DEFAULT_DISCORD_REDIRECT_URI = DISCORD_DEFAULT_REDIRECT_URI
-// TODO(maintainer): URL del relay que guarda el client_secret e intercambia
-// code→token (POST { code, redirect_uri } → { access_token, refresh_token,
-// expires_in }). O define BUNDECK_DISCORD_PROXY_URL por env.
+/** Redirects válidos a registrar en el portal de Discord (los 2 loopback + callback https). */
+export const DISCORD_VALID_REDIRECT_URIS = [
+    DISCORD_DEFAULT_REDIRECT_URI,
+    'http://localhost:6463',
+    'https://relay.bundeck.app/api/discord/callback',
+] as const
+/** Ruta del callback https del relay: reenvía el code al daemon local (sin secret). */
+export const DISCORD_CALLBACK_PATH = '/api/discord/callback'
+export const DEFAULT_DISCORD_CALLBACK_URL = 'https://relay.bundeck.app/api/discord/callback'
+/** Relay que custodia el client_secret e intercambia code→token (o BUNDECK_DISCORD_PROXY_URL). */
 export const DEFAULT_DISCORD_PROXY_URL = 'https://relay.bundeck.app/api/discord/rpc-token'
+// TODO(maintainer): si cambias de dominio del relay, actualiza
+// DEFAULT_DISCORD_PROXY_URL y DEFAULT_DISCORD_CALLBACK_URL (y registra el
+// nuevo callback en OAuth2 → Redirects del portal).
 
 /** Margen de seguridad antes de considerar el token caducado (60 s). */
 export const DISCORD_TOKEN_EXPIRY_SKEW_MS = 60_000

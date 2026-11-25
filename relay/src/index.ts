@@ -12,6 +12,11 @@ if (!config.token) {
 } else {
   console.log('[relay] RELAY_TOKEN configurado (len=%d).', config.token.length);
 }
+if (!config.discordClientId || !config.discordClientSecret) {
+  console.warn('[relay] DISCORD_CLIENT_ID/SECRET vacíos: POST /api/discord/rpc-token responderá discord-not-configured (el callback https sigue funcionando).');
+} else {
+  console.log('[relay] Discord proxy configurado (client_id len=%d).', config.discordClientId.length);
+}
 console.log(
   `[relay] env present: PORT=${process.env.PORT ? 'yes' : 'no'} RELAY_PORT=${process.env.RELAY_PORT ? 'yes' : 'no'} DATA_DIR=${process.env.DATA_DIR ? 'yes' : 'no'} RELAY_DOMAIN=${process.env.RELAY_DOMAIN ? 'yes' : 'no'} TRUST_PROXY=${process.env.TRUST_PROXY ?? '(unset)'}`,
 );
@@ -29,6 +34,8 @@ const relay = new RelayServer({
   pairing,
   version: config.version,
   publicHost: config.domain,
+  discordClientId: config.discordClientId,
+  discordClientSecret: config.discordClientSecret,
   // Sesiones del túnel en SQLite: sobreviven a reinicios del relay para que
   // los `/t/<token>/` existentes sigan valiendo al recargar. Best-effort:
   // si la BD falla, el relay sigue funcionando solo con memoria.

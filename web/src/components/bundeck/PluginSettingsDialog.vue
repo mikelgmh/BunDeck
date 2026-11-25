@@ -36,6 +36,63 @@
             <summary>{{ t('bd.discordAdvancedTitle') }}</summary>
             <p>{{ t('bd.discordAdvancedBody') }}</p>
           </details>
+          <div v-if="isDiscordOauth" class="bd-fld" data-cy="bd-discord-fields">
+            <label><b>{{ t('bd.discordSettingsTitle') }}</b></label>
+            <p class="bd-hint">{{ t('bd.discordDefaultsNote') }}</p>
+            <label :for="'ps-discord-clientId'"><b>{{ t('bd.discordClientId') }}</b></label>
+            <input
+              id="ps-discord-clientId"
+              class="bd-inp"
+              type="text"
+              :placeholder="DISCORD_DEFAULTS.clientId"
+              v-model="form.clientId"
+              autocomplete="off"
+              data-cy="bd-discord-client-id"
+            />
+            <label :for="'ps-discord-redirectUri'"><b>{{ t('bd.discordRedirectUri') }}</b></label>
+            <input
+              id="ps-discord-redirectUri"
+              class="bd-inp"
+              type="text"
+              :placeholder="DISCORD_DEFAULTS.redirectUri"
+              v-model="form.redirectUri"
+              autocomplete="off"
+              data-cy="bd-discord-redirect-uri"
+            />
+            <label :for="'ps-discord-mode'"><b>{{ t('bd.discordMode') }}</b></label>
+            <select id="ps-discord-mode" class="bd-inp" v-model="form.mode" data-cy="bd-discord-mode">
+              <option value="">{{ t('bd.discordModeAuto') }} (auto)</option>
+              <option value="auto">Auto (RPC + fallback)</option>
+              <option value="rpc">{{ t('bd.discordModeRpc') }}</option>
+              <option value="hotkey">{{ t('bd.discordModeHotkey') }}</option>
+            </select>
+            <label :for="'ps-discord-proxyUrl'"><b>{{ t('bd.discordProxyUrl') }}</b></label>
+            <input
+              id="ps-discord-proxyUrl"
+              class="bd-inp"
+              type="text"
+              :placeholder="DISCORD_DEFAULTS.proxyUrl"
+              v-model="form.proxyUrl"
+              autocomplete="off"
+              data-cy="bd-discord-proxy-url"
+            />
+            <details class="bd-hint" data-cy="bd-discord-secret">
+              <summary>{{ t('bd.discordSecretTitle') }}</summary>
+              <p>{{ t('bd.discordSecretBody') }}</p>
+              <input
+                id="ps-discord-clientSecret"
+                class="bd-inp"
+                :type="revealed.clientSecret ? 'text' : 'password'"
+                placeholder="••••••"
+                v-model="form.clientSecret"
+                autocomplete="off"
+                data-cy="bd-discord-client-secret"
+              />
+              <button class="bd-btn" @click="revealed.clientSecret = !revealed.clientSecret">
+                {{ revealed.clientSecret ? t('bd.hide') : t('bd.show') }}
+              </button>
+            </details>
+          </div>
           <div v-else-if="loginBusy" class="bd-hint" data-cy="bd-spotify-host-hint" role="status">
             <p>{{ t('bd.spotifyHostWindow') }}</p>
             <p>
@@ -146,6 +203,14 @@ const hasInstructions = computed(() => instructions.value.length > 0)
 
 /** OAuth genérico: Discord pide Client ID + popup explícito; Spotify usa el Web Player. */
 const isDiscordOauth = computed(() => oauth.value?.provider === 'discord')
+/** Baked-in del daemon (daemon/src/plugins/discord-rpc.ts): se muestran como placeholder; vacío = usar estos. */
+const DISCORD_DEFAULTS = {
+  clientId: '1575201215791497256',
+  redirectUri: 'http://127.0.0.1:6463',
+  proxyUrl: 'https://relay.bundeck.app/api/discord/rpc-token',
+} as const
+/** Claves que edita la sección dedicada de Discord (no se duplican en el loop genérico). */
+const DISCORD_MANAGED_KEYS = new Set(['mode', 'clientId', 'clientSecret', 'redirectUri', 'proxyUrl'])
 const oauthTitle = computed(() => (isDiscordOauth.value ? t('bd.discordConnectTitle') : t('bd.spotifyConnectTitle')))
 const oauthHint = computed(() => (isDiscordOauth.value ? t('bd.discordConnectHint') : t('bd.spotifyConnectHint')))
 const oauthConnect = computed(() => (isDiscordOauth.value ? t('bd.discordConnect') : t('bd.spotifyConnect')))
@@ -156,7 +221,9 @@ const oauthConnected = computed(() => (isDiscordOauth.value ? t('bd.discordConne
 const fields = computed(() => {
   const propsMap = schema.value?.properties ?? {}
   const required = new Set<string>(schema.value?.required ?? [])
-  return Object.entries<any>(propsMap).map(([key, p]) => ({
+  return Object.entries<any>(propsMap)
+    .filter(([key]) => !(isDiscordOauth.value && DISCORD_MANAGED_KEYS.has(key)))
+    .map(([key, p]) => ({
     key,
     title: p.title ?? key,
     description: p.description ?? '',
@@ -304,12 +371,19 @@ const save = async () => {
   saveError.value = ''
   saving.value = true
   try {
-    // Normaliza: números vacíos → '' (borra), checkbox → boolean
+    // Normaliza: números vacíos → '' (borra), checkbox → boolean.
+    // Se guardan TODAS las claves del formulario (incluida la sección
+    // dedicada de Discord, que no pasa por el loop genérico de `fields`).
     const values: Record<string, any> = {}
-    for (const f of fields.value) {
-      const v = form.value[f.key]
-      if (v === undefined || v === null || v === '') values[f.key] = ''
-      else values[f.key] = v
+    const fieldByKey = new Map(fields.value.map((f) => [f.key, f]))
+    for (const [k, v] of Object.entries(form.value)) {
+      const f = fieldByKey.get(k)
+      if (f && (f.type === 'number' || f.type === 'integer') && (v === undefined || v === null || v === '')) {
+        values[k] = ''
+        continue
+      }
+      if (v === undefined || v === null || v === '') values[k] = ''
+      else values[k] = v
     }
     const res = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/settings`, {
       method: 'PUT',

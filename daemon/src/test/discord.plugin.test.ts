@@ -43,11 +43,11 @@ describe('DiscordPlugin validación (sin tocar el sistema)', () => {
         await expect(sendHotkey('ctrl+shift+')).rejects.toThrow(/tecla principal|vacío/)
     })
 
-    it('push-to-talk sin hotkey ni auth devuelve needs-auth (permiso explícito)', async () => {
+    it('push-to-talk sin hotkey ni auth devuelve needs-auth con URL baked-in (permiso explícito)', async () => {
         const handler = plugin.getActionHandlers().get('push-to-talk')!
         const res = await handler({}, {})
         expect(res.status).toBe('needs-auth')
-        expect(res.authorizeUrl).toBeNull()
+        expect(res.authorizeUrl).toContain('1575201215791497256')
     })
 
     it('open-channel exige url', async () => {

@@ -21,6 +21,9 @@ export interface RelayConfig {
   rateLimitWs: number;
   rateLimitPair: number;
   trustProxy: boolean;
+  /** App de Discord del maintainer (cero-config): el secret NUNCA sale del servidor. */
+  discordClientId: string;
+  discordClientSecret: string;
 }
 
 export const VERSION = '0.2.0';
@@ -39,6 +42,11 @@ export const VERSION = '0.2.0';
  * - RELAY_RATE_LIMIT_PAIR (def 30): cuota POST /pair por IP.
  * - TRUST_PROXY=1: respeta X-Forwarded-For / X-Real-IP / CF-Connecting-IP para rate-limit
  *   (solo activar detrás de proxy confiable como openship; si no, todas las IPs colapsan).
+ * - DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET: app de Discord del maintainer para
+ *   el proxy OAuth `POST /api/discord/rpc-token` (el secret NUNCA sale del
+ *   servidor; ver docs/discord-app-setup.md). Sin ellos el proxy responde
+ *   `discord-not-configured` (500) y el callback https sigue sirviendo la
+ *   página de auto-captura / copiado manual.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
   const token = (env.RELAY_TOKEN ?? '').trim();
@@ -57,5 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     rateLimitWs: parseLimit(env.RELAY_RATE_LIMIT_WS, 120),
     rateLimitPair: parseLimit(env.RELAY_RATE_LIMIT_PAIR, 30),
     trustProxy,
+    discordClientId: (env.DISCORD_CLIENT_ID ?? '').trim(),
+    discordClientSecret: (env.DISCORD_CLIENT_SECRET ?? '').trim(),
   };
 }

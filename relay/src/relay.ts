@@ -15,6 +15,13 @@ import {
   type TunnelSessionPersist,
 } from './tunnel';
 import { renderTunnelGonePage, renderUiGonePage, wantsHtmlPage, waitingLang, type TunnelGoneReason } from './waiting';
+import {
+  DISCORD_CALLBACK_PATH,
+  DISCORD_RPC_TOKEN_PATH,
+  discordProxyPreflight,
+  handleDiscordRpcToken,
+  renderDiscordCallbackPage,
+} from './discord';
 
 export { getUiPageHandler, setUiPageHandler } from './tunnel';
 
@@ -52,6 +59,8 @@ export interface RelayServerOptions {
   rateLimitUi?: number;
   rateLimitWs?: number;
   rateLimitPair?: number;
+  /** Cuota POST /api/discord/rpc-token por IP (def 30/min). */
+  rateLimitDiscord?: number;
   /** Si true, respeta X-Forwarded-For / X-Real-IP para rate-limit (proxy confiable). */
   trustProxy?: boolean;
   store: DeviceStore;
@@ -67,6 +76,13 @@ export interface RelayServerOptions {
   httpTimeoutMs?: number;
   /** Persistencia opcional de sesiones del túnel (SQLite: sobreviven al reinicio). */
   tunnelPersist?: TunnelSessionPersist | null;
+  /** App de Discord del maintainer para el proxy OAuth (secret NUNCA expuesto). */
+  discordClientId?: string;
+  discordClientSecret?: string;
+  /** fetch inyectable para el proxy Discord (tests). */
+  discordFetchFn?: typeof fetch;
+  /** Puerto API del daemon que la página del callback prueba por defecto (def 3001). */
+  discordApiPort?: number;
 }
 
 function rateLimitedResponse(): Response {
@@ -145,6 +161,7 @@ export class RelayServer {
   private uiLimiter: RateLimiter;
   private tLimiter: RateLimiter;
   private wsLimiter: RateLimiter;
+  private discordLimiter: RateLimiter;
   private now: () => number;
   readonly startedAt: number;
   /** Núcleo del túnel inverso (estado + decisiones; el E2E sigue aparte). */
@@ -158,6 +175,7 @@ export class RelayServer {
     this.uiLimiter = new RateLimiter(opts.rateLimitUi ?? legacy ?? RATE_LIMIT_UI_PER_MIN, 60_000, nowFn);
     this.tLimiter = new RateLimiter(opts.rateLimitT ?? legacy ?? RATE_LIMIT_T_PER_MIN, 60_000, nowFn);
     this.wsLimiter = new RateLimiter(opts.rateLimitWs ?? legacy ?? RATE_LIMIT_WS_PER_MIN, 60_000, nowFn);
+    this.discordLimiter = new RateLimiter(opts.rateLimitDiscord ?? 30, 60_000, nowFn);
     this.now = opts.now ?? Date.now;
     this.startedAt = opts.startedAt ?? this.now();
     this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs, persist: opts.tunnelPersist ?? null });
@@ -340,6 +358,33 @@ export class RelayServer {
         code: entry.code,
         expiresIn: Math.round((entry.expiresAt - entry.createdAt) / 1000),
       });
+    }
+
+    // Discord OAuth (cero-config, público: el daemon del usuario final no
+    // tiene RELAY_TOKEN). Sin auth: solo rate-limit por IP.
+    // GET /api/discord/callback → página que reenvía el code al daemon local
+    // (o lo muestra para copiado manual). POST /api/discord/rpc-token →
+    // proxy code→token custodiando el secret en servidor.
+    if (url.pathname === DISCORD_CALLBACK_PATH && req.method === 'GET') {
+      return new Response(renderDiscordCallbackPage({ lang: pickLang(req), defaultApiPort: this.opts.discordApiPort ?? 3001 }), {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+    if (url.pathname === DISCORD_RPC_TOKEN_PATH) {
+      if (req.method === 'OPTIONS') return discordProxyPreflight();
+      if (req.method === 'POST') {
+        const ipDiscord = getClientIp(req, server, this.opts.trustProxy ?? false);
+        if (!this.discordLimiter.allow(`discord:${ipDiscord}`)) {
+          return rateLimitedResponse();
+        }
+        return handleDiscordRpcToken(req, {
+          clientId: this.opts.discordClientId,
+          clientSecret: this.opts.discordClientSecret,
+          fetchFn: this.opts.discordFetchFn,
+        });
+      }
+      return Response.json({ error: 'method-not-allowed' }, { status: 405 });
     }
 
     // Túnel inverso (público, sin RELAY_TOKEN: el navegador no lo tiene).

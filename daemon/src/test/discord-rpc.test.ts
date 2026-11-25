@@ -317,13 +317,13 @@ describe('DiscordPlugin voz: RPC primero, hotkey de fallback', () => {
 })
 
 describe('DiscordPlugin acciones nuevas', () => {
-    it('connect sin Client ID devuelve needs-auth con guía', async () => {
+    it('connect sin token usa el Client ID baked-in (no-token con URL, 1 clic)', async () => {
         const { ctx } = makeCtx()
         const plugin = new DiscordPlugin(ctx, okRpc())
         const res = await plugin.getActionHandlers().get('connect')!({}, {})
         expect(res.status).toBe('needs-auth')
-        expect(res.authorizeUrl).toBeNull()
-        expect(res.missing).toContain('clientId')
+        expect(res.reason).toBe('no-token')
+        expect(res.authorizeUrl).toContain('1575201215791497256')
     })
 
     it('connect con Client ID devuelve URL y la abre (permiso explícito)', async () => {
@@ -425,12 +425,13 @@ function mockProxyFetch(calls: Array<{ url: string; body: any }>, payload: any =
 }
 
 describe('discord zero-config: resolución de defaults', () => {
-    it('placeholders baked-in no resuelven sin settings ni env', async () => {
+    it('Client ID baked-in real resuelve sin settings ni env', async () => {
         await withCleanDiscordEnv(async () => {
-            expect(isDiscordPlaceholder(DEFAULT_DISCORD_CLIENT_ID)).toBe(true)
-            expect(resolveDiscordClientId(undefined)).toBeNull()
-            expect(resolveDiscordClientId('')).toBeNull()
-            expect(isDiscordZeroConfigReady()).toBe(false)
+            expect(isDiscordPlaceholder(DEFAULT_DISCORD_CLIENT_ID)).toBe(false)
+            expect(DEFAULT_DISCORD_CLIENT_ID).toBe('1575201215791497256')
+            expect(resolveDiscordClientId(undefined)).toBe('1575201215791497256')
+            expect(resolveDiscordClientId('')).toBe('1575201215791497256')
+            expect(isDiscordZeroConfigReady()).toBe(true)
             // Redirect y proxy sí tienen default utilizable.
             expect(resolveDiscordRedirectUri(undefined)).toBe(DEFAULT_DISCORD_REDIRECT_URI)
             expect(resolveDiscordProxyUrl(undefined)).toBe(DEFAULT_DISCORD_PROXY_URL)
@@ -452,7 +453,8 @@ describe('discord zero-config: resolución de defaults', () => {
     it('sin secret embebido en el bundle: el directo exige secret propio del usuario', async () => {
         const mod: any = await import('../plugins/discord-rpc')
         expect(mod.DEFAULT_DISCORD_CLIENT_SECRET).toBeUndefined()
-        expect(isDiscordPlaceholder(mod.DEFAULT_DISCORD_CLIENT_ID)).toBe(true)
+        expect(isDiscordPlaceholder(mod.DEFAULT_DISCORD_CLIENT_ID)).toBe(false)
+        expect(mod.DEFAULT_DISCORD_CLIENT_ID).toBe('1575201215791497256')
         // Sin secret del usuario no hay intercambio directo posible.
         await expect(exchangeDiscordCode({ clientId: 'cid', clientSecret: '', code: 'c', redirectUri: 'r' } as any)).rejects.toMatchObject({ code: 'needs-auth' })
         await expect(exchangeDiscordCode({ clientId: '', clientSecret: '', code: 'c', redirectUri: 'r' } as any)).rejects.toMatchObject({ code: 'needs-auth' })
@@ -517,16 +519,15 @@ describe('discord zero-config: needs-auth vs not-configured', () => {
         expect(r.instructions).toContain('Autorizar con Discord')
     })
 
-    it('connect sin config → needs-auth not-configured (no lanza, no toca teclas)', async () => {
+    it('connect sin token, con baked-in real, devuelve no-token con URL (ya no not-configured)', async () => {
         await withCleanDiscordEnv(async () => {
             const { ctx } = makeCtx({ mode: 'rpc' })
             let tapped = 0
             const plugin = new DiscordPlugin(ctx, { ...okRpc(), hotkeyTap: async (h, hold) => { tapped++; return { hotkey: h, heldMs: hold ?? 0, platform: 'test' } } })
             const res = await plugin.getActionHandlers().get('connect')!({}, {})
             expect(res.status).toBe('needs-auth')
-            expect(res.reason).toBe('not-configured')
-            expect(res.authorizeUrl).toBeNull()
-            expect(res.missing).toContain('clientId')
+            expect(res.reason).toBe('no-token')
+            expect(res.authorizeUrl).toContain('1575201215791497256')
             expect(tapped).toBe(0)
         })
     })
@@ -577,5 +578,26 @@ describe('discord zero-config: needs-auth vs not-configured', () => {
             expect(calls).toHaveLength(1)
             expect(calls[0].url).toBe(DEFAULT_DISCORD_PROXY_URL)
         })
+    })
+})
+
+describe('discord zero-config: redirects registrados (app real del maintainer)', () => {
+    it('expone los 3 redirects a registrar: 2 loopback + callback https', async () => {
+        const mod: any = await import('../plugins/discord-rpc')
+        expect(mod.DISCORD_MAINTAINER_CLIENT_ID).toBe('1575201215791497256')
+        expect(mod.DEFAULT_DISCORD_CLIENT_ID).toBe('1575201215791497256')
+        expect([...mod.DISCORD_VALID_REDIRECT_URIS]).toEqual([
+            'http://127.0.0.1:6463',
+            'http://localhost:6463',
+            'https://relay.bundeck.app/api/discord/callback',
+        ])
+        expect(mod.DEFAULT_DISCORD_CALLBACK_URL).toBe('https://relay.bundeck.app/api/discord/callback')
+        expect(mod.DISCORD_CALLBACK_PATH).toBe('/api/discord/callback')
+    })
+
+    it('la URL de autorización usa el loopback por defecto (el redirect registrado 1)', () => {
+        const r = buildDiscordNeedsAuth({ clientId: '1575201215791497256', redirectUri: undefined, reason: 'no-token' })
+        expect(r.authorizeUrl).toContain('client_id=1575201215791497256')
+        expect(r.authorizeUrl).toContain(encodeURIComponent('http://127.0.0.1:6463'))
     })
 })
