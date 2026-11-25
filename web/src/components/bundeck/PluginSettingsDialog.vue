@@ -17,31 +17,59 @@
         <div v-if="oauth" class="bd-fld" data-cy="bd-oauth-box">
           <label><b>{{ oauthTitle }}</b></label>
           <p class="bd-hint">{{ oauth.notes ?? oauthHint }}</p>
-          <p v-if="isDiscordOauth && discordChecking" class="bd-hint" role="status" data-cy="bd-discord-state">
-            {{ t('bd.discordStatusChecking') }}
+          <p v-if="isDiscordOauth && discordChecking" class="bd-hint" role="status" data-cy="bd-discord-checking">
+            <LoaderCircle :size="14" aria-hidden="true" class="bd-spin" /> {{ t('bd.discordStatusChecking') }}
           </p>
-          <p v-else-if="isDiscordOauth && discordState === 'connected'" class="bd-hint" data-cy="bd-oauth-status">
+          <p v-if="isDiscordOauth && discordState === 'connected'" class="bd-hint" data-cy="bd-oauth-status">
             ✓ {{ oauthConnected }}
           </p>
           <div
-            v-else-if="isDiscordOauth && (discordState === 'discord-closed' || discordState === 'authorized')"
+            v-if="isDiscordOauth && (discordState === 'discord-closed' || discordState === 'authorized')"
             class="bd-warnbox"
             role="status"
             data-cy="bd-discord-state"
           >
             <p>{{ discordState === 'discord-closed' ? t('bd.discordClosed') : t('bd.discordAuthorized') }}</p>
-            <button class="bd-btn" :disabled="discordChecking" data-cy="bd-discord-retry" @click="refreshDiscordLive">
-              {{ t('bd.discordRetry') }}
-            </button>
+            <p v-if="discordAutoRetrying" class="bd-hint" role="status" data-cy="bd-discord-autoretry">
+              <LoaderCircle :size="14" aria-hidden="true" class="bd-spin" /> {{ t('bd.discordAutoRetry') }}
+            </p>
           </div>
-          <p v-else-if="isDiscordOauth && discordState === 'token-expired'" class="bd-err" role="alert" data-cy="bd-discord-state">
-            {{ t('bd.discordExpired') }}
+          <div
+            v-if="isDiscordOauth && discordState === 'token-expired'"
+            class="bd-warnbox"
+            role="alert"
+            data-cy="bd-discord-state"
+          >
+            <p class="bd-err">{{ t('bd.discordExpired') }}</p>
+            <p v-if="discordAutoRetrying" class="bd-hint" role="status" data-cy="bd-discord-autoretry">
+              <LoaderCircle :size="14" aria-hidden="true" class="bd-spin" /> {{ t('bd.discordAutoRetry') }}
+            </p>
+          </div>
+          <p
+            v-if="isDiscordOauth && (discordState === 'needs-auth' || discordState === 'not-configured' || discordState === null)"
+            class="bd-hint"
+            data-cy="bd-discord-state"
+          >
+            {{ t('bd.discordNotConnected') }}
           </p>
-          <p v-else-if="isDiscordOauth" class="bd-hint" data-cy="bd-discord-state">{{ t('bd.discordNotConnected') }}</p>
-          <p v-else-if="configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
+          <p v-if="!isDiscordOauth && configured" class="bd-hint" data-cy="bd-oauth-status">✓ {{ oauthConnected }}</p>
           <div class="bd-r2">
-            <button class="bd-btn bd-pri" :disabled="loginBusy" data-cy="bd-oauth-connect" @click="connectOAuth">
+            <button
+              :class="['bd-btn', discordNeedsAuth ? 'bd-pri bd-wide' : '']"
+              :disabled="loginBusy"
+              data-cy="bd-oauth-connect"
+              @click="connectOAuth"
+            >
               {{ discordNeedsAuth ? oauthConnect : oauthReconnect }}
+            </button>
+            <button
+              v-if="isDiscordOauth && !discordNeedsAuth"
+              class="bd-btn"
+              :disabled="discordDisconnecting || discordChecking"
+              data-cy="bd-discord-disconnect"
+              @click="disconnectDiscord"
+            >
+              {{ discordDisconnecting ? t('bd.discordDisconnecting') : t('bd.discordDisconnect') }}
             </button>
             <span v-if="loginBusy" class="bd-hint" role="status">{{ oauthWaiting }}</span>
           </div>
@@ -183,7 +211,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X, LoaderCircle } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -212,6 +240,13 @@ const configured = ref(false)
 type DiscordState = 'connected' | 'discord-closed' | 'needs-auth' | 'not-configured' | 'token-expired' | 'authorized' | null
 const discordState = ref<DiscordState>(null)
 const discordChecking = ref(false)
+/** Reintento automático en segundo plano mientras el token existe pero Discord no responde (o caducó). */
+const discordAutoRetrying = ref(false)
+const discordDisconnecting = ref(false)
+const DISCORD_AUTO_RETRY_MS = 5000
+const DISCORD_AUTO_RETRY_MAX = 6
+let discordRetryTimer: ReturnType<typeof setTimeout> | null = null
+let discordRetryCount = 0
 const loginBusy = ref(false)
 const loginError = ref('')
 const loginAuthorizeUrl = ref('')
@@ -294,6 +329,7 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   configured.value = false
   discordState.value = null
   discordChecking.value = false
+  stopDiscordAutoRetry()
   form.value = {}
   secretFields.value = []
   try {
@@ -347,7 +383,40 @@ onUnmounted(() => {
   try {
     window.removeEventListener('focus', onWindowFocus)
   } catch { /* noop */ }
+  stopDiscordAutoRetry()
 })
+/** ¿Este estado merece reintento automático en segundo plano? Token guardado pero sin RPC útil. */
+const discordNeedsRetry = (st: DiscordState) => st === 'authorized' || st === 'discord-closed' || st === 'token-expired'
+const stopDiscordAutoRetry = () => {
+  if (discordRetryTimer) {
+    clearTimeout(discordRetryTimer)
+    discordRetryTimer = null
+  }
+  discordRetryCount = 0
+  discordAutoRetrying.value = false
+}
+/** Tras cada sonda: si el token existe pero Discord no responde, re-sonda solo cada ~5s (máx ~6). */
+const afterDiscordProbe = () => {
+  if (!isOpen.value || !isDiscordOauth.value || !discordNeedsRetry(discordState.value)) {
+    stopDiscordAutoRetry()
+    return
+  }
+  if (discordRetryCount >= DISCORD_AUTO_RETRY_MAX) {
+    stopDiscordAutoRetry()
+    return
+  }
+  if (discordRetryTimer) return
+  discordAutoRetrying.value = true
+  discordRetryTimer = setTimeout(async () => {
+    discordRetryTimer = null
+    if (!isOpen.value || !isDiscordOauth.value) {
+      stopDiscordAutoRetry()
+      return
+    }
+    discordRetryCount += 1
+    await refreshDiscordLive()
+  }, DISCORD_AUTO_RETRY_MS)
+}
 /** Sonda en vivo del estado Discord (acción `status`, sin lanzar ni mutar nada). */
 const refreshDiscordLive = async () => {
   if (!isDiscordOauth.value) return
@@ -361,7 +430,7 @@ const refreshDiscordLive = async () => {
     if (!res.ok) return
     const data = await res.json().catch(() => ({}))
     const st = (data as any)?.result?.status ?? (data as any)?.status
-    if (st === 'connected' || st === 'discord-closed' || st === 'needs-auth' || st === 'token-expired' || st === 'not-configured') {
+    if (st === 'connected' || st === 'discord-closed' || st === 'needs-auth' || st === 'token-expired' || st === 'not-configured' || st === 'authorized') {
       discordState.value = st
       if (st === 'connected') configured.value = true
       if (st === 'needs-auth' || st === 'token-expired' || st === 'not-configured') configured.value = false
@@ -370,10 +439,39 @@ const refreshDiscordLive = async () => {
     /* sin red/sonda: se conserva el estado del bundle */
   } finally {
     discordChecking.value = false
+    afterDiscordProbe()
+  }
+}
+/** Desconectar: borra el token en local (`discord.disconnect`) y vuelve al estado "sin token". */
+const disconnectDiscord = async () => {
+  if (!isDiscordOauth.value || discordDisconnecting.value) return
+  discordDisconnecting.value = true
+  stopDiscordAutoRetry()
+  try {
+    const res = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'disconnect' }),
+    })
+    await res.json().catch(() => ({}))
+    discordState.value = 'needs-auth'
+    configured.value = false
+    emit('saved', pluginId.value)
+    await refreshDiscordLive()
+    if (discordState.value !== 'needs-auth' && discordState.value !== 'not-configured') {
+      discordState.value = 'needs-auth'
+      configured.value = false
+    }
+  } catch {
+    discordState.value = 'needs-auth'
+    configured.value = false
+  } finally {
+    discordDisconnecting.value = false
   }
 }
 const close = () => {
   stopLoginPoll()
+  stopDiscordAutoRetry()
   loginBusy.value = false
   isOpen.value = false
   dialog.value?.close()

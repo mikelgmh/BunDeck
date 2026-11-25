@@ -126,7 +126,7 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     expect(wrapper.find('[data-cy="bd-discord-fields"]').exists()).toBe(false)
   })
 
-  it('sin autorizar: muestra "no conectado" + Autorizar (sin ✓ mentiroso)', async () => {
+  it('sin autorizar: muestra "no conectado" + Autorizar primario, sin ✓ ni Desconectar', async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: true, json: async () => ({ success: true, result: { status: 'needs-auth' } }) }
@@ -139,10 +139,42 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
     expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordNotConnected')
-    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordConnect')
+    const connect = wrapper.find('[data-cy="bd-oauth-connect"]')
+    expect(connect.text()).toContain('bd.discordConnect')
+    expect(connect.classes()).toContain('bd-pri')
+    expect(wrapper.find('[data-cy="bd-discord-disconnect"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
-  it('autorizado + RPC en vivo: muestra ✓ + Reautorizar', async () => {
+  it('checking: spinner visible mientras la sonda está en vuelo (apertura)', async () => {
+    let resolveKey!: (v: any) => void
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return new Promise((resolve) => {
+          resolveKey = resolve
+        })
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: false, discordStatus: 'needs-auth' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    const shown = (wrapper.vm as any).show('discord')
+    await flushPromises()
+    const checking = wrapper.find('[data-cy="bd-discord-checking"]')
+    expect(checking.exists()).toBe(true)
+    expect(checking.text()).toContain('bd.discordStatusChecking')
+    expect(checking.find('.bd-spin').exists()).toBe(true)
+    // Al resolver la sonda, el spinner desaparece y queda el estado sin token.
+    resolveKey({ ok: true, json: async () => ({ success: true, result: { status: 'needs-auth' } }) })
+    await shown
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-discord-checking"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordNotConnected')
+    wrapper.unmount()
+  })
+
+  it('conectado: ✓ + Desconectar secundario + Volver a autorizar discreto', async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: true, json: async () => ({ success: true, result: { status: 'connected' } }) }
@@ -154,26 +186,17 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await (wrapper.vm as any).show('discord')
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
-    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    const disconnect = wrapper.find('[data-cy="bd-discord-disconnect"]')
+    expect(disconnect.exists()).toBe(true)
+    expect(disconnect.text()).toContain('bd.discordDisconnect')
+    const connect = wrapper.find('[data-cy="bd-oauth-connect"]')
+    expect(connect.text()).toContain('bd.discordReconnect')
+    expect(connect.classes()).not.toContain('bd-pri')
+    wrapper.unmount()
   })
 
-  it('token caducado: mensaje accionable + Reautorizar', async () => {
-    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
-      if (init?.method === 'POST' && String(url).endsWith('/key')) {
-        return { ok: true, json: async () => ({ success: true, result: { status: 'token-expired' } }) }
-      }
-      return { ok: true, json: async () => ({ ...discordBundle, configured: false, discordStatus: 'token-expired' }) }
-    }) as any
-    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
-    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
-    await (wrapper.vm as any).show('discord')
-    await flushPromises()
-    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
-    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordExpired')
-    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
-  })
-
-  it('Discord cerrado: aviso ámbar autorizado + Reintentar sonda (sin ✓, sin Reintentar entrega)', async () => {
+  it('Discord cerrado: caja ámbar + reintento automático en segundo plano, sin botón manual', async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
@@ -189,11 +212,38 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     expect(box.exists()).toBe(true)
     expect(box.classes()).toContain('bd-warnbox')
     expect(box.text()).toContain('bd.discordClosed')
-    // Botón Reintentar sonda: re-sonda sin re-autorizar.
-    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(true)
+    // Sin jerga "sonda": no hay botón manual, hay spinner automático.
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    const auto = wrapper.find('[data-cy="bd-discord-autoretry"]')
+    expect(auto.exists()).toBe(true)
+    expect(auto.find('.bd-spin').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-disconnect"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordReconnect')
+    wrapper.unmount()
   })
 
-  it('autorizado con sonda desconocida: ámbar "Autorizado" + Reintentar (nunca ✓ mentiroso)', async () => {
+  it('token caducado: caja roja + reintento automático + Desconectar', async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        return { ok: true, json: async () => ({ success: true, result: { status: 'token-expired' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: false, discordStatus: 'token-expired' }) }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(false)
+    const box = wrapper.find('[data-cy="bd-discord-state"]')
+    expect(box.exists()).toBe(true)
+    expect(box.text()).toContain('bd.discordExpired')
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-discord-autoretry"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-disconnect"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('autorizado con sonda desconocida: ámbar "Autorizado" + reintento automático (nunca ✓ mentiroso)', async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: false, json: async () => ({}) }
@@ -208,7 +258,8 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     const box = wrapper.find('[data-cy="bd-discord-state"]')
     expect(box.classes()).toContain('bd-warnbox')
     expect(box.text()).toContain('bd.discordAuthorized')
-    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('conectado: solo ✓, sin aviso ni Reintentar', async () => {
@@ -224,9 +275,44 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
     expect(wrapper.find('[data-cy="bd-discord-retry"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
-  it('Reintentar sonda vuelve a llamar a la sonda en vivo', async () => {
+  it('click Desconectar llama a discord.disconnect y refresca al estado sin token', async () => {
+    let mode: 'connected' | 'needs-auth' = 'connected'
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        const action = JSON.parse(init.body ?? '{}')?.action
+        if (action === 'disconnect') {
+          mode = 'needs-auth'
+          return { ok: true, json: async () => ({ success: true, result: { status: 'disconnected' } }) }
+        }
+        return { ok: true, json: async () => ({ success: true, result: { status: mode } }) }
+      }
+      return {
+        ok: true,
+        json: async () => ({ ...discordBundle, configured: mode !== 'needs-auth', discordStatus: mode === 'needs-auth' ? 'needs-auth' : 'authorized' }),
+      }
+    })
+    globalThis.fetch = fetchMock as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
+    await wrapper.find('[data-cy="bd-discord-disconnect"]').trigger('click')
+    await flushPromises()
+    const disconnectCalls = fetchMock.mock.calls.filter(
+      ([u, i]) => i?.method === 'POST' && String(u).endsWith('/key') && JSON.parse(i.body ?? '{}')?.action === 'disconnect',
+    )
+    expect(disconnectCalls.length).toBe(1)
+    expect(wrapper.find('[data-cy="bd-discord-state"]').text()).toContain('bd.discordNotConnected')
+    expect(wrapper.find('[data-cy="bd-discord-disconnect"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-oauth-connect"]').text()).toContain('bd.discordConnect')
+    wrapper.unmount()
+  })
+
+  it('auto-reintento: re-sonda cada ~5s, máximo ~6 intentos, y luego para', async () => {
     const fetchMock = vi.fn(async (url: string, init?: any) => {
       if (init?.method === 'POST' && String(url).endsWith('/key')) {
         return { ok: true, json: async () => ({ success: true, result: { status: 'discord-closed' } }) }
@@ -238,11 +324,48 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
     await (wrapper.vm as any).show('discord')
     await flushPromises()
-    const before = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
-    await wrapper.find('[data-cy="bd-discord-retry"]').trigger('click')
+    const keyCalls = () => fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    expect(keyCalls()).toBe(1)
+    expect(wrapper.find('[data-cy="bd-discord-autoretry"]').exists()).toBe(true)
+    // Re-sonda visible en vuelo durante el reintento.
+    for (let i = 0; i < 6; i += 1) {
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+    }
+    expect(keyCalls()).toBe(7)
+    // Tras el máximo, para aunque siga cerrado.
+    await vi.advanceTimersByTimeAsync(30000)
     await flushPromises()
-    const after = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
-    expect(after).toBeGreaterThan(before)
+    expect(keyCalls()).toBe(7)
+    expect(wrapper.find('[data-cy="bd-discord-autoretry"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('auto-reintento: para en cuanto conecta', async () => {
+    let n = 0
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).endsWith('/key')) {
+        n += 1
+        return { ok: true, json: async () => ({ success: true, result: { status: n < 2 ? 'discord-closed' : 'connected' } }) }
+      }
+      return { ok: true, json: async () => ({ ...discordBundle, configured: true, discordStatus: 'authorized' }) }
+    })
+    globalThis.fetch = fetchMock as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('discord')
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-discord-autoretry"]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-discord-autoretry"]').exists()).toBe(false)
+    const keyCalls = () => fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
+    const after = keyCalls()
+    await vi.advanceTimersByTimeAsync(30000)
+    await flushPromises()
+    expect(keyCalls()).toBe(after)
+    wrapper.unmount()
   })
 
   it('volver el foco a la ventana re-sonda (el token pudo llegar por la pestaña del callback)', async () => {
@@ -262,5 +385,6 @@ describe('PluginSettingsDialog sección Discord (cero-config + avanzado)', () =>
     await flushPromises()
     const after = fetchMock.mock.calls.filter(([u, i]) => i?.method === 'POST' && String(u).endsWith('/key')).length
     expect(after).toBeGreaterThan(before)
+    wrapper.unmount()
   })
 })
