@@ -1,3 +1,11 @@
+## [1.12.1](https://github.com/mikelgmh/BunDeck/compare/v1.12.0...v1.12.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **cli:** bundeck-first daemon exe matching with libredeck fallback ([6a4716e](https://github.com/mikelgmh/BunDeck/commit/6a4716e2ba564983bc60c194ece557f640487783))
+* **cli:** manifest URL and process names to bundeck, keep legacy fallbacks ([10a18c9](https://github.com/mikelgmh/BunDeck/commit/10a18c9b998eee49554149b197e2944a860a5268))
+
 # [1.12.0](https://github.com/mikelgmh/BunDeck/compare/v1.11.1...v1.12.0) (2026-11-25)
 
 
