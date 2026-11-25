@@ -188,6 +188,9 @@
 .bundeck .bd-seg button { padding: 4px 12px; min-height: 32px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; white-space: nowrap; flex: none; }
 .bundeck .bd-seg button { padding: 4px 12px; min-height: 32px; border-radius: 8px; color: var(--bd-mu); font-weight: 500; white-space: nowrap; flex: none; }
 .bundeck .bd-seg button[aria-pressed='true'] { background: var(--bd-sf); color: var(--bd-ink); box-shadow: 0 0 0 1px var(--bd-ln); }
+/* Selector nativo de modo (viewport estrecho): oculto en escritorio, donde
+   mandan las tabs .bd-modeseg. Comparte el mismo handler que las tabs. */
+.bundeck .bd-modesel { display: none; }
 .bundeck .bd-floor { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 24px; overscroll-behavior: contain; }
 /* El contenido vive en .bd-stack con margin:auto: centra cuando cabe y
    arranca desde arriba con scroll normal cuando desborda. (justify-content:
@@ -604,7 +607,7 @@
 .bundeck .bd-remote-expiry { margin: 0; color: var(--bd-mu); font: 12px/18px var(--bd-mono); font-variant-numeric: tabular-nums; }
 .bundeck .bd-remote-qr-actions { flex-wrap: wrap; }
 .bundeck .bd-remote-pair-qr { margin-top: 0; }
-.bundeck dialog.bd-dlg.bd-remote-approval { width: min(480px, calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); overflow: auto; }
+.bundeck dialog.bd-dlg.bd-remote-approval { width: min(480px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - 32px); overflow: auto; }
 .bundeck .bd-remote-approval__body { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 24px; }
 .bundeck .bd-remote-approval__mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--bd-as); color: var(--bd-ac); }
 .bundeck .bd-remote-approval h2 { margin: 0; font-size: 20px; line-height: 28px; }
@@ -664,6 +667,11 @@
   .bundeck header.bd-top { gap: 8px; padding: 0 8px; }
 }
 @media (max-width: 700px) {
+  /* En estrecho las tabs de modo no caben: se sustituyen por el <select>
+     nativo .bd-modesel (mismo handler/eventos, sin duplicar lógica). */
+  .bundeck .bd-modeseg { display: none; }
+  .bundeck .bd-modesel { display: inline-flex; align-items: center; min-height: 40px; }
+  .bundeck .bd-modesel select.bd-inp { width: auto; max-width: 44vw; }
   .bundeck dialog.bd-dlg.bd-grid[open] { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .bundeck .bd-dnav { grid-row: auto; flex-direction: row; border: 0; border-bottom: 1px solid var(--bd-ln); padding: 8px; overflow-x: auto; }
   .bundeck .bd-dnav .bd-sh { display: none; }

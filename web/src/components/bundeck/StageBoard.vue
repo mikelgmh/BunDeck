@@ -2,7 +2,7 @@
   <section class="bd-stage" :class="{ 'bd-kiosk': kiosk }" :data-cy="kiosk ? 'bd-kiosk-grid' : undefined">
     <div v-if="!kiosk" class="bd-tool">
       <div class="bd-tgrp">
-        <div class="bd-seg" role="group" :aria-label="t('bd.mode')">
+        <div class="bd-seg bd-modeseg" role="group" :aria-label="t('bd.mode')">
           <button data-md="edit" :aria-pressed="mode === 'edit' && !kiosk" @click="$emit('mode-change', 'edit')">
             {{ t('bd.edit') }}
           </button>
@@ -13,6 +13,20 @@
             {{ t('bd.kiosk') }}
           </button>
         </div>
+        <label class="bd-modesel">
+          <span class="bd-sr">{{ t('bd.mode') }}</span>
+          <select
+            class="bd-inp"
+            data-cy="bd-mode-select"
+            :aria-label="t('bd.mode')"
+            :value="kiosk ? 'kiosk' : mode"
+            @change="onModeSelect(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="edit">{{ t('bd.edit') }}</option>
+            <option value="use">{{ t('bd.use') }}</option>
+            <option value="kiosk">{{ t('bd.kiosk') }}</option>
+          </select>
+        </label>
       </div>
       <div class="bd-tgrp bd-mid">
         <div v-if="mode === 'edit'" class="bd-seg" role="group" aria-label="layout">
@@ -477,6 +491,14 @@ const props = withDefaults(defineProps<Props>(), {
   profileData: undefined,
 })
 const emit = defineEmits<Emits>()
+
+/** El <select> de modo (viewport estrecho) reutiliza los mismos eventos que
+ *  las tabs: 'mode-change' para edit/use y 'kiosk-enter' para kiosco (los
+ *  guards y la confirmación de salida viven en el padre, sin duplicar). */
+const onModeSelect = (value: string) => {
+  if (value === 'kiosk') emit('kiosk-enter')
+  else emit('mode-change', value === 'use' ? 'use' : 'edit')
+}
 
 const container = ref<HTMLElement | null>(null)
 const swapy = ref<Swapy | null>(null)
