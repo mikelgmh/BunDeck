@@ -7,7 +7,11 @@
 //! - Al abrir: intenta que el daemon esté corriendo (espejo de
 //!   `spawnDaemon()` en `src/bun/index.ts`), luego sondea cada 2s:
 //!   API :3001 (/health), WS :3003 (TCP), Frontend :3002 o :4321 (HEAD /).
-//! - Botones: Abrir panel (navegador), Reintentar sondeo, Salir.
+//! - Botones: Abrir panel (navegador), Iniciar/Detener/Reiniciar, Salir.
+//!   Si Spotify pide login (POST /api/v1/plugins/spotify/login-request
+//!   desde cualquier UI, incluida la remota por túnel), abre el navegador
+//!   del sistema una vez y avisa en el panel hasta que se complete o se
+//!   descarte (ver `monitor::spotify_login_pending`).
 //! - Estilo: tokens de `theme.rs`, espejo manual del tema bundeck
 //!   (`web/src/styles/bundeck.css`, dark + acento amarillo).
 //! - Ventana sin marco nativo (`appears_transparent`): la barra de
@@ -21,8 +25,7 @@
 //!   invisible mantiene vivo el proceso para que el tray siga
 //!   respondiendo. Solo "Salir" (de la ventana o del menú del tray)
 //!   termina el proceso. El menú del tray ofrece Abrir panel (esta
-//!   ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
-//!   (ventana nativa del host) y Salir.
+//!   ventana GPUI), Abrir en la web (navegador) y Salir.
 
 mod monitor;
 mod autostart;
@@ -102,8 +105,9 @@ struct LauncherView {
     pending_start: bool,
     /// PNG del logo para la cabecera (None = cuadrado ámbar de reserva).
     logo: Option<PathBuf>,
-    /// Hay host Electrobun (ventana nativa disponible).
-    host: bool,
+    /// Aviso persistente de Spotify: `requestedAt` ya atendido (navegador
+    /// abierto en este equipo) pendiente de completar o descartar.
+    spotify_notice: Option<String>,
     /// Todo el I/O queda fuera del hilo de la interfaz.
     background_tx: Sender<BackgroundEvent>,
     background_rx: Receiver<BackgroundEvent>,
@@ -127,10 +131,13 @@ enum BackgroundEvent {
     Monitor {
         snapshot: Snapshot,
         installed: Option<String>,
-        host: bool,
         boot: Vec<String>,
         pending_start: bool,
     },
+    /// El sondeo abrió el navegador para un login-request de Spotify.
+    SpotifyLogin { requested_at: String },
+    /// El login-request dejó de estar pendiente (completado o descartado).
+    SpotifyLoginDone,
     Latest(Option<LatestRelease>),
     Log(String),
     UpdateCheck {
@@ -176,7 +183,7 @@ impl LauncherView {
             launcher_pending_restart: false,
             pending_start: false,
             logo: monitor::logo_path(),
-            host: false,
+            spotify_notice: None,
             background_tx,
             background_rx,
             monitor_tx,
@@ -333,7 +340,6 @@ impl LauncherView {
                 BackgroundEvent::Monitor {
                     snapshot,
                     installed,
-                    host,
                     boot,
                     pending_start,
                 } => {
@@ -346,7 +352,6 @@ impl LauncherView {
                         }
                         self.installed = Some(version);
                     }
-                    self.host = host;
                     self.pending_start = pending_start;
                     self.log.extend(boot);
                     if daemon_is_up && !self.auto_update_initialized {
@@ -369,12 +374,50 @@ impl LauncherView {
                     self.latest = latest;
                 }
                 BackgroundEvent::Log(message) => self.log.push(message),
+                BackgroundEvent::SpotifyLogin { requested_at } => {
+                    // El sondeo ya abrió el navegador del sistema para este
+                    // login-request: avisar en el panel hasta que se complete
+                    // o el usuario lo descarte.
+                    if self.spotify_notice.as_deref() != Some(requested_at.as_str()) {
+                        self.spotify_notice = Some(requested_at);
+                        self.log.push(
+                            "Spotify necesita conexión: se abrió el navegador en este equipo; inicia sesión y el acceso se completará solo.".to_string(),
+                        );
+                    }
+                }
+                BackgroundEvent::SpotifyLoginDone => {
+                    if self.spotify_notice.take().is_some() {
+                        self.log.push("Spotify conectado (o petición descartada).".to_string());
+                    }
+                }
                 BackgroundEvent::UpdateCheck {
                     installed,
                     result,
                     latest_fallback,
                 } => self.finish_update_check(installed, result, latest_fallback),
             }
+        }
+        self.truncate_log();
+    }
+
+    /// Botón Descartar del aviso de Spotify: borra el login-request en el
+    /// daemon (best-effort) y oculta el aviso; el sondeo lo confirma en el
+    /// siguiente ciclo.
+    fn dismiss_spotify(&mut self) {
+        self.spotify_notice = None;
+        std::thread::spawn(|| {
+            monitor::spotify_dismiss_login();
+        });
+        self.log.push("Aviso de Spotify descartado.".to_string());
+        self.truncate_log();
+    }
+
+    /// Botón Reabrir del aviso de Spotify (por si se cerró el navegador).
+    fn reopen_spotify(&mut self) {
+        const URL: &str = "https://open.spotify.com";
+        self.log.push(format!("Abriendo {URL} …"));
+        if let Err(e) = open::that(URL) {
+            self.log.push(format!("No se pudo abrir el navegador: {e}"));
         }
         self.truncate_log();
     }
@@ -712,37 +755,6 @@ impl LauncherView {
         }
     }
 
-    /// Botón Ventana Electrobun: pide al host que abra su dashboard.
-    /// Sin host no hay ventana nativa: lo explica y sugiere Abrir panel.
-    fn open_electrobun(&mut self) {
-        if !self.host {
-            self.log.push(
-                "Sin host Electrobun: la ventana nativa solo existe con `electrobun dev`. Usa Abrir panel."
-                    .to_string(),
-            );
-            self.truncate_log();
-            return;
-        }
-        let tx = self.background_tx.clone();
-        std::thread::spawn(move || {
-            let message = match monitor::host_post("open-window") {
-                Some(body) => {
-                    let opened = serde_json::from_str::<serde_json::Value>(&body)
-                        .ok()
-                        .and_then(|v| v.get("opened")?.as_bool())
-                        .unwrap_or(false);
-                    if opened {
-                        "Ventana Electrobun abierta.".to_string()
-                    } else {
-                        "El host ya tenía su ventana abierta.".to_string()
-                    }
-                }
-                None => "El host no respondió. Usa Abrir panel.".to_string(),
-            };
-            let _ = tx.send(BackgroundEvent::Log(message));
-        });
-    }
-
     fn dot_color(state: State) -> gpui::Rgba {
         match state {
             State::Ok => theme::ok(),
@@ -759,6 +771,9 @@ fn start_monitor_thread(
     std::thread::spawn(move || {
         let mut initial = true;
         let mut pending_start = false;
+        // `requestedAt` del login-request de Spotify ya atendido (navegador
+        // abierto): en memoria para no reabrir en cada sondeo.
+        let mut spotify_served: Option<String> = None;
 
         loop {
             let boot = if initial || pending_start {
@@ -780,18 +795,54 @@ fn start_monitor_thread(
             // Ver autostart.rs y daemon/src/system-autostart.ts.
             crate::autostart::sync_from_daemon();
             let installed = monitor::installed_version();
-            let host = monitor::host_alive();
             if events
                 .send(BackgroundEvent::Monitor {
-                    snapshot,
+                    snapshot: snapshot.clone(),
                     installed,
-                    host,
                     boot,
                     pending_start,
                 })
                 .is_err()
             {
                 return;
+            }
+            // Apertura bajo demanda de Spotify: cualquier UI (incluida la
+            // remota por túnel) crea el login-request con POST; el launcher,
+            // que siempre corre en el host en prod, abre el navegador del
+            // sistema UNA vez por `requestedAt` cuando no hay host Electrobun
+            // vivo. Con host vivo no se hace nada: el flujo dev automático
+            // (su propio poll + BrowserWindow) sigue mandando.
+            if snapshot.api.state == State::Ok {
+                match monitor::spotify_login_pending() {
+                    Some(requested_at) => {
+                        let already = spotify_served.as_deref() == Some(requested_at.as_str());
+                        if !already && !monitor::host_alive() {
+                            if open::that("https://open.spotify.com").is_ok() {
+                                spotify_served = Some(requested_at.clone());
+                                if events
+                                    .send(BackgroundEvent::SpotifyLogin { requested_at })
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            } else if events
+                                .send(BackgroundEvent::Log(
+                                    "Spotify necesita conexión pero no se pudo abrir el navegador en este equipo.".to_string(),
+                                ))
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                    None => {
+                        if spotify_served.take().is_some() {
+                            if events.send(BackgroundEvent::SpotifyLoginDone).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
             }
 
             if initial {
@@ -905,7 +956,6 @@ impl Render for LauncherView {
         };
         let update_available = self.update_available();
         let api_up = self.snapshot.api.state == State::Ok;
-        let host_up = self.host;
         // Snapshot del progreso (lo escribe el hilo de fondo).
         let (update_stage, update_frac, update_err, staged_ver) = self
             .update_progress
@@ -1283,6 +1333,79 @@ impl Render for LauncherView {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
+                if self.spotify_notice.is_none() {
+                    div().hidden().into_any_element()
+                } else {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .p_3()
+                        .rounded_xl()
+                        .bg(theme::surface())
+                        .border_1()
+                        .border_color(theme::accent())
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme::primary_text())
+                                .child("Spotify necesita conexión: se abrió el navegador en este equipo; inicia sesión y el acceso se completará solo.".to_string()),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .id("spotify-reopen")
+                                        .flex_1()
+                                        .text_center()
+                                        .text_sm()
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_lg()
+                                        .bg(theme::surface())
+                                        .border_1()
+                                        .border_color(theme::line())
+                                        .text_color(theme::primary_text())
+                                        .cursor_pointer()
+                                        .hover(|s| s.border_color(theme::secondary_text()))
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.reopen_spotify();
+                                            cx.notify();
+                                        }))
+                                        .child("Reabrir Spotify".to_string()),
+                                )
+                                .child(
+                                    div()
+                                        .id("spotify-dismiss")
+                                        .flex_1()
+                                        .text_center()
+                                        .text_sm()
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_lg()
+                                        .bg(theme::surface())
+                                        .border_1()
+                                        .border_color(theme::line())
+                                        .text_color(theme::muted_text())
+                                        .cursor_pointer()
+                                        .hover(|s| s.border_color(theme::secondary_text()))
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.dismiss_spotify();
+                                            cx.notify();
+                                        }))
+                                        .child("Descartar".to_string()),
+                                )
+                                .into_any_element(),
+                        )
+                        .into_any_element()
+                }
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Status {
                 section_label("ABRIR").into_any_element()
             } else {
                 div().hidden().into_any_element()
@@ -1294,87 +1417,37 @@ impl Render for LauncherView {
                     .gap_1()
                     .child(
                         div()
-                            .flex()
-                            .flex_row()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .id("open-dashboard")
-                                    .flex_1()
-                                    .text_center()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(theme::primary_btn_bg())
-                                    .text_color(theme::primary_btn_text())
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme::primary_btn_hover()))
-                                    .on_click(cx.listener(|view, _, window, cx| {
-                                        if view.open_dashboard() {
-                                            if view.ready_to_close() {
-                                                // Se cierra la ventana, el tray sigue vivo.
-                                                window.remove_window();
-                                            } else {
-                                                view.log.push(
-                                                    "Servicios aún arrancando: dejo la ventana abierta."
-                                                        .to_string(),
-                                                );
-                                                view.truncate_log();
-                                                cx.notify();
-                                            }
-                                        } else {
-                                            cx.notify();
-                                        }
-                                    }))
-                                    .child("Panel web".to_string()),
-                            )
-                            .child(
-                                div()
-                                    .id("open-electrobun")
-                                    .flex_1()
-                                    .text_center()
-                                    .text_sm()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_lg()
-                                    .bg(theme::surface())
-                                    .border_1()
-                                    .border_color(theme::line())
-                                    // Sin host el texto se atenúa (parece
-                                    // deshabilitado) pero sigue clicable:
-                                    // al pulsar explica que solo existe con
-                                    // `electrobun dev`. Ver `open_electrobun`
-                                    // y `monitor::host_alive` (:3031/ping).
-                                    .text_color(if host_up {
-                                        theme::primary_text()
+                            .id("open-dashboard")
+                            .w_full()
+                            .text_center()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .px_3()
+                            .py_2()
+                            .rounded_lg()
+                            .bg(theme::primary_btn_bg())
+                            .text_color(theme::primary_btn_text())
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme::primary_btn_hover()))
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                if view.open_dashboard() {
+                                    if view.ready_to_close() {
+                                        // Se cierra la ventana, el tray sigue vivo.
+                                        window.remove_window();
                                     } else {
-                                        theme::muted_text()
-                                    })
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(theme::secondary_text()))
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.open_electrobun();
+                                        view.log.push(
+                                            "Servicios aún arrancando: dejo la ventana abierta."
+                                                .to_string(),
+                                        );
+                                        view.truncate_log();
                                         cx.notify();
-                                    }))
-                                    .child(if host_up {
-                                        "Ventana Electrobun".to_string()
-                                    } else {
-                                        "Ventana Electrobun (sin host)".to_string()
-                                    }),
-                            )
-                            .into_any_element(),
+                                    }
+                                } else {
+                                    cx.notify();
+                                }
+                            }))
+                            .child("Panel web".to_string()),
                     )
-                    .child(if host_up {
-                        div().hidden().into_any_element()
-                    } else {
-                        div()
-                            .text_xs()
-                            .text_color(theme::muted_text())
-                            .child("La ventana nativa solo existe con `electrobun dev`.".to_string())
-                            .into_any_element()
-                    })
                     .into_any_element()
             } else {
                 div().hidden().into_any_element()
@@ -1577,22 +1650,6 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
                     let _ = h.update(cx, |_, window, _| window.remove_window());
                 }
             }
-        }
-        TrayEvent::OpenElectrobun => {
-            // Como el botón "Ventana Electrobun": handoff al host; sin
-            // host, se abre el panel web como alternativa.
-            std::thread::spawn(|| {
-                let opened = monitor::host_post("open-window")
-                    .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
-                    .and_then(|v| v.get("opened")?.as_bool())
-                    .unwrap_or(false);
-                if !opened {
-                    let url = format!("http://localhost:{}", monitor::frontend_port());
-                    if open::that(&url).is_err() {
-                        eprintln!("[launcher] sin host Electrobun y no se pudo abrir ({url})");
-                    }
-                }
-            });
         }
         TrayEvent::Quit => {
             // "Salir" apaga todo: pide al daemon que se detenga (muere en

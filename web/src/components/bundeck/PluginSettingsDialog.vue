@@ -24,6 +24,15 @@
             </button>
             <span v-if="loginBusy" class="bd-hint" role="status">{{ t('bd.spotifyWaiting') }}</span>
           </div>
+          <div v-if="loginBusy" class="bd-hint" data-cy="bd-spotify-host-hint" role="status">
+            <p>{{ t('bd.spotifyHostWindow') }}</p>
+            <p>
+              {{ t('bd.spotifyRemoteHint') }}
+              <a href="https://open.spotify.com" target="_blank" rel="noopener" data-cy="bd-spotify-open"
+                >open.spotify.com</a
+              >
+            </p>
+          </div>
           <p v-if="loginError" class="bd-err" role="alert">{{ loginError }}</p>
         </div>
         <p v-if="!hasSettings" class="bd-hint">{{ t('bd.pluginNoSettings') }}</p>

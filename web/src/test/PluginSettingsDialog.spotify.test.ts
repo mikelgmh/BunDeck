@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import PluginSettingsDialog from '../components/bundeck/PluginSettingsDialog.vue'
 
 vi.mock('../composables/useI18n', () => ({
@@ -110,5 +110,45 @@ describe('PluginSettingsDialog OAuth (Spotify sin Client ID)', () => {
     await p
     expect(wrapper.emitted('saved')).toBeTruthy()
     expect(wrapper.find('[data-cy="bd-oauth-status"]').exists()).toBe(true)
+  })
+
+  it('pending muestra guía accionable + enlace a open.spotify.com', async () => {
+    // POST login-request ok; el poll nunca se configura: sigue pendiente.
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).includes('login-request')) {
+        return { ok: true, json: async () => ({ success: true }) }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          schema: { properties: {} },
+          values: {},
+          instructions: '',
+          oauth: { provider: 'spotify' },
+          configured: false,
+        }),
+      }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('spotify')
+    const p = (wrapper.vm as any).connectOAuth()
+    await vi.advanceTimersByTimeAsync(2100)
+    await flushPromises()
+    // Mientras está pendiente: guía del host + pista remota + enlace.
+    const hint = wrapper.find('[data-cy="bd-spotify-host-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('bd.spotifyHostWindow')
+    expect(hint.text()).toContain('bd.spotifyRemoteHint')
+    const link = hint.find('[data-cy="bd-spotify-open"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('https://open.spotify.com')
+    expect(link.attributes('target')).toBe('_blank')
+    // Limpieza: agotar el timeout de 5 min y tragar el rechazo.
+    const done = p.catch(() => {})
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 5000)
+    await done
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-spotify-host-hint"]').exists()).toBe(false)
   })
 })

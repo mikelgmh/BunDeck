@@ -451,17 +451,9 @@ fn host_url(path: &str) -> String {
     format!("http://127.0.0.1:{}/__launcher/{path}", host_port())
 }
 
-fn host_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_secs(25))
-        .timeout_write(Duration::from_millis(1500))
-        .build()
-}
-
 /// ¿Hay host Electrobun escuchando? (GET /__launcher/ping, sin efectos).
-/// La ventana nativa solo existe si el host está en marcha
-/// (`electrobun dev`); sin host el botón se atenúa y lo explica.
+/// Solo se usa para NO duplicar su flujo dev de Spotify: con host vivo el
+/// host abre su propia ventana y el launcher no abre el navegador.
 pub fn host_alive() -> bool {
     let agent: ureq::Agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_millis(1000))
@@ -478,9 +470,46 @@ pub fn host_alive() -> bool {
         .unwrap_or(false)
 }
 
-/// POST contra el host. Devuelve el cuerpo si responde (sea cual sea).
-pub fn host_post(path: &str) -> Option<String> {
-    host_agent().post(&host_url(path)).call().ok()?.into_string().ok()
+/// login-request de Spotify pendiente (apertura bajo demanda desde cualquier
+/// dispositivo, incluido remoto por túnel): GET
+/// /api/v1/plugins/spotify/login-request. Devuelve el `requestedAt` si hay
+/// petición pendiente. Best-effort: None ante cualquier fallo.
+pub fn spotify_login_pending() -> Option<String> {
+    let url = format!(
+        "http://127.0.0.1:{}/api/v1/plugins/spotify/login-request",
+        api_port()
+    );
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(1000))
+        .timeout_read(Duration::from_millis(1500))
+        .timeout_write(Duration::from_millis(1000))
+        .build();
+    let body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.into_json().ok()?;
+    if v.get("pending")?.as_bool() != Some(true) {
+        return None;
+    }
+    let requested_at = v.get("requestedAt")?.as_str()?;
+    if requested_at.is_empty() {
+        None
+    } else {
+        Some(requested_at.to_string())
+    }
+}
+
+/// Descarta el login-request de Spotify (DELETE .../login-request).
+/// Best-effort para el botón Descartar del aviso del panel.
+pub fn spotify_dismiss_login() -> bool {
+    let url = format!(
+        "http://127.0.0.1:{}/api/v1/plugins/spotify/login-request",
+        api_port()
+    );
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(1500))
+        .timeout_read(Duration::from_millis(1500))
+        .timeout_write(Duration::from_millis(1500))
+        .build();
+    agent.delete(&url).call().is_ok()
 }
 
 /// Daemon compilado: `versions/<activa>/` (gestionado) o plano junto al

@@ -1,10 +1,8 @@
 //! Icono de bandeja (system tray) del launcher — SOLO Windows.
 //!
-//! El tray es propiedad única del launcher (el daemon no tiene tray propio
-//! y el host Electrobun no pinta ninguno): al hacer
-//! clic se abre la ventana del launcher, y el menú ofrece Abrir panel
-//! (ventana GPUI), Abrir en la web (navegador), Abrir en Electrobun
-//! (ventana nativa del host, si lo hay) y Salir (apaga el daemon y cierra
+//! El tray es propiedad única del launcher (el daemon no tiene tray propio):
+//! al hacer clic se abre la ventana del launcher, y el menú ofrece Abrir panel
+//! (ventana GPUI), Abrir en la web (navegador) y Salir (apaga el daemon y cierra
 //! el launcher).
 //!
 //! Implementación Win32 directa (`Shell_NotifyIconW`) sobre un HWND oculto
@@ -20,8 +18,6 @@ pub enum TrayEvent {
     ShowLauncher,
     /// "Abrir en la web": abrir el dashboard en el navegador.
     OpenPanel,
-    /// "Abrir en Electrobun": pedir al host que abra su ventana nativa.
-    OpenElectrobun,
     /// "Salir": apaga el daemon y cierra el launcher.
     Quit,
 }
@@ -75,8 +71,7 @@ mod imp {
     pub(super) const WM_TRAY_SHUTDOWN: u32 = WM_APP + 42;
     const MENU_OPEN: usize = 1;
     const MENU_WEB: usize = 2;
-    const MENU_ELECTROBUN: usize = 3;
-    const MENU_QUIT: usize = 4;
+    const MENU_QUIT: usize = 3;
 
     struct TrayThread {
         tx: Sender<TrayEvent>,
@@ -168,7 +163,6 @@ mod imp {
             };
             let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir panel"));
             let _ = AppendMenuW(menu, MF_STRING, MENU_WEB, w!("Abrir en la web"));
-            let _ = AppendMenuW(menu, MF_STRING, MENU_ELECTROBUN, w!("Abrir en Electrobun"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Salir"));
             let mut pt = POINT { x: 0, y: 0 };
@@ -191,7 +185,6 @@ mod imp {
             let ev = match cmd.0 as usize {
                 MENU_OPEN => Some(TrayEvent::ShowLauncher),
                 MENU_WEB => Some(TrayEvent::OpenPanel),
-                MENU_ELECTROBUN => Some(TrayEvent::OpenElectrobun),
                 MENU_QUIT => Some(TrayEvent::Quit),
                 _ => None,
             };

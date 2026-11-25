@@ -701,6 +701,8 @@
         "spotifyWaiting": "Opening the Web Player… log in and come back here; the token is stored locally.",
         "spotifyConnected": "Connected: the token renews itself in the background while the app stays open.",
         "spotifyConnectHint": "No Client ID needed: your official Web Player session is used in its own window (iframes are blocked by Spotify).",
+        "spotifyHostWindow": "Spotify was opened on the host machine: sign in there and access will complete automatically.",
+        "spotifyRemoteHint": "If you're on another device, you can also paste the token manually in settings or open",
         "pluginNeedsRuntime": "Imported from Elgato: native CodePath or missing bundle (not runnable). Reinstall from the compiled .streamDeckPlugin.",
         "installFailed": "Installation failed",
         "installedOk": "Installation complete",

@@ -298,7 +298,18 @@ export const handlePlugins: ApiHandler = async (_req, { url, method, path, db, s
       }
       if (method === 'POST') {
         db.setSetting('plugin.spotify.loginRequestedAt', String(Date.now()));
-        return jsonResponse({ success: true, pluginId, requestedAt: db.getSetting('plugin.spotify.loginRequestedAt') });
+        const requestedAt = db.getSetting('plugin.spotify.loginRequestedAt');
+        // Aviso para las UIs (incluida la remota por túnel): el launcher,
+        // que siempre corre en el host en prod, sondea este estado y abre
+        // el navegador del sistema bajo demanda. No cambia el contrato.
+        try {
+          (services as any).wsManager?.broadcast?.(
+            'plugin.login-requested',
+            { pluginId, requestedAt, ts: Date.now() },
+            'plugins'
+          );
+        } catch {}
+        return jsonResponse({ success: true, pluginId, requestedAt });
       }
       if (method === 'GET') {
         const requestedAt = db.getSetting('plugin.spotify.loginRequestedAt');
