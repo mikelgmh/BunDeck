@@ -111,6 +111,8 @@ export interface HttpResult {
 
 interface HttpPending {
   deviceId: string;
+  /** Token UI de la sesión (`/t/<token>/`). Para fallar solo sus peticiones al revocar. */
+  token?: string;
   resolve: (r: HttpResult) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -603,6 +605,7 @@ export class TunnelState {
   }
 
   private dropSession(token: string): void {
+    const sess = this.sessions.get(token);
     this.sessions.delete(token);
     try {
       this.persist?.deleteSession(token);
@@ -611,6 +614,48 @@ export class TunnelState {
     }
     for (const [code, b] of [...this.bindings]) {
       if (b.sessionToken === token) this.bindings.delete(code);
+    }
+    // Tráfico en vuelo de ESTA sesión: 401 inmediato (no espera al timeout
+    // de 30 s del daemon ni deja que una respuesta tardía cuele).
+    for (const [id, e] of [...this.httpPending]) {
+      if (e.token !== undefined && e.token !== token) continue;
+      // Sin token registrado (versiones viejas): solo falla si es del mismo
+      // daemon y ya no le quedan sesiones (evita tumbar otras sesiones).
+      if (e.token === undefined && sess) {
+        let remaining = false;
+        for (const s of this.sessions.values()) {
+          if (s.deviceId === e.deviceId) { remaining = true; break; }
+        }
+        if (remaining) continue;
+      }
+      clearTimeout(e.timer);
+      this.httpPending.delete(id);
+      try {
+        e.resolve({
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+          bodyB64: b64({ error: 'invalid-token' }),
+        });
+      } catch {
+        /* noop */
+      }
+    }
+    // Avisa al daemon para que cierre su lado del puente (si no, su
+    // TunnelClient conserva el bridge y el peer RTC asociado).
+    try {
+      const sock = sess ? this.devices.get(sess.deviceId) : undefined;
+      if (sock) {
+        for (const [id, br] of [...this.bridges]) {
+          if (br.token !== token) continue;
+          try {
+            sock.send(JSON.stringify({ v: 1, kind: 'ws-close', id }));
+          } catch {
+            /* daemon caído: se limpia al cerrar el socket */
+          }
+        }
+      }
+    } catch {
+      /* best-effort */
     }
     for (const [id, br] of [...this.bridges]) {
       if (br.token === token) {

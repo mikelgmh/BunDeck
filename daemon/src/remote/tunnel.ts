@@ -29,7 +29,7 @@
 
 import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
 import { RtcManager, buildTurnCreds } from './rtc';
-import { UI_CODE_KEY, UI_SESSION_PREFIX } from './ui-policy';
+import { UI_CODE_KEY, UI_SESSION_PREFIX, UI_UNBIND_PENDING_PREFIX } from './ui-policy';
 
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
@@ -62,6 +62,8 @@ interface DbLike {
   getSetting: (key: string) => string | null;
   /** Opcional: si existe, el túnel re-anuncia sesiones/códigos persistidos al reconectar. */
   getAllSettings?: () => Record<string, string>;
+  setSetting?: (key: string, value: string) => void;
+  deleteSetting?: (key: string) => void;
   addLog?: (entry: { level: string; message: string; meta?: any; ts: number }) => void;
 }
 
@@ -442,6 +444,24 @@ export class TunnelClient {
       this.send({ v: 1, kind: 'ui-rebind', sessionToken: token, exp });
       out.rebound += 1;
     }
+    // 3) Tombstones de revocación: re-emite ui-unbind aunque la fila de
+    // sesión ya no exista (revocar con el relay caído). Idempotente.
+    try {
+      const all2 = typeof this.db.getAllSettings === 'function' ? this.db.getAllSettings() : {};
+      for (const [k, v] of Object.entries(all2)) {
+        if (!k.startsWith(UI_UNBIND_PENDING_PREFIX)) continue;
+        const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
+        if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
+        const exp = Number(v);
+        if (!Number.isFinite(exp) || exp <= now) {
+          try { this.db.deleteSetting?.(k); } catch { /* noop */ }
+          continue;
+        }
+        this.bindings.delete(token);
+        this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
+        out.unbound += 1;
+      }
+    } catch { /* sin tombstones: nada que reintentar */ }
     return out;
   }
 
@@ -508,9 +528,27 @@ export class TunnelClient {
     return { ok: true, allowed: true, sessionToken };
   }
 
-  /** Revoca una sesión UI (emite ui-unbind). */
+   /** Revoca una sesión UI (emite ui-unbind). */
   revokeUiSession(sessionToken: string): boolean {
     const existed = this.bindings.delete(sessionToken);
+    // Tombstone durable: si el relay está caído el envío se pierde, pero
+      // resyncUiState lo re-emite al reconectar (ver UI_UNBIND_PENDING_PREFIX).
+      // Solo si la sesión existe en settings (evita tombstones huérfanos de
+      // tokens efímeros de tests que nunca se persistieron).
+    try {
+      const anyDb = this.db as unknown as { setSetting?: (k: string, v: string) => void; getSetting?: (k: string) => string | null };
+      if (typeof anyDb?.setSetting === 'function') {
+        let exp = 0;
+        try {
+          const raw = anyDb.getSetting?.(`remote.ui.session.${sessionToken}`);
+          if (!raw) throw new Error('sin sesión persistida');
+          exp = Number((JSON.parse(raw) as { exp?: unknown })?.exp ?? 0);
+        } catch { exp = 0; }
+        if (Number.isFinite(exp) && exp > this.now()) {
+          try { anyDb.setSetting(`remote.ui.unbind-pending.${sessionToken}`, String(exp)); } catch { /* noop */ }
+        }
+      }
+    } catch { /* noop */ }
     this.send({ v: 1, kind: 'ui-unbind', sessionToken });
     return existed;
   }
@@ -822,5 +860,18 @@ export class TunnelClient {
 
   bridgeCount(): number {
     return this.bridges.size;
+  }
+
+  /**
+   * Cierra los peers RTC (P2P directo) de una sesión revocada. Sin esto, un
+   * DataChannel ya establecido seguía operando tras revocar: la validación
+   * solo ocurría en el `hello` inicial, no en `api-req`/`sub` posteriores.
+   */
+  closeRtcForToken(sessionToken: string): number {
+    try {
+      return this.rtc?.closeBySessionToken?.(String(sessionToken ?? '')) ?? 0;
+    } catch {
+      return 0;
+    }
   }
 }

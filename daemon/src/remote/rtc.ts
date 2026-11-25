@@ -199,6 +199,34 @@ export class RtcManager {
     for (const id of [...this.peers.keys()]) this.close(id);
   }
 
+  /** Cierra todos los peers P2P autenticados con este token (revocación). */
+  closeBySessionToken(sessionToken: string): number {
+    const want = String(sessionToken ?? '');
+    if (!want) return 0;
+    let n = 0;
+    for (const [id, e] of [...this.peers]) {
+      if (e.sessionToken === want) {
+        this.close(id);
+        n += 1;
+      }
+    }
+    return n;
+  }
+
+  /** ¿Sigue vigente la sesión (existe, no revocada ni caducada)? */
+  private isSessionAlive(token: string): boolean {
+    try {
+      const raw = this.deps.db.getSetting(`remote.ui.session.${token}`);
+      if (!raw) return false;
+      const s = JSON.parse(raw) as { exp?: number; revoked?: boolean };
+      if (s.revoked) return false;
+      if (typeof s.exp === 'number' && s.exp < Date.now()) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private waitGatheringComplete(pc: { iceGatheringState?: string; iceGatheringStateChange?: { subscribe: (fn: (s: unknown) => void) => void } }, timeoutMs: number): Promise<void> {
     if ((pc.iceGatheringState as string) === 'complete') return Promise.resolve();
     return new Promise((resolve) => {
@@ -278,6 +306,13 @@ export class RtcManager {
     }
     if (!entry.sessionToken) {
       this.sendDc(entry, { t: 'bye', reason: 'hello-required' });
+      return;
+    }
+    // Revocación en caliente: una sesión revocada/caducada tras el hello no
+    // debe seguir operando por el DataChannel ya establecido.
+    if (!this.isSessionAlive(entry.sessionToken)) {
+      this.sendDc(entry, { t: 'bye', reason: 'revoked' });
+      this.close(entry.bridgeId);
       return;
     }
     if (t === 'api-req') {

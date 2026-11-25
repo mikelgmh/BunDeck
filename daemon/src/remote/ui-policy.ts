@@ -33,6 +33,15 @@ export const UI_CODE_KEY = 'remote.ui.code';
 const UI_CONSUMED_PREFIX = 'remote.ui.consumed.';
 /** Prefijo de las sesiones UI persistidas (lo reutiliza el TunnelClient para re-anunciarlas al reconectar). */
 export const UI_SESSION_PREFIX = 'remote.ui.session.';
+/**
+ * Tombstones de revocación (`remote.ui.unbind-pending.<token>` = exp epochMs).
+ * Cubren revocar con el relay caído: el `ui-unbind` best-effort se pierde,
+ * pero `resyncUiState` lo re-emite en cada (re)conexión hasta que caduque
+ * (idempotente: el relay ignora tokens desconocidos). Sin esto, borrar la
+ * fila de sesión hacía que el relay conservara la sesión 24 h y la tablet
+ * siguiera operando en modo Relay tras revocar.
+ */
+export const UI_UNBIND_PENDING_PREFIX = 'remote.ui.unbind-pending.';
 
 export const UI_CODE_TTL_MS = 10 * 60 * 1000; // 10 min, como pairing
 export const UI_PENDING_TTL_MS = 2 * 60 * 1000; // igual que la ventana de aprobación del relay
@@ -671,4 +680,43 @@ export function notifyTunnelUiUnbind(sessionToken: string): void {
   } catch {
     /* noop */
   }
+}
+
+/**
+ * Encola un `ui-unbind` durable (tombstone con expiración de la sesión).
+ * Llamar SIEMPRE al revocar, además de `notifyTunnelUiUnbind`: si el túnel
+ * está caído el envío best-effort se pierde y `resyncUiState` lo reintenta
+ * en cada reconexión hasta que caduque.
+ */
+export function queueUiUnbind(db: DatabaseService, sessionToken: string, exp: number): void {
+  const token = String(sessionToken ?? '');
+  if (!/^[0-9a-fA-F]{32,}$/.test(token)) return;
+  const ttl = Number.isFinite(exp) ? exp : Date.now() + UI_SESSION_TTL_MS;
+  if (ttl <= Date.now()) return;
+  try {
+    db.setSetting(`${UI_UNBIND_PENDING_PREFIX}${token}`, String(ttl));
+  } catch { /* noop */ }
+}
+
+/** Tombstones vigentes (poda oportunista de caducados). Para `resyncUiState`. */
+export function listUiUnbindPending(db: { getAllSettings?: () => Record<string, string>; deleteSetting?: (k: string) => void }): Array<{ token: string; exp: number }> {
+  const out: Array<{ token: string; exp: number }> = [];
+  let all: Record<string, string> = {};
+  try {
+    all = typeof db.getAllSettings === 'function' ? db.getAllSettings() : {};
+  } catch {
+    return out;
+  }
+  const now = Date.now();
+  for (const [k, v] of Object.entries(all)) {
+    if (!k.startsWith(UI_UNBIND_PENDING_PREFIX)) continue;
+    const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
+    const exp = Number(v);
+    if (!/^[0-9a-fA-F]{32,}$/.test(token) || !Number.isFinite(exp) || exp <= now) {
+      try { db.deleteSetting?.(k); } catch { /* noop */ }
+      continue;
+    }
+    out.push({ token, exp });
+  }
+  return out;
 }

@@ -19,7 +19,7 @@ import {
   isUiEnabled, setUiEnabled, relayHttpsUrl, createUiCode, revokeUiCode, listUiPendingCombined,
   approveUiPending, denyUiPending, listUiSessions, revokeUiSessionByPrefix,
   setUiSessionDeviceName, readUiSessionByToken, validateUiSession,
-  notifyTunnelUiUnbind,
+  notifyTunnelUiUnbind, queueUiUnbind,
 } from '../remote/ui-policy';
 import {
   createLanInvite, getLanInviteMeta, revokeLanInvite, redeemLanInvite,
@@ -336,7 +336,12 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     const r = revokeUiSessionByPrefix(db, prefix);
     if (!r) return jsonResponse({ error: 'Sesión desconocida' }, 404);
     try { services.wsManager?.broadcast('remote.ui-revoked', { scope: 'session', tokenPrefix: prefix, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    // Tombstone durable + unbind best-effort: si el túnel está caído el
+    // envío se pierde, pero resyncUiState lo re-emite al reconectar.
+    try { queueUiUnbind(db, r.token, r.session.exp); } catch { /* noop */ }
     notifyTunnelUiUnbind(r.token);
+    // P2P directo: el DataChannel ya establecido no pasa por el relay.
+    try { (globalThis as any).__libredeckRemote?.tunnel?.closeRtcForToken?.(r.token); } catch { /* noop */ }
     // Revocar = prohibir + ocultar: olvidar los dispositivos vinculados.
     try {
       for (const deviceId of devicesForTokenPrefix(db, 'ui', prefix)) {

@@ -323,6 +323,28 @@ export class WebSocketManager {
     const presentedLegacy =
       (typeof payload?.token === 'string' && payload.token) || null;
 
+    // Túnel (relay/RTC): el relay ya validó el token para abrir el puente,
+    // pero tras revocar el relay puede tardar (o el unbind haberse perdido)
+    // y el móvil reintenta `hello` con el token viejo. Sin esta guarda, el
+    // hello recreaba fila `devices` + `device_sessions` + enlace aunque el
+    // token ya no exista, y el dispositivo revocado reaparecía en la lista.
+    // Los puentes de túnel exigen sesión UI vigente: sin ella se rechaza el
+    // hello sin crear nada (el relay cierra el puente con 401/1008).
+    if (client.source === 'tunnel') {
+      const tunnelTok = presentedUi || presentedLegacy || null;
+      if (!tunnelTok || !validateUiSession(this.db, tunnelTok).ok) {
+        this.sendToClient(clientId, {
+          type: 'error',
+          payload: {
+            code: 'UI_TOKEN_REQUIRED',
+            message: 'Sesión revocada o expirada: vuelve a vincular desde Ajustes → Acceso remoto.',
+          },
+        });
+        try { this.clients.delete(clientId); } catch { /* noop */ }
+        return;
+      }
+    }
+
     // Autenticación LAN en `hello` (solo si aún no está autorizado):
     // acepta sesión portadora o código de invitación de un solo uso.
     if (!client.lanAuthed) {

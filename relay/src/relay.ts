@@ -516,6 +516,7 @@ export class RelayServer {
       timer.unref?.();
       this.tunnel.httpPending.set(id, {
         deviceId: sess.deviceId,
+        token,
         resolve: (r) => {
           clearTimeout(timer);
           resolve(r);

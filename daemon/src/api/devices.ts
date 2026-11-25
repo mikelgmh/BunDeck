@@ -23,7 +23,7 @@ import {
   type DeviceKind,
 } from '../devices';
 import { unbindDevice, boundPrefixForDevice } from '../remote/device-bindings';
-import { revokeUiSessionByPrefix, notifyTunnelUiUnbind } from '../remote/ui-policy';
+import { revokeUiSessionByPrefix, notifyTunnelUiUnbind, queueUiUnbind } from '../remote/ui-policy';
 import { revokeLanSessionByPrefix } from '../remote/lan-invites';
 import { streamDeckDriver } from '../hw-driver/streamdeck-driver';
 
@@ -170,7 +170,11 @@ export function forgetDeviceEverywhere(
       try {
         if (kind === 'ui') {
           const found = revokeUiSessionByPrefix(db, prefix);
-          if (found) notifyTunnelUiUnbind(found.token);
+          if (found) {
+            try { queueUiUnbind(db, found.token, found.session.exp); } catch { /* noop */ }
+            notifyTunnelUiUnbind(found.token);
+            try { (globalThis as any).__libredeckRemote?.tunnel?.closeRtcForToken?.(found.token); } catch { /* noop */ }
+          }
         } else {
           revokeLanSessionByPrefix(db, prefix);
         }
