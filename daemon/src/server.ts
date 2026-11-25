@@ -145,9 +145,18 @@ class LibreDeckDaemon {
           windowWatcher.on('profile-switch', (profileId: string, window: any) => {
             // Update current profile in database and window watcher
             const db = new DatabaseService();
-            db.setCurrentProfile(profileId);
-            windowWatcher.setCurrentProfile(profileId);
-            this.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
+            // Cambio global (auto-perfil): reasigna por dispositivo en vez de
+            // solo difundir. Sin WS se degrada al camino antiguo.
+            if (this.wsManager && typeof (this.wsManager as any).navigateProfileTo === 'function') {
+              (this.wsManager as any).navigateProfileTo({
+                profileId, originDeviceId: null, targets: { kind: 'all' as const },
+                context: { via: 'window-watcher', window },
+              });
+            } else {
+              db.setCurrentProfile(profileId);
+              windowWatcher.setCurrentProfile(profileId);
+              this.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
+            }
           });
 
           if (config.defaultProfileId !== undefined) windowWatcher.setDefaultProfile(config.defaultProfileId ?? null);

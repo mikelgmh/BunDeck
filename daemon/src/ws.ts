@@ -758,13 +758,41 @@ export class WebSocketManager {
     // Página inicial del perfil para los objetivos (primera no-carpeta)
     const firstPage = this.firstPageOfProfile(profile.id);
 
+    // Reasignación por dispositivo: al cambiar de perfil cada pantalla salta
+    // a SU página asignada en el perfil nuevo (`profile_assignments`); sin
+    // asignación válida (inexistente, de otro perfil o borrada), a la primera.
+    // Antes todos los objetivos recibían `firstPage` y las asignaciones por
+    // dispositivo del perfil nuevo nunca se aplicaban.
+    let assigned: Record<string, string> = {};
+    try {
+      assigned = this.db.getAssignments(profile.id) ?? {};
+    } catch { assigned = {}; }
+    const pageFor = (deviceId: string): string | null => {
+      const want = assigned[deviceId];
+      if (want) {
+        try {
+          const pg = this.db.getPage(want);
+          if (pg && pg.profile_id === profile.id) return want;
+        } catch { /* cae al fallback */ }
+      }
+      return firstPage;
+    };
+
+    const isHwDevice = (id: string): boolean =>
+      this.clientsOfDevice(id).some((c) => c.kind === 'hardware') ||
+      id === (streamDeckDriver as any)?.getDeviceId?.() ||
+      id.startsWith('streamdeck') || id.startsWith('hw:') || id.startsWith('hardware:');
+
     const delivered: string[] = [];
+    const pagesByDevice = new Map<string, string | null>();
     for (const deviceId of deviceIds) {
-      this.db.upsertDeviceSession({ device_id: deviceId, profile_id: profile.id, page_id: firstPage });
+      const targetPage = pageFor(deviceId);
+      pagesByDevice.set(deviceId, targetPage);
+      this.db.upsertDeviceSession({ device_id: deviceId, profile_id: profile.id, page_id: targetPage });
       const conns = this.clientsOfDevice(deviceId);
       for (const conn of conns) {
         conn.profileId = profile.id;
-        if (firstPage) conn.pageId = firstPage;
+        if (targetPage) conn.pageId = targetPage;
         conn.lastSeen = Date.now();
         const subscribed = conn.subscriptions.has('profiles');
         if (expanded !== 'all' || subscribed || (origin && conn.deviceId === origin)) {
@@ -772,7 +800,7 @@ export class WebSocketManager {
             type: 'profile.navigate',
             payload: {
               profileId: profile.id,
-              pageId: firstPage ?? undefined,
+              pageId: targetPage ?? undefined,
               targetDeviceId: deviceId,
               originDeviceId: origin,
               context: opts.context,
@@ -792,13 +820,20 @@ export class WebSocketManager {
       windowWatcher.setCurrentProfile(profile.id);
     }
 
-    const hwTargeted = deviceIds.some((id) =>
-      this.clientsOfDevice(id).some((c) => c.kind === 'hardware') ||
-        id === (streamDeckDriver as any)?.getDeviceId?.() ||
-        id.startsWith('streamdeck') || id.startsWith('hw:') || id.startsWith('hardware:'),
-    );
-    if ((hwTargeted || expanded === 'all') && firstPage) {
-      this.repaintHw(firstPage);
+    const hwTargeted = deviceIds.some((id) => isHwDevice(id));
+    if (hwTargeted || expanded === 'all') {
+      // El HW repinta SU página asignada, no la primera del perfil. Sin
+      // clientes (HW vía driver) se resuelve igual contra sus asignaciones.
+      let repaintPage: string | null = firstPage;
+      const hwId = deviceIds.find((id) => isHwDevice(id));
+      try {
+        if (hwId) repaintPage = pagesByDevice.get(hwId) ?? firstPage;
+        else if (deviceIds.length === 0) {
+          const driverId = String((streamDeckDriver as any)?.getDeviceId?.() ?? 'streamdeck-local');
+          repaintPage = pageFor(driverId) ?? firstPage;
+        }
+      } catch { repaintPage = firstPage; }
+      if (repaintPage) this.repaintHw(repaintPage);
     }
 
     return { ok: true, deliveredTo: delivered, pageId: firstPage };

@@ -2011,15 +2011,21 @@ export function useStreamDeck() {
     if (!isRemoteProfileChange.value) {
       ws?.send(JSON.stringify({
         type: 'profile.select',
-        // Por defecto solo este dispositivo (el daemon no reemite a otros
-        // salvo target 'all'/broadcast explícito).
-        payload: { profileId, deviceId: deviceId.value }
+        // Cambio GLOBAL de perfil: se difunde a todas las pantallas y el
+        // daemon resuelve por dispositivo (cada una abre SU página asignada
+        // en el perfil nuevo, o la primera si no tiene). Sin esto, el
+        // `current.profile_id` global avanzaba pero el resto de pantallas
+        // se quedaba en el perfil viejo.
+        payload: { profileId, target: 'all' }
       }))
     }
 
-    // OJO: el editor NO empuja su vista al HW al navegar (ni selectProfile
-    // ni selectPage repintan el Stream Deck físico). El HW sigue su propia
-    // sesión/asignación y solo cambia por acción o por el botón "dispositivos".
+    // OJO: al cambiar de perfil SÍ se empuja la vista al resto de pantallas
+    // (broadcast `profile.select` → el daemon reasigna por dispositivo y
+    // repinta el HW físico a su página asignada). Solo la navegación de
+    // PÁGINA dentro del editor (selectPage) sigue siendo local: el HW sigue
+    // su propia sesión/asignación y solo cambia de página por acción,
+    // por el botón "dispositivos" o por un cambio de perfil.
   }
   const createProfile = async (name: string) => {
     try {

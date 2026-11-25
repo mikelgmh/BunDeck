@@ -576,9 +576,18 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
           w.__ldSwitchBound = true;
           services.windowWatcher.on('profile-switch', (profileId: string, _window: any) => {
             // Update current profile in database and window watcher
-            db.setCurrentProfile(profileId);
-            services.windowWatcher.setCurrentProfile(profileId);
-            services.wsManager?.broadcast('profile.navigate', { profileId }, 'profiles');
+            // Cambio global (auto-perfil): reasigna por dispositivo en vez de
+            // solo difundir. Sin WS se degrada al camino antiguo.
+            if (services.wsManager && typeof services.wsManager.navigateProfileTo === 'function') {
+              services.wsManager.navigateProfileTo({
+                profileId, originDeviceId: null, targets: { kind: 'all' as const },
+                context: { via: 'window-watcher' },
+              });
+            } else {
+              db.setCurrentProfile(profileId);
+              services.windowWatcher.setCurrentProfile(profileId);
+              services.wsManager?.broadcast?.('profile.navigate', { profileId }, 'profiles');
+            }
           });
         }
       };

@@ -2032,8 +2032,17 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       const profileId = reqStr(args, 'profile_id');
       if (!db.getProfile(profileId)) throw new Error('Perfil no encontrado');
       const prev = db.getSetting('current.profile_id');
-      db.setCurrentProfile(profileId);
-      ctx.ws?.broadcast('profile.navigate', { profileId }, 'profiles');
+      // Cambio global: reasigna por dispositivo (cada pantalla salta a SU
+      // página del perfil nuevo). Sin WS se degrada al camino antiguo.
+      if (ctx.ws && typeof (ctx.ws as any).navigateProfileTo === 'function') {
+        const res = (ctx.ws as any).navigateProfileTo({
+          profileId, originDeviceId: null, targets: { kind: 'all' as const }, context: { via: 'mcp' },
+        });
+        if (!res?.ok) throw new Error(res?.error ?? 'No se pudo cambiar de perfil');
+      } else {
+        db.setCurrentProfile(profileId);
+        ctx.ws?.broadcast('profile.navigate', { profileId }, 'profiles');
+      }
       if (prev) recordInverse(ctx, 'set_current_profile', `activar perfil ${profileId}`, { tool: 'set_current_profile', arguments: { profile_id: prev } });
       return { success: true, profileId };
     }
