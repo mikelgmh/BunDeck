@@ -319,6 +319,54 @@ describe('RemotePane UI remota', () => {
     wrapper.unmount()
   })
 
+  it('sessions → renombrar por fila (input + guardar)', async () => {
+    const iPadUA = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+    const { fn, calls } = makeFetch({
+      uiEnabled: true,
+      sessions: [
+        { tokenPrefix: 'tokpref1', createdAt: Date.now() - 1000, exp: Date.now() + 3600000, ua: iPadUA, ip: '9.9.9.9', revoked: false, deviceName: 'iPad Safari' },
+      ],
+    })
+    vi.stubGlobal('fetch', fn)
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+    await flushPromises()
+
+    // Muestra el nombre guardado y al renombrar pre-rellena con él.
+    expect(wrapper.find('[data-cy="remote-ui-session-device"]').text()).toContain('iPad Safari')
+    await wrapper.find('[data-cy="remote-ui-session-rename"]').trigger('click')
+    await flushPromises()
+    const input = wrapper.find('[data-cy="remote-ui-session-name-input"]')
+    expect((input.element as HTMLInputElement).value).toBe('iPad Safari')
+    await input.setValue('iPad Salón')
+    await wrapper.find('[data-cy="remote-ui-session-name-save"]').trigger('click')
+    await flushPromises()
+    const posted = calls.find((c) => c.url.includes('/remote/ui-sessions/tokpref1/device-name') && c.init?.method === 'POST')
+    expect(posted).toBeTruthy()
+    expect(String(posted!.init?.body)).toContain('iPad Salón')
+    wrapper.unmount()
+  })
+
+  it('sessions → renombrar sugiere modelo + navegador si no hay nombre', async () => {
+    const iPhoneUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+    const { fn } = makeFetch({
+      uiEnabled: true,
+      sessions: [
+        { tokenPrefix: 'tokpref2', createdAt: Date.now() - 1000, exp: Date.now() + 3600000, ua: iPhoneUA, ip: '9.9.9.9', revoked: false },
+      ],
+    })
+    vi.stubGlobal('fetch', fn)
+    const wrapper = mount(RemotePane)
+    await flushPromises()
+    await wrapper.find('[data-cy="remote-ui-toggle"]').setValue(true)
+    await flushPromises()
+    await wrapper.find('[data-cy="remote-ui-session-rename"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-cy="remote-ui-session-name-input"]').element as HTMLInputElement).value).toBe('iPhone Safari')
+    wrapper.unmount()
+  })
+
   it('revocar código con pendientes pide confirmación', async () => {
     const { fn, calls } = makeFetch({
       uiEnabled: true,

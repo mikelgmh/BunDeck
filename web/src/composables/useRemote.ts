@@ -40,6 +40,7 @@ export interface UiSessionItem {
   ua: string
   ip: string
   revoked: boolean
+  deviceName?: string | null
 }
 
 export interface UiCodeData {

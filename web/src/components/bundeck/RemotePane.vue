@@ -217,6 +217,9 @@
             <div class="bd-remote-row__info">
               <b class="bd-remote-row__title bd-mono" :title="s.tokenPrefix">{{ s.tokenPrefix }}…</b>
               <p class="bd-remote-agent" :title="s.ua || t('bd.remoteUiEmptyUa')">{{ s.ua || t('bd.remoteUiEmptyUa') }}</p>
+              <p v-if="s.deviceName" class="bd-remote-meta" data-cy="remote-ui-session-device">
+                <span>{{ t('bd.deviceName') }}: <b>{{ s.deviceName }}</b></span>
+              </p>
               <p class="bd-remote-meta">
                 <span class="bd-mono">{{ s.ip }}</span>
                 <span>{{ t('bd.remoteUiSessionCreated', { date: formatDateTime(s.createdAt) }) }}</span>
@@ -233,18 +236,59 @@
               <span v-if="s.revoked" class="bd-tag-def">{{ t('bd.remoteUiRevoked') }}</span>
             </div>
             <div class="bd-remote-row__actions">
-              <button
-                class="bd-remote-revoke"
-                :disabled="s.revoked || uiLoading"
-                :aria-label="`${t('bd.remoteUiRevoke')} ${s.tokenPrefix}`"
-                :title="t('bd.remoteUiRevoke')"
-                data-cy="remote-ui-session-revoke"
-                :data-prefix="s.tokenPrefix"
-                @click="onRevokeSession(s.tokenPrefix)"
-              >
-                <ShieldOff :size="16" aria-hidden="true" />
-                {{ t('bd.remoteUiRevoke') }}
-              </button>
+              <template v-if="renamingPrefix === s.tokenPrefix">
+                <input
+                  class="bd-inp"
+                  data-cy="remote-ui-session-name-input"
+                  v-model="renamingName"
+                  maxlength="80"
+                  :placeholder="t('bd.deviceName')"
+                  :aria-label="t('bd.deviceName')"
+                  @keydown.enter.prevent="onRenameSession(s.tokenPrefix)"
+                  @keydown.escape.prevent="cancelRenameSession"
+                />
+                <button
+                  class="bd-btn bd-pri"
+                  data-cy="remote-ui-session-name-save"
+                  :disabled="!renamingName.trim()"
+                  @click="onRenameSession(s.tokenPrefix)"
+                >
+                  {{ t('bd.save') }}
+                </button>
+                <button
+                  class="bd-btn"
+                  data-cy="remote-ui-session-name-cancel"
+                  @click="cancelRenameSession"
+                >
+                  {{ t('bd.cancel') }}
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  class="bd-btn"
+                  :disabled="s.revoked || uiLoading"
+                  :aria-label="`${t('bd.remoteUiRename')} ${s.tokenPrefix}`"
+                  :title="t('bd.remoteUiRename')"
+                  data-cy="remote-ui-session-rename"
+                  :data-prefix="s.tokenPrefix"
+                  @click="startRenameSession(s)"
+                >
+                  <Pencil :size="16" aria-hidden="true" />
+                  {{ t('bd.remoteUiRename') }}
+                </button>
+                <button
+                  class="bd-remote-revoke"
+                  :disabled="s.revoked || uiLoading"
+                  :aria-label="`${t('bd.remoteUiRevoke')} ${s.tokenPrefix}`"
+                  :title="t('bd.remoteUiRevoke')"
+                  data-cy="remote-ui-session-revoke"
+                  :data-prefix="s.tokenPrefix"
+                  @click="onRevokeSession(s.tokenPrefix)"
+                >
+                  <ShieldOff :size="16" aria-hidden="true" />
+                  {{ t('bd.remoteUiRevoke') }}
+                </button>
+              </template>
             </div>
           </li>
         </ul>
@@ -593,7 +637,7 @@ import { withKioskParam } from '../../composables/useKiosk'
 import RemoteQrScan from './RemoteQrScan.vue'
 import { useDevices, type LogicalDevice } from '../../composables/useDevices'
 import { getOrCreateDeviceId, deviceDefaultName } from '../../utils/sessionRouting'
-import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check, LoaderCircle } from 'lucide-vue-next'
+import { Link2, Globe, ShieldOff, KeyRound, Trash2, Check, LoaderCircle, Pencil } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
 const { t } = useI18nStore()
@@ -900,6 +944,34 @@ const onRevokeSession = async (prefix: string) => {
   } catch {
     /* noop */
   }
+}
+
+// Renombrar dispositivo desde la fila de sesión (usa el mismo endpoint
+// que el nombrado al aprobar: renombra el dispositivo vinculado y guarda
+// el nombre en la sesión).
+const renamingPrefix = ref<string | null>(null)
+const renamingName = ref('')
+const startRenameSession = (s: { tokenPrefix: string; deviceName?: string | null; ua: string }) => {
+  renamingPrefix.value = s.tokenPrefix
+  try {
+    renamingName.value = s.deviceName ?? deviceDefaultName(s.ua || '') ?? ''
+  } catch {
+    renamingName.value = s.deviceName ?? ''
+  }
+}
+const cancelRenameSession = () => {
+  renamingPrefix.value = null
+  renamingName.value = ''
+}
+const onRenameSession = async (prefix: string) => {
+  const name = renamingName.value.trim()
+  if (!name) return
+  try {
+    await setSessionDeviceName(prefix, name)
+  } catch {
+    /* el error queda en uiError */
+  }
+  cancelRenameSession()
 }
 
 const onCopyUiUrl = async () => {

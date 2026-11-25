@@ -71,6 +71,8 @@ export interface UiSessionView {
   ua: string;
   ip: string;
   revoked: boolean;
+  /** Nombre de dispositivo propuesto al aprobar (null si no se fijó). */
+  deviceName: string | null;
 }
 
 /** Interruptor maestro. Default OFF ("0") si no existe. */
@@ -395,7 +397,9 @@ export function validateUiSession(
   return { ok: true };
 }
 
-/** Lista sesiones SIN el token completo (solo prefijo de 8 chars). */
+/** Lista sesiones vigentes SIN el token completo (solo prefijo de 8 chars).
+ * Las revocadas y caducadas no se listan (desaparecen del panel); al
+ * revocar se borra la fila para que no vuelva a aparecer. */
 export function listUiSessions(db: DatabaseService): UiSessionView[] {
   const out: UiSessionView[] = [];
   let all: Record<string, string> = {};
@@ -404,18 +408,25 @@ export function listUiSessions(db: DatabaseService): UiSessionView[] {
   } catch {
     return out;
   }
+  const now = Date.now();
   for (const [k, v] of Object.entries(all)) {
     if (!k.startsWith(UI_SESSION_PREFIX)) continue;
     const token = k.slice(UI_SESSION_PREFIX.length);
     try {
       const s = JSON.parse(v) as UiSession;
+      if (s.revoked || !(typeof s.exp === 'number') || s.exp <= now) {
+        // Higiene oportunista: las filas muertas no se listan ni se conservan.
+        try { db.deleteSetting(k); } catch { /* noop */ }
+        continue;
+      }
       out.push({
         tokenPrefix: token.slice(0, 8),
         createdAt: s.createdAt,
         exp: s.exp,
         ua: s.ua,
         ip: s.ip,
-        revoked: s.revoked,
+        revoked: false,
+        deviceName: typeof s.deviceName === 'string' && s.deviceName ? s.deviceName : null,
       });
     } catch {
       /* corrupta: ignorar */
@@ -424,7 +435,9 @@ export function listUiSessions(db: DatabaseService): UiSessionView[] {
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/** Revoca por prefijo (8 chars). Devuelve el token completo para unbind. */
+/** Revoca por prefijo (8 chars). Borra la fila para que desaparezca de la
+ * lista (el token ya no valida igualmente). Devuelve el token completo
+ * para unbind. */
 export function revokeUiSessionByPrefix(
   db: DatabaseService,
   prefix: string,
@@ -441,10 +454,9 @@ export function revokeUiSessionByPrefix(
     if (token.slice(0, 8) !== prefix) continue;
     try {
       const s = JSON.parse(v) as UiSession;
-      const next: UiSession = { ...s, revoked: true };
-      db.setSetting(k, JSON.stringify(next));
+      try { db.deleteSetting(k); } catch { /* noop */ }
       audit(db, `[remote-ui] sesión revocada (prefijo ${prefix})`);
-      return { token, session: next };
+      return { token, session: s };
     } catch {
       return null;
     }

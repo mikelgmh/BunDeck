@@ -924,6 +924,7 @@
         "remoteUiSessionCreated": "Conectada: {date}",
         "remoteUiSessionExpires": "Caduca: {date}",
         "remoteUiRevoke": "Revocar",
+        "remoteUiRename": "Renombrar",
         "remoteUiRevoked": "Revocada",
         "remoteUiOff": "UI remota desactivada",
         "remoteUiEmptyUa": "navegador desconocido",

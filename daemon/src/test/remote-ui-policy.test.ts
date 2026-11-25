@@ -366,10 +366,30 @@ describe('remote-ui: sesiones', () => {
     expect(del.body).toMatchObject({ ok: true, revoked: row.tokenPrefix });
     expect(validateUiSession(db, token).ok).toBe(false);
 
+    // Revocada = desaparece de la lista (no queda fila "revocada").
     const s2 = await remoteCall('/api/v1/remote/ui-sessions', 'GET');
-    expect(s2.body.sessions[0].revoked).toBe(true);
+    expect(s2.body.sessions).toEqual([]);
     // prefijo desconocido → 404
     expect((await remoteCall('/api/v1/remote/ui-sessions/deadbeef', 'DELETE')).status).toBe(404);
+  });
+
+  it('la lista incluye deviceName y poda caducadas', async () => {
+    enableUi();
+    const c = await remoteCall('/api/v1/remote/ui-code', 'POST', {});
+    const q = enqueueUiRequest(db, { urlCode: c.body.urlCode, ua: 'u', ip: '5.5.5.5' });
+    const a = await remoteCall(`/api/v1/remote/ui-pending/${q.reqId}/allow`, 'POST', {});
+    const token = String(a.body.sessionToken);
+    const prefix = token.slice(0, 8);
+    await remoteCall(`/api/v1/remote/ui-sessions/${prefix}/device-name`, 'POST', { name: 'iPad Salón' });
+    let s = await remoteCall('/api/v1/remote/ui-sessions', 'GET');
+    expect(s.body.sessions).toHaveLength(1);
+    expect(s.body.sessions[0]).toMatchObject({ tokenPrefix: prefix, deviceName: 'iPad Salón', revoked: false });
+    // Caducada → la lista la poda y desaparece.
+    const raw = JSON.parse(db.getSetting(`remote.ui.session.${token}`)!);
+    raw.exp = Date.now() - 1000;
+    db.setSetting(`remote.ui.session.${token}`, JSON.stringify(raw));
+    s = await remoteCall('/api/v1/remote/ui-sessions', 'GET');
+    expect(s.body.sessions).toEqual([]);
   });
 
   it('sesión expirada (exp manipulado) → inválida + log de uso expirado', async () => {
