@@ -530,12 +530,27 @@ export class WebSocketManager {
    * global actual). Cubre la apertura inicial: el primer `hello` del host
    * re-sincroniza el deck si su sesión quedó vieja. Best-effort: nunca
    * tumba el handshake.
+   *
+   * Anti-bloqueo: throttle por perfil (1.5 s). Cada `hello` (incluidas las
+   * reconexiones por timeout) llamaba aquí → repaint completo de 15 writes
+   * HID síncronos → loop bloqueado → más timeouts → más hellos. El driver
+   * además omite el repaint si la página ya es la pintada.
    */
+  private lastHwRefreshAt = 0;
+  private lastHwRefreshTarget: string | null = null;
+  private static readonly HW_REFRESH_DEDUPE_MS = 1500;
+
   public refreshHardwareToAssignment(profileId?: string | null): void {
     try {
       if (!streamDeckDriver.isConnected()) return;
       const target = profileId ?? this.currentGlobalProfileId();
       if (!target) return;
+      const now = Date.now();
+      if (target === this.lastHwRefreshTarget && now - this.lastHwRefreshAt < WebSocketManager.HW_REFRESH_DEDUPE_MS) {
+        return;
+      }
+      this.lastHwRefreshAt = now;
+      this.lastHwRefreshTarget = target;
       void streamDeckDriver.applyProfileAssignment(target, this.db).catch(() => {});
     } catch { /* noop */ }
   }

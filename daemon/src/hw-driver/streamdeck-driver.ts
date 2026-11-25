@@ -260,10 +260,15 @@ export class StreamDeckDriver {
    * fija la sesión (memoria + tabla) y repinta si hay hardware conectado.
    * Nunca tumba al llamador (boot/conexión son non-fatal): devuelve la
    * pageId aplicada o null si no había nada que mostrar o era incompatible.
+   *
+   * Anti-bloqueo: si la página asignada YA es la pintada en esta conexión,
+   * no se repinta (cada `hello` del WS llamaba aquí → N repaints completos
+   * de 15 botones que bloqueaban /health). Salvo `force: true`.
    */
   async applyProfileAssignment(
     profileId?: string | null,
     dbArg?: DatabaseService,
+    opts?: { force?: boolean },
   ): Promise<string | null> {
     try {
       const db = dbArg ?? new DatabaseService();
@@ -271,6 +276,10 @@ export class StreamDeckDriver {
       if (!current || !db.getProfile(current)) return null;
       const pageId = this.resolveHwAssignedPageId(db, current);
       if (!pageId) return null;
+      if (!opts?.force && this.streamDeck && pageId === this.lastPaintedPageId) {
+        this.skippedSamePage += 1;
+        return pageId;
+      }
       await this.setSessionView({ profileId: current, pageId });
       return pageId;
     } catch (e) {
@@ -391,6 +400,12 @@ export class StreamDeckDriver {
       console.log('🔌 Opening StreamDeck connection...');
       this.streamDeck = await mod.openStreamDeck(targetDevice);
       this.connectedDevice = targetDevice;
+      // Conexión nueva: la pantalla física está sin pintar aunque la
+      // sesión recuerde una página (el skip-if-same no aplica aquí).
+      this.lastPaintedPageId = null;
+      this.hidFailCount = 0;
+      this.hidCooldownUntil = 0;
+      this.queuedPageId = null;
 
       console.log('✅ StreamDeck connected successfully');
       
@@ -432,6 +447,7 @@ export class StreamDeckDriver {
 
   async disconnect(): Promise<void> {
     this.stopIdleLoop();
+    this.lastPaintedPageId = null;
     for (const [, iv] of this.dynamicIntervals.entries()) {
       clearInterval(iv);
     }
@@ -816,7 +832,19 @@ export class StreamDeckDriver {
     try {
       // Try using fillKeyColor first (simpler method)
       console.log(`🔄 Trying fillKeyColor for button ${keyIndex}...`);
-      await this.streamDeck.fillKeyColor(keyIndex, r, g, b);
+      const t0 = Bun.nanoseconds();
+      try {
+        await this.streamDeck.fillKeyColor(keyIndex, r, g, b);
+      } catch (e) {
+        this.noteHidFailure(e);
+        throw e;
+      }
+      const ms = (Bun.nanoseconds() - t0) / 1e6;
+      if (ms > StreamDeckDriver.HID_SLOW_WARN_MS) {
+        this.slowHidWrites += 1;
+        console.warn(`⚠️ HID fillKeyColor lento: tecla ${keyIndex} ${ms.toFixed(0)}ms (>${StreamDeckDriver.HID_SLOW_WARN_MS}ms, bloquea /health)`);
+      }
+      this.noteHidSuccess();
       console.log(`✅ fillKeyColor successful for button ${keyIndex}`);
     } catch (error) {
       console.error(`❌ fillKeyColor failed for button ${keyIndex}:`, error);
@@ -828,7 +856,19 @@ export class StreamDeckDriver {
         console.log(`📸 Generated BMP buffer, size: ${bmpBuffer.length} bytes`);
         
         console.log(`🔄 Calling fillKeyBuffer for button ${keyIndex}...`);
-        await this.streamDeck.fillKeyBuffer(keyIndex, bmpBuffer);
+        const t1 = Bun.nanoseconds();
+        try {
+          await this.streamDeck.fillKeyBuffer(keyIndex, bmpBuffer);
+        } catch (e) {
+          this.noteHidFailure(e);
+          throw e;
+        }
+        const ms1 = (Bun.nanoseconds() - t1) / 1e6;
+        if (ms1 > StreamDeckDriver.HID_SLOW_WARN_MS) {
+          this.slowHidWrites += 1;
+          console.warn(`⚠️ HID fillKeyBuffer lento: tecla ${keyIndex} ${ms1.toFixed(0)}ms (>${StreamDeckDriver.HID_SLOW_WARN_MS}ms, bloquea /health)`);
+        }
+        this.noteHidSuccess();
         console.log(`✅ fillKeyBuffer with BMP successful for button ${keyIndex}`);
       } catch (fallbackError) {
         console.error(`❌ fillKeyBuffer with BMP also failed for button ${keyIndex}:`, fallbackError);
@@ -839,7 +879,21 @@ export class StreamDeckDriver {
   async setButtonImage(keyIndex: number, imageBuffer: Buffer): Promise<void> {
     if (this.streamDeck) {
       // RGB top-down nativo del tamaño de la tecla (generateButtonImage).
-      await this.streamDeck.fillKeyBuffer(keyIndex, imageBuffer, { format: 'rgb' });
+      // OJO: node-hid escribe de forma SÍNCRONA (bloquea el event loop de
+      // Bun): se mide y se avisa si es lento; el fallo alimenta el backoff.
+      const t0 = Bun.nanoseconds();
+      try {
+        await this.streamDeck.fillKeyBuffer(keyIndex, imageBuffer, { format: 'rgb' });
+      } catch (e) {
+        this.noteHidFailure(e);
+        throw e;
+      }
+      const ms = (Bun.nanoseconds() - t0) / 1e6;
+      if (ms > StreamDeckDriver.HID_SLOW_WARN_MS) {
+        this.slowHidWrites += 1;
+        console.warn(`⚠️ HID fillKeyBuffer lento: tecla ${keyIndex} ${ms.toFixed(0)}ms (>${StreamDeckDriver.HID_SLOW_WARN_MS}ms, bloquea /health)`);
+      }
+      this.noteHidSuccess();
     }
   }
 
@@ -1388,6 +1442,120 @@ export class StreamDeckDriver {
   private updateInFlight = false;
   private queuedPageId: string | null = null;
 
+  // ---- Anti-bloqueo del event loop (repaints HID) ----
+  //
+  // Diagnóstico medido: `GET /health` (handler trivial) tardaba 0.5–2.7 s a
+  // rachas porque el loop estaba ocupado en escrituras HID síncronas
+  // (node-hid bloquea el hilo de Bun) multiplicadas por ráfagas de repintados
+  // (cada `hello` del WS repintaba la página completa). Las escrituras en sí
+  // no se pueden hacer async (la lib es síncrona), así que el fix es:
+  //  1. medir cada write y avisar si es lento (>50 ms),
+  //  2. no reintentar en caliente si el device falla (backoff + cooldown),
+  //  3. no repintar lo ya pintado (skip-if-same en la vía hello/asignación),
+  //  4. abortar el repintado tras 2 fallos HID seguidos (no 15 timeouts).
+  private static readonly HID_SLOW_WARN_MS = 50;
+  private static readonly REPAINT_SLOW_WARN_MS = 500;
+  private static readonly HID_COOLDOWN_BASE_MS = 2000;
+  private static readonly HID_COOLDOWN_MAX_MS = 30000;
+  private hidFailCount = 0;
+  private hidCooldownUntil = 0;
+  private cooldownRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Última página pintada OK en ESTA conexión (null = aún sin pintar). */
+  private lastPaintedPageId: string | null = null;
+  private repaintStarts: number[] = [];
+  private totalRepaints = 0;
+  private skippedSamePage = 0;
+  private skippedCooldown = 0;
+  private slowHidWrites = 0;
+
+  /** Contadores para diagnóstico (log de comprobación, ver resumen). */
+  getRepaintStats(): {
+    totalRepaints: number;
+    repaintsLastMinute: number;
+    lastPaintedPageId: string | null;
+    hidFailCount: number;
+    coolingDown: boolean;
+    skippedSamePage: number;
+    skippedCooldown: number;
+    slowHidWrites: number;
+  } {
+    const now = Date.now();
+    this.repaintStarts = this.repaintStarts.filter((t) => now - t < 60_000);
+    return {
+      totalRepaints: this.totalRepaints,
+      repaintsLastMinute: this.repaintStarts.length,
+      lastPaintedPageId: this.lastPaintedPageId,
+      hidFailCount: this.hidFailCount,
+      coolingDown: now < this.hidCooldownUntil,
+      skippedSamePage: this.skippedSamePage,
+      skippedCooldown: this.skippedCooldown,
+      slowHidWrites: this.slowHidWrites,
+    };
+  }
+
+  /** Solo tests: resetea pintado/cooldown/contadores sin tocar la sesión. */
+  __resetHwPaintStateForTests(): void {
+    if (this.cooldownRetryTimer) {
+      clearTimeout(this.cooldownRetryTimer);
+      this.cooldownRetryTimer = null;
+    }
+    this.hidFailCount = 0;
+    this.hidCooldownUntil = 0;
+    this.lastPaintedPageId = null;
+    this.repaintStarts = [];
+    this.totalRepaints = 0;
+    this.skippedSamePage = 0;
+    this.skippedCooldown = 0;
+    this.slowHidWrites = 0;
+    this.updateInFlight = false;
+    this.queuedPageId = null;
+    if (this.pendingSchedule) {
+      clearTimeout(this.pendingSchedule.timer);
+      this.pendingSchedule = null;
+    }
+  }
+
+  /** ¿El error es un device HID muerto (`Cannot write to hid device`, …)? */
+  private isHidDeadError(e: unknown): boolean {
+    const m = e instanceof Error ? e.message : String(e);
+    return /cannot write to hid device|hid device|hid\b.*(write|fail|error|disconnect)|device.*(disconnected|not connected|no such device|not open)/i.test(m);
+  }
+
+  private noteHidFailure(e: unknown): void {
+    this.hidFailCount += 1;
+    const backoff = Math.min(
+      StreamDeckDriver.HID_COOLDOWN_MAX_MS,
+      StreamDeckDriver.HID_COOLDOWN_BASE_MS * 2 ** Math.min(4, this.hidFailCount - 1),
+    );
+    this.hidCooldownUntil = Date.now() + backoff;
+    const reason = e instanceof Error ? e.message : String(e);
+    console.warn(`⚠️ HID write falló (${this.hidFailCount}x, cooldown ${backoff}ms): ${reason}`);
+    this.scheduleCooldownRetry();
+  }
+
+  private noteHidSuccess(): void {
+    if (this.hidFailCount !== 0) this.hidFailCount = 0;
+  }
+
+  /** Reintento único al salir del cooldown, con la última página encolada. */
+  private scheduleCooldownRetry(): void {
+    if (this.cooldownRetryTimer) return;
+    const wait = Math.max(0, this.hidCooldownUntil - Date.now());
+    this.cooldownRetryTimer = setTimeout(() => {
+      this.cooldownRetryTimer = null;
+      const q = this.queuedPageId;
+      this.queuedPageId = null;
+      if (q && Date.now() >= this.hidCooldownUntil && this.streamDeck) {
+        this.updateFromPage(q, { force: true }).catch((e) =>
+          console.error('❌ Queued StreamDeck update failed:', e),
+        );
+      }
+    }, wait);
+    if (typeof (this.cooldownRetryTimer as unknown as { unref?: () => void }).unref === 'function') {
+      (this.cooldownRetryTimer as unknown as { unref: () => void }).unref();
+    }
+  }
+
   scheduleUpdateFromPage(pageId: string, delayMs = 150): void {
     if (!pageId) return;
     if (this.pendingSchedule) clearTimeout(this.pendingSchedule.timer);
@@ -1576,6 +1744,11 @@ export class StreamDeckDriver {
     console.log(`🎛️ Updating StreamDeck buttons with data for ${buttons.length} buttons`);
     const keyCount = this.getKeyCount();
     const size = this.getIconSize();
+    // Contador de repaints (diagnóstico anti-bloqueo: ver getRepaintStats).
+    const repaintT0 = Bun.nanoseconds();
+    this.totalRepaints += 1;
+    this.repaintStarts.push(Date.now());
+    if (this.repaintStarts.length > 120) this.repaintStarts.splice(0, this.repaintStarts.length - 120);
 
     try {
       // Un solo fetch de métricas por repintado completo: antes se hacía un
@@ -1599,59 +1772,92 @@ export class StreamDeckDriver {
         }
       } catch { /* sin nombres: env igualmente válido */ }
       const env = getDaemonDisplayEnv(profileName, pageName);
+      // Si el device está muerto, cada write HID falla lento: abortar tras
+      // 2 fallos seguidos en vez de quemar los 15-32 timeouts en serie
+      // (cada uno bloquea el loop y retrasa /health).
+      let consecHidFail = 0;
+      let painted = 0;
       for (let i = 0; i < Math.min(buttons.length, keyCount); i++) {
         // Ceder el event loop por botón: el render (canvas) + escritura USB
         // son pesados y si no la API/WS se quedan colgados durante el repintado.
         await new Promise<void>((r) => setImmediate(r));
-        const button = buttons[i];
-
-        if (button && button.data) {
-          // Check if button has content
-          const hasContent = !!(
-            button.data.label?.trim() ||
-            button.data.textTop?.trim() ||
-            button.data.textBottom?.trim() ||
-            button.data.emoji?.trim() ||
-            button.data.icon ||
-            button.data.iconImage ||
-            button.data.backgroundImage ||
-            (button.data.actions && button.data.actions.length > 0)
-          );
-
-          if (hasContent) {
-            // Si es dinámico (pc-vitals), usar las métricas ya obtenidas
-            let dataToRender = button.data;
-            if (button.data.actions?.some((a: any) => a.type?.includes('pc-vitals'))) {
-              try {
-                const dyn = this.dynamicValueFromMetrics(button, metrics);
-                if (dyn) dataToRender = { ...button.data, dynamicValue: dyn };
-              } catch {}
+        try {
+          painted += await this.paintButtonAt(buttons[i], i, size, env, metrics);
+          consecHidFail = 0;
+        } catch (e) {
+          if (this.isHidDeadError(e)) {
+            consecHidFail += 1;
+            if (consecHidFail >= 2) {
+              console.warn(`⚠️ HW repaint abortado en tecla ${i}: device HID no responde (backoff activo, /health se libera)`);
+              break;
             }
-            const imageBuffer = await this.generateButtonImage(dataToRender, size, env);
-            await this.setButtonImage(i, imageBuffer);
-            const effLog = (() => { try { return resolveKeyDisplay(dataToRender, env); } catch { return null; } })();
-            console.log(`📝 Set button ${i} to "${effLog?.dynamicValue || effLog?.label || effLog?.emoji || effLog?.icon || 'BTN'}"`);
-          } else {
-            // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
-            const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
-            await this.setButtonImage(i, imageBuffer);
-            console.log(`⬛ Set button ${i} to default (empty)`);
+            continue;
           }
-        } else {
-          // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
-          const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
-          await this.setButtonImage(i, imageBuffer);
-          console.log(`⬛ Set button ${i} to default (empty)`);
+          throw e;
         }
       }
+      void painted;
 
       console.log('✅ StreamDeck buttons updated with data successfully');
     } catch (error) {
       console.error('❌ Error updating StreamDeck buttons with data:', error);
+    } finally {
+      const ms = (Bun.nanoseconds() - repaintT0) / 1e6;
+      if (ms > StreamDeckDriver.REPAINT_SLOW_WARN_MS) {
+        const perMin = this.getRepaintStats().repaintsLastMinute;
+        console.warn(`⚠️ HW repaint lento: ${ms.toFixed(0)}ms (>${StreamDeckDriver.REPAINT_SLOW_WARN_MS}ms, ${perMin}/min, bloquea /health)`);
+      }
     }
   }
 
-  async updateFromPage(pageId: string): Promise<void> {
+  /**
+   * Pinta UNA tecla (render + write HID). Extraído del loop para poder
+   * cortar por tecla ante fallos HID sin abortar todo el try/catch.
+   * Devuelve 1 si pintó, 0 si la tecla estaba vacía… (siempre pinta fondo).
+   */
+  private async paintButtonAt(button: any, i: number, size: number, env: any, metrics: any): Promise<number> {
+    if (button && button.data) {
+      // Check if button has content
+      const hasContent = !!(
+        button.data.label?.trim() ||
+        button.data.textTop?.trim() ||
+        button.data.textBottom?.trim() ||
+        button.data.emoji?.trim() ||
+        button.data.icon ||
+        button.data.iconImage ||
+        button.data.backgroundImage ||
+        (button.data.actions && button.data.actions.length > 0)
+      );
+
+      if (hasContent) {
+        // Si es dinámico (pc-vitals), usar las métricas ya obtenidas
+        let dataToRender = button.data;
+        if (button.data.actions?.some((a: any) => a.type?.includes('pc-vitals'))) {
+          try {
+            const dyn = this.dynamicValueFromMetrics(button, metrics);
+            if (dyn) dataToRender = { ...button.data, dynamicValue: dyn };
+          } catch {}
+        }
+        const imageBuffer = await this.generateButtonImage(dataToRender, size, env);
+        await this.setButtonImage(i, imageBuffer);
+        const effLog = (() => { try { return resolveKeyDisplay(dataToRender, env); } catch { return null; } })();
+        console.log(`📝 Set button ${i} to "${effLog?.dynamicValue || effLog?.label || effLog?.emoji || effLog?.icon || 'BTN'}"`);
+      } else {
+        // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
+        const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+        await this.setButtonImage(i, imageBuffer);
+        console.log(`⬛ Set button ${i} to default (empty)`);
+      }
+    } else {
+      // Tecla vacía: fondo por defecto como la web (ya no rojo de test).
+      const imageBuffer = await this.generateButtonImage({ icon: '' }, size, env);
+      await this.setButtonImage(i, imageBuffer);
+      console.log(`⬛ Set button ${i} to default (empty)`);
+    }
+    return 1;
+  }
+
+  async updateFromPage(pageId: string, opts?: { force?: boolean }): Promise<void> {
     if (!this.streamDeck) {
       console.log('❌ StreamDeck not connected, skipping page update');
       return;
@@ -1681,9 +1887,20 @@ export class StreamDeckDriver {
       return;
     }
 
+    // Cooldown HID: si el device no responde, no quemar otro repintado
+    // completo en caliente (cada write bloquea el loop y retrasa /health).
+    // La página queda encolada y el retry único la repinta al salir.
+    if (!opts?.force && Date.now() < this.hidCooldownUntil) {
+      this.skippedCooldown += 1;
+      this.queuedPageId = pageId;
+      this.scheduleCooldownRetry();
+      return;
+    }
+
     // Coalescar repintados concurrentes: si ya hay uno en vuelo (p.ej. un
     // vaciado seguido de un reorder), encolar el último pageId y volver.
     // Evita N repintados completos solapados que eternizaban el HW.
+    // (Si ya hay uno encolado para la MISMA página no se duplica: colapsa.)
     if (this.updateInFlight) {
       this.queuedPageId = pageId;
       console.log(`⏳ StreamDeck update in flight, queued page: ${pageId}`);
@@ -1734,6 +1951,12 @@ export class StreamDeckDriver {
 
       console.log('🎛️ Updating buttons with full data');
       await this.updateButtonsWithData(buttonsByPosition);
+      // Solo cuenta como "pintada" si ningún write rearmó el cooldown
+      // durante el repintado: si el device falló a medias, el próximo
+      // trigger (hello/edición) debe reintentar, no darse por pintado.
+      if (Date.now() >= this.hidCooldownUntil) {
+        this.lastPaintedPageId = pageId;
+      }
       // Polling en vivo: pc-vitals + looks/tiempo (1 s, solo cambios).
       try {
         const pg = db.getPage(pageId);
@@ -1748,13 +1971,23 @@ export class StreamDeckDriver {
     } finally {
       this.updateInFlight = false;
       // Si durante el repintado llegó otro cambio, repintar una vez más con
-      // la página más reciente en vez de haberlo solapado.
-      const queued = this.queuedPageId;
+      // la página más reciente en vez de haberlo solapado. Si el repintado
+      // murió por HID muerto y no hay nada encolado, re-encolar la propia
+      // página para el retry único del cooldown (no en caliente).
+      let queued = this.queuedPageId;
       this.queuedPageId = null;
+      if (!queued && Date.now() < this.hidCooldownUntil) {
+        queued = pageId;
+      }
       if (queued) {
-        this.updateFromPage(queued).catch((e) =>
-          console.error('❌ Queued StreamDeck update failed:', e)
-        );
+        if (Date.now() < this.hidCooldownUntil) {
+          this.queuedPageId = queued;
+          this.scheduleCooldownRetry();
+        } else {
+          this.updateFromPage(queued).catch((e) =>
+            console.error('❌ Queued StreamDeck update failed:', e)
+          );
+        }
       }
     }
   }
