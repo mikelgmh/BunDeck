@@ -1,6 +1,6 @@
 {
   "name": "bundeck",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "BunDeck - Open Source StreamDeck Alternative",
   "type": "module",
   "scripts": {

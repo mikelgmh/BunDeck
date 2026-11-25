@@ -1,3 +1,19 @@
+# [1.16.0](https://github.com/mikelgmh/BunDeck/compare/v1.15.0...v1.16.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **discord:** callback y modal distinguen token de RPC ([254b3b2](https://github.com/mikelgmh/BunDeck/commit/254b3b2343aa40425c2d7d4f7012d5266fb44dde))
+* **discord:** diagnostico auto-entrega y header Private-Network ([461c84d](https://github.com/mikelgmh/BunDeck/commit/461c84dad9074eff2ee8a393f56b7ead678b62a3))
+* **discord:** redirect https por defecto y estado real en ajustes ([90128a2](https://github.com/mikelgmh/BunDeck/commit/90128a26267e06ab7c6d59733359c0c2c7f212fd))
+* **discord:** waitReady no revienta si disconnect corre antes del timeout ([fb217d0](https://github.com/mikelgmh/BunDeck/commit/fb217d0e77f54d8bad23ba9bcac94f71a8b9036e))
+
+
+### Features
+
+* **discord:** RPC por pipe IPC como transporte primario ([da2a6dc](https://github.com/mikelgmh/BunDeck/commit/da2a6dc244a34ad2cdcd38574c348ba26a1f4256))
+* **discord:** UX simple con spinner y desconectar ([9dfcdc2](https://github.com/mikelgmh/BunDeck/commit/9dfcdc2d1dd966f96870cf9f0480e82a9bb4e775))
+
 # [1.15.0](https://github.com/mikelgmh/BunDeck/compare/v1.14.0...v1.15.0) (2026-11-25)
 
 
