@@ -1,3 +1,30 @@
+# [1.17.0](https://github.com/mikelgmh/BunDeck/compare/v1.16.0...v1.17.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **daemon:** ActionRunner usa el VariableStore compartido (sin cachés divergentes) ([7e88b8e](https://github.com/mikelgmh/BunDeck/commit/7e88b8ea27047daa9e84e690cd9f458a4d005201))
+* **db:** WAL + busy_timeout + synchronous NORMAL ([ebc4c52](https://github.com/mikelgmh/BunDeck/commit/ebc4c5252b080b9c2978befded74fe8714a60827))
+* **discord:** AUTHENTICATE idempotente en conexion reutilizada ([d0d5760](https://github.com/mikelgmh/BunDeck/commit/d0d5760cb9ba19e7a5d5685d95abcfe43ca457f8))
+* **discord:** mute determinista al primer intento + errores visibles ([ef1ab6b](https://github.com/mikelgmh/BunDeck/commit/ef1ab6bf177d75299231ce1e0d1f275d9400218e))
+* **relay:** el watcher de web-dist vigilaba una ruta inexistente y la UI remota quedaba obsoleta ([f90257b](https://github.com/mikelgmh/BunDeck/commit/f90257bf5ff5c1784fa74d90923b419c8c51ef36))
+* **tests:** aislar data-dir en plugin-loader/hw-coalesce/plugin-install con claimDataDir ([69d4ad1](https://github.com/mikelgmh/BunDeck/commit/69d4ad1c7c2926f1efeef1e4597bf38446ae79e6))
+
+
+### Features
+
+* **aspecto:** variables expuestas por acciones + condiciones simples ([0071bff](https://github.com/mikelgmh/BunDeck/commit/0071bff5343a8cf28785e9ff05417b7955e9ae97))
+* **dev:** watcher de web/src reconstruye web-dist al guardar ([42e8eea](https://github.com/mikelgmh/BunDeck/commit/42e8eea74af35af9a3faa3e2b86f28e68ba72c03))
+* variables en vivo con tipo, presets de aspecto y color libre por condición ([ba9b48b](https://github.com/mikelgmh/BunDeck/commit/ba9b48bf9f6d196bf56b8fdb3016ec7851c6d20d)), closes [#rrggbb](https://github.com/mikelgmh/BunDeck/issues/rrggbb)
+
+
+### Performance Improvements
+
+* **hw:** coalescing+backoff en repaints HID ([5de2454](https://github.com/mikelgmh/BunDeck/commit/5de2454c19aa05bb517e4f8a22a57da97a7aee96))
+* **hw:** repaint diferencial por boton + cache de imagenes ([74730aa](https://github.com/mikelgmh/BunDeck/commit/74730aa71bb94ff2828b2f66acedd5c052bd840a))
+* **hw:** status sin spawn si ya conectado + TTL 30s ([97ac459](https://github.com/mikelgmh/BunDeck/commit/97ac4596ca9b18a29c21fb5458ce757c97582361))
+* **tunel:** sin trompicones por relay ([7df5e9f](https://github.com/mikelgmh/BunDeck/commit/7df5e9f76623bc790847c5ca6b3bf2e54cae5086))
+
 # [1.16.0](https://github.com/mikelgmh/BunDeck/compare/v1.15.0...v1.16.0) (2026-11-25)
 
 
