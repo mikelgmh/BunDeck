@@ -240,3 +240,142 @@ describe('fast-path LAN: relay ui-publish con lan (WS)', () => {
     expect(relay.tunnel.getLanHints(CODE)).toBeNull();
   });
 });
+
+describe('fast-path LAN: aviso visible wait-lan-check + contrato libredeck:lanProbe', () => {
+  // Extrae el JSON de hints y el JS del probe del HTML renderizado.
+  function extractProbe(html: string): { lanJson: string; script: string } {
+    const jsonM = html.match(/<script id="lan-hints" type="application\/json">([\s\S]*?)<\/script>/);
+    expect(jsonM).not.toBeNull();
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
+    // El probe es el bloque que menciona lan-hints (el poll no lo hace).
+    const probe = scripts.find((s) => s.includes('lan-hints'));
+    expect(probe).toBeDefined();
+    return { lanJson: jsonM![1] ?? '', script: probe ?? '' };
+  }
+
+  function makeSandbox(lanJson: string, fetchMock: (url: string, opt?: unknown) => Promise<unknown>) {
+    const store = new Map<string, string>();
+    const sessionStorage = {
+      getItem: (k: string) => (store.has(k) ? (store.get(k) as string) : null),
+      setItem: (k: string, v: string) => {
+        store.set(k, String(v));
+      },
+    };
+    const els: Record<string, { textContent: string; hidden: boolean }> = {
+      'lan-hints': { textContent: lanJson, hidden: false },
+      'wait-lan': { textContent: '', hidden: true },
+      'wait-lan-check': { textContent: '', hidden: false },
+    };
+    const document = {
+      getElementById: (id: string) => els[id] ?? null,
+    };
+    const location = {
+      pathname: '/ui/abc123',
+      replaced: null as string | null,
+      replace(url: string) {
+        this.replaced = url;
+      },
+    };
+    return { store, sessionStorage, els, document, location, fetchMock };
+  }
+
+  async function runProbe(
+    sb: ReturnType<typeof makeSandbox>,
+    script: string,
+  ): Promise<void> {
+    // Ejecuta el IIFE del probe con los globales simulados (el producto no
+    // usa eval ni handlers inline; aquí solo el test interpreta el string).
+    const fn = new Function('document', 'location', 'sessionStorage', 'fetch', script);
+    // `fetch` del sandbox devuelve la promesa simulada; AbortController y
+    // temporizadores son los reales de bun (el probe los limpia al resolver).
+    (fn as (...args: unknown[]) => void)(sb.document, sb.location, sb.sessionStorage, sb.fetchMock);
+    // Deja asentar las promesas del fetch simulado + json().
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+  }
+
+  test('con lan: pinta wait-lan-check visible con el texto ES/EN', () => {
+    const es = renderWaitingPage('abc123', 'es', LAN);
+    expect(es).toContain('id="wait-lan-check"');
+    expect(es).toContain('Comprobando si estás en la misma red local…');
+    // Visible mientras el probe corre: sin hidden en ese <p>.
+    expect(es).not.toContain('id="wait-lan-check" hidden');
+    // El wait-lan de éxito sigue oculto hasta el redirect.
+    expect(es).toContain('id="wait-lan" hidden');
+    const en = renderWaitingPage('abc123', 'en', LAN);
+    expect(en).toContain('id="wait-lan-check"');
+    expect(en).toContain('Checking whether you are on the same local network…');
+  });
+
+  test('con lan: el script declara el contrato libredeck:lanProbe en ambos caminos', () => {
+    const html = renderWaitingPage('abc123', 'es', LAN);
+    const { script } = extractProbe(html);
+    expect(script).toContain('libredeck:lanProbe');
+    expect(script).toContain('wait-lan-check');
+    // Éxito: guarda ok:true + ip antes de redirigir.
+    expect(script).toContain('lanRedirect:');
+    expect(script).toContain('location.replace');
+    // Fracaso total: oculta el aviso sin tocar nada más.
+    expect(script).toContain('hidden=true');
+    // Sin eval ni handlers inline (CSP del resto del fichero).
+    expect(script).not.toContain('eval(');
+    expect(script).not.toContain('onload=');
+    expect(script).not.toContain('onclick=');
+  });
+
+  test('con lan + fetch ok (fp coincide): redirige y guarda probe ok:true', async () => {
+    const html = renderWaitingPage('abc123', 'es', LAN);
+    const { lanJson, script } = extractProbe(html);
+    const sb = makeSandbox(lanJson, async () => ({
+      ok: true,
+      json: async () => ({ fp: 'fp-test-123', frontendPort: 3002 }),
+    }));
+    await runProbe(sb, script);
+    // Redirección única a la LAN con invite + fallback al relay.
+    expect(sb.location.replaced).toContain('http://192.168.1.10:3002/?invite=');
+    expect(sb.location.replaced).toContain('relayFallback=abc123');
+    // Aviso de éxito visible (comportamiento actual intacto).
+    expect(sb.els['wait-lan']!.hidden).toBe(false);
+    // Contrato con el frontend: probe ok:true con ip y tiempos.
+    const raw = sb.store.get('libredeck:lanProbe');
+    expect(raw).toBeDefined();
+    const probe = JSON.parse(raw as string);
+    expect(probe).toMatchObject({ urlCode: 'abc123', tried: true, ok: true, ip: '192.168.1.10' });
+    expect(Array.isArray(probe.ips)).toBe(true);
+    expect(typeof probe.ms).toBe('number');
+    expect(typeof probe.ts).toBe('number');
+  });
+
+  test('con lan + fetch ko (todo falla): oculta wait-lan-check y guarda probe ok:false', async () => {
+    const html = renderWaitingPage('abc123', 'es', LAN);
+    const { lanJson, script } = extractProbe(html);
+    const sb = makeSandbox(lanJson, async () => ({ ok: false }));
+    await runProbe(sb, script);
+    // Sin redirect: la tarjeta pending sigue igual…
+    expect(sb.location.replaced).toBeNull();
+    expect(sb.els['wait-lan']!.hidden).toBe(true);
+    // …pero el aviso de comprobación desaparece.
+    expect(sb.els['wait-lan-check']!.hidden).toBe(true);
+    // Contrato con el frontend: probe ok:false con tiempos.
+    const raw = sb.store.get('libredeck:lanProbe');
+    expect(raw).toBeDefined();
+    const probe = JSON.parse(raw as string);
+    expect(probe).toMatchObject({ urlCode: 'abc123', tried: true, ok: false });
+    expect(Array.isArray(probe.ips)).toBe(true);
+    expect(typeof probe.ms).toBe('number');
+    expect(typeof probe.ts).toBe('number');
+    expect('ip' in probe).toBe(false);
+  });
+
+  test('sin lan: ni wait-lan-check ni lan-hints ni script de probe', () => {
+    for (const lang of ['es', 'en'] as const) {
+      const html = renderWaitingPage('abc123', lang);
+      expect(html).not.toContain('wait-lan-check');
+      expect(html).not.toContain('lan-hints');
+      expect(html).not.toContain('libredeck:lanProbe');
+      expect(html).not.toContain('wait-lan');
+      expect(html).toContain('setInterval');
+    }
+    expect(renderWaitingPage('abc123', 'es', null)).not.toContain('wait-lan-check');
+    expect(renderWaitingPage('abc123', 'es', undefined)).not.toContain('wait-lan-check');
+  });
+});

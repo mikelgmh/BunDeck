@@ -381,17 +381,19 @@
           <ChevronLeft v-else :size="16" stroke-width="1.75" aria-hidden="true" />
         </button>
         <div class="kiosk-collapsible">
-        <div
+        <button
+          type="button"
           class="kconn"
           :data-cy="isTunnelRoute ? 'bd-kiosk-rtc' : 'bd-kiosk-conn'"
           :data-transport="kioskTransport"
           :title="kioskConnTitle"
-          role="status"
           :aria-label="kioskConnTitle"
+          aria-haspopup="dialog"
+          @click="openKioskConn"
         >
           <span class="kled" :class="kioskTransport" aria-hidden="true"></span>
           <span>{{ kioskConnLabel }}</span>
-        </div>
+        </button>
         <span class="kiosk-sep" aria-hidden="true"></span>
         <div
           id="kmarq"
@@ -437,6 +439,13 @@
         </button>
         </div>
       </div>
+      <KioskConnDialog
+        v-if="kioskConnOpen"
+        :entries="kioskConnEntries"
+        :transport-label="kioskConnLabel"
+        :ws-ok="isConnected"
+        @dismiss="kioskConnOpen = false"
+      />
     </template>
 
     <SettingsDialog
@@ -642,6 +651,7 @@ import {
 import { useKioskWakeLock } from '../../composables/useKioskWakeLock'
 import { getTunnelToken } from '../../composables/useTunnel'
 import { kioskTransportLabelKey } from '../../utils/kioskTransport'
+import { readLanProbe, type ConnEntry } from '../../utils/kioskConnLog'
 import { getRtcSingleton } from '../../composables/useRemoteRtc'
 import {
   getActionsForKind,
@@ -658,6 +668,7 @@ import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
 import TunnelTransportBanner from './TunnelTransportBanner.vue'
 import TunnelConnectDialog from './TunnelConnectDialog.vue'
+import KioskConnDialog from './KioskConnDialog.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
@@ -1220,6 +1231,20 @@ const kioskConnTitle = computed(() => {
     default: return t('bd.tunnelTransportConnecting')
   }
 })
+// Historial de conexión del kiosco: el pilotito es un botón que abre un
+// diálogo de solo lectura (display, sin navegación ni copia). La LAN va
+// primero (ocurrió antes que el P2P); en LAN sin redirect, vacío honesto.
+const kioskConnOpen = ref(false)
+const lanEntries = ref<ConnEntry[]>([])
+const kioskConnEntries = computed<ConnEntry[]>(() => [...lanEntries.value, ...rtc.log.value])
+const openKioskConn = () => {
+  try {
+    lanEntries.value = readLanProbe()
+  } catch {
+    lanEntries.value = []
+  }
+  kioskConnOpen.value = true
+}
 // Marquee de la barra: página actual · cuadrícula · dispositivo visible
 // (vista previa o el propio; se omite si no hay ninguno).
 const kioskDeviceName = computed(() => {

@@ -41,11 +41,22 @@ describe('TunnelConnectDialog', () => {
     expect(items).toHaveLength(3)
     expect(items[0].find('span').text()).toBe('bd.tunnelConnectStepDiscover')
     expect(items[0].classes()).toContain('done')
-    expect(items[1].find('span').text()).toBe('bd.tunnelTransportP2p')
+    expect(items[1].find('span').text()).toContain('bd.tunnelTransportP2p')
     expect(items[1].classes()).toContain('act')
     expect(items[2].find('span').text()).toBe('bd.tunnelConnectStepRelay')
     expect(items[2].classes()).toContain('pend')
     wrapper.unmount()
+  })
+
+  it('signaling muestra la nota de red local; idle no', () => {
+    const sig = mount(TunnelConnectDialog, { props: { status: 'signaling' } })
+    // t está mockeado como identidad: se assertan CLAVES, no literales.
+    expect(sig.find('.kstep.act .knote').text()).toContain('bd.tunnelConnectLanNote')
+    expect(sig.html()).toContain('bd.tunnelConnectLanNote')
+    sig.unmount()
+    const idle = mount(TunnelConnectDialog, { props: { status: 'idle' } })
+    expect(idle.html()).not.toContain('bd.tunnelConnectLanNote')
+    idle.unmount()
   })
 })
 

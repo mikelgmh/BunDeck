@@ -71,7 +71,7 @@ const steps = computed<KStep[]>(() => {
   if (props.status === 'signaling')
     return [
       { text: discover, state: 'done' },
-      { text: p2p, state: 'act' },
+      { text: p2p, state: 'act', note: t('bd.tunnelConnectLanNote') },
       { text: relay, state: 'pend' },
     ]
   if (props.status === 'connected')

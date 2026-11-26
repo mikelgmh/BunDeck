@@ -8,6 +8,8 @@
  */
 import { ref } from 'vue'
 import { getTunnelToken, tunnelWsUrl } from './useTunnel'
+import type { ConnEntry, ConnKind } from '../utils/kioskConnLog'
+import type { Ref } from 'vue'
 
 export type RtcStatus = 'idle' | 'signaling' | 'connected' | 'fallback'
 
@@ -30,6 +32,19 @@ function b64decodeText(b64: string): string {
 export function useRemoteRtc() {
   const status = ref<RtcStatus>('idle')
   const detail = ref<string>('')
+  // Historial de intentos (solo lectura para el diálogo del kiosco, cap 50).
+  const log: Ref<ConnEntry[]> = ref([])
+  const pushLog = (kind: ConnKind, detail?: string) => {
+    try {
+      const e: ConnEntry =
+        detail === undefined ? { ts: Date.now(), kind } : { ts: Date.now(), kind, detail }
+      log.value = [...log.value.slice(-49), e]
+    } catch {
+      /* el historial nunca rompe la conexión */
+    }
+  }
+  // Origen para los ms de answer/ok (se fija al iniciar cada connect).
+  let connectT0 = 0
   let pc: RTCPeerConnection | null = null
   let dc: RTCDataChannel | null = null
   let signalWs: WebSocket | null = null
@@ -71,20 +86,26 @@ export function useRemoteRtc() {
     sessionToken = tok
     status.value = 'signaling'
     detail.value = 'signaling'
+    connectT0 = Date.now()
+    pushLog('rtc-start')
     try {
       const ok = await signalingHandshake(tok)
       if (!ok) throw new Error('handshake failed')
       const opened = await waitDcOpen(8000)
       if (!opened) throw new Error('dc timeout')
+      pushLog('rtc-dc')
       const welcomed = await dcHello(5000)
       if (!welcomed) throw new Error('hello rejected')
       status.value = 'connected'
       detail.value = 'p2p'
+      pushLog('rtc-ok', JSON.stringify({ ms: Date.now() - connectT0 }))
       // Suscribe eventos principales por el DataChannel (además del WS existente).
       dcSubscribe(['profiles', 'pages', 'buttons', 'plugins', 'devices', 'remote', 'settings'])
       return true
     } catch (e) {
-      detail.value = e instanceof Error ? e.message.slice(0, 80) : 'failed'
+      const reason = e instanceof Error ? e.message.slice(0, 80) : 'failed'
+      detail.value = reason
+      pushLog('rtc-fallback', reason)
       status.value = 'fallback'
       closePeer()
       // Deja el WS de señalización cerrado; el transporte relay sigue intacto.
@@ -106,7 +127,10 @@ export function useRemoteRtc() {
             resolve(v)
           }
         }
-        const to = setTimeout(() => finish(false), 10000)
+        const to = setTimeout(() => {
+          pushLog('rtc-timeout', JSON.stringify({ phase: 'signaling', ms: 10000 }))
+          finish(false)
+        }, 10000)
         ws.onopen = async () => {
           try {
             pc = new RTCPeerConnection({ iceServers: [{ urls: STUN_URLS }] })
@@ -124,6 +148,7 @@ export function useRemoteRtc() {
             const offer = await pc.createOffer()
             await pc.setLocalDescription(offer)
             ws.send(JSON.stringify({ type: 'rtc-offer', payload: { sdp: offer.sdp } }))
+            pushLog('rtc-signaling', JSON.stringify({ phase: 'offer' }))
           } catch {
             clearTimeout(to)
             finish(false)
@@ -135,6 +160,7 @@ export function useRemoteRtc() {
             if (msg.type === 'rtc-answer' && msg.payload?.sdp && pc) {
               await pc.setRemoteDescription({ type: 'answer', sdp: msg.payload.sdp } as RTCSessionDescriptionInit)
               clearTimeout(to)
+              pushLog('rtc-answer', JSON.stringify({ ms: Date.now() - connectT0 }))
               finish(true)
             } else if (msg.type === 'rtc-answer' && msg.payload?.error) {
               clearTimeout(to)
@@ -204,7 +230,11 @@ export function useRemoteRtc() {
     return new Promise((resolve) => {
       if (!dc) return resolve(false)
       if (dc.readyState === 'open') return resolve(true)
-      const to = setTimeout(() => resolve(dc?.readyState === 'open'), timeoutMs)
+      const to = setTimeout(() => {
+        const open = dc?.readyState === 'open'
+        if (!open) pushLog('rtc-timeout', JSON.stringify({ phase: 'dc', ms: timeoutMs }))
+        resolve(open)
+      }, timeoutMs)
       dc.onopen = () => {
         clearTimeout(to)
         wireDc()
@@ -250,6 +280,7 @@ export function useRemoteRtc() {
         } catch {
           /* noop */
         }
+        if (!helloOk) pushLog('rtc-timeout', JSON.stringify({ phase: 'hello', ms: timeoutMs }))
         resolve(helloOk)
       }, timeoutMs)
       try {
@@ -353,7 +384,7 @@ export function useRemoteRtc() {
     status.value = 'idle'
   }
 
-  return { status, detail, connect, disconnect, rtcFetch, onEvent, dcSubscribe }
+  return { status, detail, log, connect, disconnect, rtcFetch, onEvent, dcSubscribe }
 }
 
 /** Singleton compartido para que apiRequest pueda usar P2P sin prop drilling. */

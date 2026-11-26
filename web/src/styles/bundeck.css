@@ -1230,6 +1230,15 @@
   color: var(--bd-ink);
   white-space: nowrap;
 }
+/* El pilotito es un <button>: reset para que no rompa el layout de la barra. */
+.bundeck .kiosk-bar button.kconn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 .bundeck .kiosk-bar .kled {
   width: 10px;
   height: 10px;

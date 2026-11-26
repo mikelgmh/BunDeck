@@ -177,6 +177,7 @@ export interface WaitingTexts {
   expiredBody: string;
   privacy: string;
   noCredentials: string;
+  lanChecking: string;
   lanRedirecting: string;
 }
 
@@ -205,6 +206,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     privacy:
       'El equipo anfitrión debe aprobar tu acceso. Tu navegador intentará primero una conexión directa P2P (WebRTC) cifrada; si la red no lo permite usará el relay (el operador del relay puede ver el tráfico, protegido con TLS entre tu navegador y el relay).',
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
+    lanChecking: 'Comprobando si estás en la misma red local…',
     lanRedirecting: 'Red local detectada, abriendo versión rápida…',
   },
   en: {
@@ -230,6 +232,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     privacy:
       'The host machine must approve your access. Your browser will first try a direct encrypted P2P (WebRTC) connection; if the network does not allow it, it will use the relay (the relay operator can see the traffic, protected with TLS between your browser and the relay).',
     noCredentials: 'This page will never ask for your username or password.',
+    lanChecking: 'Checking whether you are on the same local network…',
     lanRedirecting: 'Local network detected, opening fast version…',
   },
 };
@@ -246,10 +249,14 @@ export function waitingLang(req: Request): WaitingLang {
  * `lan` (opcional, del daemon vía `ui-publish`): hints del fast-path LAN. Si
  * están presentes se inyectan como JSON escapado (`</` → `<\/`) en un
  * `<script type="application/json">` + un bloque JS best-effort que corre en
- * paralelo al poll existente: prueba `GET http://<ip>:<port>/config`
+ * paralelo al poll existente: muestra `wait-lan-check` ("comprobando red
+ * local") mientras prueba `GET http://<ip>:<port>/config`
  * (público, PNA-friendly, timeout 1500 ms) y redirige UNA sola vez a la LAN
  * si la identidad (`/config.fp`) coincide, o por reachability si hay una
- * única IP candidata y el daemon es viejo (sin `fp`). Cualquier fallo
+ * única IP candidata y el daemon es viejo (sin `fp`). Al fallar todos los
+ * intentos oculta `wait-lan-check` sin tocar nada más. En ambos casos deja
+ * el resultado en `sessionStorage['libredeck:lanProbe']`
+ * (`{urlCode,tried,ips,ok,ip?,ms,ts}`) para el frontend. Cualquier fallo
  * (mixed-content, PNA, timeout, throw) se silencia: sigue el poll relay.
  */
 export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanHints | null): string {
@@ -272,7 +279,9 @@ export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanH
         fp: (lan as LanHints).fp,
       }).replace(/<\//g, '<\\/')
     : '';
-  const lanHintHtml = lanOk ? `<p class="hint" id="wait-lan" hidden>${esc(t.lanRedirecting)}</p>` : '';
+  const lanHintHtml = lanOk
+    ? `<p class="hint" id="wait-lan-check">${esc(t.lanChecking)}</p><p class="hint" id="wait-lan" hidden>${esc(t.lanRedirecting)}</p>`
+    : '';
   const lanScript = lanOk
     ? `<script id="lan-hints" type="application/json">${lanJson}</script>
 <script>
@@ -287,16 +296,39 @@ var segs=location.pathname.split('/').filter(function(p){return !!p;});
 var urlCode=segs.length?segs[segs.length-1]:'';
 if(!urlCode)return;
 var KEY='lanRedirect:'+urlCode;
+var PROBE_KEY='libredeck:lanProbe';
 var fired=false;
 try{if(sessionStorage.getItem(KEY))return;}catch(e){}
+// Inicio del probe: sirve para medir la duración total (ms).
+var startMs=Date.now();
+var validIps=[];
+for(var v=0;v<lan.ips.length;v++){var cip=lan.ips[v];if(typeof cip==='string'&&/^[0-9.]+$/.test(cip))validIps.push(cip);}
+var portNum=(typeof lan.port==='number'&&lan.port>=1&&lan.port<=65535)?lan.port:0;
+// Guarda el resultado para el frontend (contrato fijo: misma clave y forma).
+function storeProbe(ok,ip){
+try{
+var payload={urlCode:urlCode,tried:true,ips:lan.ips.slice(),ok:!!ok,ms:(Date.now()-startMs),ts:Date.now()};
+if(ip)payload.ip=ip;
+sessionStorage.setItem(PROBE_KEY,JSON.stringify(payload));
+}catch(e){}
+}
+// Oculta el aviso de comprobación cuando el probe termina en negativo.
+function hideCheck(){var c=document.getElementById('wait-lan-check');if(c)c.hidden=true;}
+function finishFail(){hideCheck();storeProbe(false,null);}
+if(!portNum||!validIps.length){finishFail();return;}
+var remaining=validIps.length;
+function oneDone(){remaining--;if(remaining<=0&&!fired){finishFail();}}
 function goLan(ip,port){
 if(fired)return;fired=true;
+storeProbe(true,ip);
 try{sessionStorage.setItem(KEY,'1');}catch(e){}
 var msg=document.getElementById('wait-lan');
 if(msg)msg.hidden=false;
 try{location.replace('http://'+ip+':'+port+'/?invite='+encodeURIComponent(lan.code)+'&kiosk=1&relayFallback='+encodeURIComponent(urlCode));}catch(e){}
 }
 function checkLan(ip,port,single){
+var done=false;
+function fin(){if(done)return;done=true;oneDone();}
 var ctl=null;
 try{ctl=new AbortController();}catch(e){ctl=null;}
 var to=setTimeout(function(){try{if(ctl)ctl.abort();}catch(e){}},1500);
@@ -304,23 +336,20 @@ var opt={cache:'no-store',mode:'cors'};
 if(ctl)opt.signal=ctl.signal;
 fetch('http://'+ip+':'+port+'/config',opt).then(function(res){
 clearTimeout(to);
-if(!res||!res.ok)return;
+if(!res||!res.ok){fin();return;}
 return res.json().then(function(data){
-if(fired||!data||typeof data!=='object')return;
+if(fired){fin();return;}
+if(!data||typeof data!=='object'){fin();return;}
 var fp=(typeof data.fp==='string'&&data.fp)?data.fp:null;
-if(fp){if(lan.fp&&fp===lan.fp)goLan(ip,port);return;}
-if(single&&(data.frontendPort||data.apiPort||data.wsPort))goLan(ip,port);
-}).catch(function(){});
-}).catch(function(){clearTimeout(to);});
+if(fp){if(lan.fp&&fp===lan.fp){goLan(ip,port);return;}fin();return;}
+if(single&&(data.frontendPort||data.apiPort||data.wsPort)){goLan(ip,port);return;}
+fin();
+}).catch(function(){fin();});
+}).catch(function(){clearTimeout(to);fin();});
 }
 var singleLan=lan.ips.length===1;
-for(var i=0;i<lan.ips.length;i++){
-(function(ip){
-if(typeof ip!=='string'||!/^[0-9.]+$/.test(ip))return;
-var p=(typeof lan.port==='number'&&lan.port>=1&&lan.port<=65535)?lan.port:0;
-if(!p)return;
-checkLan(ip,p,singleLan);
-})(lan.ips[i]);
+for(var i=0;i<validIps.length;i++){
+checkLan(validIps[i],portNum,singleLan);
 }
 }catch(e){}
 })();
