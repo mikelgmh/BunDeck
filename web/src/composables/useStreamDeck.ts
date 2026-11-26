@@ -8,7 +8,7 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
-import { CONTROL_COMPONENTS } from './useActionPresentation'
+import { CONTROL_COMPONENTS, findActionAdata } from './useActionPresentation'
 import {
   applyButtonDeleted as applyButtonDeletedPayload,
   applyButtonPayload,
@@ -113,6 +113,7 @@ export function useStreamDeck() {
   let dynamicTimer: ReturnType<typeof setInterval> | null = null
   let dynamicInFlight = 0
   const dynamicLastRun = new Map<number, number>()
+  const dynamicActionsInFlight = new Set<string>()
 
   // Button Config
   const buttonConfig = ref<ButtonData>({
@@ -1017,7 +1018,23 @@ export function useStreamDeck() {
         const msg = typeof err === 'string' && err
           ? err
           : (err && typeof err.message === 'string' ? err.message : JSON.stringify(err ?? p))
-        notifyActionError(`Error al ejecutar la acción: ${msg}`, { actionId: p?.actionId ?? null, error: err ?? null })
+        const actionType = typeof p?.actionType === 'string' ? p.actionType : ''
+        const actionName = actionType
+          ? findActionAdata(plugins.value, actionType)?.name ?? actionType
+          : ''
+        const positionLabel = Number.isInteger(p?.position) ? `tecla ${Number(p.position) + 1}` : ''
+        const origin = [actionName, positionLabel].filter(Boolean).join(' · ')
+        const prefix = origin
+          ? `Error al ejecutar la acción (${origin})`
+          : 'Error al ejecutar la acción'
+        notifyActionError(`${prefix}: ${msg}`, {
+          actionId: p?.actionId ?? null,
+          actionType: actionType || null,
+          buttonId: p?.buttonId ?? null,
+          pageId: p?.pageId ?? null,
+          position: Number.isInteger(p?.position) ? Number(p.position) : null,
+          error: err ?? null,
+        })
         break
       }
       case 'log.created': {
@@ -1625,7 +1642,7 @@ export function useStreamDeck() {
   // Se reconstruye solo cuando plugins.value cambia (computed), no en cada
   // tick/selección/render. Las consultas dinámicas son O(1).
   const actionTypeIndex = computed(() => {
-    const index = new Map<string, { pluginId: string; dynamic: boolean }>()
+    const index = new Map<string, { pluginId: string; dynamic: boolean; pollMs: number | null }>()
     for (const plugin of plugins.value) {
       const [pid, pluginData] = plugin as [string, any]
       const actions = pluginData?.actions
@@ -1637,11 +1654,13 @@ export function useStreamDeck() {
         const hasControlSurface = actionData?.surface === 'control' &&
           typeof actionData?.component === 'string' &&
           (CONTROL_COMPONENTS as readonly string[]).includes(actionData.component)
+        const pollMs = Number(actionData?.pollMs)
         index.set(`${pid}.${actionId}`, {
           pluginId: pid,
           // A custom control owns its refresh lifecycle; the generic dynamic
           // poller must not race its component against the same action.
-          dynamic: actionData?.dynamic === true && !hasControlSurface
+          dynamic: actionData?.dynamic === true && !hasControlSurface,
+          pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : null,
         })
       }
     }
@@ -2914,13 +2933,32 @@ export function useStreamDeck() {
     return null
   }
 
-  const updateDynamicButtonValue = async (position: number, button: ButtonEntity) => {
+  const dynamicActionKey = (button: ButtonEntity, action: any): string =>
+    typeof action?.id === 'string' && action.id
+      ? action.id
+      : `${button.id}:${String(action?.type ?? '')}`
+
+  const updateDynamicButtonValue = async (
+    position: number,
+    button: ButtonEntity,
+    reservedActionKey?: string,
+  ) => {
     const dynamicAction = getDynamicAction(button)
     if (!dynamicAction) return
 
+    const actionKey = reservedActionKey ?? dynamicActionKey(button, dynamicAction)
+    const ownsActionKey = reservedActionKey === undefined
+    if (ownsActionKey) {
+      if (dynamicActionsInFlight.has(actionKey)) return
+      dynamicActionsInFlight.add(actionKey)
+    }
+
     // Concurrencia limitada: el tick central ya la regula, pero el contador
     // también cubre llamadas directas sin saturar el daemon.
-    if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) return
+    if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) {
+      if (ownsActionKey) dynamicActionsInFlight.delete(actionKey)
+      return
+    }
     dynamicInFlight += 1
     try {
       const response = await apiRequest('/actions/execute', {
@@ -2946,6 +2984,7 @@ export function useStreamDeck() {
       // cada tick si el daemon o el plugin fallan puntualmente.
     } finally {
       dynamicInFlight -= 1
+      if (ownsActionKey) dynamicActionsInFlight.delete(actionKey)
     }
   }
 
@@ -2972,15 +3011,22 @@ export function useStreamDeck() {
     if (typeof document !== 'undefined' && document.hidden) return
     const isTunnel = !!getTunnelToken()
     const now = Date.now()
-    const due: Array<{ position: number; button: ButtonEntity; action: any }> = []
+    const due: Array<{ position: number; button: ButtonEntity; action: any; actionKey: string }> = []
     for (const { position, button } of dynamicTargets()) {
       const dynamicAction = getDynamicAction(button)
       if (!dynamicAction) continue
-      const base = Number(dynamicAction?.parameters?.updateInterval) || 1000
+      const actionKey = dynamicActionKey(button, dynamicAction)
+      if (dynamicActionsInFlight.has(actionKey)) continue
+      const configuredInterval = Number(dynamicAction?.parameters?.updateInterval)
+      const manifestInterval = actionTypeIndex.value.get(dynamicAction.type)?.pollMs
+      const base = (Number.isFinite(configuredInterval) && configuredInterval > 0
+        ? configuredInterval
+        : manifestInterval) || 1000
       const last = dynamicLastRun.get(position) ?? 0
       if (!isDynamicDue(now, last, base, isTunnel)) continue
       dynamicLastRun.set(position, now)
-      due.push({ position, button, action: dynamicAction })
+      dynamicActionsInFlight.add(actionKey)
+      due.push({ position, button, action: dynamicAction, actionKey })
     }
     if (due.length > 0) void updateDynamicButtonsBatch(due)
   }
@@ -2988,11 +3034,19 @@ export function useStreamDeck() {
   // Lote de sondeo dinámico (1 round-trip por tick de página). Con daemon
   // viejo sin batch cae al sondeo clásico por botón.
   const updateDynamicButtonsBatch = async (
-    due: Array<{ position: number; button: ButtonEntity; action: any }>
+    due: Array<{ position: number; button: ButtonEntity; action: any; actionKey: string }>
   ) => {
-    if (due.length === 0 || dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) return
+    if (due.length === 0) return
+    const releaseActionKeys = () => {
+      for (const item of due) dynamicActionsInFlight.delete(item.actionKey)
+    }
+    if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) {
+      releaseActionKeys()
+      return
+    }
     dynamicInFlight += 1
     let batched = false
+    let shouldFallback = false
     try {
       const res = await apiRequest('/actions/execute-many', {
         method: 'POST',
@@ -3018,19 +3072,23 @@ export function useStreamDeck() {
           if (r?.result) dynamicButtonValues.value.set(due[i].position, r.result)
         })
         batched = true
-      }
+      } else shouldFallback = true
     } catch (batchError) {
       // Daemon sin batch u otro fallo: si no es "endpoint desconocido" se
       // deja pasar en silencio (el polling no spamea) sin fallback.
-      if (!isBatchUnsupported(batchError)) return
+      shouldFallback = isBatchUnsupported(batchError)
     } finally {
       dynamicInFlight -= 1
     }
-    if (!batched) {
-      for (const { position, button } of due) {
-        if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) break
-        await updateDynamicButtonValue(position, button)
+    try {
+      if (!batched && shouldFallback) {
+        for (const { position, button, actionKey } of due) {
+          if (dynamicInFlight >= DYNAMIC_MAX_IN_FLIGHT) break
+          await updateDynamicButtonValue(position, button, actionKey)
+        }
       }
+    } finally {
+      releaseActionKeys()
     }
   }
 

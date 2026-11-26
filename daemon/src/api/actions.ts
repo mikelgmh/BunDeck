@@ -25,6 +25,13 @@ async function execOne(
 ): Promise<any> {
   const quiet = (context as any)?.quiet === true;
   const actionId = uuidv4();
+  const errorDetails = {
+    ...(typeof action?.type === 'string' ? { actionType: action.type } : {}),
+    ...(typeof context?.buttonId === 'string' ? { buttonId: context.buttonId } : {}),
+    ...(typeof context?.pageId === 'string' ? { pageId: context.pageId } : {}),
+    ...(Number.isInteger(context?.position) ? { position: context.position } : {}),
+    ...(typeof context?.source === 'string' ? { source: context.source } : {}),
+  };
   if (!quiet) {
     services.wsManager.broadcastActionStarted(actionId, { action, context });
   }
@@ -132,13 +139,13 @@ async function execOne(
         }
       }
     } else if (!quiet) {
-      services.wsManager.broadcastActionError(actionId, result.error);
+      services.wsManager.broadcastActionError(actionId, result.error, errorDetails);
     }
 
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    if (!quiet) services.wsManager.broadcastActionError(actionId, errorMessage);
+    if (!quiet) services.wsManager.broadcastActionError(actionId, errorMessage, errorDetails);
     return { success: false, error: errorMessage, __threw: true };
   }
 }

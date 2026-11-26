@@ -1277,8 +1277,18 @@ export class WebSocketManager {
     this.broadcast('action.finished', { actionId, result, timestamp: Date.now() });
   }
 
-  public broadcastActionError(actionId: string, error: any): void {
-    this.broadcast('action.error', { actionId, error, timestamp: Date.now() });
+  public broadcastActionError(
+    actionId: string,
+    error: any,
+    details?: {
+      actionType?: string;
+      buttonId?: string;
+      pageId?: string;
+      position?: number;
+      source?: string;
+    },
+  ): void {
+    this.broadcast('action.error', { actionId, error, ...details, timestamp: Date.now() });
   }
 
   // ---- Motor de flujos ----

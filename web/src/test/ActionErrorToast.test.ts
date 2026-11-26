@@ -61,6 +61,34 @@ describe('action.error → toast (ya no se descarta)', () => {
     wrapper.unmount()
   })
 
+  it('incluye acción y tecla para identificar el origen del error', async () => {
+    const wrapper = mountSd()
+    const { events, stop } = collectActionErrors()
+    const sd = (wrapper.vm as any).sd
+    sd.plugins.value = [['pc-vitals', {
+      manifest: { name: 'PC Vitals' },
+      actions: [['summary', { name: 'Resumen del sistema' }]],
+    }]]
+
+    await sd.handleWebSocketMessage({
+      type: 'action.error',
+      payload: {
+        actionId: 'run:pc-vitals.summary',
+        actionType: 'pc-vitals.summary',
+        position: 3,
+        error: 'Action is already running',
+      },
+    })
+    await flushPromises()
+
+    expect(events).toHaveLength(1)
+    expect(events[0].message).toContain('Resumen del sistema')
+    expect(events[0].message).toContain('tecla 4')
+    expect(events[0].message).toContain('Action is already running')
+    stop()
+    wrapper.unmount()
+  })
+
   it('executeButton avisa cuando el daemon responde success:false (200)', async () => {
     execResponse = { success: false, error: 'Discord (toggle-mute) [voice-locked]: otra app tiene el control', duration: 5 }
     const wrapper = mountSd()

@@ -33,9 +33,13 @@ function fakeServices(order: string[]) {
       started: 0,
       finished: 0,
       errors: 0,
+      lastErrorDetails: null,
       broadcastActionStarted() { this.started++; },
       broadcastActionFinished(_id: string, _r: any) { this.finished++; },
-      broadcastActionError(_id: string, _e: any) { this.errors++; },
+      broadcastActionError(_id: string, _e: any, details?: any) {
+        this.errors++;
+        this.lastErrorDetails = details ?? null;
+      },
       broadcast() {},
       navigatePageTo() {},
       navigateProfileTo() {},
@@ -151,9 +155,19 @@ describe('POST /api/v1/actions/execute-many', () => {
     expect(((await ok!.json()) as any).success).toBe(true);
     expect(services.wsManager.started).toBe(1);
 
-    const fail = await handleActions!(req('/api/v1/actions/execute', { action: { type: 'boom' }, context: {} }), ctx);
+    const fail = await handleActions!(req('/api/v1/actions/execute', {
+      action: { type: 'boom' },
+      context: { buttonId: 'b9', pageId: 'p2', position: 4, source: 'key' },
+    }), ctx);
     expect(fail!.status).toBe(500);
     expect(((await fail!.json()) as any).success).toBe(false);
     expect(services.wsManager.errors).toBe(1);
+    expect(services.wsManager.lastErrorDetails).toEqual({
+      actionType: 'boom',
+      buttonId: 'b9',
+      pageId: 'p2',
+      position: 4,
+      source: 'key',
+    });
   });
 });
