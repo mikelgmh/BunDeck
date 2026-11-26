@@ -304,6 +304,11 @@ var startMs=Date.now();
 var validIps=[];
 for(var v=0;v<lan.ips.length;v++){var cip=lan.ips[v];if(typeof cip==='string'&&/^[0-9.]+$/.test(cip))validIps.push(cip);}
 var portNum=(typeof lan.port==='number'&&lan.port>=1&&lan.port<=65535)?lan.port:0;
+// Verificación por el puerto API ("/config" con fp): en DEV la UI vive en
+// Astro (sin "/config" JSON) y el embebido está desactivado, así que
+// verificar contra "port" apuntaría a un puerto muerto. La redirección sí
+// va a "port" (donde abre el kiosco).
+var verifyPort=(typeof lan.apiPort==='number'&&lan.apiPort>=1&&lan.apiPort<=65535)?lan.apiPort:portNum;
 // Guarda el resultado para el frontend (contrato fijo: misma clave y forma).
 function storeProbe(ok,ip){
 try{
@@ -334,7 +339,7 @@ try{ctl=new AbortController();}catch(e){ctl=null;}
 var to=setTimeout(function(){try{if(ctl)ctl.abort();}catch(e){}},1500);
 var opt={cache:'no-store',mode:'cors'};
 if(ctl)opt.signal=ctl.signal;
-fetch('http://'+ip+':'+port+'/config',opt).then(function(res){
+fetch('http://'+ip+':'+verifyPort+'/config',opt).then(function(res){
 clearTimeout(to);
 if(!res||!res.ok){fin();return;}
 return res.json().then(function(data){

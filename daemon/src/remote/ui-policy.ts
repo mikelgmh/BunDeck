@@ -31,7 +31,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { DatabaseService } from '../db';
-import { API_PORT, FRONTEND_PORT } from '../config';
+import { API_PORT, FRONTEND_PORT, DEV_MODE } from '../config';
 import { createLanInvite, getLanInviteMeta, LAN_INVITE_KEY } from './lan-invites';
 import { publicIdentity } from './identity';
 
@@ -232,10 +232,22 @@ function markConsumed(db: DatabaseService, urlCode: string): void {
 export interface UiFastPathLan {
   code: string; // invite LAN 128 bits (canjeable una vez en LAN)
   ips: string[]; // máx 4 IPv4 RFC1918 del host, rankeadas
-  port: number; // FRONTEND_PORT
-  apiPort: number; // API_PORT
+  port: number; // UI LAN (lanUiPort: embebido en prod, Astro en dev)
+  apiPort: number; // API (verificacion de identidad via /config)
   fp: string; // fingerprint público (ya público en QR/status)
   dev: string; // deviceId público (ya público en QR/status)
+}
+
+/** Puerto de la UI LAN al que redirige el fast-path (donde abre el kiosco). */
+export const DEV_FRONTEND_PORT = 4321; // Astro dev fijo (ver web/astro.config.mjs)
+
+/**
+ * Puerto UI del `lan`: en prod el embebido (`FRONTEND_PORT`, sirve web-dist
+ * + `/config`); en DEV el embebido está desactivado y la UI vive en Astro
+ * (`DEV_FRONTEND_PORT`). Publicar 3002 en dev apuntaba a un puerto muerto.
+ */
+export function lanUiPort(devMode = DEV_MODE): number {
+  return devMode ? DEV_FRONTEND_PORT : FRONTEND_PORT;
 }
 
 /** Margen para reutilizar el lan-invite vigente en vez de rotarlo. */
@@ -353,7 +365,7 @@ export function readUiFastPathLan(
   return {
     code: existing.code,
     ips,
-    port: FRONTEND_PORT,
+    port: lanUiPort(),
     apiPort: API_PORT,
     fp: pub.fingerprint,
     dev: pub.deviceId,
@@ -386,7 +398,7 @@ export function buildUiFastPathLan(
       return {
         code: existing.code,
         ips,
-        port: FRONTEND_PORT,
+        port: lanUiPort(),
         apiPort: API_PORT,
         fp: pub.fingerprint,
         dev: pub.deviceId,
@@ -403,7 +415,7 @@ export function buildUiFastPathLan(
   return {
     code: fresh.code,
     ips,
-    port: FRONTEND_PORT,
+    port: lanUiPort(),
     apiPort: API_PORT,
     fp: pub.fingerprint,
     dev: pub.deviceId,

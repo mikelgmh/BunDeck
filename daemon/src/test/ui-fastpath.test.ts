@@ -27,7 +27,9 @@ import { TunnelClient } from '../remote/tunnel';
 import {
   buildUiFastPathLan,
   filterAndRankLanIps,
+  lanUiPort,
   readUiFastPathLan,
+  DEV_FRONTEND_PORT,
 } from '../remote/ui-policy';
 import { publicIdentity } from '../remote/identity';
 import { API_PORT, FRONTEND_PORT } from '../config';
@@ -124,6 +126,12 @@ describe('ui-fastpath: filtro de IPs', () => {
     expect(filterAndRankLanIps([
       '172.16.0.1', '10.0.0.1', '192.168.0.1', '172.31.255.255', '192.168.0.2', '10.0.0.2',
     ])).toEqual(['192.168.0.1', '192.168.0.2', '10.0.0.1', '10.0.0.2']);
+  });
+
+  it('lanUiPort: embebido en prod, Astro en dev (el embebido no escucha en DEV)', () => {
+    expect(lanUiPort(false)).toBe(FRONTEND_PORT);
+    expect(lanUiPort(true)).toBe(DEV_FRONTEND_PORT);
+    expect(DEV_FRONTEND_PORT).toBe(4321);
   });
 });
 

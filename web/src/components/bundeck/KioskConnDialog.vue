@@ -115,9 +115,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .bd-kiosk-conn {
-  width: min(480px, calc(100vw - 32px));
-  height: fit-content;
-  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  /* Tamaño en el global (bundeck.css): el genérico .bd-dlg fija 640px de alto
+     y gana por especificidad al scoping. */
   overflow-y: auto;
 }
 .bd-kiosk-conn[open] {

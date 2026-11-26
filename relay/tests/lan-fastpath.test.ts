@@ -345,6 +345,22 @@ describe('fast-path LAN: aviso visible wait-lan-check + contrato libredeck:lanPr
     expect(typeof probe.ts).toBe('number');
   });
 
+  test('verifica identidad por apiPort y redirige al port UI (dev: Astro)', async () => {
+    // En DEV la UI vive en Astro (sin /config JSON) y el embebido está
+    // apagado: verificar contra apiPort y redirigir a port.
+    const lanDev = { ...LAN, port: 4321 };
+    const html = renderWaitingPage('abc123', 'es', lanDev);
+    const { lanJson, script } = extractProbe(html);
+    const urls: string[] = [];
+    const sb = makeSandbox(lanJson, async (url: string) => {
+      urls.push(url);
+      return { ok: true, json: async () => ({ fp: 'fp-test-123', apiPort: 3001 }) };
+    });
+    await runProbe(sb, script);
+    expect(urls).toEqual(['http://192.168.1.10:3001/config']);
+    expect(sb.location.replaced).toContain('http://192.168.1.10:4321/?invite=');
+  });
+
   test('con lan + fetch ko (todo falla): oculta wait-lan-check y guarda probe ok:false', async () => {
     const html = renderWaitingPage('abc123', 'es', LAN);
     const { lanJson, script } = extractProbe(html);
