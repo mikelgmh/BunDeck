@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/mikelgmh/BunDeck/compare/v1.21.0...v1.22.0) (2026-11-26)
+
+
+### Features
+
+* add interactive widgets and harden feedback ([dfcf1b8](https://github.com/mikelgmh/BunDeck/commit/dfcf1b899d3c191d52c875a8611c84091c5d3056))
+
 # [1.21.0](https://github.com/mikelgmh/BunDeck/compare/v1.20.0...v1.21.0) (2026-11-26)
 
 
