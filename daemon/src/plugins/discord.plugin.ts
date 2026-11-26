@@ -366,6 +366,7 @@ export class DiscordPlugin {
                 {
                     id: 'toggle-mute', name: 'Silenciar / reactivar micro', icon: 'MicOff',
                     description: 'Alterna el micrófono en Discord (RPC en background si hay autorización; si no, tu atajo global)',
+                    variables: [{ name: 'discordMuted', type: 'bool', label: 'Micro silenciado' }],
                     schema: {
                         type: 'object',
                         properties: {
@@ -381,6 +382,7 @@ export class DiscordPlugin {
                 {
                     id: 'toggle-deafen', name: 'Ensordecerse / volver', icon: 'Headphones',
                     description: 'Alterna ensordecer en Discord (RPC en background si hay autorización; si no, tu atajo global)',
+                    variables: [{ name: 'discordDeafened', type: 'bool', label: 'Ensordecido' }],
                     schema: {
                         type: 'object',
                         properties: {

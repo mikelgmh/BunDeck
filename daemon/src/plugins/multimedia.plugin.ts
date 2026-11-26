@@ -43,6 +43,10 @@ export class MultimediaPlugin {
                     description: 'Control media playback (play, pause, volume, etc.)',
                     icon: 'Volume2',
                     timeoutMs: 15000,
+                    variables: [
+                        { name: 'multimediaMuted', type: 'bool', label: 'Silenciado' },
+                        { name: 'multimediaPlaying', type: 'bool', label: 'Reproduciendo' },
+                    ],
                     schema: {
                         type: 'object',
                         properties: {

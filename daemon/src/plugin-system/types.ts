@@ -66,6 +66,13 @@ export interface PluginActionV2 {
   timeoutMs?: number;
   cooldownMs?: number;
   /**
+   * Variables de estado que la acción expone al ejecutarse con éxito
+   * (contrato daemon `variables/exposed.ts` + runtime en ActionRunner).
+   * La UI las lista en Aspecto como "variables disponibles" con su valor
+   * en vivo. Solo toggles/estados: no lógica compleja.
+   */
+  variables?: PluginActionVarDecl[];
+  /**
    * Estados discretos del botón para iconos dinámicos desde integraciones
    * (ej. spotify: playing/paused; obs: streaming on/off). La UI mapea
    * `result.state` (string) a label/icono sin lógica custom por plugin.
@@ -77,6 +84,16 @@ export interface PluginActionV2 {
    * Ej. obs.scene.scene <- obs.scene-list.
    */
   optionsFrom?: PluginDynamicOptions;
+}
+
+/** Variable de estado expuesta por una acción (contrato variables/exposed.ts). */
+export interface PluginActionVarDecl {
+  /** Nombre global (válido para validateVarName: sin puntos). */
+  name: string;
+  /** Hoy todas son booleanas (toggles/estados). */
+  type: 'bool';
+  /** Etiqueta legible para la UI. */
+  label?: string;
 }
 
 /** Estado discreto de botón/icono declarado por una acción. */

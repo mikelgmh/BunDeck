@@ -443,6 +443,16 @@ export class ActionRunner {
       // Update last execution time
       this.lastExecution.set(actionId, startTime);
 
+      // Variables expuestas por la acción (contrato variables/exposed.ts):
+      // cada ejecución exitosa actualiza su estado declarado (p. ej.
+      // discord.toggle-mute → discordMuted). Best-effort: nunca rompe.
+      if (result.success !== false) {
+        try {
+          const { applyExposedResult } = await import('./variables/exposed');
+          await applyExposedResult(this.varStore, action.type, (result as any)?.result, action.parameters);
+        } catch { /* mejor esfuerzo */ }
+      }
+
       // Log result (se omite en polling silencioso; los errores siempre).
       if (!(context as any)?.quiet) {
         this.db.addLog({

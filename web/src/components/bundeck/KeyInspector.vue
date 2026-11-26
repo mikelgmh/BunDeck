@@ -380,6 +380,16 @@
               :aria-label="`Color ${j + 1}`"
               @click="emit('update-field', 'textColor', hex)"
             ></button>
+            <input
+              type="color"
+              class="bd-cs"
+              style="padding: 0; border: 1px solid var(--bd-ln)"
+              :value="toColorInput(buttonConfig.textColor)"
+              :aria-label="t('bd.iconCustom')"
+              :title="t('bd.iconCustom')"
+              data-cy="bd-icon-custom-color"
+              @input="emit('update-field', 'textColor', ($event.target as HTMLInputElement).value)"
+            />
           </div>
         </div>
 
@@ -408,53 +418,29 @@
               type="color"
               class="bd-cs"
               style="padding: 0; border: 1px solid var(--bd-ln)"
-              :value="toColorInput(buttonConfig.backgroundColor)"
+              :value="toColorInput(buttonConfig.backgroundColor, '#374151')"
               :aria-label="t('bd.background')"
               @input="emit('update-field', 'backgroundColor', ($event.target as HTMLInputElement).value)"
             />
           </div>
         </div>
 
-        <h3 class="bd-sh">{{ t('bd.keyVarsTitle') }}</h3>
-        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.keyVarsHint') }}</p>
-        <div v-if="keyVarNames.length" class="bd-al" data-cy="bd-key-vars">
-          <div v-for="n in keyVarNames" :key="n" class="bd-ac" style="display: flex; align-items: center; gap: 8px">
-            <span class="bd-mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis">{{ n }}</span>
-            <span v-if="keyVarState(n).exists" class="bd-cnt">{{ keyVarState(n).value }}</span>
-            <span v-else class="bd-cnt" :title="t('bd.varBadName')">{{ t('bd.keyVarMissing') }}</span>
+        <h3 class="bd-sh">{{ t('bd.availVarsTitle') }}</h3>
+        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.availVarsHint') }}</p>
+        <div v-if="availableVars.length" class="bd-al" data-cy="bd-available-vars">
+          <div v-for="v in availableVars" :key="v.name" class="bd-ac" style="display: flex; align-items: center; gap: 8px">
+            <span class="bd-mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis" :title="v.fromAction ?? ''">{{ v.name }}</span>
+            <span class="bd-cnt">{{ v.origin === 'action' ? v.fromAction : t('bd.availVarGlobal') }}</span>
+            <span class="bd-cnt">{{ v.live || t('bd.availVarUnknown') }}</span>
             <button
-              v-if="!keyVarState(n).exists"
               class="bd-btn"
               style="padding: 4px 10px"
-              @click="createMissingVar(n)"
-            >{{ t('bd.keyVarCreate') }}</button>
+              :data-cy="`bd-avail-use-${v.name}`"
+              @click="useCondFromVar(v)"
+            >{{ t('bd.availVarUse') }}</button>
           </div>
         </div>
-        <p v-else class="bd-hint" data-cy="bd-key-vars-empty">{{ t('bd.keyVarsEmpty') }}</p>
-
-        <h3 class="bd-sh">{{ t('bd.toggleTitle') }}</h3>
-        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.toggleHint') }}</p>
-        <div class="bd-fld">
-          <label class="bd-sr" for="bd-toggle-var">{{ t('bd.toggleVarPh') }}</label>
-          <div style="display: flex; gap: 8px">
-            <input
-              id="bd-toggle-var"
-              type="text"
-              class="bd-inp bd-mono"
-              style="flex: 1; min-width: 0"
-              v-model="toggleVarName"
-              :placeholder="t('bd.toggleVarPh')"
-              spellcheck="false"
-              autocomplete="off"
-              data-cy="bd-toggle-var-input"
-            />
-            <button class="bd-btn bd-pri" @click="applyToggleWizard" data-cy="bd-toggle-apply">
-              <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.toggleApply') }}
-            </button>
-          </div>
-          <p v-if="toggleMsg === 'ok'" class="bd-hint" style="margin: 8px 0 0">{{ t('bd.toggleOk') }}</p>
-          <p v-if="toggleMsg === 'bad'" class="bd-err" style="margin: 8px 0 0">{{ t('bd.varBadName') }}</p>
-        </div>
+        <p v-else class="bd-hint" data-cy="bd-available-vars-empty">{{ t('bd.availVarsEmpty') }}</p>
 
         <h3 class="bd-sh">{{ t('bd.statesTitle') }}</h3>
         <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.statesHint') }}</p>
@@ -701,6 +687,7 @@ import {
 } from '../../composables/usePressActions'
 import { ev, fmt, intp, usedVarNames, IDRE, RES } from '../../composables/useExpressions'
 import { vars, getVar, getEnv, addVar, persistVars, coerceVal, displayTick } from '../../composables/useVars'
+import { availableVarsOf } from '../../composables/useExposedVariables'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
@@ -961,16 +948,15 @@ const execMode = computed(() => props.buttonConfig?.mode ?? 'seq')
 
 const activeSwatch = computed(() => {
   const cur = String(props.buttonConfig?.textColor ?? '').toLowerCase()
-  const idx = SWATCHES.indexOf(cur)
-  return idx === -1 ? 0 : idx
+  return SWATCHES.indexOf(cur)
 })
 const activeBg = computed(() => {
   const cur = String(props.buttonConfig?.backgroundColor ?? '').toLowerCase()
   return BG_SWATCHES.findIndex((h) => h.toLowerCase() === cur)
 })
-const toColorInput = (v: any) => {
+const toColorInput = (v: any, fallback = '#e8e9eb') => {
   if (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) return v
-  return '#374151'
+  return fallback
 }
 
 const iconComponent = computed(() => {
@@ -1077,100 +1063,14 @@ const lookIcon = (li: number) => {
   return (n ? dynamicIcon(n) : null) ?? Zap
 }
 
-/** Variables que lee o escribe esta tecla (acciones + reglas + apariencia). */
-const keyVarNames = computed<string[]>(() => {
-  const names = new Set<string>()
-  const pushAction = (a: any) => {
-    if (a?.type === 'local.set-var' || a?.type === 'local.toggle-var') {
-      const n = String(a?.parameters?.name ?? '').trim()
-      if (n) names.add(n)
-    }
-  }
-  for (const a of asList(props.buttonConfig?.actions)) pushAction(a)
-  const pa = props.buttonConfig?.pressActions
-  if (pa && typeof pa === 'object') {
-    for (const k of ['click', 'double', 'triple', 'long'] as const) {
-      for (const a of asList((pa as any)[k])) pushAction(a)
-    }
-  }
-  for (const r of ruleList.value) {
-    if (r?.vn) names.add(String(r.vn))
-    for (const side of ['then', 'else'] as const) {
-      for (const a of asList((r as any)?.[side])) pushAction(a)
-    }
-  }
-  const sv = String(props.buttonConfig?.stateVar ?? '').trim()
-  if (sv) names.add(sv)
-  try {
-    const all = vars.value.map((v) => v.n)
-    for (const n of usedVarNames(JSON.stringify(props.buttonConfig ?? {}), all)) names.add(n)
-  } catch { /* noop */ }
-  return [...names].sort((a, b) => a.localeCompare(b))
-})
-const keyVarState = (n: string) => {
-  const v = getVar(n)
-  if (!v) return { exists: false as const }
-  return { exists: true as const, type: v.t, value: fmt(v.v) }
-}
-const createMissingVar = (n: string) => {
-  if (getVar(n)) return
-  if (!IDRE.test(n) || RES.includes(n.toLowerCase())) return
-  addVar(n)
-}
-
-/** Wizard: toggle play/pause = variable sí/no + Alternar en click + look. */
-const toggleVarName = ref('playing')
-const toggleMsg = ref<'' | 'ok' | 'bad'>('')
-const ensureBoolVar = (name: string): string => {
-  const v = getVar(name)
-  if (!v) {
-    const created = addVar(name)
-    // addVar genera otro nombre si el pedido no era válido; solo forzar
-    // bool cuando se creó exactamente el pedido.
-    const refV = getVar(created.n)
-    if (refV && refV.n === name) {
-      refV.t = 'bool'
-      refV.v = false
-      persistVars()
-    }
-    return created.n
-  }
-  if (v.t !== 'bool') {
-    v.t = 'bool'
-    v.v = !!v.v
-    persistVars()
-  }
-  return v.n
-}
-const uid = () => 'g' + Math.random().toString(36).slice(2, 7)
-const applyToggleWizard = () => {
-  const raw = toggleVarName.value.trim()
-  if (!IDRE.test(raw) || RES.includes(raw.toLowerCase())) {
-    toggleMsg.value = 'bad'
-    return
-  }
-  const name = ensureBoolVar(raw)
-  toggleVarName.value = name
-  const curClick = getActionsForKind(props.buttonConfig, 'click')
-  const hasToggle = curClick.some(
-    (a: any) => a?.type === 'local.toggle-var' && String(a?.parameters?.name ?? '') === name
-  )
-  if (!hasToggle) {
-    const nextClick = [...curClick, { id: uid(), type: 'local.toggle-var', parameters: { name } }]
-    const nextData = setActionsForKind(props.buttonConfig, 'click', nextClick)
-    emit('update-field', 'pressActions', nextData.pressActions)
-    emit('update-field', 'actions', nextData.actions)
-  }
-  const looks = [...lookList.value]
-  if (!looks.some((l: any) => String(l?.cond ?? '').trim() === name)) {
-    const baseIcon = String(props.buttonConfig?.icon ?? '')
-    // Si la base es Pause, el estado activado vuelve a Play; si no, a Pause.
-    const onIcon = baseIcon.toLowerCase() === 'pause' ? 'Play' : 'Pause'
-    if (!baseIcon) emit('update-field', 'icon', 'Play')
-    looks.push({ cond: name, t: '', i: onIcon, c: null, bg: 0 })
-    emit('update-field', 'looks', looks)
-  }
-  toggleMsg.value = 'ok'
+/** Variables disponibles en Aspecto: las que exponen las acciones de esta
+ *  tecla (contrato variables/exposed.ts, valor en vivo) + globales. */
+const availableVars = computed(() => availableVarsOf(props.buttonConfig))
+/** Añade una condición `variable` (bool) a la apariencia condicional. */
+const useCondFromVar = (v: { name: string; type: string }) => {
+  const cond = v.type === 'bool' ? v.name : `${v.name} == ${v.name}`
+  if (lookList.value.some((l: any) => String(l?.cond ?? '').trim() === cond)) return
+  setLooks([...lookList.value, { cond, t: '', i: '', c: null, bg: 0 }])
 }
 
 /* N estados: una variable numérica gobierna N iconos.
@@ -1245,6 +1145,7 @@ const clearStateVar = () => {
 }
 /** Emite listas por pulsación de una sola vez (un solo update-field por
  *  clave: varias llamadas seguidas con la misma base rancia se pisarían). */
+const uid = () => 'g' + Math.random().toString(36).slice(2, 7)
 const emitKindLists = (lists: Partial<Record<PressKind, any[]>>) => {
   let draft: any = props.buttonConfig
   for (const k of pressKinds) {

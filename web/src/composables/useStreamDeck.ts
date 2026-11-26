@@ -678,7 +678,7 @@ export function useStreamDeck() {
     }))
     ws.send(JSON.stringify({
       type: 'subscribe',
-      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings', 'shortcuts', 'logs'] }
+      payload: { topics: ['profiles', 'buttons', 'actions', 'plugins', 'pages', 'devices', 'remote', 'settings', 'shortcuts', 'logs', 'variables'] }
     }))
     return true
   }
@@ -986,6 +986,24 @@ export function useStreamDeck() {
         // Actividad en vivo para el menú Registros (DiagnosticsPane escucha).
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('libredeck:log-created', { detail: message.payload }))
+        }
+        break
+      }
+      case 'variable.changed':
+      case 'variable.deleted': {
+        // Valores en vivo del daemon (las acciones publican su estado tras
+        // ejecutar): se funden en el store local sin recargar la página.
+        try {
+          const { upsertRemoteVar, removeVar } = await import('./useVars')
+          const p = (message.payload ?? {}) as any
+          const name = String(p?.name ?? '')
+          if (message.type === 'variable.deleted') {
+            if (name) removeVar(name)
+          } else if (name) {
+            upsertRemoteVar(name, p?.value, typeof p?.type === 'string' ? p.type : undefined)
+          }
+        } catch {
+          /* best-effort */
         }
         break
       }

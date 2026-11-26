@@ -113,6 +113,7 @@ export class AudioMixerPlugin {
                     name: 'Silenciar micro',
                     description: 'Silencia, reactiva o alterna el micrófono predeterminado',
                     icon: 'MicOff',
+                    variables: [{ name: 'audioMicMuted', type: 'bool', label: 'Micro silenciado' }],
                     schema: {
                         type: 'object',
                         properties: {

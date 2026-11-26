@@ -218,6 +218,7 @@ export class ObsPlugin {
                     description: 'Inicia, detiene o alterna la emisión en directo',
                     icon: 'Radio',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    variables: [{ name: 'obsStreaming', type: 'bool', label: 'En directo' }],
                     states: [
                         { value: 'live', label: 'En directo', icon: 'Radio' },
                         { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
@@ -251,6 +252,7 @@ export class ObsPlugin {
                     description: 'Inicia, detiene o alterna la grabación',
                     icon: 'Video',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
+                    variables: [{ name: 'obsRecording', type: 'bool', label: 'Grabando' }],
                     states: [
                         { value: 'recording', label: 'Grabando', icon: 'Disc' },
                         { value: 'stopped', label: 'Detenido', icon: 'Video' }
@@ -296,6 +298,7 @@ export class ObsPlugin {
                     name: 'Micrófono (mutear)',
                     description: 'Silencia, reactiva o alterna el audio de una fuente de entrada',
                     icon: 'MicOff',
+                    variables: [{ name: 'obsMuted', type: 'bool', label: 'Fuente silenciada' }],
                     schema: {
                         type: 'object',
                         properties: {

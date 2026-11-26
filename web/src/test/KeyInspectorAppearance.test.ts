@@ -163,33 +163,59 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     expect(wrapper.findAll('.bd-rl').length).toBe(1)
   })
 
-  it('muestra las variables que usa la tecla', async () => {
+  it('color de icono libre (picker) junto a los predefinidos', async () => {
+    const wrapper = mountInspector()
+    await openAppearance(wrapper)
+    const picker = wrapper.find('[data-cy="bd-icon-custom-color"]')
+    expect(picker.exists()).toBe(true)
+    await picker.setValue('#ff0000')
+    expect(wrapper.emitted('update-field')).toContainEqual(['textColor', '#ff0000'])
+  })
+
+  it('sin bloque de crear variables ni wizard de toggle', async () => {
     const wrapper = mountInspector({
       ...baseConfig,
       actions: [{ id: 'a1', type: 'local.toggle-var', parameters: { name: 'micSilenciado' } }],
     })
     await openAppearance(wrapper)
-    expect(wrapper.find('[data-cy="bd-key-vars"]').exists()).toBe(true)
-    expect(wrapper.html()).toContain('micSilenciado')
+    const html = wrapper.html()
+    expect(wrapper.find('[data-cy="bd-key-vars"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-toggle-var-input"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-toggle-apply"]').exists()).toBe(false)
+    expect(html).not.toContain('bd-toggle-var-input')
   })
 
-  it('el wizard crea Alternar variable en click + look', async () => {
-    const wrapper = mountInspector({ ...baseConfig, actions: [], looks: [] })
+  it('muestra las variables expuestas por las acciones de la tecla', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }],
+    })
     await openAppearance(wrapper)
-    const input = wrapper.find('[data-cy="bd-toggle-var-input"]')
-    await input.setValue('playingToggleTest')
-    await wrapper.find('[data-cy="bd-toggle-apply"]').trigger('click')
+    expect(wrapper.find('[data-cy="bd-available-vars"]').exists()).toBe(true)
+    const html = wrapper.find('[data-cy="bd-available-vars"]').html()
+    expect(html).toContain('discordMuted')
+    expect(html).toContain('discord.toggle-mute')
+  })
+
+  it('las globales de Ajustes aparecen con su valor en vivo', async () => {
+    const wrapper = mountInspector()
+    await openAppearance(wrapper)
+    const html = wrapper.find('[data-cy="bd-available-vars"]').html()
+    expect(html).toContain('contador')
+  })
+
+  it('usar una variable disponible añade su condición al aspecto', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }],
+      looks: [],
+    })
+    await openAppearance(wrapper)
+    await wrapper.find('[data-cy="bd-avail-use-discordMuted"]').trigger('click')
     const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
-    expect(emitted).toBeTruthy()
-    const actionsEmit = emitted!.find(([k]) => k === 'actions')
-    expect(actionsEmit?.[1]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'local.toggle-var', parameters: { name: 'playingToggleTest' } }),
-      ])
-    )
     const looksEmit = emitted!.find(([k]) => k === 'looks')
     expect(looksEmit?.[1]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ cond: 'playingToggleTest' })])
+      expect.arrayContaining([expect.objectContaining({ cond: 'discordMuted' })])
     )
   })
 
@@ -228,9 +254,9 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     )
   })
 
-  it('la variable de estados aparece en la lista de variables', async () => {
+  it('la variable de estados aparece entre las disponibles', async () => {
     const wrapper = mountInspector({ ...baseConfig, stateVar: 'estadoTest3' })
     await openAppearance(wrapper)
-    expect(wrapper.find('[data-cy="bd-key-vars"]').html()).toContain('estadoTest3')
+    expect(wrapper.find('[data-cy="bd-available-vars"]').html()).toContain('estadoTest3')
   })
 })

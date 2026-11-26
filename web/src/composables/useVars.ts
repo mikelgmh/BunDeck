@@ -102,6 +102,33 @@ export function removeVar(name: string): VarDef | null {
   return v
 }
 
+/**
+ * Funde un valor del daemon (WS `variable.changed`, servicio de variables
+ * tipadas) en el store local sin recargar. Crea la variable si no existe
+ * (las expuestas por acciones nacen en el daemon, no en Ajustes).
+ * Tipos daemon → locales: bool→bool, numeric→num, text/color→txt.
+ */
+export function upsertRemoteVar(name: string, value: unknown, type?: string): void {
+  if (typeof name !== 'string' || !IDRE.test(name) || RES.includes(name.toLowerCase())) return
+  const t: VarDef['t'] = type === 'bool' || type === 'boolean' ? 'bool' : type === 'numeric' || type === 'num' ? 'num' : 'txt'
+  const v = getVar(name)
+  const nv = coerceVal(t, value)
+  if (!v) {
+    vars.value.push({ n: name.slice(0, 40), t, v: nv })
+    persist()
+    bumpVars()
+    listeners.forEach((cb) => { try { cb(name) } catch { /* noop */ } })
+    return
+  }
+  if (v.t !== t) v.t = t
+  if (nv !== v.v) {
+    v.v = nv
+    persist()
+    bumpVars()
+    listeners.forEach((cb) => { try { cb(name) } catch { /* noop */ } })
+  }
+}
+
 export function importVar(def: { n: string; t: VarDef['t']; v: any }): boolean {
   if (getVar(def.n)) return false
   if (!IDRE.test(def.n) || RES.includes(def.n.toLowerCase())) return false
