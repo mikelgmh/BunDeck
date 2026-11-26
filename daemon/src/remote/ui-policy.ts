@@ -31,6 +31,9 @@
  */
 import { randomBytes } from 'node:crypto';
 import { DatabaseService } from '../db';
+import { API_PORT, FRONTEND_PORT } from '../config';
+import { createLanInvite, getLanInviteMeta, LAN_INVITE_KEY } from './lan-invites';
+import { publicIdentity } from './identity';
 
 export const UI_ENABLED_KEY = 'remote.ui.enabled';
 export const UI_CODE_KEY = 'remote.ui.code';
@@ -220,11 +223,203 @@ function markConsumed(db: DatabaseService, urlCode: string): void {
   }
 }
 
+// ---------- Fast-path LAN (credenciales pareadas ui+lan) ----------
+
+/** Objeto `lan` del `ui-publish` extendido (contrato fijo con el relay). */
+export interface UiFastPathLan {
+  code: string; // invite LAN 128 bits (canjeable una vez en LAN)
+  ips: string[]; // máx 4 IPv4 RFC1918 del host, rankeadas
+  port: number; // FRONTEND_PORT
+  apiPort: number; // API_PORT
+  fp: string; // fingerprint público (ya público en QR/status)
+  dev: string; // deviceId público (ya público en QR/status)
+}
+
+/** Margen para reutilizar el lan-invite vigente en vez de rotarlo. */
+export const UI_FASTPATH_LAN_REUSE_MS = 60_000;
+
+/** Rank de IP LAN (misma lógica que `QrDialog.getDaemonLanIp` en web). */
+export function rankLanIp(ip: string): number {
+  if (ip.startsWith('192.168.')) return 0;
+  if (ip.startsWith('10.')) return 1;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return 2;
+  return 3;
+}
+
+function isRfc1918Ip(ip: string): boolean {
+  if (typeof ip !== 'string' || !ip) return false;
+  if (ip.startsWith('192.168.')) {
+    return /^192\.168\.\d{1,3}\.\d{1,3}$/.test(ip);
+  }
+  if (ip.startsWith('10.')) {
+    return /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip);
+  }
+  const m = /^(172)\.(1[6-9]|2\d|3[01])\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  return m !== null;
+}
+
+/**
+ * Filtra (solo RFC1918, sin loopback/IPv6) + rankea + top 4.
+ * Pura (testeable sin red): `getHostLanIps` le pasa las del host.
+ */
+export function filterAndRankLanIps(ips: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ip of ips ?? []) {
+    if (typeof ip !== 'string' || !ip) continue;
+    const clean = ip.trim();
+    if (!clean || seen.has(clean)) continue;
+    if (clean === '127.0.0.1' || clean.includes(':')) continue; // loopback/IPv6 fuera
+    if (!isRfc1918Ip(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  out.sort((a, b) => rankLanIp(a) - rankLanIp(b));
+  return out.slice(0, 4);
+}
+
+/** IPv4 LAN del host ya filtradas/rankeadas (máx 4). `[]` si no hay. */
+export function getHostLanIps(): string[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { networkInterfaces } = require('node:os') as typeof import('node:os');
+    const nets = networkInterfaces();
+    const raw: string[] = [];
+    for (const addrs of Object.values(nets)) {
+      for (const a of addrs ?? []) {
+        try {
+          if ((a as { family?: unknown }).family === 'IPv4' && !(a as { internal?: unknown }).internal) {
+            raw.push((a as { address?: unknown }).address as string);
+          }
+        } catch { /* entrada rara: ignorar */ }
+      }
+    }
+    return filterAndRankLanIps(raw);
+  } catch {
+    return [];
+  }
+}
+
+/** Lee el lan-invite vigente SIN crearlo (null si ausente/caducado). */
+export function readExistingLanInvite(db: DatabaseService): { code: string; expiresAt: number } | null {
+  let meta: { present: boolean; expiresAt: number | null };
+  try {
+    meta = getLanInviteMeta(db);
+  } catch {
+    return null;
+  }
+  if (!meta.present || typeof meta.expiresAt !== 'number') return null;
+  let raw: string | null = null;
+  try {
+    raw = db.getSetting(LAN_INVITE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as { code?: unknown; expiresAt?: unknown };
+    if (typeof v.code !== 'string' || !v.code) return null;
+    const exp = typeof v.expiresAt === 'number' ? v.expiresAt : meta.expiresAt;
+    if (!Number.isFinite(exp) || (exp as number) <= Date.now()) return null;
+    return { code: v.code, expiresAt: exp as number };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Snapshot del `lan` fast-path SIN crear invites (para `resyncUiState`:
+ * re-anunciar tras reconectar no debe rotar el QR LAN).
+ * `undefined` si no hay invite vigente o no hay IPs (sanitiza en origen).
+ */
+export function readUiFastPathLan(
+  db: DatabaseService,
+  opts?: { ips?: string[] },
+): UiFastPathLan | undefined {
+  const ips = filterAndRankLanIps(opts?.ips ?? getHostLanIps());
+  if (ips.length === 0) return undefined;
+  const existing = readExistingLanInvite(db);
+  if (!existing) return undefined;
+  let pub: { deviceId: string; fingerprint: string };
+  try {
+    pub = publicIdentity(db);
+  } catch {
+    return undefined;
+  }
+  if (!pub?.deviceId || !pub?.fingerprint) return undefined;
+  return {
+    code: existing.code,
+    ips,
+    port: FRONTEND_PORT,
+    apiPort: API_PORT,
+    fp: pub.fingerprint,
+    dev: pub.deviceId,
+  };
+}
+
+/**
+ * Construye el `lan` fast-path ASEGURANDO invite: reutiliza el vigente con
+ * >60 s de vida; si no, crea uno fresco (`ui-fastpath`).
+ * `undefined` si no hay IPs (sanitiza en origen: el campo se omite y el
+ * relay viejo lo ignoraría igualmente) o sin identidad pública.
+ */
+export function buildUiFastPathLan(
+  db: DatabaseService,
+  opts?: { ips?: string[]; now?: number },
+): UiFastPathLan | undefined {
+  const ips = filterAndRankLanIps(opts?.ips ?? getHostLanIps());
+  if (ips.length === 0) return undefined;
+  let pub: { deviceId: string; fingerprint: string };
+  try {
+    pub = publicIdentity(db);
+  } catch {
+    return undefined;
+  }
+  if (!pub?.deviceId || !pub?.fingerprint) return undefined;
+  const now = typeof opts?.now === 'number' ? opts.now : Date.now();
+  try {
+    const existing = readExistingLanInvite(db);
+    if (existing && existing.expiresAt - now > UI_FASTPATH_LAN_REUSE_MS) {
+      return {
+        code: existing.code,
+        ips,
+        port: FRONTEND_PORT,
+        apiPort: API_PORT,
+        fp: pub.fingerprint,
+        dev: pub.deviceId,
+      };
+    }
+  } catch { /* sin reutilizable: crear fresco */ }
+  let fresh: { code: string };
+  try {
+    fresh = createLanInvite(db, 'ui-fastpath');
+  } catch {
+    return undefined;
+  }
+  if (!fresh?.code) return undefined;
+  return {
+    code: fresh.code,
+    ips,
+    port: FRONTEND_PORT,
+    apiPort: API_PORT,
+    fp: pub.fingerprint,
+    dev: pub.deviceId,
+  };
+}
+
 /**
  * Crea (o regenera) el código de acceso móvil. Sobrescribe el anterior.
  * No valida `enabled`: lo hace el API layer (403 maestro).
+ *
+ * Fast-path LAN (credenciales pareadas ui+lan para el relay): además del
+ * ui-code se asegura un lan-invite vigente (`remote.lan.invite`). Si queda
+ * uno con >60 s de vida se REUTILIZA (no se rota el QR/enlace LAN en cada
+ * regeneración del QR de internet); si no, se crea uno fresco con label
+ * `ui-fastpath`. NOTA single-use: `POST /ui-code` (requestUiCode) rota el
+ * QR de internet vigente igual que hoy regenera — el anterior deja de
+ * valer; el lan-invite compartido solo se consume al canjearse en LAN.
  */
-export function createUiCode(db: DatabaseService): UiCode {
+export function createUiCode(db: DatabaseService): UiCode & { lan?: UiFastPathLan } {
   // Solo debe existir un código QR pendiente de uso. Si el anterior ya se
   // consumió al aprobar, UI_CODE_KEY está vacío y su publicación se conserva
   // en el relay únicamente para que el móvil termine el handshake.
@@ -238,9 +433,18 @@ export function createUiCode(db: DatabaseService): UiCode {
   };
   db.setSetting(UI_CODE_KEY, JSON.stringify(code));
   audit(db, `[remote-ui] código UI creado (expira ${new Date(code.expiresAt).toISOString()})`);
+  // Fast-path LAN pareado (best-effort: sin IPs no hay `lan` y el relay
+  // viejo ignora el campo igualmente). Se publica junto al ui-code para que
+  // el móvil pre-aprobado pruebe LAN directa sin esperar al relay.
+  let lan: UiFastPathLan | undefined;
+  try {
+    lan = buildUiFastPathLan(db);
+  } catch {
+    lan = undefined;
+  }
   // Best-effort: que el relay conozca el código (el túnel lo republica al reconectar).
-  try { getTunnelClient()?.publishUiCode?.(code.urlCode, code.expiresAt); } catch { /* noop */ }
-  return code;
+  try { getTunnelClient()?.publishUiCode?.(code.urlCode, code.expiresAt, lan); } catch { /* noop */ }
+  return lan ? { ...code, lan } : code;
 }
 
 /** Revoca el código vigente. Devuelve true si había código. */

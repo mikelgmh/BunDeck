@@ -19,6 +19,16 @@
         <h1>🔒 {{ t('bd.lanDeniedTitle') }}</h1>
         <p>{{ t('bd.lanDeniedMsg') }}</p>
         <p class="bd-hint">{{ t('bd.lanDeniedHint') }}</p>
+        <!-- Escape al relay (fast-path LAN con invitación caducada/usada):
+          solo MUESTRA el código + copiar; nunca redirige solo (anti-bucle).
+          Sin dominio inventado: la LAN no conoce el dominio del relay. -->
+        <div v-if="lanRelayFallback" class="bd-noperm__fallback" data-cy="lan-relay-fallback">
+          <p class="bd-hint">{{ t('bd.lanDeniedRelayFallback', { code: lanRelayFallback }) }}</p>
+          <p class="bd-lan-link-row">
+            <code class="bd-mono" data-cy="lan-relay-fallback-code">{{ lanRelayFallback }}</code>
+            <button class="bd-btn" type="button" data-cy="lan-relay-fallback-copy" @click="copyRelayFallback">{{ relayFallbackCopied ? t('bd.lanDeniedRelayCopied') : t('bd.copy') }}</button>
+          </p>
+        </div>
       </div>
     </div>
     <!-- Túnel del relay con sesión muerta (reinicio, caducidad 24 h o daemon
@@ -789,6 +799,7 @@ const {
   uploadPluginFile, installPluginFromUrl,
   mcpTokens, mcpScopes, loadMcpTokens, loadMcpScopes, createMcpToken, updateMcpToken, revokeMcpToken,
   lanDenied, redeemLanInviteFromUrl,
+  lanRelayFallback,
   tunnelSessionInvalid,
   installProgress, clearInstallProgress
 } = useStreamDeck()
@@ -2510,6 +2521,20 @@ const onIoCopy = async () => {
     bdShowToast(t('bd.codeCopied'))
   } catch {
     bdShowToast(t('bd.codeCopyHint'))
+  }
+}
+
+// Copiar el código de escape al relay (pantalla "Sin permiso" con
+// ?relayFallback=): el código queda seleccionado a mano si no hay clipboard.
+const relayFallbackCopied = ref(false)
+const copyRelayFallback = async () => {
+  const code = String(lanRelayFallback.value ?? '').trim()
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    relayFallbackCopied.value = true
+  } catch {
+    relayFallbackCopied.value = false
   }
 }
 

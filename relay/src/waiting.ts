@@ -49,6 +49,9 @@
  */
 
 import { pickLang } from './landing';
+import type { LanHints } from './tunnel';
+
+export type { LanHints };
 
 export type WaitingLang = 'es' | 'en';
 export type UiStatus = 'pending' | 'approved' | 'denied' | 'expired';
@@ -165,6 +168,7 @@ export interface WaitingTexts {
   expiredBody: string;
   privacy: string;
   noCredentials: string;
+  lanRedirecting: string;
 }
 
 const STR: Record<WaitingLang, WaitingTexts> = {
@@ -192,6 +196,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     privacy:
       'El equipo anfitrión debe aprobar tu acceso. Tu navegador intentará primero una conexión directa P2P (WebRTC) cifrada; si la red no lo permite usará el relay (el operador del relay puede ver el tráfico, protegido con TLS entre tu navegador y el relay).',
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
+    lanRedirecting: 'Red local detectada, abriendo versión rápida…',
   },
   en: {
     lang: 'en',
@@ -216,6 +221,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     privacy:
       'The host machine must approve your access. Your browser will first try a direct encrypted P2P (WebRTC) connection; if the network does not allow it, it will use the relay (the relay operator can see the traffic, protected with TLS between your browser and the relay).',
     noCredentials: 'This page will never ask for your username or password.',
+    lanRedirecting: 'Local network detected, opening fast version…',
   },
 };
 
@@ -227,10 +233,90 @@ export function waitingLang(req: Request): WaitingLang {
  * Renderiza la sala de espera. `urlCode` debe venir ya validado con
  * `isValidUrlCode` (aun así se escapa). La página inicial NUNCA incluye el
  * `sessionToken`: solo llega por `GET …/status` en tiempo de ejecución.
+ *
+ * `lan` (opcional, del daemon vía `ui-publish`): hints del fast-path LAN. Si
+ * están presentes se inyectan como JSON escapado (`</` → `<\/`) en un
+ * `<script type="application/json">` + un bloque JS best-effort que corre en
+ * paralelo al poll existente: prueba `GET http://<ip>:<port>/config`
+ * (público, PNA-friendly, timeout 1500 ms) y redirige UNA sola vez a la LAN
+ * si la identidad (`/config.fp`) coincide, o por reachability si hay una
+ * única IP candidata y el daemon es viejo (sin `fp`). Cualquier fallo
+ * (mixed-content, PNA, timeout, throw) se silencia: sigue el poll relay.
  */
-export function renderWaitingPage(urlCode: string, lang: WaitingLang): string {
+export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanHints | null): string {
   const t = STR[lang];
   const code = esc(urlCode);
+  const lanOk =
+    !!lan &&
+    typeof lan === 'object' &&
+    typeof (lan as LanHints).code === 'string' &&
+    (lan as LanHints).code !== '' &&
+    Array.isArray((lan as LanHints).ips) &&
+    (lan as LanHints).ips.length > 0 &&
+    typeof (lan as LanHints).port === 'number';
+  const lanJson = lanOk
+    ? JSON.stringify({
+        code: (lan as LanHints).code,
+        ips: (lan as LanHints).ips,
+        port: (lan as LanHints).port,
+        apiPort: (lan as LanHints).apiPort,
+        fp: (lan as LanHints).fp,
+      }).replace(/<\//g, '<\\/')
+    : '';
+  const lanHintHtml = lanOk ? `<p class="hint" id="wait-lan" hidden>${esc(t.lanRedirecting)}</p>` : '';
+  const lanScript = lanOk
+    ? `<script id="lan-hints" type="application/json">${lanJson}</script>
+<script>
+(function(){
+try{
+var el=document.getElementById('lan-hints');
+if(!el)return;
+var lan=null;
+try{lan=JSON.parse(el.textContent||'null');}catch(e){return;}
+if(!lan||!lan.ips||!lan.ips.length||!lan.code||!lan.port)return;
+var segs=location.pathname.split('/').filter(function(p){return !!p;});
+var urlCode=segs.length?segs[segs.length-1]:'';
+if(!urlCode)return;
+var KEY='lanRedirect:'+urlCode;
+var fired=false;
+try{if(sessionStorage.getItem(KEY))return;}catch(e){}
+function goLan(ip,port){
+if(fired)return;fired=true;
+try{sessionStorage.setItem(KEY,'1');}catch(e){}
+var msg=document.getElementById('wait-lan');
+if(msg)msg.hidden=false;
+try{location.replace('http://'+ip+':'+port+'/?invite='+encodeURIComponent(lan.code)+'&kiosk=1&relayFallback='+encodeURIComponent(urlCode));}catch(e){}
+}
+function checkLan(ip,port,single){
+var ctl=null;
+try{ctl=new AbortController();}catch(e){ctl=null;}
+var to=setTimeout(function(){try{if(ctl)ctl.abort();}catch(e){}},1500);
+var opt={cache:'no-store',mode:'cors'};
+if(ctl)opt.signal=ctl.signal;
+fetch('http://'+ip+':'+port+'/config',opt).then(function(res){
+clearTimeout(to);
+if(!res||!res.ok)return;
+return res.json().then(function(data){
+if(fired||!data||typeof data!=='object')return;
+var fp=(typeof data.fp==='string'&&data.fp)?data.fp:null;
+if(fp){if(lan.fp&&fp===lan.fp)goLan(ip,port);return;}
+if(single&&(data.frontendPort||data.apiPort||data.wsPort))goLan(ip,port);
+}).catch(function(){});
+}).catch(function(){clearTimeout(to);});
+}
+var singleLan=lan.ips.length===1;
+for(var i=0;i<lan.ips.length;i++){
+(function(ip){
+if(typeof ip!=='string'||!/^[0-9.]+$/.test(ip))return;
+var p=(typeof lan.port==='number'&&lan.port>=1&&lan.port<=65535)?lan.port:0;
+if(!p)return;
+checkLan(ip,p,singleLan);
+})(lan.ips[i]);
+}
+}catch(e){}
+})();
+</script>`
+    : '';
   return `<!doctype html>
 <html lang="${t.lang}">
 <head>
@@ -264,7 +350,7 @@ button:active{transform:scale(.97)}
 <h1>${esc(t.pendingTitle)}</h1>
 <p>${esc(t.pendingBody)}</p>
 <p class="hint">${esc(t.pendingTransport)}</p>
-<div><span class="code" id="wait-code">${code}</span></div>
+${lanHintHtml}<div><span class="code" id="wait-code">${code}</span></div>
 <div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
 </div>
 <div class="card" id="st-approved" hidden>
@@ -334,7 +420,7 @@ poll();
 timer=setInterval(poll,POLL_MS);
 })();
 </script>
-</body>
+${lanScript}</body>
 </html>`;
 }
 
@@ -450,6 +536,10 @@ a.btn{display:inline-block;text-decoration:none;cursor:pointer;border:0;border-r
 export interface UiRouteOptions {
   /** Fuente de verdad del estado (el módulo del túnel). Si se omite, import dinámico. */
   getUiStatus?: GetUiStatus;
+  /** Hints LAN del fast-path (si el servidor es el RelayServer real, el
+   *  `setUiPageHandler` de index.ts los resuelve vía `tunnel.getLanHints`;
+   *  este accesorio cubre el `handleUiFetch` standalone). Best-effort. */
+  getLanHints?: (code: string) => LanHints | null | undefined;
   /** Solo sirve la página; deja `…/status` al handler del túnel. */
   pageOnly?: boolean;
   /** Permite adaptar el poll si el túnel usa otra ruta (desviación documentada: ninguna). */
@@ -516,7 +606,14 @@ export async function handleUiFetch(req: Request, opts: UiRouteOptions = {}): Pr
     if (wantsJson(req)) {
       return Response.json({ page: 'ui-waiting', urlCode: code }, { headers: noStore() });
     }
-    const html = renderWaitingPage(code, waitingLang(req));
+    let lan: LanHints | undefined;
+    try {
+      const h = opts.getLanHints?.(code);
+      if (h && typeof h === 'object') lan = h;
+    } catch {
+      lan = undefined;
+    }
+    const html = renderWaitingPage(code, waitingLang(req), lan);
     if (req.method === 'HEAD') {
       return new Response(null, {
         status: 200,

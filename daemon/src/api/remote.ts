@@ -277,11 +277,22 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
 
   if (path === '/api/v1/remote/ui-code' && method === 'POST') {
     if (!isUiEnabled(db)) return uiDisabled();
-    const c = createUiCode(db);
+    // Fast-path LAN: `createUiCode` asegura además un lan-invite pareado
+    // (`ui-fastpath`, reutilizado si le quedan >60 s) y lo publica al relay
+    // como `ui-publish {…, lan?}`. Aquí se devuelve SOLO al host el mismo
+    // objeto `lan` (invite code + IPs/puertos/fp/dev públicos, sin token de
+    // sesión); si el host no tiene IPs LAN, `lan` se omite en origen.
+    const c = createUiCode(db) as { code: string; urlCode: string; expiresAt: number; lan?: unknown };
     const https = relayHttpsUrl(db);
     const url = https ? `${https}/ui/${c.urlCode}` : '';
     try { services.wsManager?.broadcast('remote.ui-code', { expiresAt: c.expiresAt, ts: Date.now() }, 'remote'); } catch { /* noop */ }
-    return jsonResponse({ code: c.code, urlCode: c.urlCode, url, expiresAt: c.expiresAt });
+    return jsonResponse({
+      code: c.code,
+      urlCode: c.urlCode,
+      url,
+      expiresAt: c.expiresAt,
+      ...(c.lan ? { lan: c.lan } : {}),
+    });
   }
 
   if (path === '/api/v1/remote/ui-code' && method === 'DELETE') {

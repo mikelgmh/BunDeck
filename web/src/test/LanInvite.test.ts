@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   parseLanInviteFromUrl,
+  parseRelayFallbackFromUrl,
   buildLanInviteUrl,
   stripLanInviteFromUrl,
   getStoredLanSession,
@@ -52,6 +53,13 @@ describe('lanInvite: parse/build/strip del enlace', () => {
     expect(clean).toContain('kiosk=1')
   })
 
+  it('strip conserva relayFallback (el escape sobrevive a la limpieza)', () => {
+    const clean = stripLanInviteFromUrl('http://h:3002/?invite=ABC&relayFallback=AbC123xYz&kiosk=1')
+    expect(clean).not.toContain('invite=ABC')
+    expect(clean).toContain('relayFallback=AbC123xYz')
+    expect(clean).toContain('kiosk=1')
+  })
+
   it('sesión en storage: guardar/leer/limpiar', () => {
     const s = memStorage()
     expect(getStoredLanSession(s)).toBeNull()
@@ -66,6 +74,22 @@ describe('lanInvite: parse/build/strip del enlace', () => {
     expect(isLanDeniedError(new Error('Sin permiso: entra con el QR'), 403)).toBe(true)
     expect(isLanDeniedError(new Error('API Error: 500'), 500)).toBe(false)
     expect(isLanDeniedError(null)).toBe(false)
+  })
+})
+
+describe('lanInvite: escape al relay (?relayFallback=<urlCode>)', () => {
+  it('acepta solo urlCode válido (nunca URL ni dominio: no se inventan)', () => {
+    expect(parseRelayFallbackFromUrl('?relayFallback=AbC123xYz')).toBe('AbC123xYz')
+    expect(parseRelayFallbackFromUrl('?invite=X&relayFallback=AbC123xYz')).toBe('AbC123xYz')
+    // URL completa o dominio: se rechaza (la LAN no conoce el dominio relay).
+    expect(parseRelayFallbackFromUrl('?relayFallback=https://relay.example/ui/AbC123xYz')).toBeNull()
+    expect(parseRelayFallbackFromUrl('?relayFallback=relay.example')).toBeNull()
+    // Vacío, ausente o con caracteres raros: null.
+    expect(parseRelayFallbackFromUrl('?relayFallback=')).toBeNull()
+    expect(parseRelayFallbackFromUrl('?kiosk=1')).toBeNull()
+    expect(parseRelayFallbackFromUrl('')).toBeNull()
+    expect(parseRelayFallbackFromUrl('?relayFallback=<script>alert(1)</script>')).toBeNull()
+    expect(parseRelayFallbackFromUrl('?relayFallback=ab')).toBeNull()
   })
 })
 

@@ -246,12 +246,23 @@ export function createDaemonFetch(deps: DaemonHttpDeps): (req: Request, server?:
 
     // Config para el frontend (puertos centralizados).
     // También servido por el frontend embebido en prod; aquí para DEV_MODE.
+    // `fp`/`dev` son identidad PÚBLICA (ya expuesta en QR/status, sin secretos).
     if (url.pathname === '/config') {
+      let fp = '';
+      let dev = '';
+      try {
+        const { publicIdentity } = await import('../remote/identity');
+        const pub = publicIdentity(new DatabaseService());
+        fp = pub.fingerprint;
+        dev = pub.deviceId;
+      } catch { /* sin BD: config sin identidad */ }
       return finish(new Response(
         JSON.stringify({
           wsPort: WS_PORT,
           apiPort: PORT,
           frontendPort: FRONTEND_PORT,
+          fp,
+          dev,
         }),
         {
           headers: {

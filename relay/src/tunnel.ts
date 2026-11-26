@@ -10,7 +10,12 @@
  *  - daemon→relay `{v:1, kind:'tunnel-register', deviceId}` →
  *    `{v:1, kind:'tunnel-registered', deviceId}`.
  *  - daemon→relay `{v:1, kind:'ui-publish', urlCode, exp}` (urlCode string
- *    12+ chars, exp epochMs) → `{v:1, kind:'ui-published', urlCode}`.
+ *    12+ chars, `exp` epochMs) → `{v:1, kind:'ui-published', urlCode}`.
+ *    Extensión fast-path LAN (backward-compatible, opcional): el daemon puede
+ *    adjuntar `lan?: { code, ips, port, apiPort, fp, dev }` (invite LAN +
+ *    fingerprints). El relay lo sanitiza duro y lo expone vía
+ *    `getLanHints(urlCode)` para que la waiting page intente un redirect
+ *    directo pre-aprobación. Sin `lan` todo sigue igual.
  *  - relay→daemon `{v:1, kind:'ui-request', reqId, urlCode, ua, ip}` (solo en
  *    la primera visita a `GET /ui/<urlCode>`).
  *  - daemon→relay `{v:1, kind:'ui-decision', reqId, allow}` →
@@ -120,6 +125,63 @@ interface HttpPending {
 interface CodeEntry {
   deviceId: string;
   exp: number;
+  /** Hints LAN del fast-path (redirect pre-aprobación); null = sin hints. */
+  lan?: LanHints | null;
+}
+
+/** Hints de LAN para el fast-path pre-aprobación de la waiting page. */
+export interface LanHints {
+  /** Código de invitación LAN (base64url, 16-80 chars). */
+  code: string;
+  /** IPv4 RFC1918 candidatas (≤4, ya filtradas). */
+  ips: string[];
+  /** Puerto del frontend LAN (sirve `/config` público). */
+  port: number;
+  /** Puerto de la API LAN. */
+  apiPort: number;
+  /** Fingerprint del daemon (identidad, compara con `/config.fp`). */
+  fp: string;
+  /** Nombre del dispositivo (informativo). */
+  dev: string;
+}
+
+const LAN_CODE_RE = /^[A-Za-z0-9_-]{16,80}$/;
+
+/** ¿IPv4 RFC1918 (`10/8`, `172.16/12`, `192.168/16`)? */
+function isRfc1918Ipv4(ip: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!m) return false;
+  const n = [m[1], m[2], m[3], m[4]].map(Number);
+  for (const o of n) if (!Number.isInteger(o) || o < 0 || o > 255) return false;
+  const [a, b] = n;
+  if (a === 10) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+function isPort(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 65535;
+}
+
+/**
+ * Sanitiza los hints LAN de `ui-publish`. Devuelve null si inválido: el
+ * publish sigue sin lan (nunca falla por esto; tolera relay viejo/daemon
+ * viejo y `lan` ausente).
+ */
+function sanitizeLanHints(input: unknown): LanHints | null {
+  if (!input || typeof input !== 'object') return null;
+  const l = input as Record<string, unknown>;
+  if (typeof l.code !== 'string' || !LAN_CODE_RE.test(l.code)) return null;
+  if (!Array.isArray(l.ips)) return null;
+  const ips = l.ips
+    .filter((ip): ip is string => typeof ip === 'string' && isRfc1918Ipv4(ip))
+    .slice(0, 4);
+  if (ips.length === 0) return null;
+  if (!isPort(l.port) || !isPort(l.apiPort)) return null;
+  if (typeof l.fp !== 'string' || l.fp.length > 128) return null;
+  if (typeof l.dev !== 'string' || l.dev.length > 128) return null;
+  return { code: l.code, ips, port: l.port, apiPort: l.apiPort, fp: l.fp, dev: l.dev };
 }
 
 interface PendingReq {
@@ -362,15 +424,21 @@ export class TunnelState {
 
   // ---- publicación de códigos ----
 
-  publish(ws: TunnelSocket, urlCode: unknown, exp: unknown): { deviceId: string } | { error: string } {
+  publish(ws: TunnelSocket, urlCode: unknown, exp: unknown, lan?: unknown): { deviceId: string } | { error: string } {
     const deviceId = this.socketDevice(ws);
     if (!deviceId) return { error: 'not-registered' };
     if (typeof urlCode !== 'string' || urlCode.length < MIN_URL_CODE_LEN) return { error: 'bad-code' };
     if (typeof exp !== 'number' || !Number.isFinite(exp)) return { error: 'bad-exp' };
     // Republicar reinicia el flujo y revoca sesiones/puentes de ese código.
     this.dropCode(urlCode);
-    this.codes.set(urlCode, { deviceId, exp });
+    this.codes.set(urlCode, { deviceId, exp, lan: sanitizeLanHints(lan) });
     return { deviceId };
+  }
+
+  /** Hints LAN del código (fast-path pre-aprobación); null si no hay. */
+  getLanHints(urlCode: string): LanHints | null {
+    if (typeof urlCode !== 'string' || urlCode === '') return null;
+    return this.codes.get(urlCode)?.lan ?? null;
   }
 
   // ---- flujo de aprobación ----

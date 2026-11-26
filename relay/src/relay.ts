@@ -653,7 +653,7 @@ export class RelayServer {
         return;
       }
       case 'ui-publish': {
-        const r = this.tunnel.publish(ws, msg.urlCode, msg.exp);
+        const r = this.tunnel.publish(ws, msg.urlCode, msg.exp, (msg as Record<string, unknown>).lan);
         if ('error' in r) err(r.error);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-published', urlCode: msg.urlCode }));
         return;

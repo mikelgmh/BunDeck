@@ -14,10 +14,14 @@
  *   isBinary}` / `{kind:'ws-close', id}` → puente contra el WS MANAGER local
  *   como un cliente local más (ver `ws.ts`: `createTunnelClient`,
  *   `handleTunnelMessage`, `removeTunnelClient`).
- * - Daemon → relay: `{kind:'ui-publish', urlCode, exp}`,
+ * - Daemon → relay: `{kind:'ui-publish', urlCode, exp, lan?}`,
  *   `{kind:'ui-unpublish', urlCode}`, `{kind:'ui-decision', reqId, allow}`,
  *   `{kind:'ui-bind', urlCode, sessionToken, exp}`,
  *   `{kind:'ui-unbind', sessionToken}`.
+ *   `lan?` (fast-path LAN, backward-compatible: el relay viejo lo ignora):
+ *   `{code, ips, port, apiPort, fp, dev}` — invite LAN 128 bits + máx 4
+ *   IPv4 RFC1918 del host + puertos + identidad pública. Se omite en origen
+ *   si el host no tiene IPs LAN.
  *
  * Si el túnel está caído o la UI remota está deshabilitada
  * (`remote.ui.enabled`, default false): las decisiones son deny y los
@@ -30,6 +34,11 @@
 import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
 import { RtcManager, buildTurnCreds } from './rtc';
 import { UI_CODE_KEY, UI_SESSION_PREFIX, UI_UNBIND_PENDING_PREFIX } from './ui-policy';
+import type { UiFastPathLan } from './ui-policy';
+import { readUiFastPathLan } from './ui-policy';
+
+/** Objeto `lan` del `ui-publish` extendido (re-export del contrato). */
+export type UiPublishLan = UiFastPathLan;
 
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
@@ -187,7 +196,7 @@ export class TunnelClient {
   private statusCb: ((s: TunnelStatus) => void) | null = null;
 
   private pending = new Map<string, UiPendingRequest>();
-  private published = new Map<string, number>(); // urlCode -> exp
+  private published = new Map<string, { exp: number; lan?: UiPublishLan }>(); // urlCode -> {exp, lan?}
   private bindings = new Map<string, UiBinding>(); // sessionToken -> binding
   /** Puentes WS activos: relayId -> { localClientId?, fallbackSubs? } */
   private bridges = new Map<string, { subs?: Set<string> }>();
@@ -321,14 +330,21 @@ export class TunnelClient {
       // Keepalive: sin tráfico periódico el LB/proxy corta el socket
       // ocioso (micro-corte → resync pesado + tormenta de hellos).
       this.startHeartbeat();
-      // Republicar códigos vigentes tras cada (re)conexión.
+      // Republicar códigos vigentes tras cada (re)conexión (con su `lan`
+      // fast-path si lo tenían: credenciales pareadas ui+lan).
       const now = this.now();
-      for (const [urlCode, exp] of [...this.published.entries()]) {
-        if (exp <= now) {
+      for (const [urlCode, entry] of [...this.published.entries()]) {
+        if (entry.exp <= now) {
           this.published.delete(urlCode);
           continue;
         }
-        this.send({ v: 1, kind: 'ui-publish', urlCode, exp });
+        this.send({
+          v: 1,
+          kind: 'ui-publish',
+          urlCode,
+          exp: entry.exp,
+          ...(entry.lan ? { lan: entry.lan } : {}),
+        });
       }
       // Re-anunciar el estado UI persistido (códigos + sesiones de settings):
       // sin esto, reiniciar el daemon invalidaba todos los `/t/<token>/`
@@ -409,10 +425,14 @@ export class TunnelClient {
 
   // ---- UI codes ----
 
-  /** Publica un código de UI en el relay (lo genera otro módulo). */
-  publishUiCode(urlCode: string, exp: number): void {
-    this.published.set(urlCode, exp);
-    this.send({ v: 1, kind: 'ui-publish', urlCode, exp });
+  /**
+   * Publica un código de UI en el relay (lo genera otro módulo).
+   * `lan?` = fast-path LAN pareado (backward-compatible: el relay viejo lo
+   * ignora). Se conserva en memoria para republicarlo tras cada reconexión.
+   */
+  publishUiCode(urlCode: string, exp: number, lan?: UiPublishLan): void {
+    this.published.set(urlCode, lan ? { exp, lan } : { exp });
+    this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan } : {}) });
   }
 
   /** Retira un código de UI del relay. */
@@ -430,8 +450,10 @@ export class TunnelClient {
     this.published.delete(urlCode);
   }
 
-  publishedCodes(): Array<{ urlCode: string; exp: number }> {
-    return [...this.published.entries()].map(([urlCode, exp]) => ({ urlCode, exp }));
+  publishedCodes(): Array<{ urlCode: string; exp: number; lan?: UiPublishLan }> {
+    return [...this.published.entries()].map(([urlCode, entry]) => (
+      entry.lan ? { urlCode, exp: entry.exp, lan: entry.lan } : { urlCode, exp: entry.exp }
+    ));
   }
 
   /**
@@ -480,8 +502,14 @@ export class TunnelClient {
         const exp = typeof code?.expiresAt === 'number' ? code.expiresAt
           : typeof code?.exp === 'number' ? code.exp : 0;
         if (urlCode && Number.isFinite(exp) && exp > now && !this.published.has(urlCode)) {
-          this.published.set(urlCode, exp);
-          this.send({ v: 1, kind: 'ui-publish', urlCode, exp });
+          // Fast-path LAN pareado (solo snapshot: resync no debe rotar el
+          // QR LAN; si no hay invite vigente o no hay IPs, se omite `lan`).
+          let lan: UiPublishLan | undefined;
+          try {
+            lan = readUiFastPathLan(this.db as any) as UiPublishLan | undefined;
+          } catch { lan = undefined; }
+          this.published.set(urlCode, lan ? { exp, lan } : { exp });
+          this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan } : {}) });
           out.republishedCode = true;
         }
       }

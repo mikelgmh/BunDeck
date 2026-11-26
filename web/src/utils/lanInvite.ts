@@ -10,6 +10,29 @@
 export const LAN_INVITE_PARAM = 'invite'
 export const LAN_SESSION_KEY = 'libredeck_lan_session'
 export const LAN_DENIED_CODE = 'LAN_INVITE_REQUIRED'
+/**
+ * Vía de escape al relay cuando el canje LAN falla (`?relayFallback=<urlCode>`).
+ * Lo pone la waiting del relay al redirigir al fast-path LAN. Solo es un
+ * CÓDIGO (nunca un dominio: la LAN no puede saber el dominio del relay, así
+ * que jamás se construye una URL con él): se muestra + se copia, sin
+ * redirigir jamás de vuelta solo (anti-bucle).
+ */
+export const RELAY_FALLBACK_PARAM = 'relayFallback'
+/** urlCode válido: alfanumérico + `_-`, 4–64 chars (p. ej. `AbC123xYz`). */
+const RELAY_FALLBACK_RE = /^[A-Za-z0-9_-]{4,64}$/
+
+/** Código de escape al relay en la URL (`?relayFallback=<urlCode>`), o null. */
+export function parseRelayFallbackFromUrl(search?: string | null): string | null {
+  try {
+    const q = String(search ?? (typeof window !== 'undefined' ? window.location.search : ''))
+    if (!q) return null
+    const params = new URLSearchParams(q.startsWith('?') ? q : `?${q}`)
+    const v = (params.get(RELAY_FALLBACK_PARAM) ?? '').trim()
+    return RELAY_FALLBACK_RE.test(v) ? v : null
+  } catch {
+    return null
+  }
+}
 
 /** Código de invitación en la URL (`?invite=<código>`). */
 export function parseLanInviteFromUrl(search?: string | null): string | null {

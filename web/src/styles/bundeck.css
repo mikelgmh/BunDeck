@@ -1404,6 +1404,18 @@
   line-height: 1.5;
   margin: 0 0 8px;
 }
+/* Escape al relay en "Sin permiso" (fast-path LAN fallido): solo muestra el
+   código + copiar; nunca redirige (anti-bucle LAN↔relay). */
+.bundeck .bd-noperm__fallback {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bd-ln);
+}
+.bundeck .bd-noperm__fallback .bd-mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
 /* Velo de inactividad (web/remotos): pantalla completa negra, la opacidad la
    pone el componente según el tiempo sin interactuar; el primer toque
    despierta (poke) sin atravesar. Por encima del contenido pero por debajo

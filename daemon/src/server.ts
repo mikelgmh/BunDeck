@@ -273,11 +273,22 @@ class LibreDeckDaemon {
             return new Response(withCookie.body, { status: withCookie.status, headers });
           };
 
-          // Servir config
+          // Servir config (puertos + identidad pública fp/dev, sin secretos).
           if (url.pathname === '/config') {
+            let fp = '';
+            let dev = '';
+            try {
+              const { publicIdentity } = await import('../remote/identity');
+              const pub = publicIdentity(new DatabaseService());
+              fp = pub.fingerprint;
+              dev = pub.deviceId;
+            } catch { /* sin BD: config sin identidad */ }
             const config: any = {
               wsPort: WS_PORT,
               apiPort: PORT,
+              frontendPort: FRONTEND_PORT,
+              fp,
+              dev,
             };
 
             return finish(new Response(JSON.stringify(config), {

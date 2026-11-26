@@ -33,6 +33,20 @@ describe('TunnelConnectDialog', () => {
     expect(wrapper.emitted('dismiss')).toBeTruthy()
     wrapper.unmount()
   })
+
+  it('signaling usa la clave honesta (localizar sesión en el relay, no LAN)', async () => {
+    const wrapper = mount(TunnelConnectDialog, { props: { status: 'signaling' } })
+    const items = wrapper.findAll('.kstep')
+    // t está mockeado como identidad: se assertan CLAVES, no literales.
+    expect(items).toHaveLength(3)
+    expect(items[0].find('span').text()).toBe('bd.tunnelConnectStepDiscover')
+    expect(items[0].classes()).toContain('done')
+    expect(items[1].find('span').text()).toBe('bd.tunnelTransportP2p')
+    expect(items[1].classes()).toContain('act')
+    expect(items[2].find('span').text()).toBe('bd.tunnelConnectStepRelay')
+    expect(items[2].classes()).toContain('pend')
+    wrapper.unmount()
+  })
 })
 
 describe('TunnelKioskDot', () => {

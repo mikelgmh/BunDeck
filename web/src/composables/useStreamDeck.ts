@@ -2,7 +2,7 @@ import { ref, computed, nextTick } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
 import { rtcFetchIfConnected, getRtcSingleton } from './useRemoteRtc'
 import {
-  parseLanInviteFromUrl, stripLanInviteFromUrl,
+  parseLanInviteFromUrl, stripLanInviteFromUrl, parseRelayFallbackFromUrl,
   getStoredLanSession, setStoredLanSession, clearStoredLanSession,
   isLanDeniedError, LAN_DENIED_CODE,
 } from '../utils/lanInvite'
@@ -191,6 +191,9 @@ export function useStreamDeck() {
   const lanDenied = ref(false)
   const lanSession = ref<string | null>(getStoredLanSession())
   const lanRedeeming = ref(false)
+  // Vía de escape al relay (`?relayFallback=<urlCode>`): solo se MUESTRA
+  // (código + copiar) cuando el canje LAN falla; jamás redirige solo.
+  const lanRelayFallback = ref<string | null>(null)
 
   // Túnel del relay (/t/<token>/…): si el relay responde invalid-token /
   // expired / daemon-offline, la sesión no vale (reinicio, caducidad 24 h o
@@ -600,6 +603,9 @@ export function useStreamDeck() {
    */
   const redeemLanInviteFromUrl = async (search?: string): Promise<boolean> => {
     if (getTunnelToken()) return true
+    // Capturar ANTES de limpiar la URL (el strip conserva relayFallback, pero
+    // la lectura explícita deja claro que nunca depende del canje).
+    lanRelayFallback.value = parseRelayFallbackFromUrl(search)
     const code = parseLanInviteFromUrl(search)
     if (code && !lanRedeeming.value) {
       lanRedeeming.value = true
@@ -3200,6 +3206,8 @@ export function useStreamDeck() {
     lanSession,
     lanRedeeming,
     redeemLanInviteFromUrl,
+    // Escape al relay cuando el canje LAN falla (solo display, sin redirect)
+    lanRelayFallback,
 
     // Túnel del relay: sesión muerta (reinicio/caducidad/daemon caído)
     tunnelSessionInvalid,
