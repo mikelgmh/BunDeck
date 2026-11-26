@@ -1,3 +1,11 @@
+# [1.18.0](https://github.com/mikelgmh/BunDeck/compare/v1.17.0...v1.18.0) (2026-11-26)
+
+
+### Features
+
+* **kiosco:** barra inferior flotante y dialogo de conexion redisenado ([703103d](https://github.com/mikelgmh/BunDeck/commit/703103da8b551aab5e52fa9940da82ff9a312204))
+* **remote:** fast-path LAN con auto-redirect pre-aprobacion y paso de kiosco honesto ([09ffa8f](https://github.com/mikelgmh/BunDeck/commit/09ffa8ff66ba480c0b4276edb7c7e346f2a7596c))
+
 # [1.17.0](https://github.com/mikelgmh/BunDeck/compare/v1.16.0...v1.17.0) (2026-11-26)
 
 
