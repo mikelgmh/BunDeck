@@ -361,6 +361,30 @@ describe('fast-path LAN: aviso visible wait-lan-check + contrato libredeck:lanPr
     expect(sb.location.replaced).toContain('http://192.168.1.10:4321/?invite=');
   });
 
+  test('botón manual a la LAN: visible desde el inicio con href invite+kiosk+fallback', () => {
+    const html = renderWaitingPage('abc123', 'es', LAN);
+    expect(html).toContain('id="wait-lan-local"');
+    expect(html).toContain('¿Estás en la misma Wi-Fi');
+    // Navegación top-level por gesto (sin fetch): funciona aunque el
+    // navegador bloquee el probe automático.
+    expect(html).toContain('http://192.168.1.10:3002/?invite=');
+    expect(html).toContain('kiosk=1');
+    expect(html).toContain('relayFallback=abc123');
+    expect(html).toContain('Abrir versión local');
+    const en = renderWaitingPage('abc123', 'en', LAN);
+    expect(en).toContain('On the same Wi-Fi');
+    expect(en).toContain('Open local version');
+  });
+
+  test('varias IPs: un botón por IP con su etiqueta', () => {
+    const multi = { ...LAN, ips: ['192.168.1.10', '10.0.0.5'] };
+    const html = renderWaitingPage('abc123', 'es', multi);
+    expect(html).toContain('http://192.168.1.10:3002/?invite=');
+    expect(html).toContain('http://10.0.0.5:3002/?invite=');
+    expect(html).toContain('Abrir versión local · 192.168.1.10');
+    expect(html).toContain('Abrir versión local · 10.0.0.5');
+  });
+
   test('con lan + fetch ko (todo falla): oculta wait-lan-check y guarda probe ok:false', async () => {
     const html = renderWaitingPage('abc123', 'es', LAN);
     const { lanJson, script } = extractProbe(html);

@@ -179,6 +179,8 @@ export interface WaitingTexts {
   noCredentials: string;
   lanChecking: string;
   lanRedirecting: string;
+  lanLocalTitle: string;
+  lanLocalOpen: string;
 }
 
 const STR: Record<WaitingLang, WaitingTexts> = {
@@ -208,6 +210,8 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
     lanChecking: 'Comprobando si estás en la misma red local…',
     lanRedirecting: 'Red local detectada, abriendo versión rápida…',
+    lanLocalTitle: '¿Estás en la misma Wi-Fi que este equipo? Ábrelo directamente (no usa internet):',
+    lanLocalOpen: 'Abrir versión local',
   },
   en: {
     lang: 'en',
@@ -234,6 +238,8 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     noCredentials: 'This page will never ask for your username or password.',
     lanChecking: 'Checking whether you are on the same local network…',
     lanRedirecting: 'Local network detected, opening fast version…',
+    lanLocalTitle: 'On the same Wi-Fi as this machine? Open it directly (no internet needed):',
+    lanLocalOpen: 'Open local version',
   },
 };
 
@@ -281,6 +287,19 @@ export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanH
     : '';
   const lanHintHtml = lanOk
     ? `<p class="hint" id="wait-lan-check">${esc(t.lanChecking)}</p><p class="hint" id="wait-lan" hidden>${esc(t.lanRedirecting)}</p>`
+    : '';
+  // Atajo manual a la LAN (el auto-redirect por fetch falla en navegadores
+  // que exigen permiso de red local o bloquean https→http): la navegación
+  // top-level por gesto del usuario a http:// SÍ está permitida siempre.
+  // Misma URL que el redirect automático (invite de un solo uso + kiosk).
+  const lanStaticIps = lanOk && Array.isArray((lan as LanHints).ips)
+    ? ((lan as LanHints).ips as unknown[]).filter((ip): ip is string => typeof ip === 'string' && /^[0-9.]+$/.test(ip)).slice(0, 4)
+    : [];
+  const lanStaticPort = lanOk && typeof (lan as LanHints).port === 'number' && (lan as LanHints).port >= 1 && (lan as LanHints).port <= 65535
+    ? (lan as LanHints).port as number
+    : 0;
+  const lanLocalHtml = lanOk && lanStaticIps.length > 0 && lanStaticPort > 0 && typeof (lan as LanHints).code === 'string' && (lan as LanHints).code !== ''
+    ? `<p class="hint" id="wait-lan-local">${esc(t.lanLocalTitle)}</p><div class="btnrow">${lanStaticIps.map((ip) => `<a class="abtn" href="http://${esc(ip)}:${lanStaticPort}/?invite=${encodeURIComponent((lan as LanHints).code as string)}&amp;kiosk=1&amp;relayFallback=${encodeURIComponent(urlCode)}">${esc(lanStaticIps.length > 1 ? `${t.lanLocalOpen} · ${ip}` : t.lanLocalOpen)}</a>`).join('')}</div>`
     : '';
   const lanScript = lanOk
     ? `<script id="lan-hints" type="application/json">${lanJson}</script>
@@ -381,6 +400,9 @@ p{margin:8px 0}
 .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:26px;letter-spacing:2px;background:rgba(148,163,184,.18);border-radius:10px;padding:10px 18px;display:inline-block;margin:12px 0;word-break:break-all}
 button{cursor:pointer;border:0;border-radius:10px;padding:10px 22px;font-weight:700;background:#334155;color:#e2e8f0;margin-top:10px}
 button:active{transform:scale(.97)}
+a.abtn{display:inline-block;text-decoration:none;border:0;border-radius:10px;padding:10px 22px;font-weight:700;background:#334155;color:#e2e8f0;margin-top:10px}
+a.abtn:active{transform:scale(.97)}
+.btnrow{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .warn{font-size:13px;color:#fbbf24}
 .privacy{font-size:12.5px;opacity:.7;margin-top:20px}
 [hidden]{display:none!important}
@@ -394,7 +416,7 @@ button:active{transform:scale(.97)}
 <p>${esc(t.pendingBody)}</p>
 <p class="hint">${esc(t.pendingTransport)}</p>
 ${lanHintHtml}<div><span class="code" id="wait-code">${code}</span></div>
-<div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
+${lanLocalHtml}<div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
 </div>
 <div class="card" id="st-approved" hidden>
 <div class="spinner" role="status" aria-label="loading"></div>
