@@ -39,6 +39,14 @@ export class DeviceStore {
   constructor(dataDir: string, filename = 'relay.db') {
     this.db = openDatabaseWithFallback(dataDir, filename);
     this.db.exec(SCHEMA);
+    try {
+      const cols = this.db.prepare('PRAGMA table_info(tunnel_sessions)').all() as Array<{ name?: string }>;
+      if (!cols.some((c) => c?.name === 'secret_hash')) {
+        this.db.exec('ALTER TABLE tunnel_sessions ADD COLUMN secret_hash TEXT');
+      }
+    } catch {
+      /* best-effort: memoria sigue mandando */
+    }
   }
 
   upsert(id: string, pubKey: string, name?: string): void {
@@ -70,9 +78,28 @@ export class DeviceStore {
 
   // ---- Sesiones del túnel UI (supervivencia a reinicios del relay) ----
   // Solo lo necesario para rehidratar `TunnelState.sessions`: token,
-  // deviceId, exp, urlCode y TURN (JSON). JAMÁS secretos del daemon.
+  // deviceId, exp, urlCode y TURN (JSON). Para `/s/*` además `secret_hash`
+  // (sha256 del secreto; el secreto plano nunca se persiste).
 
-  saveTunnelSession(row: { token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }): void {
+  saveTunnelSession(row: { token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null; secretHash?: string | null }): void {
+    let hasSecretCol = true;
+    try {
+      const cols = this.db.prepare('PRAGMA table_info(tunnel_sessions)').all() as Array<{ name?: string }>;
+      hasSecretCol = cols.some((c) => c?.name === 'secret_hash');
+    } catch {
+      hasSecretCol = false;
+    }
+    if (hasSecretCol) {
+      this.db
+        .prepare(
+          `INSERT INTO tunnel_sessions (token, device_id, exp, url_code, turn, secret_hash)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(token) DO UPDATE SET device_id = excluded.device_id,
+             exp = excluded.exp, url_code = excluded.url_code, turn = excluded.turn, secret_hash = excluded.secret_hash`,
+        )
+        .run(row.token, row.deviceId, row.exp, row.urlCode, row.turnJson, row.secretHash ?? null);
+      return;
+    }
     this.db
       .prepare(
         `INSERT INTO tunnel_sessions (token, device_id, exp, url_code, turn)
@@ -91,10 +118,16 @@ export class DeviceStore {
     this.db.prepare('DELETE FROM tunnel_sessions WHERE device_id = ?').run(deviceId);
   }
 
-  listTunnelSessions(): Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }> {
-    return this.db
-      .prepare('SELECT token, device_id AS deviceId, exp, url_code AS urlCode, turn AS turnJson FROM tunnel_sessions')
-      .all() as Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }>;
+  listTunnelSessions(): Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null; secretHash?: string | null }> {
+    try {
+      return this.db
+        .prepare('SELECT token, device_id AS deviceId, exp, url_code AS urlCode, turn AS turnJson, secret_hash AS secretHash FROM tunnel_sessions')
+        .all() as Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null; secretHash?: string | null }>;
+    } catch {
+      return this.db
+        .prepare('SELECT token, device_id AS deviceId, exp, url_code AS urlCode, turn AS turnJson FROM tunnel_sessions')
+        .all() as Array<{ token: string; deviceId: string; exp: number; urlCode: string; turnJson: string | null }>;
+    }
   }
 
   pruneTunnelSessions(now: number): number {

@@ -16,7 +16,7 @@
  * - Webcam snapshot sin ffmpeg → error con instrucciones de instalación.
  * - OBS auth errónea → error "contraseña incorrecta".
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'bun:test'
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from 'bun:test'
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -234,7 +234,23 @@ describe('E2E YouTube vía ActionRunner', () => {
 })
 
 // ---------- 3. Discord ----------
-describe('E2E Discord vía ActionRunner (spawn fake)', () => {
+// `SKIP_DISCORD_E2E=1` los omite (útil con Discord apagado / sin RPC local).
+// Además son herméticos: otro fichero (discord-retry.test.ts) deja un token
+// caducado en la DB compartida del proceso y, sin limpiar, withRpc ve
+// token-expired y estos tests de fallback hotkey solo fallan en suite completa.
+const discordDescribe = process.env.SKIP_DISCORD_E2E === '1' ? describe.skip : describe
+discordDescribe('E2E Discord vía ActionRunner (spawn fake)', () => {
+    beforeEach(async () => {
+        try {
+            const { DatabaseService } = await import('../db')
+            const db = new DatabaseService()
+            for (const k of ['plugin.discord.accessToken', 'plugin.discord.refreshToken', 'plugin.discord.tokenExpiresAt']) {
+                try { db.deleteSetting(k) } catch { /* noop */ }
+            }
+            // Fuerza el fallback hotkey: con modo hotkey withRpc ni mira el RPC.
+            try { db.setSetting('plugin.discord.mode', 'hotkey') } catch { /* noop */ }
+        } catch { /* sin DB: los tests ya fallarán por sí solos */ }
+    })
     it('toggle-mute envía el hotkey', async () => {
         installSpawn(() => ({ stdout: '', exitCode: 0 }))
         const r = await run('discord.toggle-mute', { hotkey: 'ctrl+shift+m' })

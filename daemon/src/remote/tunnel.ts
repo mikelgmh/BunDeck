@@ -55,6 +55,9 @@ export interface UiBinding {
   sessionToken: string;
   urlCode: string;
   exp: number;
+  /** Nuevo flujo split-token: sid público + secreto (cookie HttpOnly). */
+  sid?: string;
+  secret?: string;
 }
 
 export type HttpHandler = (req: Request) => Promise<Response>;
@@ -171,6 +174,13 @@ function randomSessionToken(): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { randomBytes } = require('node:crypto');
   return randomBytes(32).toString('hex');
+}
+
+function randomSid(): string {
+  // 16 bytes hex (128 bits): público en URL, no es el secreto.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomBytes } = require('node:crypto');
+  return randomBytes(16).toString('hex');
 }
 
 export interface TunnelClientOpts {
@@ -518,8 +528,8 @@ export class TunnelClient {
     const sessions = this.readPrefixedSettings(UI_SESSION_PREFIX);
     for (const [k, v] of Object.entries(sessions)) {
       const token = k.slice(UI_SESSION_PREFIX.length);
-      if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
-      let s: { exp?: unknown; revoked?: unknown };
+      if (!/^[0-9a-fA-F]{16,}$/.test(token)) continue;
+      let s: { exp?: unknown; revoked?: unknown; secret?: unknown; sid?: unknown };
       try {
         s = JSON.parse(v) as { exp?: unknown; revoked?: unknown };
       } catch {
@@ -531,8 +541,19 @@ export class TunnelClient {
         // Revocada en local pero quizá el relay no se enteró (caído al
         // revocar): reintento best-effort, el relay ignora lo desconocido.
         this.bindings.delete(token);
+        this.bindings.delete(`sid:${token}`);
         this.send({ v: 1, kind: 'ui-unbind', sessionToken: token });
+        this.send({ v: 1, kind: 'ui-unbind', sid: token, sessionToken: token });
         out.unbound += 1;
+        continue;
+      }
+      const secret = typeof s?.secret === 'string' && /^[0-9a-fA-F]{32,}$/.test(s.secret) ? s.secret : null;
+      if (secret) {
+        // Sesión split-token: re-anuncia SOLO sid+secret (sin sessionToken legacy).
+        // Enviar sessionToken=sid crearía un /t/<sid>/ con el sid público (agujero).
+        this.bindings.set(token, { sessionToken: token, urlCode: '', exp, sid: token, secret });
+        this.send({ v: 1, kind: 'ui-rebind', sid: token, secret, exp });
+        out.rebound += 1;
         continue;
       }
       this.bindings.set(token, { sessionToken: token, urlCode: '', exp });
@@ -545,7 +566,7 @@ export class TunnelClient {
     const tombstones = this.readPrefixedSettings(UI_UNBIND_PENDING_PREFIX);
     for (const [k, v] of Object.entries(tombstones)) {
       const token = k.slice(UI_UNBIND_PENDING_PREFIX.length);
-      if (!/^[0-9a-fA-F]{32,}$/.test(token)) continue;
+      if (!/^[0-9a-fA-F]{16,}$/.test(token)) continue;
       const exp = Number(v);
       if (exp === 0) {
         // Tombstone perenne: la sesión revocada no caducaba; el unbind
@@ -599,11 +620,14 @@ export class TunnelClient {
   /**
    * Aprueba/deniega una petición pendiente. Si el túnel está caído o la UI
    * remota está deshabilitada, la decisión es deny aunque se pida allow.
-   * Al aprobar genera sessionToken (32 bytes hex) y emite ui-bind.
+   * Al aprobar genera sessionToken legacy (32 bytes hex) + sid (16 bytes) +
+   * secreto (32 bytes) y emite ui-bind con ambos (compat: relays viejos usan
+   * sessionToken, relays nuevos prefieren sid+secret y nunca exponen el
+   * secreto en la URL).
    * Incluye credenciales TURN efímeras si TURN_SECRET está configurado
    * (para WebRTC P2P; el relay las entrega en el primer poll approved).
    */
-  decideUiRequest(reqId: string, allow: boolean, exp?: number): { ok: boolean; allowed: boolean; sessionToken?: string; error?: string } {
+  decideUiRequest(reqId: string, allow: boolean, exp?: number): { ok: boolean; allowed: boolean; sessionToken?: string; sid?: string; secret?: string; error?: string } {
     const entry = this.pending.get(reqId);
     if (!entry) return { ok: false, allowed: false, error: 'reqId desconocido o expirado' };
     if (entry.expiresAt <= this.now()) {
@@ -615,23 +639,49 @@ export class TunnelClient {
     this.send({ v: 1, kind: 'ui-decision', reqId, allow: effectiveAllow });
     if (!effectiveAllow) return { ok: true, allowed: false };
     const sessionToken = randomSessionToken();
+    const sid = randomSid();
+    const secret = randomSessionToken();
     const bindExp = exp ?? this.now() + 24 * 3600 * 1000;
-    this.bindings.set(sessionToken, { sessionToken, urlCode: entry.urlCode, exp: bindExp });
+    this.bindings.set(sessionToken, { sessionToken, urlCode: entry.urlCode, exp: bindExp, sid, secret });
+    this.bindings.set(`sid:${sid}`, { sessionToken, urlCode: entry.urlCode, exp: bindExp, sid, secret });
     const turn = buildTurnCreds(sessionToken);
     this.send({
       v: 1,
       kind: 'ui-bind',
       urlCode: entry.urlCode,
       sessionToken,
+      sid,
+      secret,
       exp: bindExp,
       ...(turn ? { turn } : {}),
     });
-    return { ok: true, allowed: true, sessionToken };
+    return { ok: true, allowed: true, sessionToken, sid, secret };
   }
 
-   /** Revoca una sesión UI (emite ui-unbind). */
+   /** Revoca una sesión UI (emite ui-unbind legacy + sid). Acepta token legacy o sid. */
   revokeUiSession(sessionToken: string): boolean {
-    const existed = this.bindings.delete(sessionToken);
+    const key = String(sessionToken ?? '');
+    let existed = false;
+    const byToken = this.bindings.get(key);
+    if (byToken) {
+      existed = true;
+      this.bindings.delete(key);
+      if (byToken.sid) this.bindings.delete(`sid:${byToken.sid}`);
+      this.send({ v: 1, kind: 'ui-unbind', sessionToken: byToken.sessionToken });
+      if (byToken.sid) this.send({ v: 1, kind: 'ui-unbind', sid: byToken.sid, sessionToken: byToken.sid });
+    }
+    // Búsqueda por sid (el panel revoca por prefijo: puede ser sid o legacy).
+    for (const [k, b] of [...this.bindings]) {
+      if (b.sid === key || b.sessionToken === key) {
+        existed = true;
+        this.bindings.delete(k);
+        if (b.sid) {
+          this.bindings.delete(`sid:${b.sid}`);
+          this.send({ v: 1, kind: 'ui-unbind', sid: b.sid, sessionToken: b.sid });
+        }
+        this.send({ v: 1, kind: 'ui-unbind', sessionToken: b.sessionToken });
+      }
+    }
     // Tombstone durable: si el relay está caído el envío se pierde, pero
       // resyncUiState lo re-emite al reconectar (ver UI_UNBIND_PENDING_PREFIX).
       // Solo si la sesión existe en settings (evita tombstones huérfanos de

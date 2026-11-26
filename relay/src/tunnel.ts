@@ -85,6 +85,12 @@ export const UI_REQUEST_TIMEOUT_MS = 120_000;
 export const HTTP_TIMEOUT_MS = 30_000;
 export const MIN_URL_CODE_LEN = 12;
 export const MIN_TOKEN_LEN = 32;
+/** Longitud mínima del SID público (`/s/<sid>/`, 16 bytes hex = 128 bits). */
+export const MIN_SID_LEN = 16;
+/** TTL de los tickets de claim de un solo uso (canje cookie). */
+export const CLAIM_TICKET_TTL_MS = 5 * 60_000;
+/** Nombre de la cookie de sesión del túnel (valor = secreto, Path=/s/<sid>/). */
+export const TUNNEL_SESSION_COOKIE = 'bundeck_s';
 /** Cuerpo máximo aceptado en el proxy HTTP (el WS no hace streaming). */
 export const MAX_TUNNEL_BODY_BYTES = 5 * 1024 * 1024;
 
@@ -215,6 +221,8 @@ export interface PersistedTunnelSession {
   exp: number;
   urlCode: string;
   turnJson: string | null;
+  /** Hash sha256 del secreto (`/s/<sid>/`); null en sesiones legacy `/t/*`. */
+  secretHash?: string | null;
 }
 
 /**
@@ -257,7 +265,11 @@ function b64(obj: unknown): string {
 
 /** Inyecta `<base href="/t/<tok>/">` tras el primer `<head…>` (best-effort). */
 export function injectBase(html: string, token: string): string {
-  const prefix = `/t/${token}`;
+  return injectBaseForPrefix(html, `/t/${token}`);
+}
+
+/** Variante genérica: inyecta `<base href="<prefix>/">` y reescribe assets a ese prefijo. */
+export function injectBaseForPrefix(html: string, prefix: string): string {
   let out = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}<base href="${prefix}/">`);
   // Reescribe URLs absolutas de assets al prefijo del túnel: sin esto el
   // navegador pediría `/…` en la raíz del relay (401) en vez de
@@ -278,11 +290,64 @@ export function injectBase(html: string, token: string): string {
 
 /** Prefija `/t/<tok>` a cada URL absoluta de mismo origen dentro de un valor de atributo. */
 function rewriteAssetUrls(val: string, prefix: string): string {
-  return val.replace(/(^|[\s,])\/(?!\/|t\/|ui\/)/g, `$1${prefix}/`);
+  return val.replace(/(^|[\s,])\/(?!\/|t\/|s\/|ui\/)/g, `$1${prefix}/`);
 }
 
 export function isHexToken(s: unknown, min = MIN_TOKEN_LEN): s is string {
   return typeof s === 'string' && s.length >= min && /^[0-9a-fA-F]+$/.test(s);
+}
+
+/** ¿SID público válido (`/s/<sid>/`)? Hex de 16+ chars, distinto de legacy solo por longitud/ruta. */
+export function isValidSid(s: unknown): s is string {
+  return typeof s === 'string' && s.length >= MIN_SID_LEN && s.length <= 64 && /^[0-9a-fA-F]+$/.test(s);
+}
+
+/** ¿Secreto de sesión válido? Hex de 32+ chars (256 bits en el daemon nuevo). */
+export function isValidSecret(s: unknown): s is string {
+  return typeof s === 'string' && s.length >= MIN_TOKEN_LEN && /^[0-9a-fA-F]+$/.test(s);
+}
+
+/** sha256 hex del secreto (lo persistido; el secreto plano solo vive en memoria/ticket). */
+export function hashSecret(secret: string): string {
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  return createHash('sha256').update(secret, 'utf8').digest('hex');
+}
+
+/** Comparación timing-safe de hashes hex (evita early-exit). */
+export function sameHash(a: string, b: string): boolean {
+  try {
+    const { timingSafeEqual } = require('node:crypto') as typeof import('node:crypto');
+    const ba = Buffer.from(a, 'utf8');
+    const bb = Buffer.from(b, 'utf8');
+    return ba.length === bb.length && timingSafeEqual(ba, bb);
+  } catch {
+    return a === b;
+  }
+}
+
+/** Genera un ticket de claim de un solo uso (64 hex). */
+export function randomTicket(): string {
+  const { randomBytes } = require('node:crypto') as typeof import('node:crypto');
+  return randomBytes(32).toString('hex');
+}
+
+/** Parsea la cabecera `Cookie` en un mapa (sin dependencias). */
+export function parseCookies(header: string | null | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!header) return out;
+  for (const part of String(header).split(';')) {
+    const i = part.indexOf('=');
+    if (i <= 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (!k || out.has(k)) continue;
+    try {
+      out.set(k, decodeURIComponent(v));
+    } catch {
+      out.set(k, v);
+    }
+  }
+  return out;
 }
 
 /** Valida credenciales TURN del daemon: urls + username + credential, límites duros. */
@@ -303,6 +368,10 @@ export type TunnelStatus = 'pending' | 'approved' | 'denied' | 'expired';
 export class TunnelState {
   readonly httpPending = new Map<string, HttpPending>();
   readonly sessions = new Map<string, SessionEntry>();
+  /** Sesiones split-token (`/s/<sid>/`, secreto en cookie HttpOnly). */
+  readonly sidSessions = new Map<string, SessionEntry & { secretHash: string }>();
+  /** Tickets de claim de un solo uso: ticket -> {sid, secret, exp}. */
+  readonly tickets = new Map<string, { sid: string; secret: string; exp: number }>();
   readonly devices = new Map<string, TunnelSocket>();
   /**
    * Última actividad vista por deviceId (register, ping o pong del
@@ -317,6 +386,10 @@ export class TunnelState {
   private readonly pending = new Map<string, PendingReq>();
   private readonly pendingByCode = new Map<string, string>();
   private readonly bindings = new Map<string, CodeBinding>();
+  /** Bindings split-token: urlCode -> {sid, secretHash, exp, consumed, turn}. */
+  private readonly sidBindings = new Map<string, { sid: string; secretHash: string; exp: number; consumed: boolean; turn?: TurnCreds | null }>();
+  /** Secretos planos temporales (solo memoria) para emitir tickets de claim. Se limpian al caer la sesión. */
+  private readonly pendingSidSecrets = new Map<string, string>();
   /** URL-codes approved once; they cannot start another approval flow. */
   private readonly usedCodes = new Map<string, number>();
   private readonly bridges = new Map<string, { browser: TunnelSocket; deviceId: string; token: string }>();
@@ -346,7 +419,7 @@ export class TunnelState {
     const now = this.now();
     let n = 0;
     for (const r of rows) {
-      if (typeof r?.token !== 'string' || !isHexToken(r.token)) continue;
+      if (typeof r?.token !== 'string' || !isHexToken(r.token, 16)) continue;
       if (typeof r?.deviceId !== 'string' || !r.deviceId) continue;
       // `exp = 0` = perenne: nunca caduca, se restaura siempre.
       if (typeof r?.exp !== 'number' || !Number.isFinite(r.exp) || (r.exp !== 0 && r.exp <= now)) continue;
@@ -358,6 +431,19 @@ export class TunnelState {
           turn = null;
         }
       }
+      const secretHash = typeof (r as { secretHash?: unknown }).secretHash === 'string' ? (r as { secretHash: string }).secretHash : null;
+      if (secretHash && /^[0-9a-f]{64}$/.test(secretHash) && isValidSid(r.token)) {
+        this.sidSessions.set(r.token, {
+          deviceId: r.deviceId,
+          exp: r.exp,
+          urlCode: typeof r?.urlCode === 'string' ? r.urlCode : '',
+          turn,
+          secretHash,
+        });
+        n += 1;
+        continue;
+      }
+      if (!isHexToken(r.token)) continue;
       this.sessions.set(r.token, {
         deviceId: r.deviceId,
         exp: r.exp,
@@ -547,6 +633,8 @@ export class TunnelState {
     const turnCreds = sanitizeTurnCreds(turn);
     const prev = this.bindings.get(urlCode);
     if (prev && prev.sessionToken !== sessionToken) this.dropSession(prev.sessionToken);
+    // NOTA: no se toca sidBindings aquí: legacy `/t/*` y split-token `/s/*`
+    // coexisten para el mismo urlCode (compat transición).
     this.sessions.set(sessionToken as string, { deviceId: entry.deviceId, exp: exp as number, urlCode, turn: turnCreds });
     this.bindings.set(urlCode, { sessionToken: sessionToken as string, exp: exp as number, consumed: false, turn: turnCreds });
     this.persistSession(sessionToken as string);
@@ -554,6 +642,40 @@ export class TunnelState {
     const pendingId = this.pendingByCode.get(urlCode);
     if (pendingId) {
       this.pendingByCode.delete(urlCode);
+      this.pending.delete(pendingId);
+    }
+    return 'ok';
+  }
+
+  /**
+   * Enlaza una sesión split-token (`/s/<sid>/` + cookie HttpOnly).
+   * El `sid` es público (va en la URL), el `secret` nunca viaja en URL tras
+   * el claim: se entrega vía ticket de un solo uso y luego cookie.
+   */
+  bindSid(urlCode: unknown, sid: unknown, secret: unknown, exp: unknown, turn?: unknown): 'ok' | string {
+    if (!isValidSid(sid)) return 'bad-sid';
+    if (!isValidSecret(secret)) return 'bad-secret';
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp < 0) return 'bad-exp';
+    if (typeof urlCode !== 'string') return 'unknown-code';
+    const entry = this.codes.get(urlCode);
+    if (!entry) return 'unknown-code';
+    if (entry.exp <= this.now()) {
+      this.dropCode(urlCode);
+      return 'expired';
+    }
+    const turnCreds = sanitizeTurnCreds(turn);
+    const prev = this.sidBindings.get(urlCode);
+    if (prev && prev.sid !== sid) this.dropSidSession(prev.sid);
+    // NOTA: no se toca bindings legacy aquí: `/s/*` y `/t/*` coexisten (compat).
+    const secretHash = hashSecret(secret as string);
+    this.sidSessions.set(sid as string, { deviceId: entry.deviceId, exp: exp as number, urlCode: urlCode as string, turn: turnCreds, secretHash });
+    this.sidBindings.set(urlCode as string, { sid: sid as string, secretHash, exp: exp as number, consumed: false, turn: turnCreds });
+    this.pendingSidSecrets.set(sid as string, secret as string);
+    this.persistSidSession(sid as string);
+    this.usedCodes.set(urlCode as string, entry.exp);
+    const pendingId = this.pendingByCode.get(urlCode as string);
+    if (pendingId) {
+      this.pendingByCode.delete(urlCode as string);
       this.pending.delete(pendingId);
     }
     return 'ok';
@@ -584,6 +706,75 @@ export class TunnelState {
     return 'ok';
   }
 
+  /** Re-anuncia una sesión split-token (daemon al reconectar). Acepta sid+secret o sid solo si ya existe. */
+  rebindSid(deviceId: unknown, sid: unknown, secret: unknown, exp: unknown): 'ok' | string {
+    if (typeof deviceId !== 'string' || deviceId === '') return 'not-registered';
+    if (!isValidSid(sid)) return 'bad-sid';
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp < 0) return 'bad-exp';
+    const now = this.now();
+    if (exp !== 0) {
+      if (exp <= now) return 'expired';
+      if (exp - now > MAX_TUNNEL_SESSION_TTL_MS) return 'bad-exp';
+    }
+    const existing = this.sidSessions.get(sid as string);
+    let secretHash: string | null = null;
+    if (isValidSecret(secret)) secretHash = hashSecret(secret as string);
+    else if (existing) secretHash = existing.secretHash;
+    else return 'bad-secret';
+    this.sidSessions.set(sid as string, {
+      deviceId,
+      exp: exp as number,
+      urlCode: existing?.urlCode ?? '',
+      turn: existing?.turn ?? null,
+      secretHash: secretHash as string,
+    });
+    if (isValidSecret(secret)) this.pendingSidSecrets.set(sid as string, secret as string);
+    this.persistSidSession(sid as string);
+    return 'ok';
+  }
+
+  /** Emite un ticket de claim de un solo uso para `sid` (lo devuelve `status` y lo canjea `/s/<sid>/claim`). */
+  issueTicket(sid: string, secret: string): string {
+    const ticket = randomTicket();
+    this.tickets.set(ticket, { sid, secret, exp: this.now() + CLAIM_TICKET_TTL_MS });
+    return ticket;
+  }
+
+  /** Canjea `ticket` por el secreto (una sola vez). Devuelve el secreto o null. */
+  claimTicket(sid: string, ticket: string): string | null {
+    const e = this.tickets.get(ticket);
+    if (!e || e.sid !== sid) return null;
+    this.tickets.delete(ticket);
+    if (e.exp <= this.now()) return null;
+    const sess = this.sidSessions.get(sid);
+    if (!sess) return null;
+    if (sess.exp !== 0 && sess.exp <= this.now()) {
+      this.dropSidSession(sid);
+      return null;
+    }
+    // El ticket entrega el secreto plano guardado al emitir; valida contra el hash vigente.
+    if (!sameHash(hashSecret(e.secret), sess.secretHash)) return null;
+    return e.secret;
+  }
+
+  /** ¿La cookie presentada autoriza `sid`? */
+  validateSid(sid: string, secretFromCookie: string | null | undefined): boolean {
+    if (!isValidSid(sid) || !isValidSecret(secretFromCookie)) return false;
+    const sess = this.sidSessions.get(sid);
+    if (!sess) return false;
+    if (sess.exp !== 0 && sess.exp <= this.now()) {
+      this.expireSidSession(sid);
+      return false;
+    }
+    return sameHash(hashSecret(secretFromCookie as string), sess.secretHash);
+  }
+
+  /** Caducidad perezosa de sesión split-token. */
+  expireSidSession(sid: string): void {
+    const s = this.sidSessions.get(sid);
+    if (s && s.exp !== 0 && s.exp <= this.now()) this.dropSidSession(sid);
+  }
+
   private persistSession(token: string): void {
     if (!this.persist) return;
     try {
@@ -595,6 +786,24 @@ export class TunnelState {
         exp: s.exp,
         urlCode: s.urlCode,
         turnJson: s.turn ? JSON.stringify(s.turn) : null,
+      });
+    } catch {
+      /* persistencia best-effort: la memoria sigue mandando */
+    }
+  }
+
+  private persistSidSession(sid: string): void {
+    if (!this.persist) return;
+    try {
+      const s = this.sidSessions.get(sid);
+      if (!s) return;
+      this.persist.saveSession({
+        token: sid,
+        deviceId: s.deviceId,
+        exp: s.exp,
+        urlCode: s.urlCode,
+        turnJson: s.turn ? JSON.stringify(s.turn) : null,
+        secretHash: s.secretHash,
       });
     } catch {
       /* persistencia best-effort: la memoria sigue mandando */
@@ -615,18 +824,80 @@ export class TunnelState {
   /**
    * Revoca el token Y su publicación: los polls del código pasan a
    * `expired` y las peticiones tuneleadas a 401 (exigido por contrato).
+   * Acepta tanto token legacy `/t/*` como sid `/s/*`.
    */
   unbind(sessionToken: unknown): boolean {
     if (typeof sessionToken !== 'string') return false;
     const sess = this.sessions.get(sessionToken);
-    if (!sess) return false;
-    if (sess.urlCode) this.dropCode(sess.urlCode);
-    else this.dropSession(sessionToken);
+    if (sess) {
+      if (sess.urlCode) this.dropCode(sess.urlCode);
+      else this.dropSession(sessionToken);
+      return true;
+    }
+    const sidSess = this.sidSessions.get(sessionToken);
+    if (sidSess) {
+      if (sidSess.urlCode) this.dropCode(sidSess.urlCode);
+      else this.dropSidSession(sessionToken);
+      return true;
+    }
+    return false;
+  }
+
+  /** Revoca una sesión split-token por sid (canal daemon autenticado). Revoca también el legacy del mismo código. */
+  unbindSid(sid: unknown): boolean {
+    if (typeof sid !== 'string' || !this.sidSessions.has(sid)) return false;
+    const sess = this.sidSessions.get(sid);
+    if (sess?.urlCode) this.dropCode(sess.urlCode);
+    else this.dropSidSession(sid);
     return true;
   }
 
-  status(urlCode: string): { status: TunnelStatus; sessionToken?: string; turn?: TurnCreds | null; rtc?: boolean } {
+  status(urlCode: string): { status: TunnelStatus; sessionToken?: string; sid?: string; ticket?: string; turn?: TurnCreds | null; rtc?: boolean } {
     const now = this.now();
+    const sb = this.sidBindings.get(urlCode);
+    const bLegacy = this.bindings.get(urlCode);
+    // Compat: si hay binding sid Y legacy (daemon nuevo en relay nuevo),
+    // se devuelven ambos para que clientes viejos (`/t/*`) y nuevos (`/s/*`) funcionen.
+    const legacyToken = (() => {
+      if (!bLegacy) return undefined;
+      const ls = this.sessions.get(bLegacy.sessionToken);
+      if (ls && (ls.exp === 0 || ls.exp > now)) return bLegacy.sessionToken;
+      return undefined;
+    })();
+    if (sb) {
+      const s = this.sidSessions.get(sb.sid);
+      if (s && (s.exp === 0 || s.exp > now)) {
+        // Split-token: cada poll emite un ticket fresco de un solo uso.
+        // El secreto nunca viaja en la URL final: se canjea por cookie en `/s/<sid>/claim`.
+        const pendingSecret = this.pendingSidSecrets.get(sb.sid);
+        if (pendingSecret && sameHash(hashSecret(pendingSecret), s.secretHash)) {
+          const ticket = this.issueTicket(sb.sid, pendingSecret);
+          sb.consumed = true;
+          // Si hay legacy, se consume también para no re-exponerlo en polls siguientes
+          // (el primer poll lo entrega una vez, como antes).
+          let legacyOnce: string | undefined;
+          if (legacyToken && bLegacy && !bLegacy.consumed) {
+            bLegacy.consumed = true;
+            legacyOnce = legacyToken;
+          } else if (legacyToken && bLegacy?.consumed) {
+            // polls siguientes: no re-exponer legacy
+            legacyOnce = undefined;
+          }
+          return {
+            status: 'approved',
+            sid: sb.sid,
+            ticket,
+            ...(legacyOnce ? { sessionToken: legacyOnce } : {}),
+            ...(sb.turn ? { turn: sb.turn, rtc: true } : {}),
+          };
+        }
+        // Sin secreto plano (p. ej. restore tras reinicio sin rebind):
+        // aprobado sin ticket. Las cookies existentes siguen valiendo.
+        return { status: 'approved', sid: sb.sid, ...(legacyToken ? {} : {}) };
+      }
+      this.sidBindings.delete(urlCode);
+      this.pendingSidSecrets.delete(sb.sid);
+    }
     const b = this.bindings.get(urlCode);
     if (b) {
       const s = this.sessions.get(b.sessionToken);
@@ -769,6 +1040,80 @@ export class TunnelState {
     }
   }
 
+  private dropSidSession(sid: string): void {
+    const sess = this.sidSessions.get(sid);
+    this.sidSessions.delete(sid);
+    this.pendingSidSecrets.delete(sid);
+    try {
+      this.persist?.deleteSession(sid);
+    } catch {
+      /* best-effort */
+    }
+    for (const [code, b] of [...this.sidBindings]) {
+      if (b.sid === sid) {
+        this.sidBindings.delete(code);
+        this.pendingSidSecrets.delete(sid);
+      }
+    }
+    for (const [ticket, t] of [...this.tickets]) {
+      if (t.sid === sid) this.tickets.delete(ticket);
+    }
+    for (const [id, e] of [...this.httpPending]) {
+      if (e.token !== undefined && e.token !== sid) continue;
+      if (e.token === undefined && sess) {
+        let remaining = false;
+        for (const s of this.sidSessions.values()) {
+          if (s.deviceId === e.deviceId) { remaining = true; break; }
+        }
+        if (remaining) continue;
+      }
+      // Solo falla el tráfico de ESTA sid (no el legacy del mismo daemon salvo que no queden sesiones).
+      if (e.token === undefined && sess) {
+        let legacyRemaining = false;
+        for (const s of this.sessions.values()) {
+          if (s.deviceId === e.deviceId) { legacyRemaining = true; break; }
+        }
+        if (legacyRemaining) continue;
+      }
+      clearTimeout(e.timer);
+      this.httpPending.delete(id);
+      try {
+        e.resolve({
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+          bodyB64: b64({ error: 'invalid-token' }),
+        });
+      } catch {
+        /* noop */
+      }
+    }
+    try {
+      const sock = sess ? this.devices.get(sess.deviceId) : undefined;
+      if (sock) {
+        for (const [id, br] of [...this.bridges]) {
+          if (br.token !== sid) continue;
+          try {
+            sock.send(JSON.stringify({ v: 1, kind: 'ws-close', id }));
+          } catch {
+            /* daemon caído: se limpia al cerrar el socket */
+          }
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+    for (const [id, br] of [...this.bridges]) {
+      if (br.token === sid) {
+        this.bridges.delete(id);
+        try {
+          br.browser.close(1008, 'session expired');
+        } catch {
+          /* noop */
+        }
+      }
+    }
+  }
+
   private dropCode(urlCode: string): void {
     this.codes.delete(urlCode);
     this.usedCodes.delete(urlCode);
@@ -782,9 +1127,17 @@ export class TunnelState {
       this.bindings.delete(urlCode);
       this.dropSession(b.sessionToken);
     }
+    const sb = this.sidBindings.get(urlCode);
+    if (sb) {
+      this.sidBindings.delete(urlCode);
+      this.dropSidSession(sb.sid);
+    }
     // Sesiones huérfanas que apunten a este código.
     for (const [tok, s] of [...this.sessions]) {
       if (s.urlCode === urlCode) this.dropSession(tok);
+    }
+    for (const [sid, s] of [...this.sidSessions]) {
+      if (s.urlCode === urlCode) this.dropSidSession(sid);
     }
   }
 
@@ -797,6 +1150,9 @@ export class TunnelState {
     }
     for (const [tok, s] of [...this.sessions]) {
       if (s.deviceId === deviceId) this.dropSession(tok);
+    }
+    for (const [sid, s] of [...this.sidSessions]) {
+      if (s.deviceId === deviceId) this.dropSidSession(sid);
     }
     for (const [reqId, req] of [...this.pending]) {
       if (req.deviceId === deviceId) {
@@ -851,7 +1207,9 @@ export class TunnelState {
       if (e.exp > now) continue;
       const binding = this.bindings.get(code);
       const session = binding ? this.sessions.get(binding.sessionToken) : undefined;
-      if (session && (session.exp === 0 || session.exp > now)) {
+      const sidBinding = this.sidBindings.get(code);
+      const sidSession = sidBinding ? this.sidSessions.get(sidBinding.sid) : undefined;
+      if ((session && (session.exp === 0 || session.exp > now)) || (sidSession && (sidSession.exp === 0 || sidSession.exp > now))) {
         // Expira el QR, no la sesión que ya fue aprobada con él.
         this.codes.delete(code);
         const pendingId = this.pendingByCode.get(code);
@@ -866,6 +1224,12 @@ export class TunnelState {
     for (const [code, exp] of [...this.usedCodes]) if (exp <= now) this.usedCodes.delete(code);
     for (const [tok, s] of [...this.sessions]) {
       if (s.exp !== 0 && s.exp <= now) this.dropSession(tok);
+    }
+    for (const [sid, s] of [...this.sidSessions]) {
+      if (s.exp !== 0 && s.exp <= now) this.dropSidSession(sid);
+    }
+    for (const [ticket, t] of [...this.tickets]) {
+      if (t.exp <= now) this.tickets.delete(ticket);
     }
     for (const req of this.pending.values()) {
       if (req.state === 'pending' && this.timedOut(req, now)) req.state = 'denied';
@@ -898,6 +1262,10 @@ export class TunnelState {
     this.pending.clear();
     this.pendingByCode.clear();
     this.bindings.clear();
+    this.sidBindings.clear();
+    this.sidSessions.clear();
+    this.tickets.clear();
+    this.pendingSidSecrets.clear();
     this.usedCodes.clear();
     this.sessions.clear();
     this.devices.clear();

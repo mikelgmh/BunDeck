@@ -59,6 +59,9 @@ export type UiStatus = 'pending' | 'approved' | 'denied' | 'expired';
 export interface UiStatusResult {
   status: UiStatus;
   sessionToken?: string;
+  /** Nuevo flujo split-token: sid público + ticket de un solo uso (canje por cookie). */
+  sid?: string;
+  ticket?: string;
 }
 
 /** Getter de estado que debe exponer el módulo del túnel (o inyectarse). */
@@ -96,12 +99,18 @@ function isUiStatus(s: unknown): s is UiStatus {
 
 function sanitizeUiResult(v: unknown): UiStatusResult | null {
   if (!v || typeof v !== 'object') return null;
-  const r = v as { status?: unknown; sessionToken?: unknown };
+  const r = v as { status?: unknown; sessionToken?: unknown; sid?: unknown; ticket?: unknown };
   if (!isUiStatus(r.status)) return null;
-  if (r.status === 'approved' && typeof r.sessionToken !== 'string') return null;
-  return r.status === 'approved'
-    ? { status: r.status, sessionToken: r.sessionToken as string }
-    : { status: r.status };
+  if (r.status === 'approved') {
+    if (typeof r.sessionToken === 'string') return { status: r.status, sessionToken: r.sessionToken };
+    if (typeof r.sid === 'string') {
+      return typeof r.ticket === 'string'
+        ? { status: r.status, sid: r.sid, ticket: r.ticket }
+        : { status: r.status, sid: r.sid };
+    }
+    return null;
+  }
+  return { status: r.status };
 }
 
 /** Intento best-effort de localizar el getter del túnel. Nunca lanza. */
@@ -187,7 +196,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     connectingBody: 'Estableciendo conexión segura… probando conexión directa P2P.',
     goNow: 'Entrar ahora',
     tokenWarning:
-      'Aviso: el token de sesión quedará visible en la barra de direcciones. No lo compartas.',
+      'Aviso: tu sesión quedará guardada en este navegador (cookie). No compartas el enlace ni el equipo.',
     deniedTitle: 'Acceso denegado',
     deniedBody: 'El anfitrión ha denegado el acceso. Pide un código nuevo e inténtalo de nuevo.',
     expiredTitle: 'Enlace caducado o inválido',
@@ -213,7 +222,7 @@ const STR: Record<WaitingLang, WaitingTexts> = {
     connectingBody: 'Establishing secure connection… trying direct P2P connection.',
     goNow: 'Enter now',
     tokenWarning:
-      'Note: the session token will stay visible in the address bar. Do not share it.',
+      'Note: your session will be stored in this browser (cookie). Do not share the link or device.',
     deniedTitle: 'Access denied',
     deniedBody: 'The host denied access. Ask for a new code and try again.',
     expiredTitle: 'Expired or invalid link',
@@ -392,7 +401,7 @@ if(res.status===404||res.status===410){expired();return;}
 if(!res.ok){return;}
 return res.json().then(function(data){
 if(done||!data)return;
-if(data.status==='approved'&&typeof data.sessionToken==='string'&&data.sessionToken){
+if(data.status==='approved'&&(typeof data.sessionToken==='string'&&data.sessionToken||typeof data.sid==='string'&&data.sid&&typeof data.ticket==='string'&&data.ticket)){
 cleanup();show('approved');
 var kq='';
 try{
@@ -402,7 +411,13 @@ var keep=new URLSearchParams();
 var qs=keep.toString();
 kq=(qs?'?'+qs:'')+(location.hash||'');
 }catch(e){kq=(location.search||'')+(location.hash||'');}
+if(typeof data.sid==='string'&&data.sid&&typeof data.ticket==='string'&&data.ticket){
+var sep=kq.indexOf('#');var hash='';var q=kq;if(sep>=0){hash=kq.slice(sep);q=kq.slice(0,sep);}
+var join=q?(q.indexOf('?')>=0?'&':'?'):'';var tq='ticket='+encodeURIComponent(data.ticket);
+goUrl='/s/'+encodeURIComponent(data.sid)+'/claim'+(q?q+join+tq:'?'+tq)+hash;
+}else{
 goUrl='/t/'+encodeURIComponent(data.sessionToken)+'/'+kq;
+}
 goTimer=setTimeout(go,2000);
 }else if(data.status==='denied'){cleanup();show('denied');}
 else if(data.status==='expired'){expired();}

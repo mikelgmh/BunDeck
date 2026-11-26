@@ -9,6 +9,11 @@ import {
   TunnelState,
   getUiPageHandler,
   injectBase,
+  injectBaseForPrefix,
+  parseCookies,
+  isValidSid,
+  isValidSecret,
+  TUNNEL_SESSION_COOKIE,
   HTTP_TIMEOUT_MS,
   MAX_TUNNEL_BODY_BYTES,
   type HttpResult,
@@ -115,6 +120,15 @@ export function extractTunnelToken(pathname: string): string | null {
   if (!m) return null;
   const tok = m[1];
   if (/^[0-9a-fA-F]{32,}$/.test(tok)) return tok;
+  return null;
+}
+
+/** Extrae el sid público de /s/<sid>/... (hex 16+ chars). El secreto va en cookie, nunca aquí. */
+export function extractSidToken(pathname: string): string | null {
+  const m = /^\/s\/([^/]+)/.exec(pathname);
+  if (!m) return null;
+  const sid = m[1];
+  if (isValidSid(sid)) return sid;
   return null;
 }
 
@@ -390,6 +404,7 @@ export class RelayServer {
     // Túnel inverso (público, sin RELAY_TOKEN: el navegador no lo tiene).
     // /ui/* por IP, /t/* por sessionToken (cuota por sesión aprobada) con
     // fallback a IP cuando aún no hay token válido.
+    // /s/* es el plano nuevo split-token: sid público en URL + secreto en cookie.
     if (url.pathname === '/ui' || url.pathname.startsWith('/ui/')) {
       const ipUi = getClientIp(req, server, this.opts.trustProxy ?? false);
       if (!this.uiLimiter.allow(`ui:${ipUi}`)) {
@@ -405,6 +420,15 @@ export class RelayServer {
         return rateLimitedResponse();
       }
       return this.handleTunnelFetch(req, server);
+    }
+    if (url.pathname === '/s' || url.pathname.startsWith('/s/')) {
+      const ipS = getClientIp(req, server, this.opts.trustProxy ?? false);
+      const sid = extractSidToken(url.pathname);
+      const key = sid ? `t:sid:${sid}` : `t:${ipS}`;
+      if (!this.tLimiter.allow(key)) {
+        return rateLimitedResponse();
+      }
+      return this.handleSidFetch(req, server);
     }
 
     // Todo lo demás: WebSocket (wss en prod tras reverse proxy; local ws).
@@ -507,6 +531,179 @@ export class RelayServer {
       return undefined;
     }
     return this.handleTunnelProxy(req, token, rest === '' ? '/' : rest, url.search);
+  }
+
+  /**
+   * Todo bajo `/s/<sid>/…` (split-token: sid público en URL + secreto en cookie HttpOnly).
+   * `GET /s/<sid>/claim?ticket=…` canjea el ticket de un solo uso por la cookie y
+   * redirige (HTML con JS para preservar `location.hash`, que nunca viaja al servidor).
+   */
+  private handleSidFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
+    const url = new URL(req.url);
+    const m = /^\/s\/([^/]+)([\s\S]*)$/.exec(url.pathname);
+    if (!m) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    const sid = m[1];
+    const rest = m[2]; // '' o '/…'
+    if (!isValidSid(sid)) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    const upgrade = (req.headers.get('upgrade') ?? '').toLowerCase();
+
+    // Claim del ticket -> cookie HttpOnly.
+    if (rest === '/claim' || rest.startsWith('/claim/') || rest.startsWith('/claim?') || (rest === '' && url.searchParams.has('ticket'))) {
+      return this.handleSidClaim(req, sid);
+    }
+
+    const cookieSecret = parseCookies(req.headers.get('cookie')).get(TUNNEL_SESSION_COOKIE) ?? null;
+    if (upgrade.includes('websocket')) {
+      if (rest !== '/ws') return Response.json({ error: 'not-found' }, { status: 404 });
+      if (!this.tunnel.validateSid(sid, cookieSecret)) {
+        const sess = this.tunnel.sidSessions.get(sid);
+        if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+        return Response.json({ error: 'expired' }, { status: 401 });
+      }
+      const sess = this.tunnel.sidSessions.get(sid);
+      if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+      const id = this.tunnel.nextId('ws');
+      const ok = server.upgrade(req, {
+        data: { ip: getClientIp(req, server, this.opts.trustProxy ?? false), tunnelBridge: { id, token: sid, deviceId: sess.deviceId } },
+      });
+      if (!ok) return Response.json({ error: 'upgrade-failed' }, { status: 500 });
+      return undefined;
+    }
+    return this.handleSidProxy(req, sid, rest === '' ? '/' : rest, url.search, cookieSecret);
+  }
+
+  /** Canje `ticket` (un solo uso) -> `Set-Cookie` HttpOnly + página de salto que preserva hash. */
+  private handleSidClaim(req: Request, sid: string): Response {
+    const url = new URL(req.url);
+    const ticket = url.searchParams.get('ticket') ?? '';
+    const secret = ticket ? this.tunnel.claimTicket(sid, ticket) : null;
+    if (!secret || !isValidSecret(secret)) {
+      return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    }
+    const sess = this.tunnel.sidSessions.get(sid);
+    const cookie = this.buildSidCookie(req, sid, secret, sess?.exp ?? 0);
+    // Preserva ?kiosk=&mode= (ticket se elimina); el hash lo repone el JS (nunca llega al servidor).
+    const keep = new URLSearchParams();
+    for (const [k, v] of url.searchParams) {
+      if (k === 'ticket') continue;
+      if (k === 'kiosk' || k === 'mode') keep.set(k, v);
+    }
+    const qs = keep.toString();
+    const target = `/s/${encodeURIComponent(sid)}/${qs ? `?${qs}` : ''}`;
+    const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    if ((req.headers.get('accept') ?? '').includes('application/json') && !wantsHtmlPage(req)) {
+      return new Response(JSON.stringify({ ok: true, sid }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': cookie },
+      });
+    }
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>BunDeck</title></head><body><script>(function(){var t=${JSON.stringify(target)};try{var h=location.hash||'';location.replace(t+h);}catch(e){location.href=t;}})();</script></body></html>`;
+    return new Response(html, {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'set-cookie': cookie },
+    });
+  }
+
+  /** Construye `Set-Cookie` con alcance `Path=/s/<sid>/` (aísla sesiones entre sí). */
+  private buildSidCookie(req: Request, sid: string, secret: string, exp: number): string {
+    const parts = [`${TUNNEL_SESSION_COOKIE}=${encodeURIComponent(secret)}`, `Path=/s/${sid}/`, 'HttpOnly', 'SameSite=Lax'];
+    if (exp !== 0 && Number.isFinite(exp)) {
+      const maxAge = Math.max(1, Math.floor((exp - this.now()) / 1000));
+      parts.push(`Max-Age=${maxAge}`);
+    }
+    try {
+      const url = new URL(req.url);
+      const proto = (req.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')).toLowerCase();
+      if (proto === 'https') parts.push('Secure');
+    } catch {
+      /* sin Secure en local */
+    }
+    return parts.join('; ');
+  }
+
+  /** Proxy HTTP split-token: valida cookie y reescribe con prefijo `/s/<sid>`. */
+  private async handleSidProxy(req: Request, sid: string, rest: string, search: string, cookieSecret: string | null): Promise<Response> {
+    const sess = this.tunnel.sidSessions.get(sid);
+    if (!sess) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!this.tunnel.validateSid(sid, cookieSecret)) {
+      if (sess.exp !== 0 && sess.exp <= this.now()) {
+        this.tunnel.expireSidSession(sid);
+        return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
+      }
+      return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    }
+    if (sess.exp !== 0 && sess.exp <= this.now()) {
+      this.tunnel.expireSidSession(sid);
+      return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
+    }
+    const daemon = this.tunnel.devices.get(sess.deviceId);
+    if (!daemon) return this.tunnelGone(req, 'daemon-offline', 502) ?? Response.json({ error: 'daemon-offline' }, { status: 502 });
+
+    const headers: Record<string, string> = {};
+    req.headers.forEach((v, k) => {
+      if (k.toLowerCase() === 'cookie') return; // nunca reenviar la cookie de sesión al daemon
+      headers[k] = v;
+    });
+    let bodyB64: string | null = null;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength > MAX_TUNNEL_BODY_BYTES) {
+        return Response.json({ error: 'body-too-large' }, { status: 413 });
+      }
+      if (buf.byteLength > 0) bodyB64 = Buffer.from(buf).toString('base64');
+    }
+
+    const id = this.tunnel.nextId('http');
+    const path = (rest === '/' ? '/' : rest) + search;
+    const prefix = `/s/${sid}`;
+    const res: HttpResult = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.tunnel.httpPending.delete(id);
+        resolve({
+          status: 504,
+          headers: { 'content-type': 'application/json' },
+          bodyB64: Buffer.from(JSON.stringify({ error: 'daemon-timeout' }), 'utf8').toString('base64'),
+        });
+      }, this.httpTimeoutMs);
+      timer.unref?.();
+      this.tunnel.httpPending.set(id, {
+        deviceId: sess.deviceId,
+        token: sid,
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        timer,
+      });
+      try {
+        daemon.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'http-req', id, method: req.method, path, headers, bodyB64 }));
+      } catch {
+        const e = this.tunnel.takeHttp(id);
+        if (e) {
+          resolve({
+            status: 502,
+            headers: { 'content-type': 'application/json' },
+            bodyB64: Buffer.from(JSON.stringify({ error: 'daemon-offline' }), 'utf8').toString('base64'),
+          });
+        }
+      }
+    });
+
+    const status = Number.isInteger(res.status) && res.status >= 100 && res.status <= 599 ? res.status : 502;
+    const outHeaders: Record<string, string> = { ...(res.headers ?? {}) };
+    // La cookie es del relay, no del daemon: no dejar que el daemon la pise.
+    for (const k of Object.keys(outHeaders)) {
+      if (k.toLowerCase() === 'set-cookie') delete outHeaders[k];
+    }
+    let body: Uint8Array | null = res.bodyB64 ? Buffer.from(res.bodyB64, 'base64') : null;
+    const ct = String(outHeaders['content-type'] ?? outHeaders['Content-Type'] ?? '');
+    if (body && body.length > 0 && ct.toLowerCase().includes('text/html')) {
+      const injected = injectBaseForPrefix(Buffer.from(body).toString('utf8'), prefix);
+      body = Buffer.from(injected, 'utf8');
+      delete outHeaders['content-length'];
+      delete outHeaders['Content-Length'];
+    }
+    return new Response(body ? new Blob([body as unknown as BlobPart]) : null, { status, headers: outHeaders });
   }
 
   /**
@@ -669,6 +866,22 @@ export class RelayServer {
         return;
       }
       case 'ui-bind': {
+        // Nuevo flujo split-token: {urlCode, sid, secret} + legacy {sessionToken} para compat.
+        // Se enlazan AMBOS (el status devuelve sid+ticket y, una vez, sessionToken legacy).
+        const m = msg as Record<string, unknown>;
+        if (typeof m.sid === 'string' && (typeof m.secret === 'string' || typeof m.sessionToken === 'string')) {
+          const secret = typeof m.secret === 'string' ? m.secret : m.sessionToken;
+          const rSid = this.tunnel.bindSid(msg.urlCode, m.sid, secret, msg.exp, (msg as Record<string, unknown>).turn);
+          if (rSid !== 'ok') { err(rSid); return; }
+          // Legacy opcional (mismo urlCode, token distinto): no borra el sid (bind no toca sidBindings).
+          // Se exige token distinto de sid y secreto para no crear /t/<sid>/ con el sid público.
+          if (typeof m.sessionToken === 'string' && m.sessionToken !== secret && m.sessionToken !== m.sid) {
+            const rLeg = this.tunnel.bind(msg.urlCode, m.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
+            if (rLeg !== 'ok') { err(rLeg); return; }
+          }
+          ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode, sid: m.sid }));
+          return;
+        }
         const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
         if (r !== 'ok') err(r);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode }));
@@ -678,12 +891,33 @@ export class RelayServer {
         // Re-anuncio de una sesión vigente del daemon (tras reconectar).
         // El socket ya está autenticado (RELAY_TOKEN): el daemon afirma sus
         // propias sesiones sin necesitar el código original (consumido).
+        // Nuevo: {sid, secret?, exp} + legacy {sessionToken, exp} opcional. Se reanuncian ambos.
+        const m = msg as Record<string, unknown>;
+        if (typeof m.sid === 'string') {
+          const r = this.tunnel.rebindSid(this.tunnel.socketDeviceId(ws), m.sid, m.secret ?? m.sessionToken, m.exp);
+          if (r !== 'ok') { err(r); return; }
+          // Legacy opcional: solo si es un token distinto del sid y del secreto
+          // (evita crear /t/<sid>/ con el sid público).
+          if (typeof m.sessionToken === 'string' && m.sessionToken !== m.secret && m.sessionToken !== m.sid && /^[0-9a-fA-F]{32,}$/.test(m.sessionToken)) {
+            const rLeg = this.tunnel.rebind(this.tunnel.socketDeviceId(ws), m.sessionToken, m.exp);
+            if (rLeg !== 'ok') { err(rLeg); return; }
+          }
+          ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-rebound', sid: m.sid }));
+          return;
+        }
         const r = this.tunnel.rebind(this.tunnel.socketDeviceId(ws), msg.sessionToken, msg.exp);
         if (r !== 'ok') err(r);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-rebound', sessionToken: msg.sessionToken }));
         return;
       }
       case 'ui-unbind': {
+        const m = msg as Record<string, unknown>;
+        if (typeof m.sid === 'string') {
+          const ok = this.tunnel.unbindSid(m.sid);
+          if (!ok) err('unknown-token');
+          else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-unbound', sid: m.sid }));
+          return;
+        }
         const ok = this.tunnel.unbind(msg.sessionToken);
         if (!ok) err('unknown-token');
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-unbound', sessionToken: msg.sessionToken }));

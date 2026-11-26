@@ -49,8 +49,12 @@ beforeAll(async () => {
   } catch { /* suite completa: rige el mock compartido */ }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   resetVariableStore();
+  // Hermético: la suite completa comparte proceso/DB y otro fichero puede
+  // haber dejado discordMuted=true; sin borrarlo, el test 1 ve "mismo valor"
+  // y no reemite (solo falla en suite completa).
+  try { await makeStore().delete('discordMuted'); } catch { /* noop */ }
 });
 
 describe('tipo acción → WS → web', () => {

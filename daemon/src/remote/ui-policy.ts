@@ -78,6 +78,9 @@ export interface UiSession {
   revoked: boolean;
   /** Nombre propuesto por el dueño al aprobar (se usa como nombre del dispositivo). */
   deviceName?: string;
+  /** Split-token: secreto plano (solo DB local del daemon) + su hash. */
+  secret?: string;
+  secretHash?: string;
 }
 
 export interface UiSessionView {
@@ -819,7 +822,7 @@ function findTunnelPending(reqId: string): any | null {
 export function approveUiPending(
   db: DatabaseService,
   reqId: string,
-): { ok: boolean; sessionToken?: string; error?: string } {
+): { ok: boolean; sessionToken?: string; sid?: string; error?: string } {
   const hit = findTunnelPending(reqId);
   if (hit) {
     const exp = 0; // Sesiones perennes: sin caducidad (el QR y la ventana de aprobación sí caducan, la sesión aprobada no).
@@ -832,6 +835,33 @@ export function approveUiPending(
     if (!d?.ok) return { ok: false, error: String(d?.error ?? 'Solicitud desconocida o caducada') };
     if (!d?.allowed || !d?.sessionToken) return { ok: false, error: 'Túnel no disponible: la aprobación no se pudo entregar al relay' };
     const token = String(d.sessionToken);
+    const sid = typeof d.sid === 'string' ? d.sid : null;
+    const secret = typeof d.secret === 'string' ? d.secret : null;
+    if (sid && secret) {
+      // Split-token: la clave es el sid público; el secreto va dentro del JSON
+      // (DB local del daemon, nunca sale salvo al rebind autenticado).
+      // Se conserva además la entrada legacy por compat con relays viejos.
+      const { createHash } = require('node:crypto') as typeof import('node:crypto');
+      persistUiSession(db, sid, {
+        createdAt: Date.now(),
+        exp,
+        ua: String(hit?.ua ?? ''),
+        ip: String(hit?.ip ?? ''),
+        revoked: false,
+        secret,
+        secretHash: createHash('sha256').update(secret, 'utf8').digest('hex'),
+      } as UiSession);
+      persistUiSession(db, token, {
+        createdAt: Date.now(),
+        exp,
+        ua: String(hit?.ua ?? ''),
+        ip: String(hit?.ip ?? ''),
+        revoked: false,
+      });
+      consumeUrlCode(db, String(hit?.urlCode ?? ''), false);
+      audit(db, `[remote-ui] navegador aprobado (req ${reqId}, vía túnel, prefijo ${sid.slice(0, 8)})`);
+      return { ok: true, sessionToken: token, sid };
+    }
     persistUiSession(db, token, {
       createdAt: Date.now(),
       exp,
