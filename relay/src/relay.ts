@@ -999,9 +999,15 @@ export class RelayServer {
   }
 
   private onTunnelBridgeOpen(ws: AnyWs, br: TunnelBridgeData): void {
-    const sess = this.tunnel.sessions.get(br.token);
+    // El puente puede colgar de una sesión legacy (`/t/<token>/`, mapa
+    // `sessions`) o split-token (`/s/<sid>/`, mapa `sidSessions`): el token
+    // del bridge es sessionToken o sid según la ruta del upgrade. Solo mirar
+    // `sessions` cerraba los puentes `/s/` con 4401 aunque la cookie fuese válida.
+    const legacy = this.tunnel.sessions.get(br.token);
+    const sess = legacy ?? this.tunnel.sidSessions.get(br.token);
     if (!sess || (sess.exp !== 0 && sess.exp <= this.now())) {
-      if (sess) this.tunnel.expireSession(br.token);
+      if (legacy) this.tunnel.expireSession(br.token);
+      else this.tunnel.expireSidSession(br.token);
       try {
         ws.close(4401, 'expired');
       } catch {

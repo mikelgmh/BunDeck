@@ -289,4 +289,63 @@ describe('split-token /s/<sid>/ + cookie', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('echo:/hello');
   });
+
+  test('/s/<sid>/ws con cookie válida se queda abierto (regresión 4401)', async () => {
+    const relay = startRelay();
+    const base = `http://127.0.0.1:${relay.port}`;
+    const d = await registeredDaemon(relay.port);
+    const { sid, ticket } = await approveSid(d, base);
+    const claim = await fetch(`${base}/s/${sid}/claim?ticket=${ticket}`, { redirect: 'manual' });
+    expect(claim.status).toBe(200);
+    const cookie = (claim.headers.get('set-cookie') ?? '').split(';')[0];
+    expect(cookie).toContain('bundeck_s=');
+
+    // Puente /s/ con cookie válida: el upgrade abre y el relay NO lo cierra
+    // (antes: onTunnelBridgeOpen solo miraba sesiones legacy y cerraba con 4401 'expired').
+    const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/s/${sid}/ws`, { headers: { cookie } } as any);
+    sockets.push(ws);
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener('open', () => resolve(), { once: true });
+      ws.addEventListener('error', () => reject(new Error('ws /s/ open failed')), { once: true });
+      setTimeout(() => reject(new Error('ws /s/ open timeout')), 3000);
+    });
+    // El daemon recibe el ws-open del puente.
+    const opened = await d.next((m) => m.kind === 'ws-open');
+    expect(typeof opened.id).toBe('string');
+    // Sigue abierto tras el handshake.
+    await new Promise((r) => setTimeout(r, 500));
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    // Sid desconocido: el upgrade se rechaza (ni siquiera abre).
+    let rejected = false;
+    try {
+      const bad = new WebSocket(`ws://127.0.0.1:${relay.port}/s/${'ff'.repeat(16)}/ws`, { headers: { cookie } } as any);
+      sockets.push(bad);
+      await new Promise<void>((resolve, reject) => {
+        bad.addEventListener('open', () => reject(new Error('no debería abrir')), { once: true });
+        bad.addEventListener('error', () => resolve(), { once: true });
+        setTimeout(() => reject(new Error('timeout esperando rechazo')), 3000);
+      });
+      rejected = true;
+    } catch { rejected = false; }
+    expect(rejected).toBe(true);
+  });
+
+  test('onTunnelBridgeOpen acepta puentes sid vigentes y cierra 4401 los desconocidos', async () => {
+    const relay = startRelay();
+    const base = `http://127.0.0.1:${relay.port}`;
+    const d = await registeredDaemon(relay.port);
+    await approveSid(d, base);
+    const srv = relay as any;
+    // Sid vigente: no se cierra y el puente queda registrado.
+    let closed: { code: number; reason: string } | null = null;
+    srv.onTunnelBridgeOpen({ close: (c: number, r: string) => { closed = { code: c, reason: r }; } }, { id: 'ws-sid-1', token: SID, deviceId: 'daemon-1' });
+    expect(closed).toBeNull();
+    expect(srv.tunnel.getBridge('ws-sid-1')).toBeDefined();
+    // Sid desconocido: 4401 'expired' (no cuelga, no registra).
+    closed = null;
+    srv.onTunnelBridgeOpen({ close: (c: number, r: string) => { closed = { code: c, reason: r }; } }, { id: 'ws-sid-2', token: 'ff'.repeat(16), deviceId: 'daemon-1' });
+    expect(closed).toEqual({ code: 4401, reason: 'expired' });
+    expect(srv.tunnel.getBridge('ws-sid-2')).toBeUndefined();
+  });
 });

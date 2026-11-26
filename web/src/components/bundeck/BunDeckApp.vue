@@ -641,6 +641,7 @@ import {
 } from '../../composables/useKiosk'
 import { useKioskWakeLock } from '../../composables/useKioskWakeLock'
 import { getTunnelToken } from '../../composables/useTunnel'
+import { kioskTransportLabelKey } from '../../utils/kioskTransport'
 import { getRtcSingleton } from '../../composables/useRemoteRtc'
 import {
   getActionsForKind,
@@ -1208,9 +1209,7 @@ const kioskTransport = computed(() => {
   }
   return isConnected.value ? 'p2p' : 'disconnected'
 })
-const kioskConnLabel = computed(() =>
-  kioskTransport.value === 'relay' ? t('bd.remoteUiTransportRelay') : t('bd.remoteUiTransportP2p')
-)
+const kioskConnLabel = computed(() => t(kioskTransportLabelKey(kioskTransport.value)))
 const kioskConnTitle = computed(() => {
   if (!isTunnelRoute.value) return isConnected.value ? t('bd.connected') : t('bd.disconnected')
   switch (kioskTransport.value) {
