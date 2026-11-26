@@ -360,7 +360,7 @@
         </template>
       </div>
 
-      <p class="bd-cap">{{ caption }}</p>
+      <p v-if="!kiosk" class="bd-cap">{{ caption }}</p>
      </div>
     </div>
 

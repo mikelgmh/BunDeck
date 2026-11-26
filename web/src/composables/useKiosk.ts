@@ -5,9 +5,10 @@
  * - Entrada: `?kiosk=1` (también `?kiosk=true|yes|on`, `?mode=kiosk` o `#kiosk`).
  *   Los QR y enlaces de conexión (QrDialog local, RemotePane/túnel `/ui/…`)
  *   propagan el parámetro para que el escaneo aterrice ya en kiosco.
- * - Salida: botón flotante `data-cy="bd-kiosk-exit"` (+ confirmación),
- *   triple-tap en la esquina superior derecha o tecla Escape. Al salir se
- *   limpia el parámetro de la URL con `history.replaceState` (sin recargar).
+ * - Salida: botón Salir de la barra inferior `data-cy="bd-kiosk-exit"`
+ *   (+ confirmación), triple-tap en la esquina superior derecha o tecla
+ *   Escape. Al salir se limpia el parámetro de la URL con
+ *   `history.replaceState` (sin recargar).
  *
  * Mientras dura el kiosco el modo `edit` queda bloqueado: `guardModeChange`
  * veta el paso a `'edit'` y `BunDeckApp` no renderiza header/drawers/toolbars.
@@ -152,4 +153,16 @@ export async function requestFullscreen(): Promise<boolean> {
 export function guardModeChange(kiosk: boolean, next: 'edit' | 'use'): 'edit' | 'use' {
   if (kiosk && next === 'edit') return 'use'
   return next
+}
+
+/**
+ * ¿Debe animarse el marquee de la barra? Solo con overflow REAL del texto
+ * (`textWidth` = ancho del `span` del texto, `boxWidth` = ancho visible).
+ * Se mide el `span`, NO el grupo: su `padding-right` de separación entre
+ * copias inflaría `scrollWidth` y activaría el marquee aun con espacio de
+ * sobra. +1px de tolerancia anti-subpíxel.
+ */
+export function marqueeOverflows(textWidth: number, boxWidth: number): boolean {
+  if (!Number.isFinite(textWidth) || !Number.isFinite(boxWidth)) return false
+  return textWidth > boxWidth + 1
 }

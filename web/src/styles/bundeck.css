@@ -943,6 +943,7 @@
    Sin header/drawers/toolbars (no se renderizan); aqui solo el marco a
    pantalla completa, teclas grandes tactiles y la salida discreta. */
 .bundeck.bd-kiosk {
+  position: relative;
   padding-top: env(safe-area-inset-top, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
@@ -1122,20 +1123,17 @@
   z-index: 42;
 }
 /* La modal de conexión es compacta (el marco .bd-dlg de escritorio es
-   880x640 y su especificidad ganaba al tamaño del componente). <dialog> con
-   showModal pinta en el top layer; sin showModal (fallback con `open`) es
-   `absolute` (hoja UA) y pintaba arriba del todo, bajo los fijos del kiosco:
-   se fija como flotante centrado bajo los fijos (top 112px + safe-area),
-   por encima de .bd-kiosk-exit (41) y .bd-kiosk-corner (40). */
+   880x640 y su especificidad ganaba al tamaño del componente). Centrado
+   real con inset:0 + margin:auto (vale para showModal y para el fallback
+   con `open`): sin `top` fijo, que en móvil empujaba el diálogo hacia
+   abajo y lo sacaba de la pantalla. dvh + safe-areas para la barra URL. */
 .bundeck dialog.bd-dlg.bd-tunnel-connect {
-  width: min(420px, 94vw);
+  width: min(420px, calc(100vw - 32px));
   height: fit-content;
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   position: fixed;
-  top: calc(112px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
+  inset: 0;
+  margin: auto;
   z-index: 60;
 }
 @media (max-width: 640px) {
@@ -1155,6 +1153,229 @@
   .bundeck.bd-kiosk .bd-key .bd-tt,
   .bundeck.bd-kiosk .bd-key .bd-tb {
     max-width: 100%;
+  }
+}
+
+/* - Barra inferior del kiosco (?kiosk=1): sustituye al caption (.bd-cap,
+   oculto en kiosco) y a los controles superiores. Pilotito único de
+   conexión (kconn/kled) + marquee + acciones. Flotante (overlay): no
+   reserva espacio, el floor lleva el mismo aire arriba que abajo. - */
+.bundeck .kiosk-bar {
+  position: fixed;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 41;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(1080px, calc(100vw - 32px));
+  min-height: 52px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--bd-sf) 92%, transparent);
+  border: 1px solid var(--bd-ln);
+  border-radius: 999px;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 13px;
+  color: var(--bd-mu);
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease,
+    transform 0.3s ease, translate 0.3s ease;
+}
+/* Contraída: solo queda el icono de colapso, anclado a la izquierda.
+   `left` no cambia (50%): el viaje a la esquina lo hace `translate`
+   (interpola %↔px; `left` saltaría). En móvil la barra ya vive a la
+   izquierda y no hay viaje. */
+.bundeck .kiosk-bar.is-collapsed {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+  transform: none;
+  translate: calc(12px - 50vw) 0;
+}
+.bundeck .kiosk-bar.is-collapsed .kiosk-collapse {
+  pointer-events: auto;
+}
+.bundeck .kiosk-bar.is-collapsed .kiosk-collapsible {
+  opacity: 0;
+  transform: translateY(6px);
+  visibility: hidden;
+  pointer-events: none;
+}
+.bundeck .kiosk-bar .kiosk-btn.kiosk-collapse {
+  display: inline-flex;
+  opacity: 1;
+}
+.bundeck .kiosk-bar .kiosk-collapsible {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+.bundeck .kiosk-bar .kconn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--bd-ink);
+  white-space: nowrap;
+}
+.bundeck .kiosk-bar .kled {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #6b7280;
+  flex: none;
+  animation: bd-kiosk-pulse 1.2s ease-in-out infinite;
+}
+.bundeck .kiosk-bar .kled.p2p {
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+  animation: none;
+}
+.bundeck .kiosk-bar .kled.relay {
+  background: #d97706;
+  box-shadow: 0 0 6px #d97706;
+  animation: none;
+}
+.bundeck .kiosk-bar .kled.disconnected {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+  animation: none;
+}
+.bundeck .kiosk-bar .kled.probing {
+  background: var(--bd-ac);
+}
+.bundeck .kiosk-bar .kiosk-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--bd-ln);
+  flex: none;
+}
+.bundeck .kiosk-bar .kmarquee {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* Fundidos laterales solo cuando hay marquee real (overflow + animación):
+   con texto corto y fijo se ven los bordes limpios. */
+.bundeck .kiosk-bar .kmarquee:not(.is-static) {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+/* Marquee infinito de dos grupos idénticos: cada uno mide al menos el 100%
+   y se desplaza su propio ancho (-100%); el bucle es imperceptible. */
+.bundeck .kiosk-bar .kmarquee-group {
+  flex-shrink: 0;
+  min-width: 100%;
+  display: flex;
+  align-items: center;
+  padding-right: 48px;
+  animation: kbar-scroll 22s linear infinite;
+  will-change: transform;
+}
+@keyframes kbar-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+.bundeck .kiosk-bar .kmarquee:hover .kmarquee-group {
+  animation-play-state: paused;
+}
+/* Sin desborde no hay movimiento: un solo grupo fijo y centrado. */
+.bundeck .kiosk-bar .kmarquee.is-static {
+  justify-content: center;
+}
+.bundeck .kiosk-bar .kmarquee.is-static .kmarquee-group {
+  min-width: 0;
+  padding-right: 0;
+  animation: none;
+}
+.bundeck .kiosk-bar .kmarquee.is-static .kmarquee-group[aria-hidden='true'] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bundeck .kiosk-bar,
+  .bundeck .kiosk-bar .kiosk-collapsible {
+    transition: none;
+  }
+  .bundeck .kiosk-bar .kmarquee-group {
+    animation: none;
+  }
+}
+.bundeck .kiosk-bar .kiosk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--bd-ln);
+  border-radius: 99px;
+  background: var(--bd-bg);
+  color: var(--bd-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+.bundeck .kiosk-bar .kiosk-btn:hover,
+.bundeck .kiosk-bar .kiosk-btn:focus-visible {
+  opacity: 1;
+  border-color: var(--bd-ac);
+}
+/* El estado del wake lock ya no lleva pilotito visible en el kiosco: el
+   gancho se conserva (tests/lectores) pero sin presencia visual. */
+.bundeck .kiosk-bar .bd-kiosk-wake {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .bundeck .kiosk-bar {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    transform: none;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-width: none;
+    border-radius: 16px;
+    gap: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .bundeck .kiosk-bar .kiosk-collapsible {
+    gap: 8px;
+  }
+  /* En móvil la barra ya vive a la izquierda: contraída no viaja. */
+  .bundeck .kiosk-bar.is-collapsed {
+    translate: 0 0;
+  }
+  .bundeck .kiosk-bar .kiosk-btn {
+    padding: 8px 10px;
+  }
+  .bundeck .kiosk-bar .kiosk-btn span {
+    display: none;
   }
 }
 

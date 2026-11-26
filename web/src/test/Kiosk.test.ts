@@ -7,6 +7,7 @@ import {
   withoutKioskParam,
   isTripleTap,
   guardModeChange,
+  marqueeOverflows,
   requestFullscreen,
 } from '../composables/useKiosk'
 import StageBoard from '../components/bundeck/StageBoard.vue'
@@ -74,6 +75,32 @@ describe('useKiosk: propagación en URLs', () => {
     expect(withoutKioskParam('http://x/?a=b&kiosk=1')).toBe('http://x/?a=b')
     expect(withoutKioskParam('http://x/?mode=kiosk')).toBe('http://x/')
     expect(withoutKioskParam('http://x/?a=b')).toBe('http://x/?a=b')
+  })
+})
+
+describe('useKiosk: marquee de la barra', () => {
+  it('estático si el texto cabe (incluida tolerancia subpíxel)', () => {
+    expect(marqueeOverflows(100, 200)).toBe(false)
+    expect(marqueeOverflows(200, 200)).toBe(false)
+    expect(marqueeOverflows(201, 200)).toBe(false)
+  })
+
+  it('anima solo con overflow real del texto', () => {
+    expect(marqueeOverflows(202, 200)).toBe(true)
+    expect(marqueeOverflows(500, 320)).toBe(true)
+  })
+
+  it('el padding de separación entre copias no cuenta: se mide el span', () => {
+    // Texto de 270px en caja de 300px cabe → estático, aunque el grupo
+    // (texto + padding-right 48px = 318px) sea más ancho que la caja.
+    expect(marqueeOverflows(270, 300)).toBe(false)
+    expect(marqueeOverflows(318, 300)).toBe(true)
+  })
+
+  it('medidas no finitas nunca animan', () => {
+    expect(marqueeOverflows(NaN, 300)).toBe(false)
+    expect(marqueeOverflows(400, NaN)).toBe(false)
+    expect(marqueeOverflows(0, 0)).toBe(false)
   })
 })
 
@@ -290,6 +317,35 @@ describe('BunDeckApp en kiosco', () => {
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-kiosk-exit"]').exists()).toBe(false)
     expect(wrapper.find('header.bd-top').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('botón de colapso siempre visible en kiosco (también desktop)', async () => {
+    const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
+    gotoKiosk('?kiosk=1')
+    const wrapper = mount(BunDeckApp)
+    await flushPromises()
+    await flushPromises()
+    const toggle = wrapper.find('[data-cy="bd-kiosk-barcollapse"]')
+    expect(toggle.exists()).toBe(true)
+    expect(wrapper.find('#kbar.is-collapsed').exists()).toBe(false)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('colapsar/expandir la barra alterna is-collapsed y aria-expanded', async () => {
+    const { default: BunDeckApp } = await import('../components/bundeck/BunDeckApp.vue')
+    gotoKiosk('?kiosk=1')
+    const wrapper = mount(BunDeckApp)
+    await flushPromises()
+    await flushPromises()
+    const toggle = wrapper.find('[data-cy="bd-kiosk-barcollapse"]')
+    await toggle.trigger('click')
+    expect(wrapper.find('#kbar.is-collapsed').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-kiosk-barcollapse"]').attributes('aria-expanded')).toBe('false')
+    await toggle.trigger('click')
+    expect(wrapper.find('#kbar.is-collapsed').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-kiosk-barcollapse"]').attributes('aria-expanded')).toBe('true')
     wrapper.unmount()
   })
 })

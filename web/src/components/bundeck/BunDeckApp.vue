@@ -205,7 +205,7 @@
     </header>
 
     <TunnelTransportBanner
-      v-if="isTunnelRoute && showTransportBanner && !showTransportModal && (rtcStatus === 'connected' || rtcStatus === 'fallback')"
+      v-if="isTunnelRoute && !kiosk && showTransportBanner && !showTransportModal && (rtcStatus === 'connected' || rtcStatus === 'fallback')"
       :status="rtcStatus"
       @dismiss="showTransportBanner = false"
     />
@@ -346,8 +346,10 @@
       </aside>
     </main>
 
-    <!-- Modo kiosco: solo grid. Salida discreta (botón flotante + triple-tap
-         en la esquina superior derecha + Escape), con confirmación. -->
+    <!-- Modo kiosco: solo grid + barra inferior (sustituye al caption y a
+      los controles superiores). Salida discreta (botones de la barra +
+      triple-tap en la esquina superior derecha + Escape), con
+      confirmación. El pilotito de conexión es único (kconn/kled). -->
     <template v-if="kiosk">
       <div
         class="bd-kiosk-corner"
@@ -356,32 +358,74 @@
         aria-hidden="true"
         @click="onKioskCornerTap"
       ></div>
-      <div class="bd-kiosk-exit" role="group" :aria-label="t('bd.kioskExit')">
+      <div id="kbar" class="kiosk-bar" :class="{ 'is-collapsed': kioskBarCollapsed }" role="toolbar" :aria-label="t('bd.kioskExit')">
+        <button
+          class="kiosk-btn kiosk-collapse"
+          data-cy="bd-kiosk-barcollapse"
+          :aria-expanded="!kioskBarCollapsed"
+          :aria-label="kioskBarCollapsed ? t('bd.kioskBarExpand') : t('bd.kioskBarCollapse')"
+          :title="kioskBarCollapsed ? t('bd.kioskBarExpand') : t('bd.kioskBarCollapse')"
+          @click="kioskBarCollapsed = !kioskBarCollapsed"
+        >
+          <ChevronRight v-if="kioskBarCollapsed" :size="16" stroke-width="1.75" aria-hidden="true" />
+          <ChevronLeft v-else :size="16" stroke-width="1.75" aria-hidden="true" />
+        </button>
+        <div class="kiosk-collapsible">
+        <div
+          class="kconn"
+          :data-cy="isTunnelRoute ? 'bd-kiosk-rtc' : 'bd-kiosk-conn'"
+          :data-transport="kioskTransport"
+          :title="kioskConnTitle"
+          role="status"
+          :aria-label="kioskConnTitle"
+        >
+          <span class="kled" :class="kioskTransport" aria-hidden="true"></span>
+          <span>{{ kioskConnLabel }}</span>
+        </div>
+        <span class="kiosk-sep" aria-hidden="true"></span>
+        <div
+          id="kmarq"
+          ref="kmarqRef"
+          class="kmarquee"
+          :class="{ 'is-static': !kioskMarqueeScroll }"
+          role="marquee"
+          :aria-label="kioskMarquee"
+        >
+          <div class="kmarquee-group"><span>{{ kioskMarquee }}</span></div>
+          <div class="kmarquee-group" aria-hidden="true"><span>{{ kioskMarquee }}</span></div>
+        </div>
+        <span class="kiosk-sep" aria-hidden="true"></span>
         <span
           class="bd-kiosk-wake"
           data-cy="bd-kiosk-wake"
           :data-wake="wakeStatus"
           :title="wakeTitle"
           aria-hidden="true"
-        ><i></i></span>
-        <TunnelKioskDot v-if="isTunnelRoute" :status="rtcStatus" :ws-ok="isConnected" />
+        ><i aria-hidden="true"></i></span>
         <button
-          class="bd-ibtn"
+          class="kiosk-btn"
+          data-kfs=""
+          data-cy="bd-kiosk-fullscreen"
           :title="t('bd.kioskFullscreen')"
           :aria-label="t('bd.kioskFullscreen')"
-          data-cy="bd-kiosk-fullscreen"
           @click="onKioskFullscreen"
         >
-          <Minimize2 v-if="isFullscreen" :size="20" stroke-width="1.75" aria-hidden="true" />
-          <Maximize2 v-else :size="20" stroke-width="1.75" aria-hidden="true" />
+          <Minimize2 v-if="isFullscreen" :size="16" stroke-width="1.75" aria-hidden="true" />
+          <Maximize2 v-else :size="16" stroke-width="1.75" aria-hidden="true" />
+          <span>{{ t('bd.kioskFullscreen') }}</span>
         </button>
         <button
-          class="bd-btn bd-kiosk-exit-btn"
+          class="kiosk-btn exit"
+          data-kexit=""
           data-cy="bd-kiosk-exit"
+          :title="t('bd.kioskExit')"
+          :aria-label="t('bd.kioskExit')"
           @click="() => requestKioskExit('button')"
         >
-          {{ t('bd.kioskExit') }}
+          <LogOut :size="16" stroke-width="1.75" aria-hidden="true" />
+          <span>{{ t('bd.kioskExit') }}</span>
         </button>
+        </div>
       </div>
     </template>
 
@@ -558,7 +602,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
-import { Plus, Puzzle, Maximize2, Minimize2, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2, Download, Upload } from 'lucide-vue-next'
+import { Plus, Puzzle, Maximize2, Minimize2, ChevronLeft, ChevronRight, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2, Download, Upload, LogOut } from 'lucide-vue-next'
 import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {
@@ -581,6 +625,7 @@ import {
   withoutKioskParam,
   guardModeChange,
   isTripleTap,
+  marqueeOverflows,
   requestFullscreen,
   type KioskExitReason,
 } from '../../composables/useKiosk'
@@ -602,7 +647,6 @@ import StageBoard from './StageBoard.vue'
 import TitleBar from './TitleBar.vue'
 import TunnelTransportBanner from './TunnelTransportBanner.vue'
 import TunnelConnectDialog from './TunnelConnectDialog.vue'
-import TunnelKioskDot from './TunnelKioskDot.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
@@ -1141,6 +1185,71 @@ const toggleFullscreen = async () => {
     console.error('Error al cambiar pantalla completa:', error)
   }
 }
+
+// Barra inferior del kiosco: pilotito único de conexión + marquee. En túnel
+// replica el mapa del antiguo TunnelKioskDot; en LAN directa, P2P si el WS
+// vive y Desconectado en caso contrario.
+const kioskTransport = computed(() => {
+  if (isTunnelRoute.value) {
+    if (rtcStatus.value === 'connected') return 'p2p'
+    if (rtcStatus.value === 'fallback') return isConnected.value ? 'relay' : 'disconnected'
+    return rtcStatus.value === 'signaling' ? 'probing' : 'connecting'
+  }
+  return isConnected.value ? 'p2p' : 'disconnected'
+})
+const kioskConnLabel = computed(() =>
+  kioskTransport.value === 'relay' ? t('bd.remoteUiTransportRelay') : t('bd.remoteUiTransportP2p')
+)
+const kioskConnTitle = computed(() => {
+  if (!isTunnelRoute.value) return isConnected.value ? t('bd.connected') : t('bd.disconnected')
+  switch (kioskTransport.value) {
+    case 'p2p': return t('bd.tunnelTransportP2p')
+    case 'relay': return t('bd.tunnelTransportRelay')
+    case 'disconnected': return t('bd.tunnelTransportDisconnected')
+    case 'probing': return t('bd.tunnelTransportProbing')
+    default: return t('bd.tunnelTransportConnecting')
+  }
+})
+// Marquee de la barra: página actual · cuadrícula · dispositivo visible
+// (vista previa o el propio; se omite si no hay ninguno).
+const kioskDeviceName = computed(() => {
+  const prev = previewDevice.value?.name?.trim()
+  if (prev) return prev
+  const own = devStore.devices.value.find((d) => d.id === deviceId.value)?.name?.trim()
+  return own ?? ''
+})
+const kioskMarquee = computed(() => {
+  const parts = [currentPage.value?.name?.trim() || '', `${gridCols.value} × ${gridRows.value}`]
+  if (kioskDeviceName.value) parts.push(kioskDeviceName.value)
+  return parts.filter(Boolean).join(' · ')
+})
+// Marquee infinito de dos grupos idénticos: solo se anima cuando el texto
+// desborda; con texto corto queda fijo y centrado (sin movimiento inútil).
+const kmarqRef = ref<HTMLElement | null>(null)
+const kioskMarqueeScroll = ref(false)
+// Barra colapsable en todos los viewports: contraída queda el icono.
+// En móvil además flota sobre el grid (ver CSS) para no restar espacio.
+const kioskBarCollapsed = ref(false)
+let marqueeRO: ResizeObserver | null = null
+const measureMarquee = () => {
+  const el = kmarqRef.value
+  // El texto, no el grupo: su padding-right de separación inflaría scrollWidth.
+  const t = el?.querySelector('.kmarquee-group > span') as HTMLElement | null
+  if (!el || !t) return
+  kioskMarqueeScroll.value = marqueeOverflows(t.scrollWidth, el.clientWidth)
+}
+watch(kmarqRef, (el) => {
+  marqueeRO?.disconnect()
+  marqueeRO = null
+  if (el && typeof ResizeObserver !== 'undefined') {
+    try {
+      marqueeRO = new ResizeObserver(() => measureMarquee())
+      marqueeRO.observe(el)
+    } catch { /* sin RO: medida puntual */ }
+  }
+  nextTick(measureMarquee)
+})
+watch(kioskMarquee, () => nextTick(measureMarquee))
 
 // Perfiles
 const profileMenuOpen = ref<string | null>(null)
@@ -2903,10 +3012,18 @@ onMounted(async () => {
       isUpdating.value = false
     })
   }
+  // Marquee del kiosco: primera medida tras pintar + remedida al cargar
+  // las fuentes (el ancho del texto puede cambiar).
+  nextTick(measureMarquee)
+  try {
+    void document.fonts?.ready.then(() => measureMarquee())
+  } catch { /* noop */ }
 })
 
 onUnmounted(() => {
   cleanup()
+  marqueeRO?.disconnect()
+  marqueeRO = null
   window.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('click', onDocClickHeader)
   document.removeEventListener('keydown', onDocKeyProfile)
