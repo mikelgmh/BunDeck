@@ -81,11 +81,13 @@ export function webDistCacheHeaders(filePath: string): Record<string, string> {
   return {};
 }
 
-/** Candidatos para `web/src` (misma lógica que web-dist, para detectar obsolescencia en DEV). */
+/** Candidatos para `web/src` (misma lógica que web-dist, para detectar obsolescencia en DEV).
+ * OJO: este fichero vive en daemon/src/http/ (un nivel más hondo que
+ * daemon/src), así que el relativo necesita TRES `..` para llegar a la raíz. */
 export function resolveWebSrcCandidates(): string[] {
   return [
     path.join(process.cwd(), 'web', 'src'),
-    path.join(import.meta.dir, '..', '..', 'web', 'src'),
+    path.join(import.meta.dir, '..', '..', '..', 'web', 'src'),
   ];
 }
 

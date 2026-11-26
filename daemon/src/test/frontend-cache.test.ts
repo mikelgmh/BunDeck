@@ -7,7 +7,7 @@
  *   solapar); sin DEV no hace nada.
  */
 import { describe, expect, test, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webDistCacheHeaders, webDistStale, newestMtimeMs, resolveWebDistCandidates } from '../http/static';
@@ -135,6 +135,31 @@ describe('webDistStale', () => {
     utimesSync(deep, now, now);
     expect(newestMtimeMs(src)).toBeGreaterThan(0);
     expect(newestMtimeMs(join(src, 'no-existe'))).toBe(0);
+  });
+});
+
+describe('resolveWebSrcCandidates (REGRESIÓN: servía UI obsoleta por relay)', () => {
+  test('al menos un candidato existe en el layout real del repo', async () => {
+    // El bug: el relativo usaba `../..` desde daemon/src/http/ y apuntaba a
+    // `daemon/web/src` (inexistente); ni el watcher ni el rebuild encontraban
+    // web/src, el túnel servía web/dist obsoleto y el móvil no veía cambios.
+    const { resolveWebSrcCandidates } = await import('../http/static');
+    const found = resolveWebSrcCandidates().filter((d) => {
+      try {
+        return statSync(d).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test('el candidato relativo llega a web/src del repo (tres niveles)', async () => {
+    const { resolveWebSrcCandidates } = await import('../http/static');
+    // import.meta.dir = daemon/src/http → raíz del repo = tres niveles.
+    const rel = resolveWebSrcCandidates()[1].replace(/\\/g, '/');
+    expect(rel).toMatch(/web\/src$/);
+    expect(statSync(resolveWebSrcCandidates()[1]).isDirectory()).toBe(true);
   });
 });
 
