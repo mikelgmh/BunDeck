@@ -1,3 +1,10 @@
+## [1.22.1](https://github.com/mikelgmh/BunDeck/compare/v1.22.0...v1.22.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* dedupe dynamic polls and identify action errors ([b3c5168](https://github.com/mikelgmh/BunDeck/commit/b3c51687f2b8f0083bed69653df3e3a3afc963fd))
+
 # [1.22.0](https://github.com/mikelgmh/BunDeck/compare/v1.21.0...v1.22.0) (2026-11-26)
 
 
