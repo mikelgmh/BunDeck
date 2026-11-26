@@ -9,16 +9,23 @@
  *      al broadcaster inyectado (antes era no-op).
  *  Extra: un plugin que crashea en register no tumba el loader.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-loader-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+// Aislamiento del data-dir entre ficheros (ver helpers/test-data-dir.ts):
+// `resolveDataDir()` prefiere BUNDECK_DATA_DIR sobre LIBREDECK_DATA_DIR y
+// `process.env` es global al proceso de `bun test`. Fijar solo la var
+// deprecated hacía que otro fichero (p. ej. hw-repaint-coalescing, que fija
+// ambas) redirigiera getPluginsDir() a SU tmpdir mientras este test escribía
+// en el propio → "Plugin manifest not found" solo en CI.
+const CLAIM = claimDataDir('ld-loader-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase } from '../db';
+import { getPluginsDir } from '../paths';
 import { PluginLoader } from '../plugin-loader';
 import { ActionRunner } from '../action-runner';
 
@@ -26,13 +33,18 @@ let loader: PluginLoader;
 let runner: ActionRunner;
 
 function writePlugin(id: string, manifest: any, mainJs: string): void {
-  const dir = path.join(TMP, 'plugins', id);
+  // Reclamar el data-dir propio: otro fichero puede haberlo cambiado tras
+  // los imports (orden de descubrimiento dependiente del SO en CI).
+  setDataDir(TMP);
+  const dir = path.join(getPluginsDir(), id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
   fs.writeFileSync(path.join(dir, 'main.js'), mainJs);
 }
 
 beforeAll(async () => {
+  setDataDir(TMP);
+  fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
   await initDatabase();
   loader = new PluginLoader();
   // Cerrar el watcher de chokidar: los tests hacen reload explícito y así
@@ -46,6 +58,13 @@ beforeAll(async () => {
 afterAll(() => {
   try { runner.dispose(); } catch {}
   try { loader.dispose(); } catch {}
+  CLAIM.restore();
+  CLAIM.cleanup();
+});
+
+// Por si otro fichero reclama el data-dir entre tests del mismo fichero.
+beforeEach(() => {
+  setDataDir(TMP);
 });
 
 describe('PluginLoader sobre Workers', () => {

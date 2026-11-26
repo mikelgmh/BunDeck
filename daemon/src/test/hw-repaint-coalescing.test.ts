@@ -26,11 +26,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-hw-coalesce-test-'));
-process.env.BUNDECK_DATA_DIR = TMP;
-process.env.LIBREDECK_DATA_DIR = TMP;
+// Aislamiento del data-dir entre ficheros (ver helpers/test-data-dir.ts):
+// fijar BUNDECK_DATA_DIR sin restaurarlo redirige getDataDir() de OTROS
+// ficheros (p. ej. plugin-loader.test.ts, que solo fijaba la var deprecated)
+// mientras sus aserciones miran su TMP propio → fallos solo en CI.
+const CLAIM = claimDataDir('ld-hw-coalesce-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase, DatabaseService } from '../db';
@@ -74,6 +77,7 @@ let prevStreamDeck: unknown;
 let prevSession: { profileId: string | null; pageId: string | null };
 
 beforeAll(async () => {
+  setDataDir(TMP);
   await initDatabase();
   db = new DatabaseService();
   const prof = db.createProfile({ id: `prof-hw-${Date.now()}`, name: 'HW', data: {} });
@@ -110,6 +114,8 @@ afterAll(async () => {
     }
   } catch { /* noop */ }
   // Sin intervalos vivos: botones sin pc-vitals ni {{vars}} → no hay polling.
+  CLAIM.restore();
+  CLAIM.cleanup();
 });
 
 describe('HW repaint anti-bloqueo', () => {

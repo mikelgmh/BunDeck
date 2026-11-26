@@ -2,17 +2,19 @@
  * plugin-install.test.ts — instalación de plugins (ZIP, directorio, git,
  * autodetección Elgato) con progreso y broadcast WS.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import AdmZip from 'adm-zip';
+import { claimDataDir, setDataDir } from './helpers/test-data-dir';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-install-test-'));
-process.env.LIBREDECK_DATA_DIR = TMP;
+// Aislamiento del data-dir entre ficheros (ver helpers/test-data-dir.ts).
+const CLAIM = claimDataDir('ld-install-test-');
+const TMP = CLAIM.dir;
 fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 
 import { initDatabase } from '../db';
+import { getPluginsDir } from '../paths';
 import { PluginLoader } from '../plugin-loader';
 
 let loader: PluginLoader;
@@ -48,6 +50,8 @@ async function gitAvailable(): Promise<boolean> {
 }
 
 beforeAll(async () => {
+  setDataDir(TMP);
+  fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
   await initDatabase();
   loader = new PluginLoader();
   const anyLoader = loader as any;
@@ -62,6 +66,12 @@ beforeAll(async () => {
 
 afterAll(() => {
   try { loader.dispose(); } catch {}
+  CLAIM.restore();
+  CLAIM.cleanup();
+});
+
+beforeEach(() => {
+  setDataDir(TMP);
 });
 
 describe('Instalación de plugins', () => {
@@ -95,7 +105,7 @@ describe('Instalación de plugins', () => {
 
     await loader.uninstallPlugin('zipok');
     expect(loader.getPlugin('zipok')).toBeUndefined();
-    expect(fs.existsSync(path.join(TMP, 'plugins', 'zipok'))).toBe(false);
+    expect(fs.existsSync(path.join(getPluginsDir(), 'zipok'))).toBe(false);
   });
 
   it('ZIP sin manifest falla con error visible (callback + WS)', async () => {
