@@ -48,7 +48,7 @@ import {
 } from './plugins';
 import { PluginSandbox } from './plugin-system/sandbox';
 import { isSafeModeEnabled, isGatedActionType } from './e2e-safe';
-import { VariableStore } from './variables/store';
+import { VariableStore, getVariableStore } from './variables/store';
 import {
   FlowEngine,
   FlowStore,
@@ -153,7 +153,16 @@ export class ActionRunner {
   private lastExecution: Map<string, number> = new Map();
   private nativePlugins: NativePlugin[] = [];
   private sandbox = new PluginSandbox();
-  private varStore: VariableStore;
+  /**
+   * Store de variables COMPARTIDO (singleton): el runner, la API y el WS
+   * deben ver la misma caché; con una instancia propia las lecturas del
+   * otro lado quedaban rancias y hasta se perdían escrituras (changed
+   * calculado contra un valor viejo). Se resuelve perezoso para no atar
+   * el orden de construcción con `setVariableStore` del servidor.
+   */
+  private get varStore(): VariableStore {
+    return getVariableStore();
+  }
   private flowStore: FlowStore;
   private flowEngine: FlowEngine;
   private automationManager: AutomationManager;
@@ -186,7 +195,6 @@ export class ActionRunner {
       emit: (event, payload) => this.emitFlowEvent(event, payload),
     });
     this.loadNativePlugins();
-    this.varStore = new VariableStore(this.db);
     this.setupBuiltInActions();
   }
 
