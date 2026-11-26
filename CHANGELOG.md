@@ -1,3 +1,16 @@
+# [1.20.0](https://github.com/mikelgmh/BunDeck/compare/v1.19.0...v1.20.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **relay:** puentes /s/ aceptados en onTunnelBridgeOpen + etiqueta honesta del pilotito ([8b4ad3b](https://github.com/mikelgmh/BunDeck/commit/8b4ad3b533aec38b5f9482c55bd6de9e6799a8d3))
+
+
+### Features
+
+* **kiosco:** dialogo de historial con UX de modales y IPs probadas visibles ([70c2a0d](https://github.com/mikelgmh/BunDeck/commit/70c2a0dc7c200d260ba9c8c8e6b17c27fa6d7418))
+* **kiosco:** pilotito clicable con historial de conexion y waiting LAN visible ([52bf7fe](https://github.com/mikelgmh/BunDeck/commit/52bf7fe9da0e8d1a4a2fc39c48837dc907126c46))
+
 # [1.19.0](https://github.com/mikelgmh/BunDeck/compare/v1.18.0...v1.19.0) (2026-11-26)
 
 
