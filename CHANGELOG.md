@@ -1,3 +1,16 @@
+# [1.21.0](https://github.com/mikelgmh/BunDeck/compare/v1.20.0...v1.21.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **lan:** modal sin hueco, probe via apiPort y puerto UI correcto en dev ([c44c165](https://github.com/mikelgmh/BunDeck/commit/c44c1657f952d5b7b4c652b2c87e5017eda7897b))
+* **security:** handoff LAN post-aprobacion, sin invite pre-aprobacion ([16e6ec0](https://github.com/mikelgmh/BunDeck/commit/16e6ec06cfe05cc4636dc5c6743228541cd877bd))
+
+
+### Features
+
+* **relay:** boton manual Abrir version local en la waiting ([a53c518](https://github.com/mikelgmh/BunDeck/commit/a53c5187d2176f69f43acfe0b4da977a80c44efd))
+
 # [1.20.0](https://github.com/mikelgmh/BunDeck/compare/v1.19.0...v1.20.0) (2026-11-26)
 
 
