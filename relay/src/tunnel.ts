@@ -12,10 +12,12 @@
  *  - daemon→relay `{v:1, kind:'ui-publish', urlCode, exp}` (urlCode string
  *    12+ chars, `exp` epochMs) → `{v:1, kind:'ui-published', urlCode}`.
  *    Extensión fast-path LAN (backward-compatible, opcional): el daemon puede
- *    adjuntar `lan?: { code, ips, port, apiPort, fp, dev }` (invite LAN +
- *    fingerprints). El relay lo sanitiza duro y lo expone vía
- *    `getLanHints(urlCode)` para que la waiting page intente un redirect
- *    directo pre-aprobación. Sin `lan` todo sigue igual.
+ *    adjuntar `lan?: { ips, port, apiPort, fp, dev }` (SOLO alcanzabilidad,
+ *    SIN código/invite). El relay lo sanitiza duro y lo expone vía
+ *    `getLanHints(urlCode)` para que la waiting page pruebe alcanzabilidad
+ *    pre-aprobación (sin redirect ni invite). Sin `lan` todo sigue igual.
+ *    El invite LAN viaja SOLO en `ui-bind` (`lan.code`) y se entrega UNA vez
+ *    vía `status` post-aprobación (nunca en HTML público).
  *  - relay→daemon `{v:1, kind:'ui-request', reqId, urlCode, ua, ip}` (solo en
  *    la primera visita a `GET /ui/<urlCode>`).
  *  - daemon→relay `{v:1, kind:'ui-decision', reqId, allow}` →
@@ -23,7 +25,12 @@
  *    (defecto) el poll pasa a `denied`.
  *  - daemon→relay `{v:1, kind:'ui-bind', urlCode, sessionToken, exp}`
  *    (sessionToken hex 32+ chars generado por el daemon) →
- *    `{v:1, kind:'ui-bound', urlCode}`.
+ *    `{v:1, kind:'ui-bound', urlCode}`. Extensión LAN post-aprobación
+ *    (opcional): `lan?: { code, ips, port, apiPort, fp, dev }` con el invite
+ *    LAN (`code` base64url 16-80). Se guarda SOLO en el binding legacy y
+ *    `status` lo devuelve UNA vez (`{lan:{code,ips,port,apiPort,fp}}`) en la
+ *    rama aprobada (sid o legacy, la que dispare primero), marcando
+ *    `lanConsumed`. Polls siguientes ya no lo exponen.
  *  - daemon→relay `{v:1, kind:'ui-rebind', sessionToken, exp}` (sin código:
  *    el daemon re-anuncia sus sesiones vigentes al (re)conectar para que un
  *    reinicio o micro-corte no invalide los `/t/<token>/` existentes) →
@@ -39,7 +46,7 @@
  *    `{v:1, kind:'ws-close', id}` en ambos sentidos (daemon→relay aceptado
  *    como extensión para que el daemon pueda cerrar un puente).
  *  - Errores: `{v:1, kind:'error', error, detail?}` (`not-registered`,
- *    `bad-code`, `bad-exp`, `bad-token`, `bad-decision`, `unknown-code`,
+ *    `bad-code`, `bad-exp`, `bad-token`, `bad-lan`, `bad-decision`, `unknown-code`,
  *    `unknown-request`, `unknown-token`, `stale-request`, `expired`,
  *    `unknown-kind`, `rate-limited`).
  *
@@ -49,7 +56,9 @@
  *    La primera visita dispara `ui-request` al daemon.
  *  - `GET /ui/<urlCode>/status` → 200
  *    `{status:'pending'|'approved'|'denied'|'expired', sessionToken?}`.
- *    El token solo se entrega en el PRIMER poll tras aprobar.
+ *    El token solo se entrega en el PRIMER poll tras aprobar. Si el bind
+ *    trajo `lan`, el primer poll aprobado incluye además
+ *    `lan:{code,ips,port,apiPort,fp}` UNA sola vez.
  *  - Todo bajo `/t/<sessionToken>/<path>` (HTTP) y WS en `/t/<tok>/ws`.
  *    Token desconocido → 401 `{error:'invalid-token'}`; caducado → 401
  *    `{error:'expired'}`. Daemon offline → 502; sin respuesta → 504.
@@ -131,14 +140,22 @@ interface HttpPending {
 interface CodeEntry {
   deviceId: string;
   exp: number;
-  /** Hints LAN del fast-path (redirect pre-aprobación); null = sin hints. */
+  /** Hints LAN de alcanzabilidad (SIN código pre-aprobación); null = sin hints. */
   lan?: LanHints | null;
 }
 
-/** Hints de LAN para el fast-path pre-aprobación de la waiting page. */
+/**
+ * Hints de LAN.
+ * - `ui-publish`: SOLO alcanzabilidad `{ips, port, apiPort, fp, dev}` SIN
+ *   `code` (el invite NUNCA viaja pre-aprobación).
+ * - `ui-bind`: CON invite `{code, ips, port, apiPort, fp, dev?}` (`code`
+ *   base64url 16-80). Fuente única del invite post-aprobación.
+ * `code` es opcional en el tipo para cubrir ambas fases; `sanitizeLanHints`
+ * lo exige solo con `requireCode:true`.
+ */
 export interface LanHints {
-  /** Código de invitación LAN (base64url, 16-80 chars). */
-  code: string;
+  /** Código de invitación LAN (solo fase bind/status; ausente en publish). */
+  code?: string;
   /** IPv4 RFC1918 candidatas (≤4, ya filtradas). */
   ips: string[];
   /** Puerto del frontend LAN (sirve `/config` público). */
@@ -149,6 +166,15 @@ export interface LanHints {
   fp: string;
   /** Nombre del dispositivo (informativo). */
   dev: string;
+}
+
+/** Invite LAN tal como lo devuelve `status` post-aprobación (sin `dev`). */
+export interface LanDirect {
+  code: string;
+  ips: string[];
+  port: number;
+  apiPort: number;
+  fp: string;
 }
 
 const LAN_CODE_RE = /^[A-Za-z0-9_-]{16,80}$/;
@@ -171,23 +197,40 @@ function isPort(n: unknown): n is number {
 }
 
 /**
- * Sanitiza los hints LAN de `ui-publish`. Devuelve null si inválido: el
- * publish sigue sin lan (nunca falla por esto; tolera relay viejo/daemon
- * viejo y `lan` ausente).
+ * Sanitiza los hints LAN.
+ * - `requireCode:false` (publish): acepta `code` AUSENTE; solo exige
+ *   ips+puertos válidos. Si trae `code` válido se conserva (compat daemon
+ *   viejo), si trae `code` inválido se ignora (no tumba el publish).
+ *   `fp`/`dev` opcionales (defecto `''`).
+ * - `requireCode:true` (bind): exige `code` base64url 16-80 ADEMÁS de
+ *   ips+puertos válidos; si falta o es inválido devuelve null (el caller
+ *   responde `bad-lan`).
+ * En ambos casos ips no-RFC1918 se descartan (≤4) y puertos fuera de rango
+ * invalidan todo. Nunca lanza; null = sin lan (publish) o `bad-lan` (bind).
  */
-function sanitizeLanHints(input: unknown): LanHints | null {
+export function sanitizeLanHints(input: unknown, requireCode = false): LanHints | null {
   if (!input || typeof input !== 'object') return null;
   const l = input as Record<string, unknown>;
-  if (typeof l.code !== 'string' || !LAN_CODE_RE.test(l.code)) return null;
+  // Código: obligatorio solo en bind. En publish se tolera ausente (nuevo
+  // diseño) o válido (compat daemon viejo); si viene inválido se ignora.
+  let code: string | undefined;
+  if (typeof l.code === 'string' && LAN_CODE_RE.test(l.code)) {
+    code = l.code;
+  } else if (requireCode) {
+    return null;
+  } else if (l.code !== undefined) {
+    // Publish con code inválido: se ignora, no invalida los hints.
+    code = undefined;
+  }
   if (!Array.isArray(l.ips)) return null;
   const ips = l.ips
     .filter((ip): ip is string => typeof ip === 'string' && isRfc1918Ipv4(ip))
     .slice(0, 4);
   if (ips.length === 0) return null;
   if (!isPort(l.port) || !isPort(l.apiPort)) return null;
-  if (typeof l.fp !== 'string' || l.fp.length > 128) return null;
-  if (typeof l.dev !== 'string' || l.dev.length > 128) return null;
-  return { code: l.code, ips, port: l.port, apiPort: l.apiPort, fp: l.fp, dev: l.dev };
+  const fp = typeof l.fp === 'string' && l.fp.length <= 128 ? l.fp : '';
+  const dev = typeof l.dev === 'string' && l.dev.length <= 128 ? l.dev : '';
+  return { ...(code !== undefined ? { code } : {}), ips, port: l.port, apiPort: l.apiPort, fp, dev };
 }
 
 interface PendingReq {
@@ -205,6 +248,15 @@ interface CodeBinding {
   exp: number;
   consumed: boolean;
   turn?: TurnCreds | null;
+  /**
+   * Invite LAN post-aprobación (viene de `ui-bind`, validado con
+   * `requireCode:true`). Fuente ÚNICA del invite: el binding sid NUNCA lo
+   * guarda. Se entrega UNA vez vía `status` y muere con el binding
+   * (`dropCode`/`prune`/`unbind` borran el binding entero, sin huérfanos).
+   */
+  lan?: LanHints | null;
+  /** `true` tras exponer `lan` una vez en `status` (independiente de `consumed`). */
+  lanConsumed?: boolean;
 }
 
 interface SessionEntry {
@@ -517,11 +569,13 @@ export class TunnelState {
     if (typeof exp !== 'number' || !Number.isFinite(exp)) return { error: 'bad-exp' };
     // Republicar reinicia el flujo y revoca sesiones/puentes de ese código.
     this.dropCode(urlCode);
-    this.codes.set(urlCode, { deviceId, exp, lan: sanitizeLanHints(lan) });
+    // Publish SIN código: solo alcanzabilidad (requireCode:false). Nunca falla
+    // por lan inválido (tolerante); el invite viaja solo en bind.
+    this.codes.set(urlCode, { deviceId, exp, lan: sanitizeLanHints(lan, false) });
     return { deviceId };
   }
 
-  /** Hints LAN del código (fast-path pre-aprobación); null si no hay. */
+  /** Hints LAN de alcanzabilidad (SIN código); null si no hay. */
   getLanHints(urlCode: string): LanHints | null {
     if (typeof urlCode !== 'string' || urlCode === '') return null;
     return this.codes.get(urlCode)?.lan ?? null;
@@ -619,7 +673,7 @@ export class TunnelState {
     return 'ok';
   }
 
-  bind(urlCode: unknown, sessionToken: unknown, exp: unknown, turn?: unknown): 'ok' | string {
+  bind(urlCode: unknown, sessionToken: unknown, exp: unknown, turn?: unknown, lan?: unknown): 'ok' | string {
     if (!isHexToken(sessionToken)) return 'bad-token';
     // `exp = 0` = sesión perenne (nunca caduca): se acepta sin tope TTL.
     if (typeof exp !== 'number' || !Number.isFinite(exp) || exp < 0) return 'bad-exp';
@@ -631,12 +685,27 @@ export class TunnelState {
       return 'expired';
     }
     const turnCreds = sanitizeTurnCreds(turn);
+    // Invite LAN post-aprobación: solo en el binding legacy (el sid NUNCA lo
+    // guarda; fuente única = legacy). Ausente = sin LAN (compat). Presente
+    // pero inválido = `bad-lan` (el daemon debe reintentar sin lan o válido).
+    let lanHints: LanHints | null = null;
+    if (lan !== undefined && lan !== null) {
+      lanHints = sanitizeLanHints(lan, true);
+      if (!lanHints) return 'bad-lan';
+    }
     const prev = this.bindings.get(urlCode);
     if (prev && prev.sessionToken !== sessionToken) this.dropSession(prev.sessionToken);
     // NOTA: no se toca sidBindings aquí: legacy `/t/*` y split-token `/s/*`
     // coexisten para el mismo urlCode (compat transición).
     this.sessions.set(sessionToken as string, { deviceId: entry.deviceId, exp: exp as number, urlCode, turn: turnCreds });
-    this.bindings.set(urlCode, { sessionToken: sessionToken as string, exp: exp as number, consumed: false, turn: turnCreds });
+    this.bindings.set(urlCode, {
+      sessionToken: sessionToken as string,
+      exp: exp as number,
+      consumed: false,
+      turn: turnCreds,
+      lan: lanHints,
+      lanConsumed: false,
+    });
     this.persistSession(sessionToken as string);
     this.usedCodes.set(urlCode, entry.exp);
     const pendingId = this.pendingByCode.get(urlCode);
@@ -852,7 +921,7 @@ export class TunnelState {
     return true;
   }
 
-  status(urlCode: string): { status: TunnelStatus; sessionToken?: string; sid?: string; ticket?: string; turn?: TurnCreds | null; rtc?: boolean } {
+  status(urlCode: string): { status: TunnelStatus; sessionToken?: string; sid?: string; ticket?: string; turn?: TurnCreds | null; rtc?: boolean; lan?: LanDirect } {
     const now = this.now();
     const sb = this.sidBindings.get(urlCode);
     const bLegacy = this.bindings.get(urlCode);
@@ -864,6 +933,26 @@ export class TunnelState {
       if (ls && (ls.exp === 0 || ls.exp > now)) return bLegacy.sessionToken;
       return undefined;
     })();
+    // Invite LAN post-aprobación: fuente ÚNICA = binding legacy. Se entrega
+    // UNA vez (lanConsumed) en la rama aprobada que dispare primero,
+    // independiente de los flags de sessionToken/ticket. Sin binding legacy
+    // o ya consumido: no se expone (flujo actual intacto).
+    const takeLanOnce = (): LanDirect | undefined => {
+      const bl = this.bindings.get(urlCode);
+      if (!bl?.lan || bl.lanConsumed) return undefined;
+      const lan = bl.lan;
+      if (!lan || typeof lan.code !== 'string' || !lan.code) return undefined;
+      if (!Array.isArray(lan.ips) || lan.ips.length === 0) return undefined;
+      if (typeof lan.port !== 'number') return undefined;
+      bl.lanConsumed = true;
+      return {
+        code: lan.code,
+        ips: [...lan.ips],
+        port: lan.port,
+        apiPort: lan.apiPort,
+        fp: typeof lan.fp === 'string' ? lan.fp : '',
+      };
+    };
     if (sb) {
       const s = this.sidSessions.get(sb.sid);
       if (s && (s.exp === 0 || s.exp > now)) {
@@ -883,17 +972,21 @@ export class TunnelState {
             // polls siguientes: no re-exponer legacy
             legacyOnce = undefined;
           }
+          const lanOnce = takeLanOnce();
           return {
             status: 'approved',
             sid: sb.sid,
             ticket,
             ...(legacyOnce ? { sessionToken: legacyOnce } : {}),
             ...(sb.turn ? { turn: sb.turn, rtc: true } : {}),
+            ...(lanOnce ? { lan: lanOnce } : {}),
           };
         }
         // Sin secreto plano (p. ej. restore tras reinicio sin rebind):
         // aprobado sin ticket. Las cookies existentes siguen valiendo.
-        return { status: 'approved', sid: sb.sid, ...(legacyToken ? {} : {}) };
+        // El invite LAN sigue entregándose una vez si existe.
+        const lanOnce = takeLanOnce();
+        return { status: 'approved', sid: sb.sid, ...(legacyToken ? {} : {}), ...(lanOnce ? { lan: lanOnce } : {}) };
       }
       this.sidBindings.delete(urlCode);
       this.pendingSidSecrets.delete(sb.sid);
@@ -904,8 +997,11 @@ export class TunnelState {
       if (s && (s.exp === 0 || s.exp > now)) {
         if (!b.consumed) {
           b.consumed = true;
-          return { status: 'approved', sessionToken: b.sessionToken, ...(b.turn ? { turn: b.turn, rtc: true } : {}) };
+          const lanOnce = takeLanOnce();
+          return { status: 'approved', sessionToken: b.sessionToken, ...(b.turn ? { turn: b.turn, rtc: true } : {}), ...(lanOnce ? { lan: lanOnce } : {}) };
         }
+        // Token ya entregado: aprobado sin re-exponer. El lan tampoco se
+        // re-expone (takeLanOnce ya marcó consumido en el primer poll).
         return { status: 'approved' };
       }
       this.bindings.delete(urlCode);
@@ -1115,6 +1211,8 @@ export class TunnelState {
   }
 
   private dropCode(urlCode: string): void {
+    // Los bindings se borran enteros: el `lan` (y `lanConsumed`) muere con
+    // ellos, sin huérfanos. Vale para dropCode/prune/unbind (todos borran bindings).
     this.codes.delete(urlCode);
     this.usedCodes.delete(urlCode);
     const reqId = this.pendingByCode.get(urlCode);

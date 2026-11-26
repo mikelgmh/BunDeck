@@ -53,8 +53,9 @@ const server = relay.listen(config.port, '0.0.0.0');
 // Sala de espera del navegador (/ui/<code>): la sirve waiting.ts a través
 // del hook que expone tunnel.ts. Sin esto, /ui/<code> devuelve 404.
 // Fast-path LAN: resuelve los hints publicados por el daemon (`ui-publish`
-// con `lan`) vía `relay.tunnel.getLanHints` y los pasa a la página para el
-// auto-redirect pre-aprobación (best-effort; sin hints todo sigue igual).
+// con `lan` SIN código) vía `relay.tunnel.getLanHints` y los pasa a la página
+// para el probe de alcanzabilidad pre-aprobación (best-effort; sin hints
+// todo sigue igual). El invite viaja solo post-aprobación vía `status`.
 setUiPageHandler((urlCode: string, req: Request) => {
   if (wantsJson(req)) return Response.json({ page: 'ui-waiting', urlCode });
   let lan: Parameters<typeof renderWaitingPage>[2];

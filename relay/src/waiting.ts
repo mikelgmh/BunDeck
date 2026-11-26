@@ -62,6 +62,8 @@ export interface UiStatusResult {
   /** Nuevo flujo split-token: sid público + ticket de un solo uso (canje por cookie). */
   sid?: string;
   ticket?: string;
+  /** Invite LAN post-aprobación (solo en el primer poll aprobado; nunca pre-aprobación). */
+  lan?: { code: string; ips: string[]; port: number; apiPort: number; fp: string };
 }
 
 /** Getter de estado que debe exponer el módulo del túnel (o inyectarse). */
@@ -99,15 +101,42 @@ function isUiStatus(s: unknown): s is UiStatus {
 
 function sanitizeUiResult(v: unknown): UiStatusResult | null {
   if (!v || typeof v !== 'object') return null;
-  const r = v as { status?: unknown; sessionToken?: unknown; sid?: unknown; ticket?: unknown };
+  const r = v as { status?: unknown; sessionToken?: unknown; sid?: unknown; ticket?: unknown; lan?: unknown };
   if (!isUiStatus(r.status)) return null;
   if (r.status === 'approved') {
-    if (typeof r.sessionToken === 'string') return { status: r.status, sessionToken: r.sessionToken };
-    if (typeof r.sid === 'string') {
-      return typeof r.ticket === 'string'
-        ? { status: r.status, sid: r.sid, ticket: r.ticket }
-        : { status: r.status, sid: r.sid };
+    // Invite LAN post-aprobación (opcional): se valida duro antes de exponerlo
+    // al JS de la página (que solo lo usa tras aprobar).
+    let lan: UiStatusResult['lan'];
+    if (r.lan && typeof r.lan === 'object') {
+      const l = r.lan as Record<string, unknown>;
+      if (
+        typeof l.code === 'string' && l.code !== '' &&
+        Array.isArray(l.ips) && l.ips.length > 0 &&
+        typeof l.port === 'number'
+      ) {
+        const ips = (l.ips as unknown[]).filter((ip): ip is string => typeof ip === 'string').slice(0, 4);
+        if (ips.length > 0) {
+          lan = {
+            code: l.code,
+            ips,
+            port: l.port,
+            apiPort: typeof l.apiPort === 'number' ? l.apiPort : l.port,
+            fp: typeof l.fp === 'string' ? l.fp : '',
+          };
+        }
+      }
     }
+    if (typeof r.sessionToken === 'string') return { status: r.status, sessionToken: r.sessionToken, ...(lan ? { lan } : {}) };
+    if (typeof r.sid === 'string') {
+      const base = typeof r.ticket === 'string'
+        ? { status: r.status, sid: r.sid, ticket: r.ticket } as UiStatusResult
+        : { status: r.status, sid: r.sid } as UiStatusResult;
+      return lan ? { ...base, lan } : base;
+    }
+    // Aprobado sin token ni sid (segundo poll legacy / restore sid sin ticket):
+    // sigue siendo aprobado válido; propaga lan si la trae (una sola vez la
+    // genera el túnel, aquí solo se reenvía).
+    if (lan) return { status: r.status, lan };
     return null;
   }
   return { status: r.status };
@@ -178,9 +207,8 @@ export interface WaitingTexts {
   privacy: string;
   noCredentials: string;
   lanChecking: string;
-  lanRedirecting: string;
-  lanLocalTitle: string;
-  lanLocalOpen: string;
+  lanDirectTitle: string;
+  lanDirectOpen: string;
 }
 
 const STR: Record<WaitingLang, WaitingTexts> = {
@@ -209,9 +237,8 @@ const STR: Record<WaitingLang, WaitingTexts> = {
       'El equipo anfitrión debe aprobar tu acceso. Tu navegador intentará primero una conexión directa P2P (WebRTC) cifrada; si la red no lo permite usará el relay (el operador del relay puede ver el tráfico, protegido con TLS entre tu navegador y el relay).',
     noCredentials: 'Esta página nunca te pedirá usuario ni contraseña.',
     lanChecking: 'Comprobando si estás en la misma red local…',
-    lanRedirecting: 'Red local detectada, abriendo versión rápida…',
-    lanLocalTitle: '¿Estás en la misma Wi-Fi que este equipo? Ábrelo directamente (no usa internet):',
-    lanLocalOpen: 'Abrir versión local',
+    lanDirectTitle: 'Estás en la misma red: abre la versión directa',
+    lanDirectOpen: 'Abrir versión directa',
   },
   en: {
     lang: 'en',
@@ -237,9 +264,8 @@ const STR: Record<WaitingLang, WaitingTexts> = {
       'The host machine must approve your access. Your browser will first try a direct encrypted P2P (WebRTC) connection; if the network does not allow it, it will use the relay (the relay operator can see the traffic, protected with TLS between your browser and the relay).',
     noCredentials: 'This page will never ask for your username or password.',
     lanChecking: 'Checking whether you are on the same local network…',
-    lanRedirecting: 'Local network detected, opening fast version…',
-    lanLocalTitle: 'On the same Wi-Fi as this machine? Open it directly (no internet needed):',
-    lanLocalOpen: 'Open local version',
+    lanDirectTitle: 'On the same network: open the direct version',
+    lanDirectOpen: 'Open direct version',
   },
 };
 
@@ -250,20 +276,21 @@ export function waitingLang(req: Request): WaitingLang {
 /**
  * Renderiza la sala de espera. `urlCode` debe venir ya validado con
  * `isValidUrlCode` (aun así se escapa). La página inicial NUNCA incluye el
- * `sessionToken`: solo llega por `GET …/status` en tiempo de ejecución.
+ * `sessionToken` ni el invite LAN: solo llegan por `GET …/status` tras aprobar.
  *
- * `lan` (opcional, del daemon vía `ui-publish`): hints del fast-path LAN. Si
- * están presentes se inyectan como JSON escapado (`</` → `<\/`) en un
- * `<script type="application/json">` + un bloque JS best-effort que corre en
- * paralelo al poll existente: muestra `wait-lan-check` ("comprobando red
- * local") mientras prueba `GET http://<ip>:<port>/config`
- * (público, PNA-friendly, timeout 1500 ms) y redirige UNA sola vez a la LAN
- * si la identidad (`/config.fp`) coincide, o por reachability si hay una
- * única IP candidata y el daemon es viejo (sin `fp`). Al fallar todos los
- * intentos oculta `wait-lan-check` sin tocar nada más. En ambos casos deja
- * el resultado en `sessionStorage['libredeck:lanProbe']`
- * (`{urlCode,tried,ips,ok,ip?,ms,ts}`) para el frontend. Cualquier fallo
- * (mixed-content, PNA, timeout, throw) se silencia: sigue el poll relay.
+ * `lan` (opcional, del daemon vía `ui-publish`): hints de ALCANZABILIDAD sin
+ * código `{ips, port, apiPort, fp}`. Se inyectan como JSON escapado (`</` →
+ * `<\/`) en un `<script type="application/json">` + un bloque JS best-effort
+ * que corre en paralelo al poll: muestra `wait-lan-check` mientras prueba
+ * `GET http://<ip>:<apiPort>/config` (público, PNA-friendly, timeout
+ * 1500 ms) y guarda el resultado en `sessionStorage['libredeck:lanProbe']`
+ * (`{urlCode,tried,ips,ok,ip?,ms,ts}`) para el frontend. NUNCA redirige ni
+ * usa invites pre-aprobación (no hay `code` en el HTML inicial).
+ * Tras aprobar, el poll de `status` puede traer `data.lan:{code,…}` UNA vez:
+ * si el probe guardado dice `ok:true` para ESTE urlCode (fresco <10 min) se
+ * redirige a la URL directa LAN; si no, se muestra el bloque manual
+ * post-aprobación (`wait-lan-direct`) junto al "Entrar ahora" existente.
+ * Cualquier fallo se silencia: sigue el poll relay.
  */
 export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanHints | null): string {
   const t = STR[lang];
@@ -271,14 +298,13 @@ export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanH
   const lanOk =
     !!lan &&
     typeof lan === 'object' &&
-    typeof (lan as LanHints).code === 'string' &&
-    (lan as LanHints).code !== '' &&
     Array.isArray((lan as LanHints).ips) &&
     (lan as LanHints).ips.length > 0 &&
     typeof (lan as LanHints).port === 'number';
+  // SIN `code`: el HTML inicial nunca contiene un invite utilizable. Solo
+  // alcanzabilidad (ips/port/apiPort/fp) para el probe pre-aprobación.
   const lanJson = lanOk
     ? JSON.stringify({
-        code: (lan as LanHints).code,
         ips: (lan as LanHints).ips,
         port: (lan as LanHints).port,
         apiPort: (lan as LanHints).apiPort,
@@ -286,21 +312,12 @@ export function renderWaitingPage(urlCode: string, lang: WaitingLang, lan?: LanH
       }).replace(/<\//g, '<\\/')
     : '';
   const lanHintHtml = lanOk
-    ? `<p class="hint" id="wait-lan-check">${esc(t.lanChecking)}</p><p class="hint" id="wait-lan" hidden>${esc(t.lanRedirecting)}</p>`
+    ? `<p class="hint" id="wait-lan-check">${esc(t.lanChecking)}</p>`
     : '';
-  // Atajo manual a la LAN (el auto-redirect por fetch falla en navegadores
-  // que exigen permiso de red local o bloquean https→http): la navegación
-  // top-level por gesto del usuario a http:// SÍ está permitida siempre.
-  // Misma URL que el redirect automático (invite de un solo uso + kiosk).
-  const lanStaticIps = lanOk && Array.isArray((lan as LanHints).ips)
-    ? ((lan as LanHints).ips as unknown[]).filter((ip): ip is string => typeof ip === 'string' && /^[0-9.]+$/.test(ip)).slice(0, 4)
-    : [];
-  const lanStaticPort = lanOk && typeof (lan as LanHints).port === 'number' && (lan as LanHints).port >= 1 && (lan as LanHints).port <= 65535
-    ? (lan as LanHints).port as number
-    : 0;
-  const lanLocalHtml = lanOk && lanStaticIps.length > 0 && lanStaticPort > 0 && typeof (lan as LanHints).code === 'string' && (lan as LanHints).code !== ''
-    ? `<p class="hint" id="wait-lan-local">${esc(t.lanLocalTitle)}</p><div class="btnrow">${lanStaticIps.map((ip) => `<a class="abtn" href="http://${esc(ip)}:${lanStaticPort}/?invite=${encodeURIComponent((lan as LanHints).code as string)}&amp;kiosk=1&amp;relayFallback=${encodeURIComponent(urlCode)}">${esc(lanStaticIps.length > 1 ? `${t.lanLocalOpen} · ${ip}` : t.lanLocalOpen)}</a>`).join('')}</div>`
-    : '';
+  // Probe SOLO de alcanzabilidad pre-aprobación: verifica `/config` y guarda
+  // `libredeck:lanProbe`, sin redirect ni invite (no hay `code` aquí). La
+  // redirección a la LAN ocurre SOLO post-aprobación en el poll de `status`
+  // (cuando `data.lan.code` ya existe y el Denegar sigue intacto).
   const lanScript = lanOk
     ? `<script id="lan-hints" type="application/json">${lanJson}</script>
 <script>
@@ -310,25 +327,16 @@ var el=document.getElementById('lan-hints');
 if(!el)return;
 var lan=null;
 try{lan=JSON.parse(el.textContent||'null');}catch(e){return;}
-if(!lan||!lan.ips||!lan.ips.length||!lan.code||!lan.port)return;
+if(!lan||!lan.ips||!lan.ips.length||!lan.port)return;
 var segs=location.pathname.split('/').filter(function(p){return !!p;});
 var urlCode=segs.length?segs[segs.length-1]:'';
 if(!urlCode)return;
-var KEY='lanRedirect:'+urlCode;
 var PROBE_KEY='libredeck:lanProbe';
-var fired=false;
-try{if(sessionStorage.getItem(KEY))return;}catch(e){}
-// Inicio del probe: sirve para medir la duración total (ms).
 var startMs=Date.now();
 var validIps=[];
 for(var v=0;v<lan.ips.length;v++){var cip=lan.ips[v];if(typeof cip==='string'&&/^[0-9.]+$/.test(cip))validIps.push(cip);}
 var portNum=(typeof lan.port==='number'&&lan.port>=1&&lan.port<=65535)?lan.port:0;
-// Verificación por el puerto API ("/config" con fp): en DEV la UI vive en
-// Astro (sin "/config" JSON) y el embebido está desactivado, así que
-// verificar contra "port" apuntaría a un puerto muerto. La redirección sí
-// va a "port" (donde abre el kiosco).
 var verifyPort=(typeof lan.apiPort==='number'&&lan.apiPort>=1&&lan.apiPort<=65535)?lan.apiPort:portNum;
-// Guarda el resultado para el frontend (contrato fijo: misma clave y forma).
 function storeProbe(ok,ip){
 try{
 var payload={urlCode:urlCode,tried:true,ips:lan.ips.slice(),ok:!!ok,ms:(Date.now()-startMs),ts:Date.now()};
@@ -336,21 +344,14 @@ if(ip)payload.ip=ip;
 sessionStorage.setItem(PROBE_KEY,JSON.stringify(payload));
 }catch(e){}
 }
-// Oculta el aviso de comprobación cuando el probe termina en negativo.
 function hideCheck(){var c=document.getElementById('wait-lan-check');if(c)c.hidden=true;}
 function finishFail(){hideCheck();storeProbe(false,null);}
 if(!portNum||!validIps.length){finishFail();return;}
 var remaining=validIps.length;
-function oneDone(){remaining--;if(remaining<=0&&!fired){finishFail();}}
-function goLan(ip,port){
-if(fired)return;fired=true;
-storeProbe(true,ip);
-try{sessionStorage.setItem(KEY,'1');}catch(e){}
-var msg=document.getElementById('wait-lan');
-if(msg)msg.hidden=false;
-try{location.replace('http://'+ip+':'+port+'/?invite='+encodeURIComponent(lan.code)+'&kiosk=1&relayFallback='+encodeURIComponent(urlCode));}catch(e){}
-}
-function checkLan(ip,port,single){
+var doneOk=false;
+function markOk(ip){if(doneOk)return;doneOk=true;hideCheck();storeProbe(true,ip);}
+function oneDone(){remaining--;if(remaining<=0&&!doneOk){finishFail();}}
+function checkLan(ip,single){
 var done=false;
 function fin(){if(done)return;done=true;oneDone();}
 var ctl=null;
@@ -360,13 +361,14 @@ var opt={cache:'no-store',mode:'cors'};
 if(ctl)opt.signal=ctl.signal;
 fetch('http://'+ip+':'+verifyPort+'/config',opt).then(function(res){
 clearTimeout(to);
+if(doneOk){fin();return;}
 if(!res||!res.ok){fin();return;}
 return res.json().then(function(data){
-if(fired){fin();return;}
+if(doneOk){fin();return;}
 if(!data||typeof data!=='object'){fin();return;}
 var fp=(typeof data.fp==='string'&&data.fp)?data.fp:null;
-if(fp){if(lan.fp&&fp===lan.fp){goLan(ip,port);return;}fin();return;}
-if(single&&(data.frontendPort||data.apiPort||data.wsPort)){goLan(ip,port);return;}
+if(fp){if(lan.fp&&fp===lan.fp){markOk(ip);fin();return;}fin();return;}
+if(single&&(data.frontendPort||data.apiPort||data.wsPort)){markOk(ip);fin();return;}
 fin();
 }).catch(function(){fin();});
 }).catch(function(){clearTimeout(to);fin();});
@@ -416,7 +418,7 @@ a.abtn:active{transform:scale(.97)}
 <p>${esc(t.pendingBody)}</p>
 <p class="hint">${esc(t.pendingTransport)}</p>
 ${lanHintHtml}<div><span class="code" id="wait-code">${code}</span></div>
-${lanLocalHtml}<div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
+<div><button id="wait-cancel" type="button">${esc(t.cancel)}</button></div>
 </div>
 <div class="card" id="st-approved" hidden>
 <div class="spinner" role="status" aria-label="loading"></div>
@@ -424,6 +426,7 @@ ${lanLocalHtml}<div><button id="wait-cancel" type="button">${esc(t.cancel)}</but
 <p>${esc(t.approvedBody)}</p>
 <p class="hint" id="wait-connecting">${esc(t.connectingBody)}</p>
 <div><button id="wait-go" type="button">${esc(t.goNow)}</button></div>
+<p class="hint" id="wait-lan-direct" hidden><span>${esc(t.lanDirectTitle)}</span><br><a class="abtn" id="wait-lan-direct-link" href="#">${esc(t.lanDirectOpen)}</a></p>
 <p class="warn">${esc(t.tokenWarning)}</p>
 </div>
 <div class="card" id="st-denied" hidden>
@@ -474,6 +477,33 @@ goUrl='/s/'+encodeURIComponent(data.sid)+'/claim'+(q?q+join+tq:'?'+tq)+hash;
 }else{
 goUrl='/t/'+encodeURIComponent(data.sessionToken)+'/'+kq;
 }
+try{
+var lan=data.lan;
+if(lan&&typeof lan.code==='string'&&lan.code&&Array.isArray(lan.ips)&&lan.ips.length&&typeof lan.port==='number'){
+var segs2=location.pathname.split('/').filter(function(p){return !!p;});
+var code2=segs2.length?segs2[segs2.length-1]:'';
+var probeRaw=null;
+try{probeRaw=sessionStorage.getItem('libredeck:lanProbe');}catch(e){}
+var probe=null;
+try{probe=probeRaw?JSON.parse(probeRaw):null;}catch(e){probe=null;}
+var fresh=probe&&probe.ok===true&&probe.urlCode===code2&&typeof probe.ts==='number'&&(Date.now()-probe.ts)<10*60*1000;
+var lanIp=null;
+if(fresh&&typeof probe.ip==='string'&&lan.ips.indexOf(probe.ip)>=0){lanIp=probe.ip;}
+else if(fresh&&typeof probe.ip==='string'&&/^[0-9.]+$/.test(probe.ip)){lanIp=probe.ip;}
+if(!lanIp){
+for(var li=0;li<lan.ips.length;li++){var cip2=lan.ips[li];if(typeof cip2==='string'&&/^[0-9.]+$/.test(cip2)){lanIp=cip2;break;}
+}
+}
+if(lanIp){
+var lanUrl='http://'+lanIp+':'+lan.port+'/?invite='+encodeURIComponent(lan.code)+'&kiosk=1&relayFallback='+encodeURIComponent(code2);
+var link=document.getElementById('wait-lan-direct-link');
+if(link){try{link.setAttribute('href',lanUrl);}catch(e){}}
+var box=document.getElementById('wait-lan-direct');
+if(box){box.hidden=false;}
+if(fresh){goUrl=lanUrl;}
+}
+}
+}catch(e){}
 goTimer=setTimeout(go,2000);
 }else if(data.status==='denied'){cleanup();show('denied');}
 else if(data.status==='expired'){expired();}

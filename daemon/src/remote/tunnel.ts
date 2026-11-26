@@ -18,10 +18,12 @@
  *   `{kind:'ui-unpublish', urlCode}`, `{kind:'ui-decision', reqId, allow}`,
  *   `{kind:'ui-bind', urlCode, sessionToken, exp}`,
  *   `{kind:'ui-unbind', sessionToken}`.
- *   `lan?` (fast-path LAN, backward-compatible: el relay viejo lo ignora):
- *   `{code, ips, port, apiPort, fp, dev}` — invite LAN 128 bits + máx 4
- *   IPv4 RFC1918 del host + puertos + identidad pública. Se omite en origen
- *   si el host no tiene IPs LAN.
+ *   `lan?` del `ui-publish` (fast-path LAN, backward-compatible: el relay
+ *   viejo lo ignora): SOLO hints de alcanzabilidad
+ *   `{ips, port, apiPort, fp, dev}` SIN `code`. El `code` (invite LAN de
+ *   128 bits) se genera al APROBAR y viaja en el `ui-bind` (`lan?` con
+ *   `{code, ips, port, apiPort, fp}`), que el relay entrega una vez en
+ *   `status.approved.lan`. Sin `lan` en origen si el host no tiene IPs LAN.
  *
  * Si el túnel está caído o la UI remota está deshabilitada
  * (`remote.ui.enabled`, default false): las decisiones son deny y los
@@ -35,10 +37,26 @@ import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-rel
 import { RtcManager, buildTurnCreds } from './rtc';
 import { UI_CODE_KEY, UI_SESSION_PREFIX, UI_UNBIND_PENDING_PREFIX } from './ui-policy';
 import type { UiFastPathLan } from './ui-policy';
-import { readUiFastPathLan } from './ui-policy';
+import { buildUiFastPathLan, readUiFastPathLan } from './ui-policy';
 
 /** Objeto `lan` del `ui-publish` extendido (re-export del contrato). */
 export type UiPublishLan = UiFastPathLan;
+
+/**
+ * Objeto `lan` tal como viaja en el wire del `ui-publish`: SOLO hints de
+ * alcanzabilidad (sin `code`). El invite LAN (128 bits) ya NO viaja
+ * pre-aprobación (fix de seguridad: era visible en el HTML público de la
+ * waiting y permitía entrar por LAN sin aprobación). El `code` se genera
+ * al APROBAR y viaja en el `ui-bind` (una sola vez, como el sessionToken).
+ */
+export type UiPublishLanWire = Omit<UiFastPathLan, 'code'>;
+
+/** Quita el `code` del `lan` interno antes de enviarlo al relay. */
+export function toPublishLan(lan: UiFastPathLan): UiPublishLanWire {
+  const { code: _code, ...hints } = lan;
+  void _code;
+  return hints;
+}
 
 export type TunnelStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected';
 
@@ -340,8 +358,9 @@ export class TunnelClient {
       // Keepalive: sin tráfico periódico el LB/proxy corta el socket
       // ocioso (micro-corte → resync pesado + tormenta de hellos).
       this.startHeartbeat();
-      // Republicar códigos vigentes tras cada (re)conexión (con su `lan`
-      // fast-path si lo tenían: credenciales pareadas ui+lan).
+      // Republicar códigos vigentes tras cada (re)conexión: SOLO hints
+      // de alcanzabilidad (SIN `code`: el invite LAN ya no viaja
+      // pre-aprobación; se genera al aprobar y va en el `ui-bind`).
       const now = this.now();
       for (const [urlCode, entry] of [...this.published.entries()]) {
         if (entry.exp <= now) {
@@ -353,7 +372,7 @@ export class TunnelClient {
           kind: 'ui-publish',
           urlCode,
           exp: entry.exp,
-          ...(entry.lan ? { lan: entry.lan } : {}),
+          ...(entry.lan ? { lan: toPublishLan(entry.lan) } : {}),
         });
       }
       // Re-anunciar el estado UI persistido (códigos + sesiones de settings):
@@ -438,11 +457,14 @@ export class TunnelClient {
   /**
    * Publica un código de UI en el relay (lo genera otro módulo).
    * `lan?` = fast-path LAN pareado (backward-compatible: el relay viejo lo
-   * ignora). Se conserva en memoria para republicarlo tras cada reconexión.
+   * ignora). En memoria se conserva el `lan` COMPLETO (con `code`: es DB
+   * local); al wire (`ui-publish`) solo salen hints SIN `code` (el invite
+   * se genera/entrega al aprobar, en el `ui-bind`). Se republica igual
+   * (hints) tras cada reconexión.
    */
   publishUiCode(urlCode: string, exp: number, lan?: UiPublishLan): void {
     this.published.set(urlCode, lan ? { exp, lan } : { exp });
-    this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan } : {}) });
+    this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan: toPublishLan(lan) } : {}) });
   }
 
   /** Retira un código de UI del relay. */
@@ -470,13 +492,16 @@ export class TunnelClient {
    * Re-anuncia al relay el estado UI persistido en settings tras cada
    * (re)conexión:
    * - Código vigente (`remote.ui.code`): se republica si no está ya en
-   *   memoria (p. ej. tras reiniciar el daemon).
+   *   memoria (p. ej. tras reiniciar el daemon). Solo hints SIN `code`.
    * - Sesiones vigentes (`remote.ui.session.*`): se re-emiten como
    *   `ui-rebind` (restaura sin necesitar el código original, ya consumido).
    *   Las revocadas pero aún no caducadas se re-emiten como `ui-unbind`
    *   (cubre revocar con el relay caído y reconectar después).
    * Sin esto, cualquier reinicio del daemon (o micro-corte) dejaba todos los
    * `/t/<token>/` en `401 invalid-token` hasta generar un QR nuevo.
+   * NOTA degradación aceptada: el `lan` con `code` del approve es one-shot
+   * del `ui-bind` y NO se re-emite aquí ni en `ui-rebind`; si el relay
+   * reinicia se pierde y el teléfono cae a `/t/` o `/s/`.
    */
   /**
    * Lee solo las settings bajo un prefijo (`getSettingsByPrefix` acotado
@@ -514,12 +539,15 @@ export class TunnelClient {
         if (urlCode && Number.isFinite(exp) && exp > now && !this.published.has(urlCode)) {
           // Fast-path LAN pareado (solo snapshot: resync no debe rotar el
           // QR LAN; si no hay invite vigente o no hay IPs, se omite `lan`).
+          // Al wire solo salen hints SIN `code` (el invite se entrega al
+          // aprobar, en el `ui-bind` one-shot). En memoria se conserva el
+          // `lan` completo para republicar los hints tras reconexiones.
           let lan: UiPublishLan | undefined;
           try {
             lan = readUiFastPathLan(this.db as any) as UiPublishLan | undefined;
           } catch { lan = undefined; }
           this.published.set(urlCode, lan ? { exp, lan } : { exp });
-          this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan } : {}) });
+          this.send({ v: 1, kind: 'ui-publish', urlCode, exp, ...(lan ? { lan: toPublishLan(lan) } : {}) });
           out.republishedCode = true;
         }
       }
@@ -624,10 +652,16 @@ export class TunnelClient {
    * secreto (32 bytes) y emite ui-bind con ambos (compat: relays viejos usan
    * sessionToken, relays nuevos prefieren sid+secret y nunca exponen el
    * secreto en la URL).
+   * Además genera el invite LAN (`buildUiFastPathLan`: reutiliza el vigente
+   * con >60 s de vida o crea uno fresco) y lo incluye en el `ui-bind`
+   * (`lan: {code, ips, port, apiPort, fp}`), UNA sola vez como el
+   * sessionToken: es el único momento en que el `code` viaja al relay
+   * (pre-aprobación solo salen hints SIN code). Sin `lan` si el host no
+   * tiene IPs LAN o falla la identidad pública.
    * Incluye credenciales TURN efímeras si TURN_SECRET está configurado
    * (para WebRTC P2P; el relay las entrega en el primer poll approved).
    */
-  decideUiRequest(reqId: string, allow: boolean, exp?: number): { ok: boolean; allowed: boolean; sessionToken?: string; sid?: string; secret?: string; error?: string } {
+  decideUiRequest(reqId: string, allow: boolean, exp?: number): { ok: boolean; allowed: boolean; sessionToken?: string; sid?: string; secret?: string; lan?: UiFastPathLan; error?: string } {
     const entry = this.pending.get(reqId);
     if (!entry) return { ok: false, allowed: false, error: 'reqId desconocido o expirado' };
     if (entry.expiresAt <= this.now()) {
@@ -645,6 +679,11 @@ export class TunnelClient {
     this.bindings.set(sessionToken, { sessionToken, urlCode: entry.urlCode, exp: bindExp, sid, secret });
     this.bindings.set(`sid:${sid}`, { sessionToken, urlCode: entry.urlCode, exp: bindExp, sid, secret });
     const turn = buildTurnCreds(sessionToken);
+    // Invite LAN post-aprobación (best-effort: sin IPs no hay `lan`).
+    let lan: UiFastPathLan | undefined;
+    try {
+      lan = buildUiFastPathLan(this.db as any);
+    } catch { lan = undefined; }
     this.send({
       v: 1,
       kind: 'ui-bind',
@@ -654,8 +693,9 @@ export class TunnelClient {
       secret,
       exp: bindExp,
       ...(turn ? { turn } : {}),
+      ...(lan ? { lan } : {}),
     });
-    return { ok: true, allowed: true, sessionToken, sid, secret };
+    return { ok: true, allowed: true, sessionToken, sid, secret, ...(lan ? { lan } : {}) };
   }
 
    /** Revoca una sesión UI (emite ui-unbind legacy + sid). Acepta token legacy o sid. */

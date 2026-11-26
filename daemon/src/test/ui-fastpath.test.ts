@@ -4,7 +4,9 @@
  * Cubre (contrato fijo con el relay):
  * - (a) `POST ui-code` devuelve `lan` con invite 128 bits + IPs filtradas/
  *   rankeadas (misma lógica que `QrDialog.getDaemonLanIp`) + puertos + fp/dev.
- * - (b) `publishUiCode` emite `lan` y la republicación tras reconexión lo conserva.
+ * - (b) `publishUiCode` emite `lan` SIN `code` (solo hints) y la
+ *   republicación tras reconexión lo conserva; el `code` viaja UNA vez en
+ *   el `ui-bind` del approve (post-aprobación).
  * - (c) `/config` (DEV handler) incluye `fp`/`dev` públicos.
  * - (d) Sin IPs → sin campo `lan` (sanitiza en origen).
  *
@@ -182,7 +184,7 @@ describe('ui-fastpath: POST ui-code con lan', () => {
 });
 
 describe('ui-fastpath: tunnel publish + republicación', () => {
-  it('(b) ui-publish emite lan y la reconexión lo conserva', async () => {
+  it('(b) ui-publish emite lan SIN code (solo hints) y la reconexión lo conserva', async () => {
     const restore = patchNet(mixedNets);
     let relay: any = null;
     let serverWs: any = null;
@@ -222,9 +224,18 @@ describe('ui-fastpath: tunnel publish + republicación', () => {
       await waitFor(() => receivedOf('ui-publish').some((m) => m.urlCode === 'FAST-URL-1'));
       const first = receivedOf('ui-publish').find((m) => m.urlCode === 'FAST-URL-1')!;
       expect(first.exp).toBe(exp);
-      expect(first.lan).toMatchObject({ code: lan.code, port: FRONTEND_PORT, apiPort: API_PORT });
+      // SEGURIDAD post-aprobación: el wire pre-aprobación lleva SOLO hints.
+      expect(first.lan).toBeDefined();
+      expect('code' in first.lan).toBe(false);
+      expect(first.lan).toMatchObject({ ips: lan.ips, port: FRONTEND_PORT, apiPort: API_PORT });
+      const pub = publicIdentity(db);
+      expect(first.lan.fp).toBe(pub.fingerprint);
+      expect(first.lan.dev).toBe(pub.deviceId);
+      // En memoria sí se conserva el code (DB local) para republicar hints.
+      const mem = tunnel.publishedCodes().find((p) => p.urlCode === 'FAST-URL-1')!;
+      expect(mem.lan?.code).toBe(lan.code);
 
-      // Fuerza reconexión desde el relay: el onopen loop debe republicar con el mismo lan.
+      // Fuerza reconexión desde el relay: el onopen loop debe republicar los mismos hints.
       received.length = 0;
       const before = connectCount;
       (tunnel as any).backoffMs = 50;
@@ -232,7 +243,68 @@ describe('ui-fastpath: tunnel publish + republicación', () => {
       await waitFor(() => connectCount > before, 10000);
       await waitFor(() => receivedOf('ui-publish').some((m) => m.urlCode === 'FAST-URL-1'), 10000);
       const repub = receivedOf('ui-publish').find((m) => m.urlCode === 'FAST-URL-1')!;
+      expect('code' in repub.lan).toBe(false);
       expect(repub.lan).toEqual(first.lan);
+      tunnel.stop();
+    } finally {
+      try { relay?.stop?.(true); } catch { /* noop */ }
+      restore();
+    }
+  }, 20000);
+
+  it('(b2) approve con túnel emite ui-bind CON lan.code válido + ips/puertos/fp', async () => {
+    const restore = patchNet(mixedNets);
+    let relay: any = null;
+    const received: any[] = [];
+    try {
+      enableUi();
+      relay = Bun.serve({
+        port: 0,
+        fetch(req, server) {
+          if (server.upgrade(req)) return;
+          return new Response('relay-fake', { status: 200 });
+        },
+        websocket: {
+          open() {},
+          message(_ws: any, raw: any) {
+            try { received.push(JSON.parse(String(raw))); } catch { /* noop */ }
+          },
+        },
+      });
+      const mgr: any = { broadcast: () => {} };
+      const tunnel = new TunnelClient(db as any, mgr, {
+        deviceId: 'dev-fastpath-2',
+        relayUrl: `ws://127.0.0.1:${relay.port}`,
+      });
+      tunnel.start();
+      const receivedOf = (kind: string) => received.filter((m) => m?.kind === kind);
+      await waitFor(() => receivedOf('tunnel-register').length >= 1);
+
+      const exp = Date.now() + 600_000;
+      (tunnel as any).enqueuePending({
+        reqId: 'req-approve-lan',
+        urlCode: 'FAST-URL-APPROVE',
+        ua: 'U',
+        ip: '1.2.3.4',
+        receivedAt: Date.now(),
+        expiresAt: Date.now() + 120_000,
+      });
+      const d = tunnel.decideUiRequest('req-approve-lan', true, exp);
+      expect(d.ok).toBe(true);
+      expect(d.allowed).toBe(true);
+      await waitFor(() => receivedOf('ui-bind').length >= 1);
+      const bind = receivedOf('ui-bind').find((m) => m.urlCode === 'FAST-URL-APPROVE')!;
+      expect(bind).toBeDefined();
+      // El ui-bind SÍ lleva el invite LAN 128 bits + alcanzabilidad.
+      expect(bind.lan).toBeDefined();
+      expect(bind.lan.code).toMatch(/^[A-Za-z0-9\-_]{22}$/);
+      expect(bind.lan.ips).toEqual(['192.168.1.50', '10.0.0.5', '172.20.5.4']);
+      expect(bind.lan.port).toBe(FRONTEND_PORT);
+      expect(bind.lan.apiPort).toBe(API_PORT);
+      const pub = publicIdentity(db);
+      expect(bind.lan.fp).toBe(pub.fingerprint);
+      // El retorno (para tests) incluye el mismo lan del wire.
+      expect(d.lan?.code).toBe(bind.lan.code);
       tunnel.stop();
     } finally {
       try { relay?.stop?.(true); } catch { /* noop */ }

@@ -868,6 +868,8 @@ export class RelayServer {
       case 'ui-bind': {
         // Nuevo flujo split-token: {urlCode, sid, secret} + legacy {sessionToken} para compat.
         // Se enlazan AMBOS (el status devuelve sid+ticket y, una vez, sessionToken legacy).
+        // LAN post-aprobación: `msg.lan` (con `code`) va SOLO al bind legacy
+        // (fuente única; el binding sid nunca guarda lan). Sin lan: compat intacta.
         const m = msg as Record<string, unknown>;
         if (typeof m.sid === 'string' && (typeof m.secret === 'string' || typeof m.sessionToken === 'string')) {
           const secret = typeof m.secret === 'string' ? m.secret : m.sessionToken;
@@ -876,13 +878,13 @@ export class RelayServer {
           // Legacy opcional (mismo urlCode, token distinto): no borra el sid (bind no toca sidBindings).
           // Se exige token distinto de sid y secreto para no crear /t/<sid>/ con el sid público.
           if (typeof m.sessionToken === 'string' && m.sessionToken !== secret && m.sessionToken !== m.sid) {
-            const rLeg = this.tunnel.bind(msg.urlCode, m.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
+            const rLeg = this.tunnel.bind(msg.urlCode, m.sessionToken, msg.exp, (msg as Record<string, unknown>).turn, (msg as Record<string, unknown>).lan);
             if (rLeg !== 'ok') { err(rLeg); return; }
           }
           ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode, sid: m.sid }));
           return;
         }
-        const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp, (msg as Record<string, unknown>).turn);
+        const r = this.tunnel.bind(msg.urlCode, msg.sessionToken, msg.exp, (msg as Record<string, unknown>).turn, (msg as Record<string, unknown>).lan);
         if (r !== 'ok') err(r);
         else ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-bound', urlCode: msg.urlCode }));
         return;

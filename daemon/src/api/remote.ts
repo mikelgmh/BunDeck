@@ -279,7 +279,8 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
     if (!isUiEnabled(db)) return uiDisabled();
     // Fast-path LAN: `createUiCode` asegura además un lan-invite pareado
     // (`ui-fastpath`, reutilizado si le quedan >60 s) y lo publica al relay
-    // como `ui-publish {…, lan?}`. Aquí se devuelve SOLO al host el mismo
+    // como `ui-publish` con SOLO hints SIN `code` (el invite viaja al
+    // aprobar, en el `ui-bind`). Aquí se devuelve SOLO al host el mismo
     // objeto `lan` (invite code + IPs/puertos/fp/dev públicos, sin token de
     // sesión); si el host no tiene IPs LAN, `lan` se omite en origen.
     const c = createUiCode(db) as { code: string; urlCode: string; expiresAt: number; lan?: unknown };

@@ -432,7 +432,12 @@ export function buildUiFastPathLan(
  * regeneración del QR de internet); si no, se crea uno fresco con label
  * `ui-fastpath`. NOTA single-use: `POST /ui-code` (requestUiCode) rota el
  * QR de internet vigente igual que hoy regenera — el anterior deja de
- * valer; el lan-invite compartido solo se consume al canjearse en LAN.
+ * valer; el lan-invite compartido solo se canjea una vez en LAN.
+ * SEGURIDAD post-aprobación: el `code` del invite se devuelve SOLO al host
+ * (respuesta local) y se conserva en memoria del TunnelClient; al wire del
+ * relay (`ui-publish`) solo salen hints SIN `code` (ver `toPublishLan` en
+ * `remote/tunnel.ts`). El `code` viaja al relay UNA vez en el `ui-bind`
+ * del approve (generado con `buildUiFastPathLan` en `decideUiRequest`).
  */
 export function createUiCode(db: DatabaseService): UiCode & { lan?: UiFastPathLan } {
   // Solo debe existir un código QR pendiente de uso. Si el anterior ya se
@@ -449,8 +454,9 @@ export function createUiCode(db: DatabaseService): UiCode & { lan?: UiFastPathLa
   db.setSetting(UI_CODE_KEY, JSON.stringify(code));
   audit(db, `[remote-ui] código UI creado (expira ${new Date(code.expiresAt).toISOString()})`);
   // Fast-path LAN pareado (best-effort: sin IPs no hay `lan` y el relay
-  // viejo ignora el campo igualmente). Se publica junto al ui-code para que
-  // el móvil pre-aprobado pruebe LAN directa sin esperar al relay.
+  // viejo ignora el campo igualmente). Se publica junto al ui-code como
+  // hints SIN `code` para que el móvil pre-aprobado pruebe LAN directa sin
+  // esperar al relay (el invite viaja al aprobar, en el `ui-bind`).
   let lan: UiFastPathLan | undefined;
   try {
     lan = buildUiFastPathLan(db);
@@ -887,6 +893,9 @@ export function approveUiPending(
   }
   const p = resolveUiPending(reqId);
   if (!p) return { ok: false, error: 'Solicitud desconocida o caducada' };
+  // Aprobación local SIN túnel: no hay relay al que entregar nada (el
+  // teléfono no puede estar esperando `status` sin relay), así que no se
+  // genera ni se envía ningún invite LAN: solo sesión local + consumo.
   // Un solo navegador por código: al aprobar se consume el urlCode.
   consumeUrlCode(db, p.urlCode);
   const { token } = createUiSession(db, { ua: p.ua, ip: p.ip });

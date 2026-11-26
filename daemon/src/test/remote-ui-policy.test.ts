@@ -319,6 +319,11 @@ describe('remote-ui: delegación al TunnelClient', () => {
 
     const a = await remoteCall('/api/v1/remote/ui-pending/tun-1/allow', 'POST', {});
     expect(a.body).toMatchObject({ ok: true, sessionToken: TUN_TOKEN });
+    // La API al host NUNCA expone secretos: solo {ok, sessionToken}
+    // (sin `secret` del split-token ni `lan` con el invite).
+    expect('secret' in a.body).toBe(false);
+    expect('lan' in a.body).toBe(false);
+    expect(JSON.stringify(a.body)).not.toMatch(/secret/i);
     expect(tunnel.decisions).toContainEqual({ reqId: 'tun-1', allow: true, urlCode: c.body.urlCode });
     // REGRESIÓN BUG3: tras aprobar, el pendiente desaparece del listado
     // (el contador "Solicitudes pendientes" baja a 0).

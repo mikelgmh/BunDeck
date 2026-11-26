@@ -5,12 +5,21 @@ import { join } from 'node:path';
 import { DeviceStore } from '../src/store';
 import { PairingStore } from '../src/pairing';
 import { RelayServer } from '../src/relay';
-import { TunnelState } from '../src/tunnel';
+import { TunnelState, sanitizeLanHints } from '../src/tunnel';
 import { renderWaitingPage } from '../src/waiting';
 
 const TOKEN = 'test-relay-token';
 const CODE = 'testcode-abc123'; // 15 chars (>= 12)
-const LAN = {
+// Publish: SIN code (nuevo diseño post-aprobación).
+const LAN_PUBLISH = {
+  ips: ['192.168.1.10'],
+  port: 3002,
+  apiPort: 3001,
+  fp: 'fp-test-123',
+  dev: 'PC-Test',
+};
+// Bind: CON code (invite fresco, solo post-aprobación).
+const LAN_BIND = {
   code: 'ABCDEFGHIJKLMNOPQRSTUV', // 22 chars base64url
   ips: ['192.168.1.10'],
   port: 3002,
@@ -18,6 +27,7 @@ const LAN = {
   fp: 'fp-test-123',
   dev: 'PC-Test',
 };
+const TOK = 'ab'.repeat(32); // 64 hex
 
 function memState(now = Date.now()): { state: TunnelState; socket: { send: () => boolean; close: () => void } } {
   const state = new TunnelState({ now: () => now });
@@ -26,396 +36,382 @@ function memState(now = Date.now()): { state: TunnelState; socket: { send: () =>
   return { state, socket };
 }
 
-describe('fast-path LAN: TunnelState.publish con lan', () => {
-  test('lan válida se guarda y getLanHints la devuelve', () => {
-    const { state, socket } = memState();
-    expect(state.publish(socket, CODE, Date.now() + 600_000, LAN)).toEqual({ deviceId: 'daemon-lan' });
-    expect(state.getLanHints(CODE)).toEqual(LAN);
+describe('sanitizeLanHints con/sin code según flag', () => {
+  test('requireCode:false acepta sin code (publish)', () => {
+    const r = sanitizeLanHints(LAN_PUBLISH, false);
+    expect(r).not.toBeNull();
+    expect(r!.ips).toEqual(['192.168.1.10']);
+    expect(r!.port).toBe(3002);
+    expect(r!.code).toBeUndefined();
   });
 
-  test('sin lan (relay/daemon viejo) publica igual y hints es null', () => {
-    const { state, socket } = memState();
-    expect(state.publish(socket, CODE, Date.now() + 600_000)).toEqual({ deviceId: 'daemon-lan' });
-    expect(state.getLanHints(CODE)).toBeNull();
-    expect(state.getLanHints('no-existe')).toBeNull();
+  test('requireCode:false conserva code válido (compat daemon viejo), ignora inválido', () => {
+    const withValid = sanitizeLanHints(LAN_BIND, false);
+    expect(withValid).not.toBeNull();
+    expect(withValid!.code).toBe(LAN_BIND.code);
+    const withBad = sanitizeLanHints({ ...LAN_PUBLISH, code: 'corto' }, false);
+    expect(withBad).not.toBeNull();
+    expect(withBad!.code).toBeUndefined();
   });
 
-  test('lan inválida publica sin lan (no falla el publish)', () => {
-    const badLans: unknown[] = [
-      null,
-      'str',
-      42,
-      {},
-      { ...LAN, code: 'corto' },
-      { ...LAN, code: 'con espacios no' },
-      { ...LAN, code: '<script>alert(1)</script>0123' },
-      { ...LAN, ips: [] },
-      { ...LAN, ips: 'no-array' },
-      { ...LAN, ips: ['8.8.8.8'] }, // pública
-      { ...LAN, ips: ['10.0.0.1', '999.1.1.1', 'fe80::1'] }, // mixta con 1 válida → filtrada
-      { ...LAN, port: 0 },
-      { ...LAN, port: 70000 },
-      { ...LAN, port: 3002.5 },
-      { ...LAN, apiPort: -1 },
-      { ...LAN, fp: 'x'.repeat(129) },
-      { ...LAN, dev: 'y'.repeat(129) },
-      { ...LAN, fp: 123 },
-    ];
-    for (const lan of badLans) {
-      const { state, socket } = memState();
-      const r = state.publish(socket, CODE, Date.now() + 600_000, lan);
-      expect(r).toEqual({ deviceId: 'daemon-lan' });
-      // La mixta conserva la válida; el resto publica sin lan.
-      if (lan && typeof lan === 'object' && (lan as { fp?: unknown }).fp === 123) {
-        expect(state.getLanHints(CODE)).toBeNull();
-      } else if (Array.isArray((lan as { ips?: unknown })?.ips) && (lan as { ips: unknown[] }).ips.includes('10.0.0.1')) {
-        expect(state.getLanHints(CODE)).toEqual({ ...LAN, ips: ['10.0.0.1'] });
-      } else {
-        expect(state.getLanHints(CODE)).toBeNull();
-      }
+  test('requireCode:true exige code 16-80 base64url (bind)', () => {
+    expect(sanitizeLanHints(LAN_BIND, true)).not.toBeNull();
+    expect(sanitizeLanHints(LAN_PUBLISH, true)).toBeNull();
+    expect(sanitizeLanHints({ ...LAN_BIND, code: 'corto' }, true)).toBeNull();
+    expect(sanitizeLanHints({ ...LAN_BIND, code: 'con espacios no!!!!' }, true)).toBeNull();
+    expect(sanitizeLanHints({ ...LAN_BIND, code: '<script>alert(1)</script>0123' }, true)).toBeNull();
+  });
+
+  test('ambos modos exigen ips+puertos válidos', () => {
+    for (const flag of [false, true] as const) {
+      const base = flag ? LAN_BIND : LAN_PUBLISH;
+      expect(sanitizeLanHints({ ...base, ips: [] }, flag)).toBeNull();
+      expect(sanitizeLanHints({ ...base, ips: ['8.8.8.8'] }, flag)).toBeNull();
+      expect(sanitizeLanHints({ ...base, port: 0 }, flag)).toBeNull();
+      expect(sanitizeLanHints({ ...base, apiPort: 70000 }, flag)).toBeNull();
     }
   });
 
   test('ips no-RFC1918 se descartan y se recorta a 4', () => {
-    const { state, socket } = memState();
-    state.publish(socket, CODE, Date.now() + 600_000, {
-      ...LAN,
-      ips: ['8.8.8.8', '10.0.0.1', '172.16.5.4', '192.168.0.2', '172.32.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'],
-    });
-    expect(state.getLanHints(CODE)).toEqual({
-      ...LAN,
-      ips: ['10.0.0.1', '172.16.5.4', '192.168.0.2', '10.0.0.2'],
-    });
+    const r = sanitizeLanHints(
+      {
+        ...LAN_PUBLISH,
+        ips: ['8.8.8.8', '10.0.0.1', '172.16.5.4', '192.168.0.2', '172.32.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'],
+      },
+      false,
+    );
+    expect(r!.ips).toEqual(['10.0.0.1', '172.16.5.4', '192.168.0.2', '10.0.0.2']);
   });
 });
 
-describe('fast-path LAN: limpieza de hints', () => {
-  test('republicar sin lan limpia los hints anteriores', () => {
+describe('publish sin code + limpieza', () => {
+  test('publish sin lan publica igual (hints null)', () => {
     const { state, socket } = memState();
-    state.publish(socket, CODE, Date.now() + 600_000, LAN);
-    expect(state.getLanHints(CODE)).toEqual(LAN);
+    expect(state.publish(socket, CODE, Date.now() + 600_000)).toEqual({ deviceId: 'daemon-lan' });
+    expect(state.getLanHints(CODE)).toBeNull();
+  });
+
+  test('publish con hints sin code guarda alcanzabilidad', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000, LAN_PUBLISH);
+    const h = state.getLanHints(CODE);
+    expect(h).not.toBeNull();
+    expect(h!.ips).toEqual(['192.168.1.10']);
+    expect(h!.code).toBeUndefined();
+  });
+
+  test('publish con lan inválida publica sin lan (no falla)', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000, { code: 'x' });
+    expect(state.getLanHints(CODE)).toBeNull();
+  });
+
+  test('republicar/unpublish/prune limpian hints (mueren con el binding)', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000, LAN_PUBLISH);
+    expect(state.getLanHints(CODE)).not.toBeNull();
     state.publish(socket, CODE, Date.now() + 600_000);
     expect(state.getLanHints(CODE)).toBeNull();
-  });
-
-  test('unpublish (dropCode) limpia los hints', () => {
-    const { state, socket } = memState();
-    state.publish(socket, CODE, Date.now() + 600_000, LAN);
-    expect(state.getLanHints(CODE)).toEqual(LAN);
+    state.publish(socket, CODE, Date.now() + 600_000, LAN_PUBLISH);
     expect(state.unpublish(CODE)).toBe(true);
     expect(state.getLanHints(CODE)).toBeNull();
-  });
-
-  test('prune expira el código y sus hints', () => {
     let now = 1_000;
-    const state = new TunnelState({ now: () => now });
-    const socket = { send: () => true, close: () => {} };
-    state.registerDevice(socket, 'daemon-lan');
-    state.publish(socket, CODE, 10_000, LAN);
-    expect(state.getLanHints(CODE)).toEqual(LAN);
+    const st2 = new TunnelState({ now: () => now });
+    const sock2 = { send: () => true, close: () => {} };
+    st2.registerDevice(sock2, 'd');
+    st2.publish(sock2, CODE, 10_000, LAN_PUBLISH);
     now = 11_000;
-    state.prune();
-    expect(state.getLanHints(CODE)).toBeNull();
+    st2.prune();
+    expect(st2.getLanHints(CODE)).toBeNull();
   });
 });
 
-describe('fast-path LAN: renderWaitingPage', () => {
-  test('sin lan = HTML actual (sin lanHints)', () => {
-    for (const lang of ['es', 'en'] as const) {
-      const html = renderWaitingPage('abc123', lang);
-      expect(html).not.toContain('lan-hints');
-      expect(html).not.toContain('lanRedirect');
-      expect(html).not.toContain('wait-lan');
-      expect(html).toContain('setInterval');
-    }
-    // Explícito null/undefined tampoco inyecta.
-    expect(renderWaitingPage('abc123', 'es', null)).not.toContain('lan-hints');
-    expect(renderWaitingPage('abc123', 'es', undefined)).not.toContain('lan-hints');
+describe('bind guarda lan y status la devuelve UNA vez', () => {
+  test('bind con lan válida guarda; status la devuelve una vez (poll2 ya no)', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000, LAN_PUBLISH);
+    expect(state.bind(CODE, TOK, Date.now() + 600_000, null, LAN_BIND)).toBe('ok');
+    const s1 = state.status(CODE) as { status: string; sessionToken?: string; lan?: Record<string, unknown> };
+    expect(s1.status).toBe('approved');
+    expect(s1.sessionToken).toBe(TOK);
+    expect(s1.lan).toEqual({
+      code: LAN_BIND.code,
+      ips: ['192.168.1.10'],
+      port: 3002,
+      apiPort: 3001,
+      fp: 'fp-test-123',
+    });
+    // Sin dev en status (contrato fijo).
+    expect('dev' in (s1.lan ?? {})).toBe(false);
+    const s2 = state.status(CODE) as { status: string; lan?: unknown; sessionToken?: unknown };
+    expect(s2.status).toBe('approved');
+    expect(s2.lan).toBeUndefined();
+    expect(s2.sessionToken).toBeUndefined();
   });
 
-  test('con lan inyecta JSON escapado + JS con guard de single-redirect', () => {
-    const html = renderWaitingPage('abc123', 'es', LAN);
-    // JSON de hints escapado (</ → <\/), sin dependencias.
-    expect(html).toContain('id="lan-hints"');
-    expect(html).toContain('192.168.1.10');
-    expect(html).toContain('"port":3002');
-    // Guard de single-redirect: flag + sessionStorage.
-    expect(html).toContain('lanRedirect:');
-    expect(html).toContain('sessionStorage');
-    // Race contra /config público con timeout + redirect con invite.
-    expect(html).toContain('/config');
-    expect(html).toContain('invite=');
-    expect(html).toContain('relayFallback=');
-    expect(html).toContain('1500');
-    expect(html).toContain('no-store');
-    // Texto ES nuevo visible.
-    expect(html).toContain('Red local detectada, abriendo versión rápida…');
-    const en = renderWaitingPage('abc123', 'en', LAN);
-    expect(en).toContain('Local network detected, opening fast version…');
+  test('bind con lan inválida responde bad-lan', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000, LAN_PUBLISH);
+    expect(state.bind(CODE, TOK, Date.now() + 600_000, null, { code: 'x' })).toBe('bad-lan');
+    expect(state.bind(CODE, TOK, Date.now() + 600_000, null, LAN_PUBLISH)).toBe('bad-lan'); // sin code
+    // Sin lan: ok (compat).
+    expect(state.bind(CODE, TOK, Date.now() + 600_000)).toBe('ok');
+    const s = state.status(CODE) as { lan?: unknown };
+    expect(s.lan).toBeUndefined();
+  });
+
+  test('status legacy-sin-sid intacto (sin lan: sin campo lan)', () => {
+    const { state, socket } = memState();
+    state.publish(socket, CODE, Date.now() + 600_000);
+    expect(state.bind(CODE, TOK, Date.now() + 600_000)).toBe('ok');
+    const s1 = state.status(CODE) as { status: string; sessionToken?: string; lan?: unknown };
+    expect(s1).toEqual({ status: 'approved', sessionToken: TOK });
+    const s2 = state.status(CODE) as { status: string };
+    expect(s2).toEqual({ status: 'approved' });
+  });
+
+  test('dual sid+legacy: primer poll trae sid+ticket+legacy+lan; segundo sin legacy ni lan', () => {
+    const now = Date.now();
+    const { state, socket } = memState(now);
+    state.publish(socket, CODE, now + 600_000, LAN_PUBLISH);
+    const SID = 'ab'.repeat(16);
+    const SECRET = 'cd'.repeat(32);
+    expect(state.bindSid(CODE, SID, SECRET, now + 600_000)).toBe('ok');
+    expect(state.bind(CODE, TOK, now + 600_000, null, LAN_BIND)).toBe('ok');
+    const s1 = state.status(CODE) as { status: string; sid?: string; ticket?: string; sessionToken?: string; lan?: { code: string } };
+    expect(s1.status).toBe('approved');
+    expect(typeof s1.sid).toBe('string');
+    expect(typeof s1.ticket).toBe('string');
+    expect(s1.sessionToken).toBe(TOK);
+    expect(s1.lan?.code).toBe(LAN_BIND.code);
+    const s2 = state.status(CODE) as { status: string; sessionToken?: unknown; lan?: unknown; sid?: string; ticket?: string };
+    expect(s2.status).toBe('approved');
+    expect(s2.sessionToken).toBeUndefined();
+    expect(s2.lan).toBeUndefined();
+    expect(typeof s2.sid).toBe('string');
+    expect(typeof s2.ticket).toBe('string');
+  });
+});
+
+describe('waiting post-aprobación: sin code pre-aprobación', () => {
+  // Extrae el JSON de hints y el script de probe (el que menciona lan-hints).
+  function extractProbe(html: string): { lanJson: string; probe: string; main: string } {
+    const jsonM = html.match(/<script id="lan-hints" type="application\/json">([\s\S]*?)<\/script>/);
+    expect(jsonM).not.toBeNull();
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
+    const probe = scripts.find((s) => s.includes('lan-hints') || s.includes('libredeck:lanProbe') === false ? s.includes('lan-hints') : false);
+    // El probe es el bloque que menciona lan-hints; el principal es el del poll (STATUS_URL).
+    const probeScript = scripts.find((s) => s.includes('lan-hints')) ?? '';
+    const mainScript = scripts.find((s) => s.includes('STATUS_URL')) ?? '';
+    expect(probeScript).not.toBe('');
+    expect(mainScript).not.toBe('');
+    return { lanJson: jsonM![1] ?? '', probe: probeScript, main: mainScript };
+  }
+
+  test('HTML inicial con hints NO incluye code (ni invite utilizable)', () => {
+    const secret = 'ZZZSECRETCODE12345678';
+    const html = renderWaitingPage('abc123', 'es', { ...LAN_PUBLISH, code: secret } as never);
+    expect(html).not.toContain(secret);
+    // El JSON inyectado es solo alcanzabilidad.
+    const m = html.match(/<script id="lan-hints" type="application\/json">([\s\S]*?)<\/script>/);
+    expect(m).not.toBeNull();
+    const parsed = JSON.parse(m![1] ?? '{}');
+    expect('code' in parsed).toBe(false);
+    expect(parsed.ips).toEqual(['192.168.1.10']);
+    // Sin bloque manual pre-aprobación con invite.
+    expect(html).not.toContain('wait-lan-local');
+    expect(html).not.toContain('lanRedirect:');
+    // Sin eval/handlers inline; escapa </.
+    expect(html).not.toContain('eval(');
+  });
+
+  test('sin redirect pre-aprobación: el probe NO contiene location.replace; el go() al túnel SÍ sigue', () => {
+    const html = renderWaitingPage('abc123', 'es', LAN_PUBLISH);
+    const { probe, main } = extractProbe(html);
+    expect(probe).not.toContain('location.replace');
+    expect(probe).not.toContain('lanRedirect:');
+    expect(probe).not.toContain('goLan');
+    expect(probe).not.toContain('invite=');
+    expect(probe).toContain('libredeck:lanProbe');
+    expect(probe).toContain('wait-lan-check');
+    // El flujo actual al túnel sigue intacto.
+    expect(main).toContain('location.replace');
+    expect(main).toContain('/t/');
+    expect(main).toContain('/s/');
+  });
+
+  test('bloque manual post-approval con href correcto + auto-redirect solo con probe-ok', () => {
+    const html = renderWaitingPage('abc123', 'es', LAN_PUBLISH);
+    // Bloque oculto post-aprobación (se muestra vía JS cuando data.lan existe).
+    expect(html).toContain('id="wait-lan-direct"');
+    expect(html).toContain('id="wait-lan-direct-link"');
+    const { main } = extractProbe(html);
+    // Construye la URL directa post-aprobación con invite+kiosk+fallback.
+    expect(main).toContain('invite=');
+    expect(main).toContain('kiosk=1');
+    expect(main).toContain('relayFallback=');
+    expect(main).toContain('wait-lan-direct-link');
+    expect(main).toContain('libredeck:lanProbe');
+    // Frescura <10min y auto-redirect vía goUrl (mismo go() del túnel).
+    expect(main).toContain('10*60*1000');
+    expect(main).toContain('goUrl=lanUrl');
+  });
+
+  test('textos ES/EN nuevos', () => {
+    const es = renderWaitingPage('abc123', 'es', LAN_PUBLISH);
+    expect(es).toContain('Estás en la misma red: abre la versión directa');
+    expect(es).toContain('Abrir versión directa');
+    const en = renderWaitingPage('abc123', 'en', LAN_PUBLISH);
+    expect(en).toContain('On the same network: open the direct version');
+    expect(en).toContain('Open direct version');
+    // Ya no existen las claves viejas pre-aprobación.
+    expect(es).not.toContain('Abrir versión local');
+    expect(en).not.toContain('Open local version');
   });
 
   test('el JSON inyectado no permite breakout de </script>', () => {
-    const evil = { ...LAN, dev: '</script><script>alert(1)</script>', fp: '</script>' };
-    const { state, socket } = memState();
-    // fp '</script>' es string ≤128: sanitiza ok (el escape lo hace el render).
-    state.publish(socket, CODE, Date.now() + 600_000, evil);
-    const html = renderWaitingPage(CODE, 'es', state.getLanHints(CODE));
-    expect(html).not.toContain('</script><script>alert(1)');
+    const evil = { ...LAN_PUBLISH, fp: '</script>' };
+    const html = renderWaitingPage(CODE, 'es', evil);
+    expect(html).not.toContain('</script><script>');
     expect(html).toContain('<\\/script>');
   });
 
-  test('lan incompleta no inyecta (tolerante)', () => {
-    const html = renderWaitingPage('abc123', 'es', { code: '', ips: [], port: 0 } as never);
-    expect(html).not.toContain('lan-hints');
+  test('probe guarda contrato libredeck:lanProbe y oculta el aviso (ok y ko)', async () => {
+    const html = renderWaitingPage('abc123', 'es', LAN_PUBLISH);
+    const { lanJson, probe } = extractProbe(html);
+    function sandbox(fetchMock: (url: string) => Promise<unknown>) {
+      const store = new Map<string, string>();
+      return {
+        store,
+        sessionStorage: {
+          getItem: (k: string) => (store.has(k) ? (store.get(k) as string) : null),
+          setItem: (k: string, v: string) => { store.set(String(k), String(v)); },
+        },
+        document: {
+          getElementById: (id: string) => {
+            if (id === 'lan-hints') return { textContent: lanJson, hidden: false };
+            if (id === 'wait-lan-check') return { textContent: '', hidden: false as boolean, _h: false };
+            return null;
+          },
+        },
+        location: { pathname: '/ui/abc123', replaced: null as string | null },
+        fetchMock,
+      };
+    }
+    // ok:true con fp coincidente
+    const sbOk = sandbox(async () => ({ ok: true, json: async () => ({ fp: 'fp-test-123' }) }));
+    let hiddenFlag = false;
+    const docOk = {
+      getElementById: (id: string) => {
+        if (id === 'lan-hints') return { textContent: lanJson };
+        if (id === 'wait-lan-check') return { set hidden(v: boolean) { hiddenFlag = v; }, get hidden() { return hiddenFlag; } };
+        return null;
+      },
+    };
+    const fnOk = new Function('document', 'location', 'sessionStorage', 'fetch', probe);
+    (fnOk as (...a: unknown[]) => void)(docOk, sbOk.location, sbOk.sessionStorage, sbOk.fetchMock);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    const rawOk = sbOk.store.get('libredeck:lanProbe');
+    expect(rawOk).toBeDefined();
+    const pOk = JSON.parse(rawOk as string);
+    expect(pOk).toMatchObject({ urlCode: 'abc123', tried: true, ok: true, ip: '192.168.1.10' });
+    // ko: todo falla → ok:false, sin ip
+    const sbKo = sandbox(async () => ({ ok: false }));
+    const fnKo = new Function('document', 'location', 'sessionStorage', 'fetch', probe);
+    (fnKo as (...a: unknown[]) => void)(docOk, sbKo.location, sbKo.sessionStorage, sbKo.fetchMock);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    const rawKo = sbKo.store.get('libredeck:lanProbe');
+    expect(rawKo).toBeDefined();
+    const pKo = JSON.parse(rawKo as string);
+    expect(pKo).toMatchObject({ urlCode: 'abc123', tried: true, ok: false });
+    expect('ip' in pKo).toBe(false);
   });
 });
 
-describe('fast-path LAN: relay ui-publish con lan (WS)', () => {
+describe('relay ui-publish/ui-bind con lan (WS)', () => {
   const servers: RelayServer[] = [];
   const stores: DeviceStore[] = [];
   const sockets: WebSocket[] = [];
 
   afterEach(async () => {
     for (const s of sockets.splice(0)) {
-      try {
-        s.close();
-      } catch {
-        /* noop */
-      }
+      try { s.close(); } catch { /* noop */ }
     }
     for (const r of servers.splice(0)) r.stop();
     for (const s of stores.splice(0)) s.close();
     await new Promise((r) => setTimeout(r, 25));
   });
 
-  test('pasa msg.lan a publish y mantiene el ack ui-published', async () => {
+  test('publish sin code + bind con lan: status devuelve lan una vez', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'relay-lan-test-'));
     const store = new DeviceStore(dir);
     stores.push(store);
-    const relay = new RelayServer({ token: TOKEN, store, pairing: new PairingStore() });
-    relay.listen(0, '127.0.0.1');
-    servers.push(relay);
-
-    const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/?token=${TOKEN}`);
-    sockets.push(ws);
-    const buf: unknown[] = [];
-    ws.addEventListener('message', (e) => {
-      try {
-        buf.push(JSON.parse(String((e as MessageEvent).data)));
-      } catch {
-        /* noop */
-      }
-    });
-    await new Promise<void>((resolve, reject) => {
-      ws.addEventListener('open', () => resolve(), { once: true });
-      ws.addEventListener('error', () => reject(new Error('connect failed')), { once: true });
-    });
-    const next = (pred: (m: { kind?: unknown }) => boolean): Promise<{ kind?: unknown } & Record<string, unknown>> =>
-      new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          clearInterval(poll);
-          reject(new Error('timeout'));
-        }, 3000);
-        const poll = setInterval(() => {
-          const i = buf.findIndex((m) => pred(m as { kind?: unknown }));
-          if (i >= 0) {
-            clearTimeout(timer);
-            clearInterval(poll);
-            resolve(buf.splice(i, 1)[0] as { kind?: unknown } & Record<string, unknown>);
-          }
-        }, 5);
-      });
-
+    const relay = startRelay(store, servers, sockets);
+    const { ws, next } = await connectDaemon(relay, sockets);
     ws.send(JSON.stringify({ v: 1, kind: 'tunnel-register', deviceId: 'daemon-lan' }));
     await next((m) => m.kind === 'tunnel-registered');
-    ws.send(JSON.stringify({ v: 1, kind: 'ui-publish', urlCode: CODE, exp: Date.now() + 600_000, lan: LAN }));
+    ws.send(JSON.stringify({ v: 1, kind: 'ui-publish', urlCode: CODE, exp: Date.now() + 600_000, lan: LAN_PUBLISH }));
     const ack = await next((m) => m.kind === 'ui-published');
     expect(ack.urlCode).toBe(CODE);
-    expect(relay.tunnel.getLanHints(CODE)).toEqual(LAN);
+    const hints = relay.tunnel.getLanHints(CODE);
+    expect(hints?.code).toBeUndefined();
+    expect(hints?.ips).toEqual(['192.168.1.10']);
+    // Bind legacy con invite.
+    ws.send(JSON.stringify({ v: 1, kind: 'ui-bind', urlCode: CODE, sessionToken: TOK, exp: Date.now() + 600_000, lan: LAN_BIND }));
+    await next((m) => m.kind === 'ui-bound');
+    const base = `http://127.0.0.1:${relay.port}`;
+    const s1 = await (await fetch(`${base}/ui/${CODE}/status`)).json();
+    expect(s1.status).toBe('approved');
+    expect(s1.lan.code).toBe(LAN_BIND.code);
+    const s2 = await (await fetch(`${base}/ui/${CODE}/status`)).json();
+    expect(s2.lan).toBeUndefined();
+  });
 
-    // lan inválida: mismo ack, sin hints.
-    ws.send(JSON.stringify({ v: 1, kind: 'ui-publish', urlCode: CODE, exp: Date.now() + 600_000, lan: { code: 'x' } }));
-    const ack2 = await next((m) => m.kind === 'ui-published');
-    expect(ack2.urlCode).toBe(CODE);
-    expect(relay.tunnel.getLanHints(CODE)).toBeNull();
+  test('bind con lan inválida responde bad-lan', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-lan-test-'));
+    const store = new DeviceStore(dir);
+    stores.push(store);
+    const relay = startRelay(store, servers, sockets);
+    const { ws, next } = await connectDaemon(relay, sockets);
+    ws.send(JSON.stringify({ v: 1, kind: 'tunnel-register', deviceId: 'daemon-lan' }));
+    await next((m) => m.kind === 'tunnel-registered');
+    ws.send(JSON.stringify({ v: 1, kind: 'ui-publish', urlCode: CODE, exp: Date.now() + 600_000, lan: LAN_PUBLISH }));
+    await next((m) => m.kind === 'ui-published');
+    ws.send(JSON.stringify({ v: 1, kind: 'ui-bind', urlCode: CODE, sessionToken: TOK, exp: Date.now() + 600_000, lan: { code: 'x' } }));
+    const err = await next((m) => m.kind === 'error');
+    expect(err.error).toBe('bad-lan');
   });
 });
 
-describe('fast-path LAN: aviso visible wait-lan-check + contrato libredeck:lanProbe', () => {
-  // Extrae el JSON de hints y el JS del probe del HTML renderizado.
-  function extractProbe(html: string): { lanJson: string; script: string } {
-    const jsonM = html.match(/<script id="lan-hints" type="application\/json">([\s\S]*?)<\/script>/);
-    expect(jsonM).not.toBeNull();
-    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
-    // El probe es el bloque que menciona lan-hints (el poll no lo hace).
-    const probe = scripts.find((s) => s.includes('lan-hints'));
-    expect(probe).toBeDefined();
-    return { lanJson: jsonM![1] ?? '', script: probe ?? '' };
-  }
+function startRelay(store: DeviceStore, servers: RelayServer[], sockets: WebSocket[]): RelayServer {
+  const relay = new RelayServer({ token: TOKEN, store, pairing: new PairingStore() });
+  relay.listen(0, '127.0.0.1');
+  servers.push(relay);
+  return relay;
+}
 
-  function makeSandbox(lanJson: string, fetchMock: (url: string, opt?: unknown) => Promise<unknown>) {
-    const store = new Map<string, string>();
-    const sessionStorage = {
-      getItem: (k: string) => (store.has(k) ? (store.get(k) as string) : null),
-      setItem: (k: string, v: string) => {
-        store.set(k, String(v));
-      },
-    };
-    const els: Record<string, { textContent: string; hidden: boolean }> = {
-      'lan-hints': { textContent: lanJson, hidden: false },
-      'wait-lan': { textContent: '', hidden: true },
-      'wait-lan-check': { textContent: '', hidden: false },
-    };
-    const document = {
-      getElementById: (id: string) => els[id] ?? null,
-    };
-    const location = {
-      pathname: '/ui/abc123',
-      replaced: null as string | null,
-      replace(url: string) {
-        this.replaced = url;
-      },
-    };
-    return { store, sessionStorage, els, document, location, fetchMock };
-  }
-
-  async function runProbe(
-    sb: ReturnType<typeof makeSandbox>,
-    script: string,
-  ): Promise<void> {
-    // Ejecuta el IIFE del probe con los globales simulados (el producto no
-    // usa eval ni handlers inline; aquí solo el test interpreta el string).
-    const fn = new Function('document', 'location', 'sessionStorage', 'fetch', script);
-    // `fetch` del sandbox devuelve la promesa simulada; AbortController y
-    // temporizadores son los reales de bun (el probe los limpia al resolver).
-    (fn as (...args: unknown[]) => void)(sb.document, sb.location, sb.sessionStorage, sb.fetchMock);
-    // Deja asentar las promesas del fetch simulado + json().
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
-  }
-
-  test('con lan: pinta wait-lan-check visible con el texto ES/EN', () => {
-    const es = renderWaitingPage('abc123', 'es', LAN);
-    expect(es).toContain('id="wait-lan-check"');
-    expect(es).toContain('Comprobando si estás en la misma red local…');
-    // Visible mientras el probe corre: sin hidden en ese <p>.
-    expect(es).not.toContain('id="wait-lan-check" hidden');
-    // El wait-lan de éxito sigue oculto hasta el redirect.
-    expect(es).toContain('id="wait-lan" hidden');
-    const en = renderWaitingPage('abc123', 'en', LAN);
-    expect(en).toContain('id="wait-lan-check"');
-    expect(en).toContain('Checking whether you are on the same local network…');
+async function connectDaemon(relay: RelayServer, sockets: WebSocket[]): Promise<{ ws: WebSocket; next: (pred: (m: { kind?: unknown }) => boolean) => Promise<{ kind?: unknown } & Record<string, unknown>> }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/?token=${TOKEN}`);
+  sockets.push(ws);
+  const buf: unknown[] = [];
+  ws.addEventListener('message', (e) => {
+    try { buf.push(JSON.parse(String((e as MessageEvent).data))); } catch { /* noop */ }
   });
-
-  test('con lan: el script declara el contrato libredeck:lanProbe en ambos caminos', () => {
-    const html = renderWaitingPage('abc123', 'es', LAN);
-    const { script } = extractProbe(html);
-    expect(script).toContain('libredeck:lanProbe');
-    expect(script).toContain('wait-lan-check');
-    // Éxito: guarda ok:true + ip antes de redirigir.
-    expect(script).toContain('lanRedirect:');
-    expect(script).toContain('location.replace');
-    // Fracaso total: oculta el aviso sin tocar nada más.
-    expect(script).toContain('hidden=true');
-    // Sin eval ni handlers inline (CSP del resto del fichero).
-    expect(script).not.toContain('eval(');
-    expect(script).not.toContain('onload=');
-    expect(script).not.toContain('onclick=');
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener('open', () => resolve(), { once: true });
+    ws.addEventListener('error', () => reject(new Error('connect failed')), { once: true });
   });
-
-  test('con lan + fetch ok (fp coincide): redirige y guarda probe ok:true', async () => {
-    const html = renderWaitingPage('abc123', 'es', LAN);
-    const { lanJson, script } = extractProbe(html);
-    const sb = makeSandbox(lanJson, async () => ({
-      ok: true,
-      json: async () => ({ fp: 'fp-test-123', frontendPort: 3002 }),
-    }));
-    await runProbe(sb, script);
-    // Redirección única a la LAN con invite + fallback al relay.
-    expect(sb.location.replaced).toContain('http://192.168.1.10:3002/?invite=');
-    expect(sb.location.replaced).toContain('relayFallback=abc123');
-    // Aviso de éxito visible (comportamiento actual intacto).
-    expect(sb.els['wait-lan']!.hidden).toBe(false);
-    // Contrato con el frontend: probe ok:true con ip y tiempos.
-    const raw = sb.store.get('libredeck:lanProbe');
-    expect(raw).toBeDefined();
-    const probe = JSON.parse(raw as string);
-    expect(probe).toMatchObject({ urlCode: 'abc123', tried: true, ok: true, ip: '192.168.1.10' });
-    expect(Array.isArray(probe.ips)).toBe(true);
-    expect(typeof probe.ms).toBe('number');
-    expect(typeof probe.ts).toBe('number');
-  });
-
-  test('verifica identidad por apiPort y redirige al port UI (dev: Astro)', async () => {
-    // En DEV la UI vive en Astro (sin /config JSON) y el embebido está
-    // apagado: verificar contra apiPort y redirigir a port.
-    const lanDev = { ...LAN, port: 4321 };
-    const html = renderWaitingPage('abc123', 'es', lanDev);
-    const { lanJson, script } = extractProbe(html);
-    const urls: string[] = [];
-    const sb = makeSandbox(lanJson, async (url: string) => {
-      urls.push(url);
-      return { ok: true, json: async () => ({ fp: 'fp-test-123', apiPort: 3001 }) };
+  const next = (pred: (m: { kind?: unknown }) => boolean): Promise<{ kind?: unknown } & Record<string, unknown>> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { clearInterval(poll); reject(new Error('timeout')); }, 3000);
+      const poll = setInterval(() => {
+        const i = buf.findIndex((m) => pred(m as { kind?: unknown }));
+        if (i >= 0) {
+          clearTimeout(timer);
+          clearInterval(poll);
+          resolve(buf.splice(i, 1)[0] as { kind?: unknown } & Record<string, unknown>);
+        }
+      }, 5);
     });
-    await runProbe(sb, script);
-    expect(urls).toEqual(['http://192.168.1.10:3001/config']);
-    expect(sb.location.replaced).toContain('http://192.168.1.10:4321/?invite=');
-  });
-
-  test('botón manual a la LAN: visible desde el inicio con href invite+kiosk+fallback', () => {
-    const html = renderWaitingPage('abc123', 'es', LAN);
-    expect(html).toContain('id="wait-lan-local"');
-    expect(html).toContain('¿Estás en la misma Wi-Fi');
-    // Navegación top-level por gesto (sin fetch): funciona aunque el
-    // navegador bloquee el probe automático.
-    expect(html).toContain('http://192.168.1.10:3002/?invite=');
-    expect(html).toContain('kiosk=1');
-    expect(html).toContain('relayFallback=abc123');
-    expect(html).toContain('Abrir versión local');
-    const en = renderWaitingPage('abc123', 'en', LAN);
-    expect(en).toContain('On the same Wi-Fi');
-    expect(en).toContain('Open local version');
-  });
-
-  test('varias IPs: un botón por IP con su etiqueta', () => {
-    const multi = { ...LAN, ips: ['192.168.1.10', '10.0.0.5'] };
-    const html = renderWaitingPage('abc123', 'es', multi);
-    expect(html).toContain('http://192.168.1.10:3002/?invite=');
-    expect(html).toContain('http://10.0.0.5:3002/?invite=');
-    expect(html).toContain('Abrir versión local · 192.168.1.10');
-    expect(html).toContain('Abrir versión local · 10.0.0.5');
-  });
-
-  test('con lan + fetch ko (todo falla): oculta wait-lan-check y guarda probe ok:false', async () => {
-    const html = renderWaitingPage('abc123', 'es', LAN);
-    const { lanJson, script } = extractProbe(html);
-    const sb = makeSandbox(lanJson, async () => ({ ok: false }));
-    await runProbe(sb, script);
-    // Sin redirect: la tarjeta pending sigue igual…
-    expect(sb.location.replaced).toBeNull();
-    expect(sb.els['wait-lan']!.hidden).toBe(true);
-    // …pero el aviso de comprobación desaparece.
-    expect(sb.els['wait-lan-check']!.hidden).toBe(true);
-    // Contrato con el frontend: probe ok:false con tiempos.
-    const raw = sb.store.get('libredeck:lanProbe');
-    expect(raw).toBeDefined();
-    const probe = JSON.parse(raw as string);
-    expect(probe).toMatchObject({ urlCode: 'abc123', tried: true, ok: false });
-    expect(Array.isArray(probe.ips)).toBe(true);
-    expect(typeof probe.ms).toBe('number');
-    expect(typeof probe.ts).toBe('number');
-    expect('ip' in probe).toBe(false);
-  });
-
-  test('sin lan: ni wait-lan-check ni lan-hints ni script de probe', () => {
-    for (const lang of ['es', 'en'] as const) {
-      const html = renderWaitingPage('abc123', lang);
-      expect(html).not.toContain('wait-lan-check');
-      expect(html).not.toContain('lan-hints');
-      expect(html).not.toContain('libredeck:lanProbe');
-      expect(html).not.toContain('wait-lan');
-      expect(html).toContain('setInterval');
-    }
-    expect(renderWaitingPage('abc123', 'es', null)).not.toContain('wait-lan-check');
-    expect(renderWaitingPage('abc123', 'es', undefined)).not.toContain('wait-lan-check');
-  });
-});
+  return { ws, next };
+}
