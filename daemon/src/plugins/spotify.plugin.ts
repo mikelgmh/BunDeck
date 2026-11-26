@@ -86,7 +86,7 @@ export class SpotifyPlugin {
         return {
             id: 'spotify',
             name: 'Spotify',
-            version: '1.2.0',
+            version: '1.2.1',
             description: 'Controla la reproducción de Spotify: reproducir/pausar, Me gusta, aleatorio y playlists',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -335,6 +335,8 @@ export class SpotifyPlugin {
                     name: 'Lo que suena',
                     description: 'Pista actual e is_playing para iconos dinámicos (states: playing/paused/stopped)',
                     icon: 'Music',
+                    surface: 'control',
+                    component: 'spotify-player',
                     dynamic: true,
                     pollMs: 10000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -626,7 +628,12 @@ export class SpotifyPlugin {
         return {
             state: isPlaying ? 'playing' : (name ? 'paused' : 'stopped'),
             isPlaying,
-            track: name ? { name, artists, id: track?.id ?? null } : null,
+            track: name ? {
+                name,
+                artists,
+                id: track?.id ?? null,
+                albumArtUrl: typeof track?.album?.images?.[0]?.url === 'string' ? track.album.images[0].url : null,
+            } : null,
             device: body?.device?.name ?? null,
             status,
         }

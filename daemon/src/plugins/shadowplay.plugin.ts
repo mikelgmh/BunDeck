@@ -66,7 +66,7 @@ export class ShadowplayPlugin {
         return {
             id: 'shadowplay',
             name: 'ShadowPlay (NVIDIA)',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Guarda la repetición instantánea y controla la grabación de NVIDIA Share con sus atajos',
             author: 'BunDeck',
             permissions: ['keyboard', 'process'],
@@ -131,6 +131,8 @@ export class ShadowplayPlugin {
                 {
                     id: 'check-status', name: 'Comprobar NVIDIA Share', icon: 'Activity',
                     description: 'Comprueba si NVIDIA Share está en ejecución',
+                    surface: 'control',
+                    component: 'stream-studio',
                     schema: { type: 'object', properties: {}, required: [] }
                 }
             ]

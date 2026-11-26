@@ -218,23 +218,24 @@
             >
               <div class="grid-stack-item-content">
                 <div
-                  v-if="isVolume(b.position)"
+                  v-if="isControlSurface(b.position)"
                   class="bd-key vol-key"
                   :class="{ 'bd-sel': selectedButton === b.position }"
                   :aria-label="keyAriaLabel(b.position)"
                   :style="keyColorVar(b.position)"
                   :data-position="b.position"
                   data-cy="bd-key-vol"
-                  @click="onKeyClick(b.position)"
+                  @click="onKeyClick($event, b.position)"
                   @contextmenu.prevent.stop="showContextMenu($event, b.position)"
                   @dragover.prevent="onDragOver($event, b.position)"
                   @dragleave="onDragLeave($event)"
                   @drop.prevent="onDrop($event, b.position)"
                 >
-                  <VolumeRange
+                  <ControlSurface
+                    :action="controlActionOf(b.position)!"
                     :api-base="apiBase ?? ''"
-                    :app="volumeAppOf(b.position)"
-                    :label="keyLabel(b.position) || 'Volumen'"
+                    :legacy-app="volumeAppOf(b.position)"
+                    :label="keyLabel(b.position) || ''"
                     :readonly="false"
                   />
                 </div>
@@ -385,7 +386,7 @@ import 'gridstack/dist/gridstack.min.css'
 import {
   Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, ScrollText
 } from 'lucide-vue-next'
-import VolumeRange from './VolumeRange.vue'
+import ControlSurface from './ControlSurface.vue'
 import { findControlAction } from '../../composables/useActionPresentation'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import {
@@ -1115,7 +1116,7 @@ const onKeyClick = (event: MouseEvent | KeyboardEvent, position: number) => {
     return
   }
   if (lastPointer.pos === position && Date.now() - lastPointer.t < 700) return
-  if (isVolume(position) || !props.getButton(position)) return
+  if (isControlSurface(position) || !props.getButton(position)) return
   const el = event.currentTarget as HTMLElement | null
   playPressFx(el, 'click', { animations: animOn() })
   pressFeedback('click')
@@ -1154,7 +1155,7 @@ const onPressStart = (event: PointerEvent, position: number) => {
   lastPointer.pos = position
   lastPointer.t = Date.now()
   if (suppressClickPos !== null && suppressClickPos !== position) suppressClickPos = null
-  if (isVolume(position) || !props.getButton(position)) return
+  if (isControlSurface(position) || !props.getButton(position)) return
   downPos = position
   if (!hasLongContent(bdata(position))) return
   const el = event.currentTarget as HTMLElement | null
@@ -1194,7 +1195,7 @@ const onPressUp = (event: PointerEvent, position: number) => {
     return // el long consume el tap posterior
   }
   holdFired = false
-  if (isVolume(position) || !props.getButton(position)) return
+  if (isControlSurface(position) || !props.getButton(position)) return
   // Solo cuenta si hubo pointerdown previo (evita doble tap con el click).
   lastPointer.pos = position
   lastPointer.t = Date.now()
@@ -1225,10 +1226,9 @@ const actionCount = (position: number) => {
   return (d?.actions?.length ?? 0) + extra + (d?.rules?.length ?? 0)
 }
 
-/** Control interactivo de la tecla (hoy: volumen). La presencia de la ACCIÓN
- *  en `data.actions` decide el render, no un tipo de botón aparte: una tecla
- *  con `audio-mixer.volume-control` se pinta como slider; sin ella, normal.
- *  Se acepta también el legado `widget_type: 'volume'` (sin acción). */
+/** Control interactivo de la tecla. La presencia de una acción de superficie
+ *  decide el render, no un tipo de botón aparte. Se conserva el legado
+ *  `widget_type: 'volume'` (sin acción) por compatibilidad. */
 const controlActionOf = (position: number): any | undefined => {
   const btn = props.getButton(position) as any
   if (!btn) return undefined
@@ -1237,7 +1237,7 @@ const controlActionOf = (position: number): any | undefined => {
   if (btn.widget_type === 'volume') return { type: 'audio-mixer.volume-control', parameters: {} }
   return undefined
 }
-const isVolume = (position: number) => !!controlActionOf(position)
+const isControlSurface = (position: number) => isGsMode.value && !!controlActionOf(position)
 /** App objetivo del control de volumen (vacío = maestro). */
 const volumeAppOf = (position: number): string | null => {
   const params = controlActionOf(position)?.parameters as any

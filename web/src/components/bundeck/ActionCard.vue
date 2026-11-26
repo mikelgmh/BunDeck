@@ -76,7 +76,7 @@
 
   <!-- Parámetros: esquema del plugin si existe, controles nativos si no -->
   <SchemaForm
-    v-else-if="actionSchema(action.type)"
+    v-else-if="hasSchemaFields"
     :schema="actionSchema(action.type)"
     :model-value="action.parameters ?? {}"
     :available-pages="availablePages"
@@ -85,6 +85,26 @@
     :dynamic-options="actionMeta(action.type).dynamicOptions"
     @update:model-value="(params: any) => emitParams(params)"
   />
+  <div v-else-if="showConfigNotice" class="bd-action-config-note" data-cy="bd-action-config-note">
+    <p class="bd-hint">{{ t('bd.actionNoParams') }}</p>
+    <p v-if="actionDescription" class="bd-hint">{{ actionDescription }}</p>
+    <template v-if="actionMeta(action.type).hasPluginSettings">
+      <p class="bd-hint">
+        {{ t('bd.actionPluginSettingsHint', { plugin: actionMeta(action.type).pluginName }) }}
+      </p>
+      <button
+        class="bd-btn bd-wide"
+        type="button"
+        data-cy="bd-open-plugin-settings"
+        data-swapy-no-drag
+        @click="openPluginSettings(action.type)"
+      >
+        <Settings :size="15" stroke-width="1.75" aria-hidden="true" />
+        {{ t('bd.openPluginSettings') }}
+      </button>
+    </template>
+    <p v-else class="bd-hint">{{ t('bd.actionNoExtraConfig') }}</p>
+  </div>
   <div v-else class="bd-fld" style="margin: 8px 4px 0 0">
     <template v-if="paramKind(action.type) === 'text'">
       <input
@@ -191,6 +211,7 @@ interface Emits {
   (e: 'update-action', index: number, patch: Record<string, any>): void
   (e: 'update-param', index: number, paramKey: string, value: any): void
   (e: 'remove', index: number): void
+  (e: 'open-plugin-settings', pluginId: string): void
 }
 
 const props = defineProps<Props>()
@@ -243,9 +264,43 @@ const actionSchema = (type: string) => findPluginAction(type)?.schema ?? null
 /** pluginId/actionId + optionsFrom para listas remotas en SchemaForm. */
 const actionMeta = (type: string) => {
   const found = findPluginAction(type)
-  if (!found || !type.includes('.')) return { pluginId: null, actionId: null, dynamicOptions: null }
+  if (!type.includes('.')) return {
+    pluginId: null,
+    actionId: null,
+    dynamicOptions: null,
+    pluginName: '',
+    hasPluginSettings: false,
+    description: '',
+  }
   const [pid, ...rest] = type.split('.')
-  return { pluginId: pid, actionId: rest.join('.'), dynamicOptions: found.optionsFrom ?? null }
+  const pluginData = (props.plugins ?? []).find((entry: any) => entry?.[0] === pid)?.[1]
+  const settingsProperties = pluginData?.manifest?.settingsSchema?.properties
+  return {
+    pluginId: pid,
+    actionId: rest.join('.'),
+    dynamicOptions: found?.optionsFrom ?? null,
+    pluginName: pluginData?.manifest?.name ?? pluginData?.name ?? pid,
+    hasPluginSettings: !!settingsProperties && Object.keys(settingsProperties).length > 0,
+    description: typeof found?.description === 'string' ? found.description : '',
+  }
+}
+const hasSchemaFields = computed(() => {
+  const schema = actionSchema(props.action.type)
+  return Object.entries(schema?.properties ?? {}).some(([, property]: [string, any]) =>
+    property?.ui?.component !== 'hidden'
+  )
+})
+const hasSchema = computed(() => !!actionSchema(props.action.type))
+const hasFallbackFields = computed(() =>
+  !hasSchema.value && Object.keys(props.action.parameters ?? {}).length > 0
+)
+const showConfigNotice = computed(() =>
+  !hasSchemaFields.value && !hasFallbackFields.value && !!actionMeta(props.action.type).pluginId
+)
+const actionDescription = computed(() => actionMeta(props.action.type).description)
+const openPluginSettings = (type: string) => {
+  const pluginId = actionMeta(type).pluginId
+  if (pluginId) emit('open-plugin-settings', pluginId)
 }
 /** Clase de presentación (ejecución | dato | control) para el badge. */
 const actionSurface = (type: string) => actionSurfaceKind(findPluginAction(type))
@@ -295,5 +350,17 @@ const emitParams = (params: Record<string, any>) => {
 }
 .bd-eq input {
   flex: 1;
+}
+.bd-action-config-note {
+  display: grid;
+  gap: 8px;
+  margin: 8px 4px 0 0;
+  padding: 12px;
+  border: 1px solid var(--bd-ln, #303237);
+  border-radius: 12px;
+  background: var(--bd-sf, #1a1c1f);
+}
+.bd-action-config-note p {
+  margin: 0;
 }
 </style>

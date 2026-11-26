@@ -209,7 +209,7 @@ describe('DiscordPlugin manifest RPC', () => {
         const { ctx } = makeCtx()
         const manifest = new DiscordPlugin(ctx).getManifest()
         expect(manifest.id).toBe('discord')
-        expect(manifest.version).toBe('1.2.0')
+        expect(manifest.version).toBe('1.2.1')
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(['connect', 'disconnect', 'open-channel', 'push-to-talk', 'status', 'toggle-deafen', 'toggle-mute'])
         expect(manifest.oauth.provider).toBe('discord')

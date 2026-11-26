@@ -8,6 +8,7 @@ import {
 } from '../utils/lanInvite'
 import { ensurePressMirror, pressExtraCount } from './usePressActions'
 import { resolvePageSize } from './useDevices'
+import { CONTROL_COMPONENTS } from './useActionPresentation'
 import {
   applyButtonDeleted as applyButtonDeletedPayload,
   applyButtonPayload,
@@ -1632,9 +1633,15 @@ export function useStreamDeck() {
       for (const entry of actions) {
         const actionId = entry?.[0]
         if (typeof actionId !== 'string') continue
+        const actionData = entry?.[1]
+        const hasControlSurface = actionData?.surface === 'control' &&
+          typeof actionData?.component === 'string' &&
+          (CONTROL_COMPONENTS as readonly string[]).includes(actionData.component)
         index.set(`${pid}.${actionId}`, {
           pluginId: pid,
-          dynamic: entry?.[1]?.dynamic === true
+          // A custom control owns its refresh lifecycle; the generic dynamic
+          // poller must not race its component against the same action.
+          dynamic: actionData?.dynamic === true && !hasControlSurface
         })
       }
     }

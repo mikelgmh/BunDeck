@@ -21,7 +21,7 @@ describe('SoundboardPlugin manifest', () => {
     it('expone un manifest válido en español', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('soundboard')
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toBe('1.0.1')
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(['list-sounds', 'play', 'set-output', 'stop'])
     })

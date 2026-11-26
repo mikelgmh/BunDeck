@@ -51,7 +51,7 @@ export class TwitchPlugin {
         return {
             id: 'twitch',
             name: 'Twitch',
-            version: '1.1.0',
+            version: '1.1.1',
             description: 'Controla tu directo de Twitch: título, categoría, clips, marcadores, chat, anuncios y espectadores',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -116,7 +116,8 @@ export class TwitchPlugin {
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve cuántos espectadores tienes ahora (0 si no estás en directo)',
-                    dynamic: true, pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
+                    dynamic: true, surface: 'control', component: 'stream-studio',
+                    pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
                         { value: 'live', label: 'En directo', icon: 'Radio' },
                         { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }

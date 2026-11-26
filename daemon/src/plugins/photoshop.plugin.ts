@@ -103,7 +103,7 @@ export class PhotoshopPlugin {
         return {
             id: 'photoshop',
             name: 'Adobe Photoshop',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla Photoshop: herramientas, capas, pincel, acciones, historial y guardado vía atajos configurables',
             author: 'BunDeck',
             permissions: ['keyboard', 'input'],
@@ -179,6 +179,8 @@ export class PhotoshopPlugin {
                     name: 'Tamaño de pincel',
                     description: 'Aumenta o reduce el tamaño del pincel',
                     icon: 'Circle',
+                    surface: 'control',
+                    component: 'creative-tools',
                     schema: {
                         type: 'object',
                         properties: {

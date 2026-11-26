@@ -29,7 +29,7 @@ export class MultimediaPlugin {
         return {
             id: 'multimedia',
             name: 'Multimedia Controls',
-            version: '1.1.0',
+            version: '1.1.1',
             description: 'Control media playback and system volume',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -42,6 +42,9 @@ export class MultimediaPlugin {
                     name: 'Multimedia Control',
                     description: 'Control media playback (play, pause, volume, etc.)',
                     icon: 'Volume2',
+                    surface: 'control',
+                    component: 'media-transport',
+                    freeModeOnly: true,
                     timeoutMs: 15000,
                     variables: [
                         { name: 'multimediaMuted', type: 'bool', label: 'Silenciado' },

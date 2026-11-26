@@ -52,7 +52,7 @@ export class EmailPlugin {
         return {
             id: 'email',
             name: 'Correo',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'No leídos de Gmail/Outlook, abrir bandeja y redactar (mailto:) con tu cliente habitual',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -92,6 +92,9 @@ export class EmailPlugin {
                     description: 'Cuenta correos sin leer (requiere token OAuth del proveedor)',
                     icon: 'Mail',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     pollMs: 300000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -113,6 +116,9 @@ export class EmailPlugin {
                     name: 'Abrir bandeja',
                     description: 'Abre tu bandeja en el navegador',
                     icon: 'Inbox',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',

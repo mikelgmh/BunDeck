@@ -132,7 +132,7 @@ export class CalendarPlugin {
         return {
             id: 'calendar',
             name: 'Calendario',
-            version: '1.1.0',
+            version: '1.1.1',
             description: 'Próximo evento, cuenta atrás y apertura (ICS local o Google Calendar)',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -177,6 +177,9 @@ export class CalendarPlugin {
                     description: 'Devuelve el próximo evento del calendario',
                     icon: 'CalendarClock',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'calendar-agenda',
+                    freeModeOnly: true,
                     pollMs: 60000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {

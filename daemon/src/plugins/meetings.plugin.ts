@@ -122,7 +122,7 @@ export class MeetingsPlugin {
         return {
             id: 'meetings',
             name: 'Reuniones',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla Zoom, Teams y Meet: micro, cámara, compartir, salir y unirse',
             author: 'BunDeck',
             permissions: ['keyboard', 'system', 'network'],
@@ -138,6 +138,8 @@ export class MeetingsPlugin {
                     name: 'Control de reunión',
                     description: 'Envía un hotkey a Zoom/Teams/Meet (micro, cámara, compartir, salir…)',
                     icon: 'Video',
+                    surface: 'control',
+                    component: 'voice-panel',
                     schema: {
                         type: 'object',
                         properties: {

@@ -179,6 +179,7 @@
                   @update-action="(idx, patch) => updPressAction(idx, patch)"
                   @update-param="(idx, k, v) => updPressParam(idx, k, v)"
                   @remove="(idx) => rmPressAction(idx)"
+                  @open-plugin-settings="(pluginId) => emit('open-plugin-settings', pluginId)"
                 >
                   <template #handle>
                     <button
@@ -303,6 +304,7 @@
                 @update-action="(idx, patch) => updRuleAction(ri, 'then', idx, patch)"
                 @update-param="(idx, k, v) => updRuleParam(ri, 'then', idx, k, v)"
                 @remove="(idx) => delRuleAction(ri, 'then', idx)"
+                @open-plugin-settings="(pluginId) => emit('open-plugin-settings', pluginId)"
               />
             </div>
           </div>
@@ -321,6 +323,7 @@
                 @update-action="(idx, patch) => updRuleAction(ri, 'else', idx, patch)"
                 @update-param="(idx, k, v) => updRuleParam(ri, 'else', idx, k, v)"
                 @remove="(idx) => delRuleAction(ri, 'else', idx)"
+                @open-plugin-settings="(pluginId) => emit('open-plugin-settings', pluginId)"
               />
             </div>
           </div>
@@ -774,6 +777,7 @@ interface Emits {
   (e: 'action-drop-selected', actionType: string, kind?: PressKind): void
   (e: 'view-logs'): void
   (e: 'action-logs', payload: { kind: string; index: number; actionType: string }): void
+  (e: 'open-plugin-settings', pluginId: string): void
 }
 
 const props = withDefaults(defineProps<Props>(), { profileName: '', pageName: '', apiBase: '' })

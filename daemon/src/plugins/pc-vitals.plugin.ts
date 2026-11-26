@@ -40,7 +40,7 @@ export class PCVitalsPlugin {
         return {
             id: 'pc-vitals',
             name: 'PC Vitals',
-            version: '1.4.0',
+            version: '1.4.1',
             description: 'Muestra el estado del equipo: CPU, RAM, GPU, temperatura, ventiladores, voltajes, disco, red, uptime y procesos',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -58,6 +58,9 @@ export class PCVitalsPlugin {
                     description: 'CPU/RAM/GPU/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)',
                     icon: 'Gauge',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     pollMs: 5000,
                     timeoutMs: 15000,
                     states: [
@@ -73,6 +76,9 @@ export class PCVitalsPlugin {
                     description: 'Métrica CPU/RAM/GPU en botón (uso % o temperatura; cubre lo que antes eran acciones separadas de temperatura/uso)',
                     icon: 'Activity',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     pollMs: 2000,
                     timeoutMs: 10000,
                     states: [
@@ -136,6 +142,9 @@ export class PCVitalsPlugin {
                     name: 'Ventiladores',
                     description: 'RPM de ventiladores (requiere LHM/OHM con driver+admin en Windows, hwmon/sensors en Linux; degradado si no hay sensor)',
                     icon: 'Fan',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
@@ -150,6 +159,9 @@ export class PCVitalsPlugin {
                     name: 'Uso de disco',
                     description: 'Espacio usado/libre del disco (df en Linux/macOS, CIM/wmic en Windows)',
                     icon: 'HardDrive',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -167,6 +179,9 @@ export class PCVitalsPlugin {
                     name: 'Velocidad de red',
                     description: 'KB/s enviados+recibidos (dos muestras de contadores del SO separadas 500 ms)',
                     icon: 'Wifi',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -185,6 +200,9 @@ export class PCVitalsPlugin {
                     name: 'Tiempo encendido',
                     description: 'Segundos desde el arranque (siempre disponible, vía node:os)',
                     icon: 'Clock',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
@@ -192,6 +210,9 @@ export class PCVitalsPlugin {
                     name: 'Procesos top',
                     description: 'Procesos con más CPU/memoria (ps en Linux/macOS, tasklist en Windows)',
                     icon: 'ListOrdered',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     timeoutMs: 15000,
                     schema: {
                         type: 'object',

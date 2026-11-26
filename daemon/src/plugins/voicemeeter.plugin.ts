@@ -83,7 +83,7 @@ export class VoicemeeterPlugin {
         return {
             id: 'voicemeeter',
             name: 'VoiceMeeter',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla VoiceMeeter (mute de strips/buses) vía Macro Buttons + atajos — solo Windows',
             author: 'BunDeck',
             permissions: ['keyboard', 'process', 'filesystem'],
@@ -107,6 +107,8 @@ export class VoicemeeterPlugin {
                 {
                     id: 'strip-mute', name: 'Mutear strip (micro/línea)', icon: 'MicOff',
                     description: 'Envía el atajo de Macro Buttons que mutea un strip',
+                    surface: 'control',
+                    component: 'voice-panel',
                     schema: {
                         type: 'object',
                         properties: {
@@ -119,6 +121,8 @@ export class VoicemeeterPlugin {
                 {
                     id: 'bus-mute', name: 'Mutear bus (salida A/B)', icon: 'VolumeX',
                     description: 'Envía el atajo de Macro Buttons que mutea un bus de salida',
+                    surface: 'control',
+                    component: 'voice-panel',
                     schema: {
                         type: 'object',
                         properties: {

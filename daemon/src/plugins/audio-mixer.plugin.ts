@@ -39,7 +39,7 @@ export class AudioMixerPlugin {
         return {
             id: 'audio-mixer',
             name: 'Mezclador de audio',
-            version: '1.1.0',
+            version: '1.1.1',
             description: 'Volumen por aplicación, dispositivo de salida, silencio de micro y niveles',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -96,6 +96,9 @@ export class AudioMixerPlugin {
                     name: 'Cambiar salida',
                     description: 'Lista los dispositivos de salida o fija el predeterminado',
                     icon: 'Speaker',
+                    surface: 'control',
+                    component: 'audio-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -113,6 +116,9 @@ export class AudioMixerPlugin {
                     name: 'Silenciar micro',
                     description: 'Silencia, reactiva o alterna el micrófono predeterminado',
                     icon: 'MicOff',
+                    surface: 'control',
+                    component: 'audio-control',
+                    freeModeOnly: true,
                     variables: [{ name: 'audioMicMuted', type: 'bool', label: 'Micro silenciado' }],
                     schema: {
                         type: 'object',

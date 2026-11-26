@@ -81,7 +81,7 @@ export class SlackPlugin {
         return {
             id: 'slack',
             name: 'Slack',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Abre canales y DMs, cuenta no leídos y envía mensajes',
             author: 'BunDeck',
             permissions: ['http', 'network'],
@@ -114,6 +114,9 @@ export class SlackPlugin {
                     name: 'Abrir canal',
                     description: 'Abre un canal de Slack en el navegador/app (sin token)',
                     icon: 'Hash',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -150,6 +153,9 @@ export class SlackPlugin {
                     name: 'Contar no leídos',
                     description: 'Suma los mensajes no leídos de canales y DMs (requiere token)',
                     icon: 'Bell',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

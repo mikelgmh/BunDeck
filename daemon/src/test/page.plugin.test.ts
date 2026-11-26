@@ -16,7 +16,7 @@ describe('PagePlugin', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('page')
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toBe('1.0.1')
         expect(manifest.actions).toHaveLength(1)
         expect(manifest.actions[0].id).toBe('page')
         expect(manifest.actions[0].schema.required).toEqual(['pageId'])

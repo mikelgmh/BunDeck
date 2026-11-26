@@ -58,7 +58,7 @@ export class WeatherPlugin {
         return {
             id: 'weather',
             name: 'El tiempo',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Tiempo actual y pronóstico (Open-Meteo, sin API key): temperatura, lluvia y viento',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -97,6 +97,9 @@ export class WeatherPlugin {
                     description: 'Temperatura, condición, lluvia y viento actuales',
                     icon: 'CloudSun',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     pollMs: 600000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -122,6 +125,9 @@ export class WeatherPlugin {
                     name: 'Pronóstico',
                     description: 'Máximas/mínimas y lluvia de los próximos días (1-7)',
                     icon: 'CalendarCloud',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',

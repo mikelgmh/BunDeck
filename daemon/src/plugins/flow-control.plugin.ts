@@ -52,7 +52,7 @@ export class FlowControlPlugin {
         return {
             id: 'flow',
             name: 'Flujos',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Primitivas del motor de flujos: esperas, variables y registro',
             author: 'BunDeck',
             permissions: ['system', 'utility'],
@@ -79,6 +79,9 @@ export class FlowControlPlugin {
                     name: 'Fijar variable',
                     description: 'Asigna un valor a una variable global del motor de flujos',
                     icon: 'Variable',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],
@@ -97,6 +100,9 @@ export class FlowControlPlugin {
                     name: 'Alternar variable',
                     description: 'Alterna una variable booleana (o 0/1, o vacío/«sí»)',
                     icon: 'ToggleLeft',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],
@@ -110,6 +116,9 @@ export class FlowControlPlugin {
                     name: 'Leer variable',
                     description: 'Devuelve el valor actual de una variable global',
                     icon: 'Eye',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],

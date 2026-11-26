@@ -72,7 +72,7 @@ describe('StageBoard modo libre: control por acción', () => {
   it('sin acción de control pinta tecla estándar con icono/texto', async () => {
     const plain = mount(StageBoard, {
       props: baseProps({
-        getButton: () => ({ id: 'b1', page_id: 'p1', position: 0, data: { label: 'Play', actions: [{ id: 'x', type: 'multimedia.multimedia', parameters: { action: 'play' } }] } }),
+        getButton: () => ({ id: 'b1', page_id: 'p1', position: 0, data: { label: 'Play', actions: [{ id: 'x', type: 'shell.shell', parameters: { command: 'true' } }] } }),
         getButtonData: () => ({ label: 'Play', actions: [] })
       }) as any
     })

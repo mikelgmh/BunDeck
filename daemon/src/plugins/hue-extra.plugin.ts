@@ -66,7 +66,7 @@ export class HueExtraPlugin {
         return {
             id: 'hue-extra',
             name: 'Philips Hue Extra',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla luces Philips Hue en red local: lista, enciende/apaga, brillo, color y escenas',
             author: 'BunDeck',
             permissions: ['network'],
@@ -107,6 +107,9 @@ export class HueExtraPlugin {
                     name: 'Encender / Apagar',
                     description: 'Enciende, apaga o alterna una luz Hue',
                     icon: 'Lightbulb',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -132,6 +135,9 @@ export class HueExtraPlugin {
                     name: 'Brillo',
                     description: 'Ajusta el brillo de una luz (1-254)',
                     icon: 'Sun',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -157,6 +163,9 @@ export class HueExtraPlugin {
                     name: 'Color',
                     description: 'Cambia el color de una luz (matiz 0-65535, saturación 0-254)',
                     icon: 'Palette',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -188,6 +197,9 @@ export class HueExtraPlugin {
                     name: 'Activar escena',
                     description: 'Recupera una escena Hue por su ID',
                     icon: 'Sparkles',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

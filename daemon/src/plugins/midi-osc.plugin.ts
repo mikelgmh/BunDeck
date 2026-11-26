@@ -86,7 +86,7 @@ export class MidiOscPlugin {
         return {
             id: 'midi-osc',
             name: 'MIDI / OSC',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Envía mensajes OSC por UDP a consolas, Resolume o DAWs; incluye ayuda MIDI degradada sin librerías extra',
             author: 'BunDeck',
             permissions: ['network'],
@@ -96,6 +96,9 @@ export class MidiOscPlugin {
                     name: 'Enviar OSC',
                     description: 'Envía un mensaje OSC (dirección + argumentos) por UDP',
                     icon: 'Radio',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

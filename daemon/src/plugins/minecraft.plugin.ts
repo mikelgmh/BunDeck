@@ -69,7 +69,7 @@ export class MinecraftPlugin {
         return {
             id: 'minecraft',
             name: 'Minecraft',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Consulta si un servidor de Minecraft está en línea (jugadores, versión, latencia) y abre el launcher',
             author: 'BunDeck',
             permissions: ['network', 'process'],
@@ -79,6 +79,9 @@ export class MinecraftPlugin {
                     name: 'Estado del servidor',
                     description: 'Pregunta a mcsrvstat.us si el servidor está en línea, su versión y jugadores',
                     icon: 'Server',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -107,6 +110,9 @@ export class MinecraftPlugin {
                     name: 'Latencia del servidor',
                     description: 'Mide el tiempo de respuesta al consultar el estado (ms)',
                     icon: 'Gauge',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

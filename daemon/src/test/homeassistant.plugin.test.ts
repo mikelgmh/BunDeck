@@ -52,7 +52,7 @@ describe('HomeAssistantPlugin manifest', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('homeassistant')
         expect(manifest.name).toBe('Home Assistant')
-        expect(manifest.version).toBe('2.1.0')
+        expect(manifest.version).toBe('2.1.1')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')

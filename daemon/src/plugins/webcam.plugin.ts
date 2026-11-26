@@ -37,7 +37,7 @@ export class WebcamPlugin {
         return {
             id: 'webcam',
             name: 'Webcam',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Utilidades de cámara: listar cámaras, foto rápida y ajustes del sistema',
             author: 'BunDeck',
             permissions: ['process', 'filesystem'],
@@ -61,6 +61,9 @@ export class WebcamPlugin {
                 {
                     id: 'snapshot', name: 'Foto rápida', icon: 'ImagePlus',
                     description: 'Captura un fotograma de la cámara (requiere ffmpeg)',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

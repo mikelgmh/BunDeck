@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   CONTROL_ACTION_COMPONENTS,
+  CONTROL_COMPONENTS,
   actionSurfaceKind,
   actionTypeSurfaceKind,
   findActionAdata,
@@ -27,6 +28,7 @@ describe('useActionPresentation', () => {
     expect(actionTypeSurfaceKind([], 'audio-mixer.volume-control')).toBe('control')
     expect(actionTypeSurfaceKind(pluginsOf({ id: 'volume-control', surface: 'control', component: 'volume-range' }), 'audio-mixer.volume-control')).toBe('control')
     expect(actionTypeSurfaceKind(pluginsOf({ id: 'app-volume' }), 'audio-mixer.app-volume')).toBe('plain')
+    expect(actionTypeSurfaceKind([], 'multimedia.multimedia')).toBe('control')
     expect(actionTypeSurfaceKind(pluginsOf({ id: 'monitor', dynamic: true }), 'audio-mixer.monitor')).toBe('data')
   })
 
@@ -40,11 +42,13 @@ describe('useActionPresentation', () => {
   it('detecta el control en la lista de acciones de la tecla', () => {
     const vol = { id: 'a1', type: 'audio-mixer.volume-control', parameters: {} }
     const play = { id: 'a2', type: 'multimedia.multimedia', parameters: {} }
+    const plain = { id: 'a3', type: 'shell.shell', parameters: {} }
     expect(isControlAction(vol)).toBe(true)
-    expect(isControlAction(play)).toBe(false)
+    expect(isControlAction(play)).toBe(true)
     expect(isControlAction(null)).toBe(false)
-    expect(findControlAction([play, vol])).toBe(vol)
-    expect(findControlAction([play])).toBeUndefined()
+    expect(findControlAction([play, vol])).toBe(play)
+    expect(findControlAction([plain, vol])).toBe(vol)
+    expect(findControlAction([plain])).toBeUndefined()
     expect(findControlAction([])).toBeUndefined()
     expect(findControlAction(null)).toBeUndefined()
   })
@@ -53,6 +57,7 @@ describe('useActionPresentation', () => {
     expect(controlComponentOf('audio-mixer.volume-control')).toBe('volume-range')
     expect(controlComponentOf('otra')).toBeNull()
     expect(CONTROL_ACTION_COMPONENTS['audio-mixer.volume-control']).toBe('volume-range')
+    expect(new Set(Object.values(CONTROL_ACTION_COMPONENTS))).toEqual(new Set(CONTROL_COMPONENTS))
   })
 
   it('matchesActionQuery: biblioteca y paleta usan nombre + tipo + grupo', () => {

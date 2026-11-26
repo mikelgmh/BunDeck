@@ -23,6 +23,7 @@ function fakeServices(order: string[]) {
       executeAction: async (action: any, context: any) => {
         order.push(String(action?.type));
         if (action?.type === 'boom') throw new Error('kaboom');
+        if (action?.type === 'rejected') return { success: false, error: 'not available' };
         return { success: true, result: { echo: action?.type, btn: context?.buttonId ?? null } };
       },
       getRunningActions: () => [],
@@ -110,6 +111,24 @@ describe('POST /api/v1/actions/execute-many', () => {
     expect(body.results[0].success).toBe(true);
     // La excepción del runner se reporta como item fallido, no como 500.
     expect(body.results[1].success).toBe(false);
+    // Las ejecuciones quiet son polling de fondo: sus errores se leen en la
+    // respuesta del caller, no se convierten en toasts globales por WS.
+    expect(services.wsManager.errors).toBe(0);
+  });
+
+  it('no difunde por WS los fallos devueltos por una acción quiet', async () => {
+    const order: string[] = [];
+    const services = fakeServices(order);
+    const res = await handleActions!(
+      req('/api/v1/actions/execute-many', {
+        actions: [{ type: 'rejected' }],
+        context: { quiet: true },
+      }),
+      { url: new URL('http://localhost/api/v1/actions/execute-many'), method: 'POST', path: '/api/v1/actions/execute-many', db: fakeDb, services },
+    );
+    const body = (await res!.json()) as any;
+    expect(body.results[0]).toMatchObject({ success: false, error: 'not available' });
+    expect(services.wsManager.errors).toBe(0);
   });
 
   it('valida el cuerpo (vacío, demasiados, sin type → 400)', async () => {
@@ -135,5 +154,6 @@ describe('POST /api/v1/actions/execute-many', () => {
     const fail = await handleActions!(req('/api/v1/actions/execute', { action: { type: 'boom' }, context: {} }), ctx);
     expect(fail!.status).toBe(500);
     expect(((await fail!.json()) as any).success).toBe(false);
+    expect(services.wsManager.errors).toBe(1);
   });
 });

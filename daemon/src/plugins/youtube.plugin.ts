@@ -30,7 +30,7 @@ export class YoutubePlugin {
         return {
             id: 'youtube',
             name: 'YouTube',
-            version: '1.1.0',
+            version: '1.1.1',
             description: 'YouTube para creadores: espectadores del directo, chat en vivo, control de emisión y panel',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -65,7 +65,8 @@ export class YoutubePlugin {
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve espectadores actuales del directo y si sigue en vivo',
-                    dynamic: true, pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
+                    dynamic: true, surface: 'control', component: 'stream-studio',
+                    pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
                         { value: 'live', label: 'En directo', icon: 'Radio' },
                         { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }

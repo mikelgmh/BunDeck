@@ -267,7 +267,7 @@ export class DiscordPlugin {
         return {
             id: 'discord',
             name: 'Discord',
-            version: '1.2.0',
+            version: '1.2.1',
             description: 'Controla Discord en background vía RPC (mute/deafen/pulsar-para-hablar sin foco), con fallback a atajos globales. Conexión en 1 clic: solo pulsa Autorizar.',
             author: 'BunDeck',
             permissions: ['keyboard', 'process', 'network'],
@@ -366,6 +366,8 @@ export class DiscordPlugin {
                 {
                     id: 'toggle-mute', name: 'Silenciar / reactivar micro', icon: 'MicOff',
                     description: 'Alterna el micrófono en Discord (RPC en background si hay autorización; si no, tu atajo global)',
+                    surface: 'control',
+                    component: 'voice-panel',
                     variables: [{ name: 'discordMuted', type: 'bool', label: 'Micro silenciado' }],
                     schema: {
                         type: 'object',
@@ -465,6 +467,8 @@ export class DiscordPlugin {
                 {
                     id: 'status', name: 'Estado de conexión Discord', icon: 'Activity',
                     description: 'Muestra si el RPC está conectado, si falta autorización o si Discord está cerrado (sin lanzar errores)',
+                    surface: 'control',
+                    component: 'voice-panel',
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {

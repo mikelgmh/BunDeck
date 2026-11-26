@@ -43,7 +43,7 @@ export class SoundboardPlugin {
         return {
             id: 'soundboard',
             name: 'Soundboard',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Reproduce efectos de sonido locales (wav/mp3) para tu directo',
             author: 'BunDeck',
             permissions: ['filesystem', 'process'],
@@ -68,6 +68,8 @@ export class SoundboardPlugin {
                 {
                     id: 'play', name: 'Reproducir sonido', icon: 'Play',
                     description: 'Reproduce un archivo de audio local',
+                    surface: 'control',
+                    component: 'soundboard',
                     schema: {
                         type: 'object',
                         properties: {

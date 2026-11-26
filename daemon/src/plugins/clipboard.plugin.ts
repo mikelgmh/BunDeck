@@ -115,7 +115,7 @@ export class ClipboardPlugin {
         return {
             id: 'clipboard',
             name: 'Portapapeles',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Slots de portapapeles: guarda, pega, lista e historial',
             author: 'BunDeck',
             permissions: ['system'],
@@ -131,6 +131,9 @@ export class ClipboardPlugin {
                     name: 'Guardar slot',
                     description: 'Guarda texto en un slot (o captura el portapapeles actual)',
                     icon: 'ClipboardCopy',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -152,6 +155,9 @@ export class ClipboardPlugin {
                     name: 'Pegar slot',
                     description: 'Copia el slot al portapapeles del sistema',
                     icon: 'ClipboardPaste',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -168,6 +174,9 @@ export class ClipboardPlugin {
                     name: 'Listar slots',
                     description: 'Muestra los slots guardados (vista previa)',
                     icon: 'List',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 },
                 {
@@ -175,6 +184,9 @@ export class ClipboardPlugin {
                     name: 'Historial',
                     description: 'Últimos textos guardados o pegados',
                     icon: 'History',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

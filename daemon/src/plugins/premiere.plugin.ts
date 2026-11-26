@@ -89,7 +89,7 @@ export class PremierePlugin {
         return {
             id: 'premiere',
             name: 'Adobe Premiere Pro',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla Premiere: transporte JKL, marcas de entrada/salida, marcadores, historial, guardado y exportación',
             author: 'BunDeck',
             permissions: ['keyboard', 'input'],
@@ -99,6 +99,8 @@ export class PremierePlugin {
                     name: 'Transporte',
                     description: 'Reproduce, pausa y navega por la línea de tiempo (JKL, Espacio, flechas, Inicio/Fin)',
                     icon: 'Play',
+                    surface: 'control',
+                    component: 'creative-tools',
                     schema: {
                         type: 'object',
                         properties: {

@@ -48,7 +48,7 @@ export class WindowManagerPlugin {
         return {
             id: 'window-manager',
             name: 'Gestor de ventanas',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Coloca la ventana activa y guarda/restaura layouts de posición',
             author: 'BunDeck',
             permissions: ['system'],
@@ -132,6 +132,9 @@ export class WindowManagerPlugin {
                     name: 'Listar layouts',
                     description: 'Muestra los layouts guardados',
                     icon: 'List',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 }
             ]

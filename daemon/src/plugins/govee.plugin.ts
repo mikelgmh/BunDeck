@@ -59,7 +59,7 @@ export class GoveePlugin {
         return {
             id: 'govee',
             name: 'Govee',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla luces Govee por la nube: encendido, brillo, color y modos de escena',
             author: 'BunDeck',
             permissions: ['http', 'network'],
@@ -81,6 +81,9 @@ export class GoveePlugin {
                     name: 'Encender / Apagar',
                     description: 'Enciende o apaga un dispositivo Govee',
                     icon: 'Lightbulb',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -100,6 +103,9 @@ export class GoveePlugin {
                     name: 'Brillo',
                     description: 'Ajusta el brillo (0-100)',
                     icon: 'Sun',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -119,6 +125,9 @@ export class GoveePlugin {
                     name: 'Color',
                     description: 'Cambia el color (RGB 0-255)',
                     icon: 'Palette',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -135,6 +144,9 @@ export class GoveePlugin {
                     name: 'Escena / Modo',
                     description: 'Activa un modo de escena del dispositivo (requiere que el modelo lo soporte)',
                     icon: 'Sparkles',
+                    surface: 'control',
+                    component: 'smart-home',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

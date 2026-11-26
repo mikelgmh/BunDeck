@@ -22,7 +22,7 @@ export class PagePlugin {
         return {
             id: 'page',
             name: 'Page Navigation',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Navigate to different pages within BunDeck',
             author: 'BunDeck',
             permissions: ['navigation', 'ui'],
@@ -32,6 +32,9 @@ export class PagePlugin {
                     name: 'Navigate to Page',
                     description: 'Switch to a different page',
                     icon: 'FileText',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

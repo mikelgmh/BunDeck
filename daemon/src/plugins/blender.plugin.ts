@@ -93,7 +93,7 @@ export class BlenderPlugin {
         return {
             id: 'blender',
             name: 'Blender',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla Blender: vistas del viewport, render y guardado vía atajos configurables',
             author: 'BunDeck',
             permissions: ['keyboard', 'input'],
@@ -103,6 +103,8 @@ export class BlenderPlugin {
                     name: 'Vista del viewport',
                     description: 'Cambia la vista 3D (frontal, cenital, cámara, sombreado…)',
                     icon: 'Box',
+                    surface: 'control',
+                    component: 'creative-tools',
                     schema: {
                         type: 'object',
                         properties: {

@@ -17,7 +17,7 @@ describe('YoutubePlugin manifest', () => {
     it('expone un manifest válido en español', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('youtube')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.1.1')
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(['open-dashboard', 'post-chat', 'start-broadcast', 'stop-broadcast', 'viewer-count'])
     })

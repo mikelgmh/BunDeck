@@ -49,7 +49,7 @@ describe('SpotifyPlugin', () => {
 
         expect(manifest.id).toBe('spotify')
         expect(manifest.name).toBe('Spotify')
-        expect(manifest.version).toBe('1.2.0')
+        expect(manifest.version).toBe('1.2.1')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')

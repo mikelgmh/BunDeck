@@ -17,7 +17,7 @@ describe('TwitchPlugin manifest', () => {
     it('expone un manifest válido en español', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('twitch')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.1.1')
         expect(manifest.settingsSchema).toBeDefined()
         const ids = manifest.actions.map((a: any) => a.id).sort()
         expect(ids).toEqual(['ad-break', 'chat-message', 'create-clip', 'create-marker', 'set-category', 'set-title', 'viewer-count'])

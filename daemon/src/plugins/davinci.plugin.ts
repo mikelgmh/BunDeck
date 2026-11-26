@@ -99,7 +99,7 @@ export class DavinciPlugin {
         return {
             id: 'davinci',
             name: 'DaVinci Resolve',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla DaVinci Resolve: transporte, edición, marcadores, render, guardado y cambio de página',
             author: 'BunDeck',
             permissions: ['keyboard', 'input'],
@@ -109,6 +109,8 @@ export class DavinciPlugin {
                     name: 'Transporte',
                     description: 'Reproduce, pausa, detiene y navega (Espacio, JKL, flechas, Inicio/Fin)',
                     icon: 'Play',
+                    surface: 'control',
+                    component: 'creative-tools',
                     schema: {
                         type: 'object',
                         properties: {

@@ -337,6 +337,7 @@
             @action-logs="(p) => onKeyActionLogs(p)"
             @open-icon-picker="openIconPicker"
             @open-look-icon="(i) => openLookIconPicker(i)"
+            @open-plugin-settings="(id) => openPluginSettings(id, 'settings')"
              @clear-image="onClearImage"
             @action-drop-selected="onActionDropSelected"
           />

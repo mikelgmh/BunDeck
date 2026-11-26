@@ -33,7 +33,7 @@ export class ProfileAutoPlugin {
         return {
             id: 'profile-auto',
             name: 'Perfiles automáticos',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Cambia de perfil según la app activa y restaura el anterior',
             author: 'BunDeck',
             permissions: ['system'],
@@ -123,6 +123,9 @@ export class ProfileAutoPlugin {
                     name: 'Estado',
                     description: 'Indica si la vigilancia está activa y cuántas reglas hay',
                     icon: 'Info',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 },
                 {
@@ -130,6 +133,9 @@ export class ProfileAutoPlugin {
                     name: 'Cambiar de perfil',
                     description: 'Cambia manualmente al perfil indicado',
                     icon: 'UserCheck',
+                    surface: 'control',
+                    component: 'workflow-control',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

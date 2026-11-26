@@ -36,7 +36,7 @@ describe('ObsPlugin manifest', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('obs')
         expect(manifest.name).toBe('OBS Studio')
-        expect(manifest.version).toBe('1.2.0')
+        expect(manifest.version).toBe('1.2.1')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('network')
         expect(manifest.actions).toHaveLength(12)

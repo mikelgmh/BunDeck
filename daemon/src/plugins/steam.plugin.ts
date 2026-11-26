@@ -56,7 +56,7 @@ export class SteamPlugin {
         return {
             id: 'steam',
             name: 'Steam',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Lanza juegos de Steam, abre la biblioteca y consulta si un juego/servidor está en línea',
             author: 'BunDeck',
             permissions: ['process', 'network'],
@@ -95,6 +95,9 @@ export class SteamPlugin {
                     name: 'Estado del juego',
                     description: 'Consulta el nombre, precio y estado de un juego vía la tienda pública de Steam',
                     icon: 'Activity',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -124,6 +127,9 @@ export class SteamPlugin {
                     name: 'Presencia (próximamente)',
                     description: 'Placeholder: Steam no expone presencia de amigos sin API key; devuelve cómo activarla',
                     icon: 'Users',
+                    surface: 'control',
+                    component: 'status-cards',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

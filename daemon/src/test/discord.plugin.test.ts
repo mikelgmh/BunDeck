@@ -14,7 +14,7 @@ describe('DiscordPlugin manifest', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('discord')
         expect(manifest.name).toBe('Discord')
-        expect(manifest.version).toBe('1.2.0')
+        expect(manifest.version).toBe('1.2.1')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.settingsSchema).toBeDefined()
         expect(manifest.oauth?.provider).toBe('discord')

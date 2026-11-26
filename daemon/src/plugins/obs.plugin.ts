@@ -110,7 +110,7 @@ export class ObsPlugin {
         return {
             id: 'obs',
             name: 'OBS Studio',
-            version: '1.2.0',
+            version: '1.2.1',
             description: 'Controla OBS Studio (escenas, fuentes, directo, grabación y audio) vía obs-websocket v5',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -490,6 +490,8 @@ export class ObsPlugin {
                     description: 'Directo/grabación actuales para iconos dinámicos (states: live/offline, recording/stopped)',
                     icon: 'Activity',
                     dynamic: true,
+                    surface: 'control',
+                    component: 'stream-studio',
                     pollMs: 5000,
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
                     states: [

@@ -131,14 +131,14 @@ async function execOne(
           );
         }
       }
-    } else {
+    } else if (!quiet) {
       services.wsManager.broadcastActionError(actionId, result.error);
     }
 
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    services.wsManager.broadcastActionError(actionId, errorMessage);
+    if (!quiet) services.wsManager.broadcastActionError(actionId, errorMessage);
     return { success: false, error: errorMessage, __threw: true };
   }
 }

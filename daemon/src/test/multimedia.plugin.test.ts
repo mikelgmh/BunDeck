@@ -34,7 +34,7 @@ describe('MultimediaPlugin', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('multimedia')
-        expect(manifest.version).toBe('1.1.0')
+        expect(manifest.version).toBe('1.1.1')
         expect(manifest.actions).toHaveLength(1)
         expect(manifest.actions[0].id).toBe('multimedia')
         expect(manifest.actions[0].schema.required).toEqual(['action'])

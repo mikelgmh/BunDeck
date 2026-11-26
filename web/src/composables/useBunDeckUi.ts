@@ -385,14 +385,31 @@ export const bdToast = ref<BdToast | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 export function bdShowToast(message: string, undo?: () => void, ms = 6000) {
-  if (toastTimer) clearTimeout(toastTimer)
-  bdToast.value = { id: ++toastId.value, message, undo }
+  const text = String(message ?? '')
+  // Polling actions can report the same failure repeatedly. Keep the original
+  // deadline instead of resetting it on every identical notification.
+  if (toastTimer !== null && bdToast.value?.message === text) {
+    if (undo && !bdToast.value.undo) {
+      bdToast.value = { ...bdToast.value, undo }
+    }
+    return
+  }
+  if (toastTimer !== null) clearTimeout(toastTimer)
+  const id = ++toastId.value
+  const duration = Number.isFinite(ms) ? Math.min(10_000, Math.max(1_000, ms)) : 6000
+  bdToast.value = { id, message: text, undo }
   toastTimer = setTimeout(() => {
-    bdToast.value = null
-  }, ms)
+    // An already-queued timeout from a replaced toast must not clear the
+    // handle (or hide the message) belonging to the newer toast.
+    if (bdToast.value?.id === id) {
+      bdToast.value = null
+      toastTimer = null
+    }
+  }, duration)
 }
 
 export function bdHideToast() {
-  if (toastTimer) clearTimeout(toastTimer)
+  if (toastTimer !== null) clearTimeout(toastTimer)
+  toastTimer = null
   bdToast.value = null
 }

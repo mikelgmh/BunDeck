@@ -54,7 +54,7 @@ export class VoicemodPlugin {
         return {
             id: 'voicemod',
             name: 'Voicemod',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Controla Voicemod: voces, efectos, mute y estado del cambiador de voz',
             author: 'BunDeck',
             permissions: ['network'],
@@ -85,6 +85,8 @@ export class VoicemodPlugin {
                 {
                     id: 'get-status', name: 'Estado de Voicemod', icon: 'Activity',
                     description: 'Comprueba la conexión y devuelve la voz activa',
+                    surface: 'control',
+                    component: 'voice-panel',
                     schema: { type: 'object', properties: { ...conn }, required: [] }
                 },
                 {

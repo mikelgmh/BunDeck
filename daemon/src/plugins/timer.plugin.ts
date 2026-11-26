@@ -61,7 +61,7 @@ export class TimerPlugin {
         return {
             id: 'timer',
             name: 'Temporizador',
-            version: '1.0.0',
+            version: '1.0.1',
             description: 'Pomodoro: inicia, detiene y consulta un temporizador de trabajo/descanso',
             author: 'BunDeck',
             permissions: ['system'],
@@ -89,6 +89,9 @@ export class TimerPlugin {
                     name: 'Iniciar',
                     description: 'Inicia el temporizador (trabajo, descanso o personalizado)',
                     icon: 'Play',
+                    surface: 'control',
+                    component: 'pomodoro',
+                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -135,6 +138,9 @@ export class TimerPlugin {
                     name: 'Detener',
                     description: 'Detiene el temporizador (guarda lo restante)',
                     icon: 'Square',
+                    surface: 'control',
+                    component: 'pomodoro',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 },
                 {
@@ -142,6 +148,9 @@ export class TimerPlugin {
                     name: 'Estado',
                     description: 'Devuelve el estado y el tiempo restante',
                     icon: 'Hourglass',
+                    surface: 'control',
+                    component: 'pomodoro',
+                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 }
             ]
