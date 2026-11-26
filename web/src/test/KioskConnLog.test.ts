@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   connLogKey,
   connLogParams,
+  connLogTone,
+  connLogSymbol,
   readLanProbe,
   LAN_PROBE_KEY,
   type ConnEntry,
@@ -18,6 +20,24 @@ describe('connLogKey', () => {
     expect(connLogKey('rtc-ok')).toBe('bd.kioskLogRtcOk')
     expect(connLogKey('rtc-timeout')).toBe('bd.kioskLogRtcTimeout')
     expect(connLogKey('rtc-fallback')).toBe('bd.kioskLogRtcFallback')
+  })
+})
+
+describe('connLogTone/connLogSymbol', () => {
+  it('ok→✓, warn→!, info→● (mismo lenguaje que la modal de conexión)', () => {
+    expect(connLogTone('lan-ok')).toBe('ok')
+    expect(connLogTone('rtc-ok')).toBe('ok')
+    expect(connLogSymbol('lan-ok')).toBe('✓')
+    expect(connLogTone('lan-miss')).toBe('warn')
+    expect(connLogTone('rtc-timeout')).toBe('warn')
+    expect(connLogTone('rtc-fallback')).toBe('warn')
+    expect(connLogSymbol('rtc-fallback')).toBe('!')
+    expect(connLogTone('rtc-start')).toBe('info')
+    expect(connLogTone('rtc-signaling')).toBe('info')
+    expect(connLogTone('rtc-answer')).toBe('info')
+    expect(connLogTone('rtc-dc')).toBe('info')
+    expect(connLogSymbol('rtc-dc')).toBe('●')
+    expect(connLogTone('desconocido')).toBe('info')
   })
 })
 
@@ -52,12 +72,21 @@ describe('readLanProbe', () => {
     ])
   })
 
-  it('lan-miss con n/ms', () => {
+  it('lan-miss con ips/ms (se muestran las IPs probadas)', () => {
     const s = mem({
-      [LAN_PROBE_KEY]: JSON.stringify({ urlCode: 'AbC123', tried: true, ips: ['a', 'b', 'c'], ok: false, ms: 345, ts: 1700000000000 }),
+      [LAN_PROBE_KEY]: JSON.stringify({ urlCode: 'AbC123', tried: true, ips: ['192.168.1.10', '192.168.1.11'], ok: false, ms: 345, ts: 1700000000000 }),
     })
     expect(readLanProbe(s)).toEqual([
-      { ts: 1700000000000, kind: 'lan-miss', detail: JSON.stringify({ n: 3, ms: 345 }) },
+      { ts: 1700000000000, kind: 'lan-miss', detail: JSON.stringify({ n: 2, ms: 345, ips: '192.168.1.10, 192.168.1.11' }) },
+    ])
+  })
+
+  it('lan-miss sin lista usa el conteo', () => {
+    const s = mem({
+      [LAN_PROBE_KEY]: JSON.stringify({ urlCode: 'AbC123', tried: true, ips: [], ok: false, ms: 6, ts: 1700000000000 }),
+    })
+    expect(readLanProbe(s)).toEqual([
+      { ts: 1700000000000, kind: 'lan-miss', detail: JSON.stringify({ n: 0, ms: 6, ips: '0 IP' }) },
     ])
   })
 

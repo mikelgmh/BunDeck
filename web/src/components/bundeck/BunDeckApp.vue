@@ -443,6 +443,7 @@
         v-if="kioskConnOpen"
         :entries="kioskConnEntries"
         :transport-label="kioskConnLabel"
+        :tone="kioskTransport"
         :ws-ok="isConnected"
         @dismiss="kioskConnOpen = false"
       />

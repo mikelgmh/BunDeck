@@ -35,6 +35,19 @@ describe('KioskConnDialog', () => {
     wrapper.unmount()
   })
 
+  it('pilotito con tono y símbolos por tipo de entrada', () => {
+    const wrapper = mount(KioskConnDialog, {
+      props: { entries, transportLabel: 'P2P', wsOk: true, tone: 'relay' },
+    })
+    expect(wrapper.find('.kconn-dot').attributes('data-tone')).toBe('relay')
+    const rows = wrapper.findAll('[data-cy="kiosk-conn-entry"]')
+    expect(rows[0].attributes('data-tone')).toBe('ok')
+    expect(rows[0].find('.ksym').text()).toBe('✓')
+    expect(rows[1].attributes('data-tone')).toBe('warn')
+    expect(rows[1].find('.ksym').text()).toBe('!')
+    wrapper.unmount()
+  })
+
   it('vacío honesto sin entradas', () => {
     const wrapper = mount(KioskConnDialog, {
       props: { entries: [], transportLabel: 'X', wsOk: false },

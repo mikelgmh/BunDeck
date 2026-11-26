@@ -1010,7 +1010,7 @@
         "tunnelConnectNatBlocked": "bloqueado por NAT",
         "tunnelConnectLanNote": "incluye red local",
         "kioskLogLanOk": "Red local OK ({ip}, {ms} ms)",
-        "kioskLogLanMiss": "Red local sin respuesta ({n} IPs, {ms} ms)",
+        "kioskLogLanMiss": "Red local sin respuesta de {ips} ({ms} ms)",
         "kioskLogRtcStart": "P2P iniciado",
         "kioskLogRtcSignaling": "Señalización ({phase})",
         "kioskLogRtcAnswer": "Respuesta recibida ({ms} ms)",

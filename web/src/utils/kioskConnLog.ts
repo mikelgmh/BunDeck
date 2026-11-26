@@ -28,6 +28,33 @@ export interface ConnEntry {
   detail?: string
 }
 
+/** Tono visual de cada entrada (punto/símbolo de la línea de tiempo). */
+export function connLogTone(kind: string): 'ok' | 'warn' | 'info' {
+  switch (kind) {
+    case 'lan-ok':
+    case 'rtc-ok':
+      return 'ok'
+    case 'lan-miss':
+    case 'rtc-timeout':
+    case 'rtc-fallback':
+      return 'warn'
+    case 'rtc-start':
+    case 'rtc-signaling':
+    case 'rtc-answer':
+    case 'rtc-dc':
+    default:
+      return 'info'
+  }
+}
+
+/** Símbolo textual del tono (mismo lenguaje que la modal de conexión). */
+export function connLogSymbol(kind: string): string {
+  const tone = connLogTone(kind)
+  if (tone === 'ok') return '✓'
+  if (tone === 'warn') return '!'
+  return '●'
+}
+
 /** Clave i18n del texto de cada entrada (el componente aplica `t()`). */
 export function connLogKey(kind: string): string {
   switch (kind) {
@@ -98,7 +125,11 @@ export function readLanProbe(
       return [{ ts, kind: 'lan-ok', detail: JSON.stringify({ ip: p.ip, ms: msSafe }) }]
     }
     const n = Array.isArray(p.ips) ? p.ips.length : 0
-    return [{ ts, kind: 'lan-miss', detail: JSON.stringify({ n, ms: msSafe }) }]
+    const list = Array.isArray(p.ips) ? p.ips.filter((s) => typeof s === 'string' && s) : []
+    // Las IPs probadas sí se muestran (son RFC1918 del propio host, sin
+    // secretos): es el dato que faltaba en el diálogo ("¿qué IP probó?").
+    const ips = list.length > 0 ? list.join(', ') : `${n} IP`
+    return [{ ts, kind: 'lan-miss', detail: JSON.stringify({ n, ms: msSafe, ips }) }]
   } catch {
     return []
   }

@@ -1010,7 +1010,7 @@
         "tunnelConnectNatBlocked": "blocked by NAT",
         "tunnelConnectLanNote": "includes local network",
         "kioskLogLanOk": "Local network OK ({ip}, {ms} ms)",
-        "kioskLogLanMiss": "Local network unreachable ({n} IPs, {ms} ms)",
+        "kioskLogLanMiss": "Local network: no response from {ips} ({ms} ms)",
         "kioskLogRtcStart": "P2P started",
         "kioskLogRtcSignaling": "Signaling ({phase})",
         "kioskLogRtcAnswer": "Answer received ({ms} ms)",
