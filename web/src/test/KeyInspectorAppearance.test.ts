@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import KeyInspector from '../components/bundeck/KeyInspector.vue'
+import { upsertRemoteVar } from '../composables/useVars'
 
 vi.mock('../composables/useI18n', () => ({
   useI18nStore: () => ({ t: (key: string) => key }),
@@ -172,6 +174,28 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     expect(wrapper.emitted('update-field')).toContainEqual(['textColor', '#ff0000'])
   })
 
+  it('cada condición tiene color libre de icono y de fondo', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      looks: [{ cond: 'contador > 1', t: 'Hola', i: '', c: null, bg: 0 }],
+    })
+    await openAppearance(wrapper)
+    const iconPicker = wrapper.find('[data-cy="bd-look-custom-color-0"]')
+    const bgPicker = wrapper.find('[data-cy="bd-look-custom-bg-0"]')
+    expect(iconPicker.exists()).toBe(true)
+    expect(bgPicker.exists()).toBe(true)
+    await iconPicker.setValue('#123abc')
+    await bgPicker.setValue('#abcdef')
+    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const looksEmits = emitted!.filter(([k]) => k === 'looks').map(([, v]) => v)
+    expect(looksEmits).toContainEqual(
+      expect.arrayContaining([expect.objectContaining({ c: '#123abc' })])
+    )
+    expect(looksEmits).toContainEqual(
+      expect.arrayContaining([expect.objectContaining({ bg: '#abcdef' })])
+    )
+  })
+
   it('sin bloque de crear variables ni wizard de toggle', async () => {
     const wrapper = mountInspector({
       ...baseConfig,
@@ -219,44 +243,114 @@ describe('KeyInspector appearance (regresión pantalla en negro)', () => {
     )
   })
 
-  it('N estados: añadir estado crea look `V == N`', async () => {
+  it('sin sección de Estados (eliminada: no tenía sentido)', async () => {
     const wrapper = mountInspector({ ...baseConfig, actions: [], looks: [], stateVar: 'estadoTest' })
     await openAppearance(wrapper)
-    expect(wrapper.find('[data-cy="bd-states"]').exists()).toBe(true)
-    await wrapper.find('[data-cy="bd-state-add"]').trigger('click')
-    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
-    const looksEmit = emitted!.find(([k]) => k === 'looks')
-    expect(looksEmit?.[1]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ cond: 'estadoTest == 1' })])
-    )
-  })
-
-  it('transición por pulsación: siguiente añade set-var al click', async () => {
-    const wrapper = mountInspector({
-      ...baseConfig,
-      actions: [],
-      looks: [{ cond: 'estadoTest2 == 1', t: '', i: 'Pause', c: null, bg: 0 }],
-      stateVar: 'estadoTest2',
-    })
-    await openAppearance(wrapper)
-    const sel = wrapper.find('[data-cy="bd-trans-click"]')
-    expect(sel.exists()).toBe(true)
-    await sel.setValue('next')
-    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
-    const paEmit = emitted!.find(([k]) => k === 'pressActions')
-    expect(paEmit?.[1]?.click).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'local.set-var',
-          parameters: { name: 'estadoTest2', expr: '(estadoTest2 + 1) % 2' },
-        }),
-      ])
-    )
+    expect(wrapper.find('[data-cy="bd-states"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-state-add"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-state-var-input"]').exists()).toBe(false)
+    expect(wrapper.find('[data-cy="bd-trans-click"]').exists()).toBe(false)
   })
 
   it('la variable de estados aparece entre las disponibles', async () => {
     const wrapper = mountInspector({ ...baseConfig, stateVar: 'estadoTest3' })
     await openAppearance(wrapper)
     expect(wrapper.find('[data-cy="bd-available-vars"]').html()).toContain('estadoTest3')
+  })
+
+  it('presets: discord mute ofrece el par on/off y los añade en orden', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }],
+      looks: [],
+    })
+    await openAppearance(wrapper)
+    expect(wrapper.find('[data-cy="bd-presets"]').exists()).toBe(true)
+    await wrapper.find('[data-cy="bd-preset-discordMuted-on"]').trigger('click')
+    let emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    let looksEmit = emitted!.find(([k]) => k === 'looks')
+    expect(looksEmit?.[1]).toEqual([
+      expect.objectContaining({ cond: 'discordMuted', c: 4, bg: 1 }),
+    ])
+    // Simula el guardado del padre y añade el off: queda el par en orden.
+    await wrapper.setProps({ buttonConfig: { ...baseConfig, actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }], looks: looksEmit?.[1] } })
+    await wrapper.find('[data-cy="bd-preset-discordMuted-off"]').trigger('click')
+    emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const last = emitted!.filter(([k]) => k === 'looks').at(-1)
+    expect(last?.[1]).toEqual([
+      expect.objectContaining({ cond: 'discordMuted' }),
+      expect.objectContaining({ cond: 'discordMuted == falso' }),
+    ])
+  })
+
+  it('sin acciones con estado no hay presets', async () => {
+    const wrapper = mountInspector({ ...baseConfig, actions: [{ id: 'a1', type: 'shell.exec', parameters: {} }] })
+    await openAppearance(wrapper)
+    expect(wrapper.find('[data-cy="bd-presets"]').exists()).toBe(false)
+  })
+
+  it('con icono personalizado el off hereda el icono del botón', async () => {
+    const wrapper = mountInspector({
+      ...baseConfig,
+      icon: 'Mic',
+      actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }],
+      looks: [],
+    })
+    await openAppearance(wrapper)
+    await wrapper.find('[data-cy="bd-preset-discordMuted-off"]').trigger('click')
+    const emitted = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const looksEmit = emitted!.find(([k]) => k === 'looks')
+    expect(looksEmit?.[1]).toEqual([
+      expect.objectContaining({ cond: 'discordMuted == falso', i: 'Mic' }),
+    ])
+    await wrapper.setProps({ buttonConfig: { ...baseConfig, icon: 'Mic', actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }], looks: looksEmit?.[1] } })
+    await wrapper.find('[data-cy="bd-preset-discordMuted-on"]').trigger('click')
+    const emitted2 = wrapper.emitted('update-field') as Array<[string, any]> | undefined
+    const last = emitted2!.filter(([k]) => k === 'looks').at(-1)
+    expect(last?.[1]).toEqual([
+      expect.objectContaining({ cond: 'discordMuted == falso', i: 'Mic' }),
+      expect.objectContaining({ cond: 'discordMuted', i: 'MicOff' }),
+    ])
+  })
+
+  it('condición bool con tipo: matchea en true y vuelve a la base en false', async () => {
+    upsertRemoteVar('discordMuted', true, 'bool')
+    const wrapper = mountInspector({
+      ...baseConfig,
+      actions: [{ id: 'a1', type: 'discord.toggle-mute', parameters: {} }],
+      looks: [{ cond: 'discordMuted == true', t: 'Muteado', i: '', c: 4, bg: 1 }],
+    })
+    await openAppearance(wrapper)
+    await nextTick()
+    let cards = wrapper.findAll('.bd-rl')
+    expect(cards.length).toBe(1)
+    expect(cards[0].classes()).toContain('is-matched')
+    upsertRemoteVar('discordMuted', false, 'bool')
+    await nextTick()
+    cards = wrapper.findAll('.bd-rl')
+    expect(cards[0].classes()).not.toContain('is-matched')
+    upsertRemoteVar('discordMuted', true, 'bool')
+  })
+
+  it('prioridad: gana la primera condición cierta; sin match, base', async () => {
+    upsertRemoteVar('contador', 2, 'num')
+    const wrapper = mountInspector({
+      ...baseConfig,
+      looks: [
+        { cond: 'contador > 100', t: 'Grande', i: '', c: null, bg: 0 },
+        { cond: 'contador > 1', t: 'Mediano', i: '', c: null, bg: 0 },
+      ],
+    })
+    await openAppearance(wrapper)
+    await nextTick()
+    let cards = wrapper.findAll('.bd-rl')
+    expect(cards[1].classes()).toContain('is-matched')
+    expect(cards[0].classes()).not.toContain('is-matched')
+    upsertRemoteVar('contador', 0, 'num')
+    await nextTick()
+    cards = wrapper.findAll('.bd-rl')
+    expect(cards[0].classes()).not.toContain('is-matched')
+    expect(cards[1].classes()).not.toContain('is-matched')
+    upsertRemoteVar('contador', 0, 'num')
   })
 })

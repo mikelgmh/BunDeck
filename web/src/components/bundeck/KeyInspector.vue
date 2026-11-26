@@ -425,120 +425,143 @@
           </div>
         </div>
 
-        <h3 class="bd-sh">{{ t('bd.availVarsTitle') }}</h3>
+        <h3 class="bd-sh">
+          <span>{{ t('bd.availVarsTitle') }}</span>
+          <span class="bd-var-legend">
+            <span><i class="bd-dot" style="background: #6fcf97"></i>{{ t('bd.availVarKey') }}</span>
+            <span><i class="bd-dot" style="background: #82b4ea"></i>{{ t('bd.availVarGlobal') }}</span>
+          </span>
+        </h3>
         <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.availVarsHint') }}</p>
-        <div v-if="availableVars.length" class="bd-al" data-cy="bd-available-vars">
-          <div v-for="v in availableVars" :key="v.name" class="bd-ac" style="display: flex; align-items: center; gap: 8px">
-            <span class="bd-mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis" :title="v.fromAction ?? ''">{{ v.name }}</span>
-            <span class="bd-cnt">{{ v.origin === 'action' ? v.fromAction : t('bd.availVarGlobal') }}</span>
-            <span class="bd-cnt">{{ v.live || t('bd.availVarUnknown') }}</span>
+        <div v-if="availableVars.length" class="bd-vars-grid" data-cy="bd-available-vars">
+          <div
+            v-for="v in availableVars"
+            :key="v.name"
+            class="bd-var-chip"
+            :data-scope="v.origin"
+            :title="v.origin === 'action' ? `${v.fromAction ?? ''} — ${t('bd.availVarAutoHint')}` : t('bd.availVarEditHint')"
+          >
+            <span class="bd-dot" :style="{ background: v.origin === 'action' ? '#6fcf97' : '#82b4ea' }"></span>
+            <span class="bd-var-name" @click="copyVar(v.name)" :title="t('bd.availVarCopyHint')">{{ copiedVar === v.name ? t('bd.availVarCopied') : v.name }}</span>
+            <span v-if="v.origin === 'action'" class="bd-sr">{{ v.fromAction }}</span>
+            <template v-if="v.origin === 'action'">
+              <span class="bd-var-ro" :title="t('bd.availVarAutoHint')">{{ v.live || t('bd.availVarUnknownShort') }}</span>
+            </template>
+            <template v-else-if="globalVarType(v.name) === 'bool'">
+              <button
+                type="button"
+                class="bd-var-val-bool"
+                :data-val="String(globalVarVal(v.name))"
+                :title="t('bd.availVarEditHint')"
+                @click="toggleGlobalVar(v.name)"
+              >{{ fmtBoolShort(globalVarVal(v.name)) }}</button>
+            </template>
+            <template v-else-if="globalVarType(v.name) === 'num'">
+              <input
+                type="number"
+                class="bd-var-val-inp"
+                :value="globalVarVal(v.name)"
+                :aria-label="v.name"
+                @input="setGlobalVar(v.name, ($event.target as HTMLInputElement).value)"
+              />
+            </template>
+            <template v-else>
+              <input
+                type="text"
+                class="bd-var-val-inp bd-var-val-txt"
+                :value="globalVarVal(v.name)"
+                :aria-label="v.name"
+                spellcheck="false"
+                autocomplete="off"
+                @input="setGlobalVar(v.name, ($event.target as HTMLInputElement).value)"
+              />
+            </template>
             <button
-              class="bd-btn"
-              style="padding: 4px 10px"
+              class="bd-use-mini"
               :data-cy="`bd-avail-use-${v.name}`"
+              :title="t('bd.availVarUse')"
+              :aria-label="t('bd.availVarUse')"
               @click="useCondFromVar(v)"
-            >{{ t('bd.availVarUse') }}</button>
+            >+</button>
           </div>
         </div>
         <p v-else class="bd-hint" data-cy="bd-available-vars-empty">{{ t('bd.availVarsEmpty') }}</p>
 
-        <h3 class="bd-sh">{{ t('bd.statesTitle') }}</h3>
-        <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.statesHint') }}</p>
-        <div class="bd-fld">
-          <div style="display: flex; gap: 8px">
-            <input
-              type="text"
-              class="bd-inp bd-mono"
-              style="flex: 1; min-width: 0"
-              v-model="stateVarDraft"
-              :placeholder="t('bd.statesVarPh')"
-              spellcheck="false"
-              autocomplete="off"
-              data-cy="bd-state-var-input"
-            />
-            <button class="bd-btn" @click="applyStateVar" data-cy="bd-state-var-apply">{{ t('bd.statesUse') }}</button>
-            <button v-if="stateVar" class="bd-btn" @click="clearStateVar">{{ t('bd.statesClear') }}</button>
+        <h3 class="bd-sh">
+          <span>{{ t('bd.looksTitle') }}</span>
+          <span class="bd-var-legend">{{ t('bd.looksPrio') }}</span>
+        </h3>
+        <p class="bd-hint" style="margin: 0 0 10px">{{ t('bd.looksHint') }}</p>
+        <div v-if="varPresets.length" class="bd-presets" data-cy="bd-presets">
+          <p class="bd-hint" style="margin: 0">{{ t('bd.presetHint') }}</p>
+          <div v-for="g in varPresets" :key="g.varName" class="bd-preset-row">
+            <span class="bd-mono bd-preset-var" :title="g.fromAction">{{ g.varName }}</span>
+            <button
+              class="bd-btn bd-preset-btn"
+              :data-cy="`bd-preset-${g.varName}-on`"
+              :title="g.on.cond"
+              @click="addPreset(g.on, false)"
+            >{{ t(g.on.titleKey) }}</button>
+            <button
+              class="bd-btn bd-preset-btn"
+              :data-cy="`bd-preset-${g.varName}-off`"
+              :title="g.off.cond"
+              @click="addPreset(g.off, true)"
+            >{{ t(g.off.titleKey) }}</button>
           </div>
         </div>
-        <div v-if="stateVar" data-cy="bd-states">
-          <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.statesBaseHint') }}</p>
-          <div v-for="s in stateEntries" :key="s.i" class="bd-rl">
-            <div class="bd-ah">
-              <b>{{ t('bd.stateN', { n: s.i }) }}</b>
-              <span class="bd-mono" style="font-size: 11px; opacity: 0.7">{{ stateVar }} == {{ s.i }}</span>
-              <button :aria-label="t('bd.delete')" :title="t('bd.delete')" @click="delState(s.i)">
-                <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
-              </button>
-            </div>
-            <div class="bd-rg3">
-              <input
-                type="text"
-                class="bd-inp"
-                :value="s.look.t ?? ''"
-                :placeholder="t('bd.lookTitlePh')"
-                :aria-label="t('bd.keyTitle')"
-                style="flex: 1; min-width: 120px"
-                @input="setStateVisual(s.i, { t: ($event.target as HTMLInputElement).value })"
-              />
-              <button class="bd-btn" @click="openStateIcon(s.i)">
-                <component :is="stateIcon(s.i)" :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.icon') }}…
-              </button>
-            </div>
-            <div class="bd-cols" style="margin-bottom: 12px" role="group" :aria-label="t('bd.iconColor')">
-              <button
-                v-for="(hex, j) in SWATCHES"
-                :key="hex"
-                class="bd-cs"
-                :style="{ '--bd-s': hex }"
-                :aria-pressed="s.look.c === j"
-                :aria-label="`Color ${j + 1}`"
-                @click="setStateVisual(s.i, { c: s.look.c === j ? null : j })"
-              ></button>
-            </div>
-            <div class="bd-cols" role="group" :aria-label="t('bd.keyBackground')">
-              <button
-                v-for="(hex, j) in LOOK_BGS"
-                :key="String(hex)"
-                class="bd-cs"
-                :style="{ '--bd-s': hex ?? '#2d3036' }"
-                :aria-pressed="(s.look.bg ?? 0) === j"
-                :aria-label="`${t('bd.background')} ${j + 1}`"
-                @click="setStateVisual(s.i, { bg: j })"
-              ></button>
-            </div>
-          </div>
-          <button class="bd-btn bd-wide" @click="addState" data-cy="bd-state-add">
-            <Plus :size="16" stroke-width="1.75" aria-hidden="true" />{{ t('bd.stateAdd') }}
-          </button>
-
-          <h4 class="bd-sh">{{ t('bd.transTitle') }}</h4>
-          <p class="bd-hint" style="margin: 0 0 8px">{{ t('bd.transHint') }}</p>
-          <div v-for="k in pressKinds" :key="k" class="bd-fld">
-            <label class="bd-lb" :for="`bd-trans-${k}`">{{ t(pressKindLabel[k]) }}</label>
-            <select
-              :id="`bd-trans-${k}`"
-              class="bd-inp"
-              :value="transOf(k).key"
-              :data-cy="`bd-trans-${k}`"
-              @change="setTrans(k, ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="none">{{ t('bd.transNone') }}</option>
-              <option value="next">{{ t('bd.transNext') }}</option>
-              <option value="prev">{{ t('bd.transPrev') }}</option>
-              <option v-for="i in transTargets" :key="i" :value="`go:${i}`">{{ t('bd.transGo', { n: i }) }}</option>
-              <option v-if="transOf(k).key === 'custom'" value="custom" disabled>{{ t('bd.transCustom') }}</option>
-            </select>
-          </div>
-        </div>
-
-        <h3 class="bd-sh">{{ t('bd.looksTitle') }}</h3>
-        <p class="bd-hint" style="margin: 0 0 12px">{{ t('bd.looksHint') }}</p>
-        <div v-for="(l, li) in lookList" :key="li" class="bd-rl">
+        <div v-for="(l, li) in lookList" :key="li" class="bd-rl" :class="{ 'is-matched': firstMatchedLook === li }">
           <div class="bd-ah">
             <b>{{ t('bd.lookCond') }} {{ li + 1 }}</b>
+            <span class="bd-status-pill" :class="{ active: firstMatchedLook === li }">{{ lookStatusText(li) }}</span>
             <button :aria-label="t('bd.delete')" :title="t('bd.delete')" @click="delLook(li)">
               <Trash2 :size="16" stroke-width="1.75" aria-hidden="true" />
             </button>
+          </div>
+          <div class="bd-cond-builder">
+            <div class="bd-clause-row">
+              <select
+                class="bd-sel bd-sel-var"
+                :value="condParts(li).name"
+                :aria-label="t('bd.varName')"
+                @change="setCondPart(li, { name: ($event.target as HTMLSelectElement).value })"
+              >
+                <optgroup v-if="keyVarsList.length" :label="t('bd.availVarKey')">
+                  <option v-for="v in keyVarsList" :key="v.name" :value="v.name">{{ v.name }}</option>
+                </optgroup>
+                <optgroup v-if="globalVarsList.length" :label="t('bd.availVarGlobal')">
+                  <option v-for="v in globalVarsList" :key="v.name" :value="v.name">{{ v.name }}</option>
+                </optgroup>
+              </select>
+              <select
+                class="bd-sel bd-sel-op"
+                :value="condParts(li).op"
+                aria-label="="
+                @change="setCondPart(li, { op: ($event.target as HTMLSelectElement).value })"
+              >
+                <option v-for="o in condOpsFor(condParts(li).name)" :key="o.v" :value="o.v">{{ o.label }}</option>
+              </select>
+              <select
+                v-if="condVarType(condParts(li).name) === 'bool'"
+                class="bd-clause-val"
+                :value="condParts(li).val"
+                @change="setCondPart(li, { val: ($event.target as HTMLSelectElement).value })"
+              >
+                <option value="true">{{ t('bd.varTrue') }}</option>
+                <option value="false">{{ t('bd.varFalse') }}</option>
+              </select>
+              <input
+                v-else
+                class="bd-clause-val"
+                :type="condVarType(condParts(li).name) === 'num' ? 'number' : 'text'"
+                :value="condParts(li).val"
+                :placeholder="t('bd.condValPh')"
+                spellcheck="false"
+                autocomplete="off"
+                @input="setCondPart(li, { val: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <p class="bd-cb">{{ condReadable(li) }}</p>
           </div>
           <div class="bd-fld">
             <label class="bd-sr" :for="`bd-lc-${li}`">{{ t('bd.ruleIf') }}</label>
@@ -578,6 +601,17 @@
               :aria-label="`Color ${j + 1}`"
               @click="setLook(li, { c: l.c === j ? null : j })"
             ></button>
+            <input
+              type="color"
+              class="bd-cs"
+              style="padding: 0; border: 1px solid var(--bd-ln)"
+              :value="lookCustomColor(li)"
+              :aria-pressed="isLookCustomColor(li)"
+              :aria-label="t('bd.iconCustom')"
+              :title="t('bd.iconCustom')"
+              :data-cy="`bd-look-custom-color-${li}`"
+              @input="setLook(li, { c: ($event.target as HTMLInputElement).value })"
+            />
           </div>
           <div class="bd-cols" role="group" :aria-label="t('bd.keyBackground')">
             <button
@@ -589,6 +623,17 @@
               :aria-label="`${t('bd.background')} ${j + 1}`"
               @click="setLook(li, { bg: j })"
             ></button>
+            <input
+              type="color"
+              class="bd-cs"
+              style="padding: 0; border: 1px solid var(--bd-ln)"
+              :value="lookCustomBg(li)"
+              :aria-pressed="isLookCustomBg(li)"
+              :aria-label="t('bd.background')"
+              :title="t('bd.background')"
+              :data-cy="`bd-look-custom-bg-${li}`"
+              @input="setLook(li, { bg: ($event.target as HTMLInputElement).value })"
+            />
           </div>
         </div>
         <button class="bd-btn bd-wide" data-cy="bd-add-look" @click="addLook">
@@ -681,13 +726,12 @@ import ContextMenu from '../ContextMenu.vue'
 import { useI18nStore } from '../../composables/useI18n'
 import {
   normalizePressActions,
-  getActionsForKind,
   setActionsForKind,
   type PressKind,
 } from '../../composables/usePressActions'
-import { ev, fmt, intp, usedVarNames, IDRE, RES } from '../../composables/useExpressions'
-import { vars, getVar, getEnv, addVar, persistVars, coerceVal, displayTick } from '../../composables/useVars'
-import { availableVarsOf } from '../../composables/useExposedVariables'
+import { ev, fmt, intp, usedVarNames } from '../../composables/useExpressions'
+import { vars, getVar, getEnv, setVarValue, displayTick, pushVarToDaemon } from '../../composables/useVars'
+import { availableVarsOf, presetsFor, resolvePresetLook, type VarStatePreset } from '../../composables/useExposedVariables'
 import { assetUrl, isAssetRef } from '../../composables/useKeyShare'
 
 const { t } = useI18nStore()
@@ -958,6 +1002,13 @@ const toColorInput = (v: any, fallback = '#e8e9eb') => {
   if (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) return v
   return fallback
 }
+/** Color libre `#rrggbb` en un look (frente a índice de paleta). */
+const lookHex = (v: unknown): string | null =>
+  (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : null)
+const isLookCustomColor = (li: number): boolean => lookHex(lookList.value[li]?.c) !== null
+const isLookCustomBg = (li: number): boolean => lookHex(lookList.value[li]?.bg) !== null
+const lookCustomColor = (li: number): string => lookHex(lookList.value[li]?.c) ?? '#e8e9eb'
+const lookCustomBg = (li: number): string => lookHex(lookList.value[li]?.bg) ?? '#374151'
 
 const iconComponent = computed(() => {
   const name = props.buttonConfig?.icon
@@ -989,8 +1040,8 @@ const preview = computed(() => {
     const backgroundColor = typeof raw.backgroundColor === 'string' ? raw.backgroundColor : null
     return {
       label: intp(String(L?.t ?? raw.label ?? ''), E),
-      color: L && L.c != null && typeof SWATCHES[L.c] === 'string' ? SWATCHES[L.c] : textColor,
-      bg: (L && L.bg ? (typeof LOOK_BGS[L.bg] === 'string' ? LOOK_BGS[L.bg] : null) : backgroundColor) as string | null,
+      color: lookHex(L?.c) ?? (L && L.c != null && typeof SWATCHES[L.c as number] === 'string' ? SWATCHES[L.c as number] as string : textColor),
+      bg: (lookHex(L?.bg) ?? (L && L.bg ? (typeof LOOK_BGS[L.bg as number] === 'string' ? LOOK_BGS[L.bg as number] as string : null) : null) ?? backgroundColor) as string | null,
       iconName: String(L?.i || raw.icon || ''),
       image: typeof raw.iconImage === 'string' ? raw.iconImage : ''
     }
@@ -1066,6 +1117,16 @@ const lookIcon = (li: number) => {
 /** Variables disponibles en Aspecto: las que exponen las acciones de esta
  *  tecla (contrato variables/exposed.ts, valor en vivo) + globales. */
 const availableVars = computed(() => availableVarsOf(props.buttonConfig))
+/** Pares on/off predefinidos para las variables de estado de esta tecla. */
+const varPresets = computed(() => presetsFor(props.buttonConfig))
+/** Añade un look predefinido (se omite si la condición ya existe). El look
+ *  del estado por defecto hereda el icono del botón si el usuario ya lo
+ *  personalizó (si no, usa el de la acción). */
+const addPreset = (p: VarStatePreset, isOff: boolean) => {
+  const resolved = resolvePresetLook(p, isOff, props.buttonConfig, t)
+  if (lookList.value.some((l: any) => String(l?.cond ?? '').trim() === resolved.cond)) return
+  setLooks([...lookList.value, resolved])
+}
 /** Añade una condición `variable` (bool) a la apariencia condicional. */
 const useCondFromVar = (v: { name: string; type: string }) => {
   const cond = v.type === 'bool' ? v.name : `${v.name} == ${v.name}`
@@ -1073,213 +1134,124 @@ const useCondFromVar = (v: { name: string; type: string }) => {
   setLooks([...lookList.value, { cond, t: '', i: '', c: null, bg: 0 }])
 }
 
-/* N estados: una variable numérica gobierna N iconos.
- * Estado 0 = base de la tecla; estados i>=1 = looks con cond `V == i`.
- * Las transiciones por pulsación son acciones `local.set-var` sobre V
- * en la lista de esa pulsación (visibles en la pestaña Acciones). */
-const stateVar = computed(() => String(props.buttonConfig?.stateVar ?? '').trim())
-const stateVarDraft = ref('')
-watch(
-  () => props.buttonConfig?.stateVar,
-  (v) => { stateVarDraft.value = String(v ?? '') },
-  { immediate: true }
-)
-const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const stateCondOf = (v: string, i: number) => `${v} == ${i}`
-const parseStateCond = (cond: unknown, v: string): number | null => {
-  if (!v) return null
-  const m = new RegExp(`^\\s*${escRe(v)}\\s*==\\s*(\\d+)\\s*$`).exec(String(cond ?? ''))
-  if (!m) return null
-  const i = parseInt(m[1], 10)
-  return Number.isFinite(i) ? i : null
+/** Variables en vivo (rejilla compacta): las de acción son de solo lectura
+ *  (las controla la acción automáticamente); las globales se editan aquí. */
+const copiedVar = ref<string | null>(null)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+const copyVar = (name: string) => {
+  const text = `{{${name}}}`
+  try {
+    void navigator.clipboard?.writeText(text)
+  } catch { /* portapapeles no disponible */ }
+  copiedVar.value = name
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copiedVar.value = null }, 800)
 }
-const rawLooks = computed(() => (Array.isArray(props.buttonConfig?.looks) ? props.buttonConfig.looks : []))
-/** Estados i>=1 con su índice real en looks[] (para el selector de icono). */
-const stateEntries = computed(() => {
-  const v = stateVar.value
-  if (!v) return []
-  const out: Array<{ i: number; li: number; look: any }> = []
-  rawLooks.value.forEach((l: any, li: number) => {
-    const i = parseStateCond(l?.cond, v)
-    if (i !== null && i >= 1) out.push({ i, li, look: l })
-  })
-  return out.sort((a, b) => a.i - b.i)
-})
-const stateCount = computed(() => {
-  if (!stateVar.value) return 0
-  let m = 0
-  for (const s of stateEntries.value) m = Math.max(m, s.i)
-  return stateEntries.value.length ? m + 1 : 1
-})
-const transTargets = computed(() => Array.from({ length: stateCount.value }, (_, i) => i))
-const ensureNumVar = (name: string): string => {
+const globalVarType = (name: string): string => {
   const v = getVar(name)
-  if (!v) {
-    const created = addVar(name)
-    const refV = getVar(created.n)
-    if (refV && refV.n === name) {
-      refV.t = 'num'
-      refV.v = 0
-      persistVars()
-    }
-    return created.n
+  if (v) return v.t
+  const avail = availableVarsOf(props.buttonConfig).find((a) => a.name === name)
+  return avail?.type === 'bool' ? 'bool' : avail?.type === 'num' ? 'num' : 'txt'
+}
+const globalVarVal = (name: string): any => getVar(name)?.v ?? ''
+const fmtBoolShort = (v: any): string => {
+  if (v === true) return t('bd.varTrue')
+  if (v === false) return t('bd.varFalse')
+  return t('bd.availVarUnknownShort')
+}
+const toggleGlobalVar = (name: string) => {
+  const cur = getVar(name)
+  if (!cur) return
+  if (cur.t === 'bool') setVarValue(name, !cur.v)
+  else if (cur.t === 'num') setVarValue(name, cur.v ? 0 : 1)
+  else setVarValue(name, cur.v ? '' : '1')
+  // El daemon debe enterarse (hardware + reglas): best-effort por WS.
+  pushVarToDaemon(name)
+}
+const setGlobalVar = (name: string, raw: any) => {
+  const cur = getVar(name)
+  if (!cur) return
+  if (cur.t === 'num') {
+    const x = +raw
+    setVarValue(name, Number.isFinite(x) ? x : 0)
+  } else if (cur.t === 'bool') {
+    setVarValue(name, raw === true || raw === 'true' || raw === '1')
+  } else {
+    setVarValue(name, String(raw ?? ''))
   }
-  if (v.t !== 'num') {
-    v.t = 'num'
-    v.v = coerceVal('num', v.v)
-    persistVars()
+  pushVarToDaemon(name)
+}
+/** Constructor visual de condiciones (una cláusula por look).
+ *  Lee/escribe el mismo `cond` en texto: `nombre`, `nombre == valor`, etc. */
+const COND_OPS = [
+  { v: '==', label: '=' },
+  { v: '!=', label: '≠' },
+  { v: '>', label: '>' },
+  { v: '>=', label: '≥' },
+  { v: '<', label: '<' },
+  { v: '<=', label: '≤' },
+  { v: 'contains', label: '⊃' },
+]
+const keyVarsList = computed(() => availableVars.value.filter((v) => v.origin === 'action'))
+const globalVarsList = computed(() => availableVars.value.filter((v) => v.origin !== 'action'))
+const condVarType = (name: string): string => {
+  const avail = availableVars.value.find((v) => v.name === name)
+  if (avail) return avail.type === 'bool' ? 'bool' : avail.type === 'num' ? 'num' : 'txt'
+  return getVar(name)?.t ?? 'txt'
+}
+const condOpsFor = (name: string) => {
+  if (condVarType(name) === 'bool') return COND_OPS.filter((o) => o.v === '==' || o.v === '!=')
+  return COND_OPS
+}
+const condParts = (li: number): { name: string; op: string; val: string } => {
+  const cond = String(lookList.value[li]?.cond ?? '')
+  const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=|>=|<=|>|<|contains)?\s*([\s\S]*?)\s*$/.exec(cond)
+  const fallback = availableVars.value[0]?.name ?? ''
+  if (!m || !m[1]) return { name: fallback, op: '==', val: '' }
+  if (!m[2]) return { name: m[1], op: '==', val: 'true' }
+  let val = m[3] ?? ''
+  const q = /^(['"])([\s\S]*)\1$/.exec(val)
+  if (q) val = q[2]
+  return { name: m[1], op: m[2], val }
+}
+const setCondPart = (li: number, patch: Partial<{ name: string; op: string; val: string }>) => {
+  const cur = condParts(li)
+  const name = patch.name ?? cur.name
+  if (!name) return
+  let op = patch.op ?? cur.op
+  let val = patch.val ?? cur.val
+  if (condVarType(name) === 'bool' && op !== '==' && op !== '!=') op = '=='
+  const cond = op === '==' && (val === '' || val == null) && condVarType(name) !== 'bool'
+    ? name
+    : `${name} ${op} ${val}`.trim()
+  setLook(li, { cond })
+}
+const condReadable = (li: number): string => {
+  const p = condParts(li)
+  if (!String(lookList.value[li]?.cond ?? '').trim()) return t('bd.condAlways')
+  const disp = p.val === 'true' ? t('bd.varTrue') : p.val === 'false' ? t('bd.varFalse') : p.val
+  const opLabel = COND_OPS.find((o) => o.v === p.op)?.label ?? p.op
+  return `${p.name} ${opLabel} ${disp}`
+}
+const lookTruth = (li: number): boolean | null => {
+  const cond = String(lookList.value[li]?.cond ?? '')
+  if (!cond.trim()) return true
+  try {
+    void displayTick.value
+    return !!ev(cond, getEnv(props.profileName, props.pageName))
+  } catch { return null }
+}
+const firstMatchedLook = computed(() => {
+  for (let i = 0; i < lookList.value.length; i++) {
+    if (lookTruth(i) === true) return i
   }
-  return v.n
-}
-const applyStateVar = () => {
-  const raw = stateVarDraft.value.trim()
-  if (!IDRE.test(raw) || RES.includes(raw.toLowerCase())) return
-  const name = ensureNumVar(raw)
-  stateVarDraft.value = name
-  if (name !== stateVar.value) emit('update-field', 'stateVar', name)
-}
-/** Quita la variable de estados; los looks gestionados pasan a ser
- *  condiciones normales (el usuario puede borrarlos). */
-const clearStateVar = () => {
-  emit('update-field', 'stateVar', '')
-}
-/** Emite listas por pulsación de una sola vez (un solo update-field por
- *  clave: varias llamadas seguidas con la misma base rancia se pisarían). */
-const uid = () => 'g' + Math.random().toString(36).slice(2, 7)
-const emitKindLists = (lists: Partial<Record<PressKind, any[]>>) => {
-  let draft: any = props.buttonConfig
-  for (const k of pressKinds) {
-    if (lists[k] !== undefined) draft = setActionsForKind(draft, k, lists[k]!)
-  }
-  emit('update-field', 'pressActions', draft.pressActions)
-  if (lists.click !== undefined) emit('update-field', 'actions', draft.actions)
-}
-const setKindList = (kind: PressKind, list: any[]) => emitKindLists({ [kind]: list } as Partial<Record<PressKind, any[]>>)
-const stateIcon = (i: number) => {
-  const s = stateEntries.value.find((e) => e.i === i)
-  const n = typeof s?.look?.i === 'string' && s.look.i
-    ? s.look.i
-    : (typeof props.buttonConfig?.icon === 'string' ? props.buttonConfig.icon : '')
-  return (n ? dynamicIcon(n) : null) ?? Zap
-}
-const openStateIcon = (i: number) => {
-  const s = stateEntries.value.find((e) => e.i === i)
-  if (s && s.li >= 0) emit('open-look-icon', s.li)
-}
-const setStateVisual = (i: number, patch: Record<string, any>) => {
-  const v = stateVar.value
-  if (!v) return
-  const next = [...rawLooks.value]
-  const li = next.findIndex((l: any) => parseStateCond(l?.cond, v) === i)
-  if (li < 0) return
-  const { cond, ...safe } = patch
-  void cond
-  next[li] = { ...next[li], ...safe }
-  emit('update-field', 'looks', next)
-}
-/** Reescribe las transiciones afectadas al cambiar N (añadir/borrar).
- *  next/prev se regeneran con el nuevo módulo; los "ir a" fuera de rango
- *  o al estado borrado se eliminan; el resto se renumera. */
-const fixTransitions = (newN: number, deleted?: number) => {
-  const v = stateVar.value
-  if (!v) return
-  const lists: Partial<Record<PressKind, any[]>> = {}
-  let touched = false
-  for (const k of pressKinds) {
-    const cur = getActionsForKind(props.buttonConfig, k)
-    let changed = false
-    const next = cur.map((a: any) => {
-      if (a?.type !== 'local.set-var' || String(a?.parameters?.name ?? '') !== v) return a
-      const expr = String(a?.parameters?.expr ?? '').trim()
-      const norm = expr.replace(/\s+/g, '')
-      if (/^\d+$/.test(expr)) {
-        const j = parseInt(expr, 10)
-        if (deleted !== undefined && j === deleted) { changed = true; return null }
-        if (deleted !== undefined && j > deleted) {
-          changed = true
-          return { ...a, parameters: { ...(a.parameters ?? {}), expr: String(j - 1) } }
-        }
-        if (j >= newN) { changed = true; return null }
-        return a
-      }
-      if (norm === `(${v}+1)%${stateCount.value}` || norm === `(${v}+${stateCount.value}-1)%${stateCount.value}`) {
-        const isNext = norm === `(${v}+1)%${stateCount.value}`
-        changed = true
-        const nexpr = isNext ? `(${v} + 1) % ${newN}` : `(${v} + ${newN} - 1) % ${newN}`
-        return { ...a, parameters: { ...(a.parameters ?? {}), expr: nexpr } }
-      }
-      return a
-    }).filter((a: any) => a !== null)
-    if (changed) {
-      lists[k] = next
-      touched = true
-    }
-  }
-  if (touched) emitKindLists(lists)
-}
-const addState = () => {
-  const v = stateVar.value
-  if (!v) return
-  const n = stateEntries.value.reduce((m, s) => Math.max(m, s.i), 0) + 1
-  const looks = [...rawLooks.value]
-  looks.push({ cond: stateCondOf(v, n), t: '', i: '', c: null, bg: 0 })
-  emit('update-field', 'looks', looks)
-  fixTransitions(n + 1)
-}
-const delState = (i: number) => {
-  const v = stateVar.value
-  if (!v || i < 1) return
-  const kept = rawLooks.value.filter((l: any) => parseStateCond(l?.cond, v) !== i)
-  for (const l of kept) {
-    if (l && typeof l === 'object') {
-      const j = parseStateCond(l?.cond, v)
-      if (j !== null && j > i) l.cond = stateCondOf(v, j - 1)
-    }
-  }
-  emit('update-field', 'looks', kept)
-  const newMax = kept.reduce((m: number, l: any) => {
-    const j = parseStateCond(l?.cond, v)
-    return j !== null && j > m ? j : m
-  }, 0)
-  fixTransitions(Math.max(1, newMax + 1), i)
-}
-/** Clasifica la transición de una pulsación: none/next/prev/go:i/custom. */
-const transOf = (kind: PressKind): { key: string } => {
-  const v = stateVar.value
-  if (!v) return { key: 'none' }
-  const list = getActionsForKind(props.buttonConfig, kind)
-  const found = [...list].reverse().find(
-    (a: any) => a?.type === 'local.set-var' && String(a?.parameters?.name ?? '') === v
-  )
-  if (!found) return { key: 'none' }
-  const expr = String(found?.parameters?.expr ?? '').trim()
-  const n = Math.max(stateCount.value, 1)
-  if (/^\d+$/.test(expr)) {
-    const i = parseInt(expr, 10)
-    return i >= 0 && i < n ? { key: `go:${i}` } : { key: 'custom' }
-  }
-  const norm = expr.replace(/\s+/g, '')
-  if (norm === `(${v}+1)%${n}`) return { key: 'next' }
-  if (norm === `(${v}+${n}-1)%${n}`) return { key: 'prev' }
-  return { key: 'custom' }
-}
-const setTrans = (kind: PressKind, sel: string) => {
-  const v = stateVar.value
-  if (!v || sel === 'custom') return
-  const n = Math.max(stateCount.value, 1)
-  const cur = getActionsForKind(props.buttonConfig, kind)
-  const next = cur.filter(
-    (a: any) => !(a?.type === 'local.set-var' && String(a?.parameters?.name ?? '') === v)
-  )
-  if (sel !== 'none') {
-    let expr = ''
-    if (sel === 'next') expr = `(${v} + 1) % ${n}`
-    else if (sel === 'prev') expr = `(${v} + ${n} - 1) % ${n}`
-    else if (sel.startsWith('go:') && /^\d+$/.test(sel.slice(3))) expr = sel.slice(3)
-    else return
-    next.push({ id: uid(), type: 'local.set-var', parameters: { name: v, expr } })
-  }
-  setKindList(kind, next)
+  return -1
+})
+const lookStatusText = (li: number): string => {
+  const v = lookTruth(li)
+  if (v === true) return firstMatchedLook.value === li ? t('bd.condActive') : t('bd.condWaiting')
+  if (v === null) return t('bd.condFalse')
+  return t('bd.condFalse')
 }
 
 const onDrop = (event: DragEvent) => {

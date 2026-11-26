@@ -19,6 +19,10 @@ import { getVariableStore } from '../variables/store';
 export const KEY_COLORS = ['#e8e9eb', '#e8b04e', '#86cba5', '#82b4ea', '#ec8e7f', '#c7a6e0'];
 /** Fondos condicionales (misma que la web: BGS; índice 0 = sin cambio). */
 export const KEY_BGS: Array<string | undefined> = [undefined, '#5a2b2b', '#2b5a3a', '#2b3f5a', '#5a4a24', '#4b315e'];
+/** Color libre `#rrggbb` en un look (frente a índice de paleta). */
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+const asHex = (v: unknown): string | undefined =>
+  (typeof v === 'string' && HEX_RE.test(v) ? v : undefined);
 
 export const DEFAULT_KEY_BG = '#2d3036';
 export const DEFAULT_KEY_FG = '#e8e9eb';
@@ -28,8 +32,10 @@ export interface KeyLookLike {
   cond?: string;
   t?: string;
   i?: string;
-  c?: number | null;
-  bg?: number;
+  /** Índice de paleta (0-5) o color libre `#rrggbb`. */
+  c?: number | string | null;
+  /** Índice de fondo (0 = base) o color libre `#rrggbb`. */
+  bg?: number | string;
 }
 
 export interface KeyDisplayInput {
@@ -106,8 +112,8 @@ export function resolveKeyDisplay(raw: KeyDisplayInput, env: Env): ResolvedKeyDi
   const colorIdx = hit && hit.c != null ? hit.c : null;
   const bgIdx = hit?.bg ?? null;
   const textColor =
-    colorIdx != null && KEY_COLORS[colorIdx] ? KEY_COLORS[colorIdx] : (raw.textColor || DEFAULT_KEY_FG);
-  const bgFromLook = bgIdx ? KEY_BGS[bgIdx] : undefined;
+    asHex(colorIdx) ?? (colorIdx != null && KEY_COLORS[colorIdx as number] ? KEY_COLORS[colorIdx as number] as string : (raw.textColor || DEFAULT_KEY_FG));
+  const bgFromLook = asHex(bgIdx) ?? (bgIdx ? KEY_BGS[bgIdx as number] : undefined);
   const backgroundColor = bgFromLook ?? raw.backgroundColor ?? '';
 
   // En la web el título visible es label || textTop || textBottom; aquí se

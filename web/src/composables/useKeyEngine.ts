@@ -366,8 +366,8 @@ export function createKeyEngine(deps: EngineDeps) {
         ...raw,
         label: intp(L.t || raw.label || '', E),
         icon: L.i || raw.icon || 'zap',
-        textColor: L.c != null ? (COLORS[L.c] ?? raw.textColor) : raw.textColor,
-        backgroundColor: L.bg ? (BGS[L.bg] ?? raw.backgroundColor) : raw.backgroundColor
+        textColor: L.c != null ? (hexColor(L.c) ?? COLORS[L.c as number] ?? raw.textColor) : raw.textColor,
+        backgroundColor: L.bg ? (hexColor(L.bg) ?? BGS[L.bg as number] ?? raw.backgroundColor) : raw.backgroundColor
       }
     }
     let envSig = timeDep ? `t${tick}\u0000` : ''
@@ -391,6 +391,10 @@ export function createKeyEngine(deps: EngineDeps) {
 
 export const COLORS = ['#e8e9eb', '#e8b04e', '#86cba5', '#82b4ea', '#ec8e7f', '#c7a6e0']
 const BGS: Array<string | undefined> = [undefined, '#5a2b2b', '#2b5a3a', '#2b3f5a', '#5a4a24', '#4b315e']
+/** Color libre `#rrggbb` en un look (frente a índice de paleta). */
+const HEX_RE = /^#[0-9a-fA-F]{6}$/
+const hexColor = (v: unknown): string | undefined =>
+  (typeof v === 'string' && HEX_RE.test(v) ? v : undefined)
 
 /** Variables usadas por una tecla (acciones + reglas + looks) y sus páginas. */
 export function keyUsedVars(key: any, pages: Array<{ buttons: Array<{ data: any }> }>, allNames: string[]): string[] {

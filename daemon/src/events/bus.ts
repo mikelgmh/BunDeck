@@ -18,6 +18,9 @@ export interface VariableChangedPayload {
   name: string;
   scope: string;
   scopeId: string;
+  /** Tipo daemon de la variable (text|numeric|bool|color): los clientes lo
+   *  necesitan para no perder el tipo en el puente WS. */
+  type: string;
   value: unknown;
   previous: unknown;
   unavailable: boolean;

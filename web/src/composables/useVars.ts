@@ -52,6 +52,42 @@ export function coerceVal(t: VarDef['t'], v: any): number | string | boolean {
   return String(v ?? '')
 }
 
+/** Tipos del daemon (text|numeric|bool|color) → tipos locales (txt|num|bool). */
+export function daemonTypeToLocal(t: unknown): VarDef['t'] | undefined {
+  const s = String(t ?? '').toLowerCase()
+  if (s === 'bool' || s === 'boolean') return 'bool'
+  if (s === 'numeric' || s === 'num' || s === 'number') return 'num'
+  if (s === 'text' || s === 'txt' || s === 'string' || s === 'color' || s === 'colour') return 'txt'
+  return undefined
+}
+
+/** Tipos locales → tipos del daemon (para crear/re-tipificar al vuelo). */
+export function localTypeToDaemon(t: VarDef['t']): string {
+  return t === 'bool' ? 'bool' : t === 'num' ? 'numeric' : 'text'
+}
+
+/**
+ * Push web → daemon por el WS (`variable.set`): las ediciones locales de
+ * variables (rejilla del inspector, Ajustes) deben llegar al hardware y a
+ * las reglas del daemon, no quedarse solo en localStorage. El daemon
+ * responde con broadcast `variable.changed` que nos devuelve el valor.
+ * Best-effort: sin socket registrado no hace nada.
+ */
+type VarPushSender = (message: unknown) => void
+let varPushSender: VarPushSender | null = null
+export function setVarPushSender(fn: VarPushSender | null): void {
+  varPushSender = fn
+}
+/** Envía {name, value, type} al daemon. Devuelve false si no hay socket. */
+export function pushVarToDaemon(name: string): boolean {
+  const v = getVar(name)
+  if (!v || !varPushSender) return false
+  try {
+    varPushSender({ type: 'variable.set', payload: { name: v.n, value: v.v, type: localTypeToDaemon(v.t) } })
+    return true
+  } catch { return false }
+}
+
 export function persistVars(): void {
   persist()
 }
@@ -107,11 +143,13 @@ export function removeVar(name: string): VarDef | null {
  * tipadas) en el store local sin recargar. Crea la variable si no existe
  * (las expuestas por acciones nacen en el daemon, no en Ajustes).
  * Tipos daemon → locales: bool→bool, numeric→num, text/color→txt.
+ * Si el payload no trae tipo (daemon antiguo), se conserva el local.
  */
 export function upsertRemoteVar(name: string, value: unknown, type?: string): void {
   if (typeof name !== 'string' || !IDRE.test(name) || RES.includes(name.toLowerCase())) return
-  const t: VarDef['t'] = type === 'bool' || type === 'boolean' ? 'bool' : type === 'numeric' || type === 'num' ? 'num' : 'txt'
   const v = getVar(name)
+  const mapped = daemonTypeToLocal(type)
+  const t: VarDef['t'] = mapped ?? v?.t ?? 'txt'
   const nv = coerceVal(t, value)
   if (!v) {
     vars.value.push({ n: name.slice(0, 40), t, v: nv })

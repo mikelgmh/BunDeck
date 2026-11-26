@@ -20,6 +20,7 @@ import {
   reloadDebounceMs,
 } from '../utils/wsIncremental'
 import { getOrCreateDeviceId, deviceDefaultName, isNavigationForMe, isBroadcastNav } from '../utils/sessionRouting'
+import { setVarPushSender } from './useVars'
 import type { ActionType, ButtonData, ProfileData, PageData, ButtonEntity } from '../types/streamdeck'
 
 /** Icono Lucide por defecto para teclas recién creadas (nombre PascalCase,
@@ -655,6 +656,33 @@ export function useStreamDeck() {
       helloTimer = null
     }
   }
+  // Push web → daemon de variables (`variable.set`): las ediciones locales
+  // (rejilla del inspector, Ajustes) deben llegar al hardware y a las reglas
+  // del daemon. Se registra una vez por instancia (en prod hay una sola).
+  const sendVarPush = (message: unknown) => {
+    if (!ws || ws.readyState !== 1) throw new Error('WS sin conexión')
+    ws.send(JSON.stringify(message))
+  }
+  setVarPushSender(sendVarPush)
+  /**
+   * Hidratación inicial desde el daemon (GET /variables?scope=global):
+   * al (re)conectar, el daemon es la fuente de la verdad (tipos y valores
+   * que la web aún no conoce, p. ej. discordMuted tras pulsar). Sin esto,
+   * las condiciones solo convergen con el próximo evento WS.
+   */
+  const hydrateVarsFromDaemon = async () => {
+    try {
+      const data = await apiRequest('/variables?scope=global')
+      const list = Array.isArray((data as any)?.variables) ? (data as any).variables : []
+      if (!list.length) return
+      const { upsertRemoteVar } = await import('./useVars')
+      for (const item of list) {
+        const n = typeof item?.name === 'string' ? item.name : ''
+        if (!n) continue
+        upsertRemoteVar(n, item?.value, typeof item?.type === 'string' ? item.type : undefined)
+      }
+    } catch { /* daemon antiguo o caído: se converge por WS */ }
+  }
   const sendHello = () => {
     if (!ws || ws.readyState !== 1) return false
     // Sesión propia: el daemon restaura nuestra vista (reconexión) o
@@ -800,6 +828,9 @@ export function useStreamDeck() {
         // Refrescar dispositivos: al (re)conectar puede haber presencia nueva.
         helloAcked = true
         clearHelloTimer()
+        // Fuente de la verdad de variables: hidrata tipos+valores del daemon
+        // (p. ej. discordMuted ya a true antes de abrir la página).
+        void hydrateVarsFromDaemon()
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('libredeck:devices-changed'))
         }
@@ -993,14 +1024,17 @@ export function useStreamDeck() {
       case 'variable.deleted': {
         // Valores en vivo del daemon (las acciones publican su estado tras
         // ejecutar): se funden en el store local sin recargar la página.
+        // El payload trae `type` (text|numeric|bool|color): sin él, un bool
+        // llegaría como texto y `var == true` no matchearía nunca.
         try {
-          const { upsertRemoteVar, removeVar } = await import('./useVars')
+          const { upsertRemoteVar, removeVar, daemonTypeToLocal } = await import('./useVars')
           const p = (message.payload ?? {}) as any
           const name = String(p?.name ?? '')
           if (message.type === 'variable.deleted') {
             if (name) removeVar(name)
           } else if (name) {
-            upsertRemoteVar(name, p?.value, typeof p?.type === 'string' ? p.type : undefined)
+            const mapped = daemonTypeToLocal(p?.type)
+            upsertRemoteVar(name, p?.value, mapped)
           }
         } catch {
           /* best-effort */

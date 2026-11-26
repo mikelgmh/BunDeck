@@ -510,6 +510,16 @@
       </div>
     </dialog>
 
+    <dialog ref="presetDialog" class="bd-confirm" :aria-label="t('bd.presetDlgTitle')" @close="onPresetDialogClosed">
+      <h2>{{ t('bd.presetDlgTitle') }}</h2>
+      <p>{{ presetDlgMsg }}</p>
+      <div class="bd-confirm-actions">
+        <button class="bd-btn" data-cy="bd-preset-dlg-ignore" @click="resolvePreset('ignore')">{{ t('bd.presetIgnore') }}</button>
+        <button v-if="presetDlgHasLooks" class="bd-btn bd-dng" data-cy="bd-preset-dlg-replace" @click="resolvePreset('replace')">{{ t('bd.presetReplace') }}</button>
+        <button class="bd-btn bd-pri" data-cy="bd-preset-dlg-add" @click="resolvePreset('add')">{{ t('bd.presetAdd') }}</button>
+      </div>
+    </dialog>
+
     <dialog ref="profileNameDialog" class="bd-confirm" :aria-label="profileDialogTitle" @close="onProfileDialogClosed">
       <h2>{{ profileDialogTitle }}</h2>
       <div class="bd-confirm-body">
@@ -583,6 +593,7 @@ import {
   type PressKind,
 } from '../../composables/usePressActions'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
+import { presetOfferFor, mergePresetLooks, cleanLooksList, resolvePresetLooks } from '../../composables/useExposedVariables'
 import {
   useDevices, checkPageCompatibility, resolvePageSize, resolveDeckSize,
   type LogicalDevice,
@@ -810,6 +821,62 @@ const resolveConfirm = (v: boolean) => {
   confirmDialog.value?.close()
   confirmResolve?.(v)
   confirmResolve = null
+}
+
+// Diálogo de presets al añadir una acción con estados: si es la única
+// acción de la tecla y no hay condiciones, se añaden solas; si ya había
+// acciones o condiciones, se pregunta ignorar / añadir / reemplazar.
+const presetDialog = ref<HTMLDialogElement | null>(null)
+const presetDlgMsg = ref('')
+const presetDlgHasLooks = ref(false)
+let presetResolve: ((v: 'ignore' | 'add' | 'replace') => void) | null = null
+const askPreset = (msg: string, hasLooks: boolean): Promise<'ignore' | 'add' | 'replace'> =>
+  new Promise((resolve) => {
+    presetDlgMsg.value = msg
+    presetDlgHasLooks.value = hasLooks
+    presetResolve = resolve
+    presetDialog.value?.showModal()
+  })
+const resolvePreset = (v: 'ignore' | 'add' | 'replace') => {
+  presetDialog.value?.close()
+  presetResolve?.(v)
+  presetResolve = null
+}
+const onPresetDialogClosed = () => {
+  // Cerrar con Escape/X equivale a ignorar (no se toca nada).
+  if (presetResolve) {
+    presetResolve('ignore')
+    presetResolve = null
+  }
+}
+/** Nº de acciones directas en todos los tipos de pulsación (sin reglas). */
+const countPressActions = (cfg: any): number => {
+  let n = 0
+  for (const k of ['click', 'double', 'triple', 'long'] as const) n += getActionsForKind(cfg, k).length
+  return n
+}
+/** Tras añadir la acción: auto-presets si es la única y no hay
+ *  condiciones; si ya había acciones o condiciones, preguntar. */
+const afterActionAdded = async (type: string, priorActions: number) => {
+  const current = cleanLooksList(buttonConfig.value.looks)
+  const offer = presetOfferFor(current, type)
+  if (!offer) return
+  const resolved = resolvePresetLooks(offer.groups, buttonConfig.value, t)
+  const missing = resolved.filter((r) => !current.some((l) => String(l?.cond ?? '').trim() === r.cond))
+  if (!missing.length) return
+  if (priorActions === 0 && current.length === 0) {
+    buttonConfig.value = { ...buttonConfig.value, looks: [...current, ...missing] }
+    bumpConfigVersion()
+    await saveButtonConfig()
+    return
+  }
+  const varNames = [...new Set(offer.groups.map((g) => g.varName))].join(', ')
+  const key = current.length ? 'bd.presetDlgMsg' : 'bd.presetDlgMsgNoLooks'
+  const choice = await askPreset(t(key, { n: current.length, vars: varNames, m: missing.length }), current.length > 0)
+  if (choice === 'ignore') return
+  buttonConfig.value = { ...buttonConfig.value, looks: mergePresetLooks(current, resolved, choice) }
+  bumpConfigVersion()
+  await saveButtonConfig()
 }
 
 /** Vista mínima de página para la regla de compatibilidad. */
@@ -1763,6 +1830,7 @@ const ensureControlSlot = async (type: string): Promise<boolean> => {
 /** Añade una acción a la lista del tipo de pulsación indicado. */
 const addActionToKind = async (type: string, kind: PressKind): Promise<boolean> => {
   if (kind === 'click') return addActionGuarded(type)
+  const priorActions = countPressActions(buttonConfig.value)
   if (!(await ensureControlSlot(type))) return false
   const next = setActionsForKind(buttonConfig.value, kind, [
     ...getActionsForKind(buttonConfig.value, kind),
@@ -1771,15 +1839,18 @@ const addActionToKind = async (type: string, kind: PressKind): Promise<boolean> 
   buttonConfig.value = next
   bumpConfigVersion()
   await saveButtonConfig()
+  await afterActionAdded(type, priorActions)
   return true
 }
 /** Añade una acción al borrador con guarda de superficie y guardado inmediato. */
 const addActionGuarded = async (type: string): Promise<boolean> => {
+  const priorActions = countPressActions(buttonConfig.value)
   if (!(await ensureControlSlot(type))) return false
   addAction(type)
   // Guardado inmediato: sin esto la tecla vacía depende del autoguardado
   // (800 ms) y el usuario no ve nada al pulsar.
   await saveButtonConfig()
+  await afterActionAdded(type, priorActions)
   return true
 }
 const onActionPick = async (type: string) => {

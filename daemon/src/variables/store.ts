@@ -305,6 +305,7 @@ export class VariableStore {
       this.cache.delete(cacheKey(s, sid, name));
       const payload: VariableChangedPayload = {
         name, scope: s, scopeId: sid,
+        type: def?.type ?? 'text',
         value: undefined, previous: def?.value,
         unavailable: false, source: 'delete', ts: Date.now(),
       };
@@ -404,6 +405,7 @@ export class VariableStore {
       name: def.name,
       scope: def.scope,
       scopeId: def.scopeId,
+      type: def.type,
       value: def.value,
       previous,
       unavailable: def.unavailable,

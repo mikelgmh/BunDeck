@@ -67,6 +67,18 @@ describe('resolveKeyDisplay (looks)', () => {
     );
     expect(eff.label).toBe('Base');
   });
+
+  it('acepta color libre #rrggbb en c/bg (además de índices)', () => {
+    const eff = resolveKeyDisplay(
+      {
+        label: 'Base', icon: 'Zap', textColor: '#ffffff', backgroundColor: '#111111',
+        looks: [{ cond: 'modo == "x"', t: 'Otro', c: '#123abc', bg: '#abcdef' }],
+      },
+      env([{ n: 'modo', v: 'x' }]),
+    );
+    expect(eff.textColor).toBe('#123abc');
+    expect(eff.backgroundColor).toBe('#abcdef');
+  });
 });
 
 describe('resolveKeyDisplay ({{vars}})', () => {

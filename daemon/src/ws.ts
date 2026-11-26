@@ -1350,7 +1350,7 @@ export class WebSocketManager {
     this.busUnsub = () => { offs.forEach((o) => o()); this.busUnsub = null; };
   }
 
-  /** `variable.set` desde un cliente: { name, value?, expr?, toggle?, scope?, scopeId? }. */
+  /** `variable.set` desde un cliente: { name, value?, expr?, toggle?, type?, scope?, scopeId? }. */
   private async handleVariableSet(clientId: string, payload: any): Promise<void> {
     try {
       const { getVariableStore } = await import('./variables/store');
@@ -1365,7 +1365,16 @@ export class WebSocketManager {
         const value = store.evalExpr(String(payload.expr), addr.scope, addr.scopeId);
         def = await store.set(name, value, addr);
       } else {
-        def = await store.set(name, payload?.value, addr);
+        // `type` explícito (la web lo envía al editar): si difiere del
+        // actual se re-tipifica antes de asignar para no corromper el tipo.
+        const wantType = typeof payload?.type === 'string' && payload.type ? payload.type : undefined;
+        if (wantType) {
+          try {
+            const cur = store.get(name, addr.scope, addr.scopeId);
+            if (cur && cur.type !== wantType) await store.retype(name, wantType, addr);
+          } catch { /* retype best-effort: set ya valida */ }
+        }
+        def = await store.set(name, payload?.value, wantType ? { ...addr, type: wantType } : addr);
       }
       this.sendToClient(clientId, { type: 'variable.set.result', payload: { variable: def } });
     } catch (error) {

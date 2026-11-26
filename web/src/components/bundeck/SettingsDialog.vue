@@ -605,7 +605,7 @@ import {
   fetchDetectedProfiles, importDetectedProfiles, importStreamDeckFile, summarizeImportPlan,
   type DetectedSDProfile,
 } from '../../composables/useStreamDeckImport'
-import { vars, addVar, coerceVal, persistVars, setVarValue } from '../../composables/useVars'
+import { vars, addVar, coerceVal, persistVars, setVarValue, pushVarToDaemon } from '../../composables/useVars'
 import { IDRE, RES } from '../../composables/useExpressions'
 import {
   SHORTCUT_IDS, DEFAULT_SHORTCUTS, SHORTCUTS_CONFIG_KEY,
@@ -1042,7 +1042,9 @@ const openAuto = (focusProfileId?: string) => {
 const varRows = vars
 const varErr = ref<Record<number, string>>({})
 const addVarRow = () => {
-  addVar()
+  const v = addVar()
+  // La crea también en el daemon (hardware + reglas la ven enseguida).
+  pushVarToDaemon(v.n)
 }
 const renameVar = (i: number, name: string) => {
   const n = name.trim()
@@ -1063,10 +1065,11 @@ const changeVarType = (i: number, vtype: string) => {
   v.t = vtype === 'bool' ? 'bool' : vtype === 'txt' ? 'txt' : 'num'
   v.v = coerceVal(v.t, v.t === 'num' ? 0 : v.t === 'bool' ? false : '')
   persistVars()
+  pushVarToDaemon(v.n)
 }
 const changeVarValue = (i: number, raw: any) => {
   const v = vars.value[i]
-  if (v) setVarValue(v.n, raw)
+  if (v && setVarValue(v.n, raw)) pushVarToDaemon(v.n)
 }
 const delVar = (i: number) => {
   vars.value.splice(i, 1)

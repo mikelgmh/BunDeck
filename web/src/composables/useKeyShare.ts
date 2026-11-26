@@ -28,8 +28,10 @@ export interface SharedLook {
   cond?: string
   t?: string
   i?: string
-  c?: number | null
-  bg?: number
+  /** Índice de paleta (0-5) o color libre `#rrggbb`. */
+  c?: number | string | null
+  /** Índice de fondo (0 = base) o color libre `#rrggbb`. */
+  bg?: number | string
 }
 
 export interface SharedVar {
@@ -135,6 +137,8 @@ const MODES = ['seq', 'par', 'alt']
 const LONGPRESS = ['none', 'folder', 'repeat', 'mute']
 const WHEN = ['press', 'double', 'triple', 'long', 'load', 'timer', 'var']
 const VARTYPES = ['num', 'txt', 'bool']
+/** Color libre `#rrggbb`: se conserva tal cual en exportar/importar. */
+const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)
 
 export function cleanAction(a: any): SharedAction {
   const type = str(a?.type, 96)
@@ -173,8 +177,8 @@ export function cleanLook(l: any): SharedLook {
     cond: str(l?.cond, 300),
     t: str(l?.t, 40),
     i: typeof l?.i === 'string' ? l.i.slice(0, 48) : '',
-    c: l?.c != null ? num(l.c, 0, 5, 0) : null,
-    bg: l?.bg ? num(l.bg, 0, 5, 0) : 0
+    c: isHexColor(l?.c) ? l.c : (l?.c != null ? num(l.c, 0, 5, 0) : null),
+    bg: isHexColor(l?.bg) ? l.bg : (l?.bg ? num(l.bg, 0, 5, 0) : 0)
   }
 }
 
