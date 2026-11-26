@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/mikelgmh/BunDeck/compare/v1.18.0...v1.19.0) (2026-11-26)
+
+
+### Features
+
+* **relay:** split-token sid en URL mas secreto en cookie HttpOnly ([ddbca68](https://github.com/mikelgmh/BunDeck/commit/ddbca68eca7accd82aa61c10c823308ece5e1d79))
+
 # [1.18.0](https://github.com/mikelgmh/BunDeck/compare/v1.17.0...v1.18.0) (2026-11-26)
 
 
