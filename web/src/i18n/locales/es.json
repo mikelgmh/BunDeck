@@ -196,6 +196,7 @@
         "kioskFullscreen": "Pantalla completa",
         "kioskBarCollapse": "Contraer barra",
         "kioskBarExpand": "Expandir barra",
+        "widgetNeedsConfig": "Sin configurar: abrir ajustes de la acción",
         "kioskHint": "Toca la esquina superior derecha 3 veces o pulsa Escape para salir.",
         "kioskKeepAwake": "Pantalla siempre encendida (kiosco)",
         "kioskKeepAwakeFallback": "Pantalla siempre encendida por vídeo (modo compatibilidad)",

@@ -196,6 +196,7 @@
         "kioskFullscreen": "Fullscreen",
         "kioskBarCollapse": "Collapse bar",
         "kioskBarExpand": "Expand bar",
+        "widgetNeedsConfig": "Not configured: open action settings",
         "kioskHint": "Tap the top-right corner 3 times or press Escape to exit.",
         "kioskKeepAwake": "Screen always on (kiosk)",
         "kioskKeepAwakeFallback": "Screen kept on via video (compatibility mode)",
