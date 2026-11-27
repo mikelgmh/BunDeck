@@ -1,3 +1,15 @@
+# [1.23.0](https://github.com/mikelgmh/BunDeck/compare/v1.22.2...v1.23.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **ci:** instala deps del relay y ejecuta sus tests en el pipeline ([fd0b88b](https://github.com/mikelgmh/BunDeck/commit/fd0b88b47757fe46937acdeead7225d404192a40))
+
+
+### Features
+
+* **remote:** auth del relay por dispositivo con claim automatico ([bac5c50](https://github.com/mikelgmh/BunDeck/commit/bac5c5070f6da9e46eebe16ed90657d3b0ec8500))
+
 ## [1.22.2](https://github.com/mikelgmh/BunDeck/compare/v1.22.1...v1.22.2) (2026-11-27)
 
 
