@@ -30,21 +30,37 @@ import { forgetDeviceEverywhere } from './devices';
 import { allowLanRedeem, getLanContext } from '../http/lan-guard';
 import { DEFAULT_POLICY, isAllowlisted } from '../remote/remote-actions';
 import { encryptTo } from '../remote/crypto';
-import { resolveRelayUrl, RELAY_URL_KEY, isValidRelayUrl, isRelayDisabledValue, normalizeRelayUrl, DEFAULT_PUBLIC_RELAY_URL } from '../remote/public-relay';
+import { resolveRelayUrl, RELAY_URL_KEY, isValidRelayUrl, isRelayDisabledValue, normalizeRelayUrl, DEFAULT_PUBLIC_RELAY_URL, resolveDeviceToken, DEVICE_TOKEN_KEY } from '../remote/public-relay';
+import { revokeDeviceToken, rotateDeviceToken } from '../remote/device-claim';
+import type { RelayAuthState } from '../remote/relay-auth';
 
 export const handleRemote: ApiHandler = async (req, { url, method, path, db, services }) => {
   const remote: any = (globalThis as any).__libredeckRemote;
 
   if (path === '/api/v1/remote/status' && method === 'GET') {
     const pub = publicIdentity(db);
+    // Estado de enlace device-token: se deriva de lo observado por el
+    // RelayClient (tracker); si el módulo remoto no expone tracker, heurística
+    // honesta mínima (conectado → ok; si no, unreachable). NUNCA se exponen
+    // aquí deviceToken ni provision (ver RELAY_SECRET_SETTING_KEYS).
+    const trackerAuth: RelayAuthState | undefined = (() => {
+      try { return remote?.relay?.getAuthState?.(); } catch { return undefined; }
+    })();
+    const relayConnState: string = (() => {
+      try { return remote?.relay?.getState?.() ?? 'unknown'; } catch { return 'unknown'; }
+    })();
+    const relayAuth: RelayAuthState = trackerAuth
+      ?? (relayConnState === 'connected' ? 'ok' : 'unreachable');
     return jsonResponse({
       deviceId: pub.deviceId,
       fingerprint: pub.fingerprint,
       publicKey: pub.publicKey,
       relay: {
         url: resolveRelayUrl(db),
-        status: remote?.relay?.getState?.() ?? 'unknown',
+        status: relayConnState,
         envOverride: typeof process.env.RELAY_URL === 'string' && process.env.RELAY_URL.length > 0,
+        auth: relayAuth,
+        deviceLinked: !!resolveDeviceToken(db),
       },
       tunnel: {
         status: remote?.tunnel?.getState?.() ?? 'unknown',
@@ -215,6 +231,45 @@ export const handleRemote: ApiHandler = async (req, { url, method, path, db, ser
       }, 'remote');
     } catch { /* noop */ }
     return jsonResponse({ ok: true, url: effective, default: DEFAULT_PUBLIC_RELAY_URL });
+  }
+
+  // ---------- Enlace device-token con el relay ----------
+  // POST /api/v1/remote/relay-unlink: revoca en el relay (best-effort) y
+  // borra el device-token local → {ok:true, linked:false}.
+  // POST /api/v1/remote/relay-rotate: rota el device-token (gracia 5 min del
+  // viejo en el relay) y guarda el nuevo → {ok:true}.
+  // Ninguna respuesta ni broadcast incluye secretos (solo flags).
+  if (path === '/api/v1/remote/relay-unlink' && method === 'POST') {
+    const token = resolveDeviceToken(db);
+    if (token) {
+      try {
+        await revokeDeviceToken({ relayUrl: resolveRelayUrl(db), deviceToken: token });
+      } catch { /* best-effort: el borrado local es lo que desvincula */ }
+      try { db.deleteSetting(DEVICE_TOKEN_KEY); } catch { /* noop */ }
+    }
+    try { services.wsManager?.broadcast('remote.relay-link', { linked: false, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true, linked: false });
+  }
+
+  if (path === '/api/v1/remote/relay-rotate' && method === 'POST') {
+    const token = resolveDeviceToken(db);
+    if (!token) return jsonResponse({ error: 'sin device-token vinculado' }, 400);
+    let res: Awaited<ReturnType<typeof rotateDeviceToken>>;
+    try {
+      res = await rotateDeviceToken({ relayUrl: resolveRelayUrl(db), deviceToken: token });
+    } catch {
+      return jsonResponse({ error: 'relay inalcanzable' }, 502);
+    }
+    if (!res.ok) {
+      if (res.error === 'rate-limited') {
+        return jsonResponse({ error: 'relay rate-limited', ...(res.retryAfterMs != null ? { retryAfterMs: res.retryAfterMs } : {}) }, 429);
+      }
+      if (res.error === 'unreachable') return jsonResponse({ error: 'relay inalcanzable' }, 502);
+      return jsonResponse({ error: `rotación rechazada (${res.error})` }, 400);
+    }
+    try { db.setSetting(DEVICE_TOKEN_KEY, res.deviceToken); } catch { /* noop */ }
+    try { services.wsManager?.broadcast('remote.relay-link', { linked: true, ts: Date.now() }, 'remote'); } catch { /* noop */ }
+    return jsonResponse({ ok: true });
   }
 
   // Dev/E2E: cifrar un comando al peer y enviarlo por el relay.

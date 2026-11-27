@@ -104,8 +104,32 @@
             </button>
           </div>
           <p class="bd-hint" style="text-align: center">{{ t('bd.remoteUiOpenHint') }}</p>
-          <p v-if="tunnelDown" class="bd-err" role="alert" style="text-align: center" data-cy="qr-internet-tunnel-down">
-            {{ t('bd.remoteUiTunnelDown') }}
+          <p v-if="relayCause" class="bd-err" role="alert" style="text-align: center" data-cy="qr-internet-tunnel-down">
+            <span v-if="relayCause === 'auth-required'" data-cy="relay-auth-required">{{ t('bd.remoteRelayAuthRequired') }} {{ t('bd.remoteRelayAuthAuto') }}</span>
+            <span v-else-if="relayCause === 'invalid-token'" data-cy="relay-invalid-token">{{ t('bd.remoteRelayInvalidToken') }}</span>
+            <span v-else-if="relayCause === 'rate-limited'" data-cy="relay-rate-limited">{{ t('bd.remoteRelayRateLimited') }}</span>
+            <span v-else-if="relayCause === 'unsupported'" data-cy="relay-unsupported">{{ t('bd.remoteRelayUnsupported') }}</span>
+            <span v-else data-cy="relay-unreachable">{{ t('bd.remoteUiTunnelDown') }}</span>
+            <button
+              v-if="relayCause === 'auth-required' || relayCause === 'invalid-token'"
+              class="bd-btn bd-pri"
+              style="margin-left: 8px"
+              :disabled="uiLoading"
+              data-cy="qr-relay-link-now"
+              @click="onRelayRetry"
+            >
+              {{ relayCause === 'auth-required' ? t('bd.remoteRelayLinkNow') : t('bd.remoteRelayRelink') }}
+            </button>
+            <button
+              v-else-if="relayCause === 'rate-limited'"
+              class="bd-btn"
+              style="margin-left: 8px"
+              :disabled="uiLoading"
+              data-cy="qr-relay-retry"
+              @click="onRelayRetry"
+            >
+              {{ t('bd.remoteRelayRetry') }}
+            </button>
           </p>
           <div v-if="uiCode" class="bd-remote-code-row" style="justify-content: center">
             <span class="bd-remote-label">{{ t('bd.remoteUiOneTimeCode') }}</span>
@@ -367,11 +391,22 @@ const uiSecsLeft = computed(() =>
   uiCode.value ? Math.max(0, Math.ceil((uiCode.value.expiresAt - now.value) / 1000)) : 0
 )
 const uiExpired = computed(() => !!uiCode.value && uiSecsLeft.value <= 0)
-// Igual que Ajustes → Acceso remoto: si el túnel no está conectado, el QR
-// recién generado caducará en el móvil (el relay no conoce el código).
-const tunnelDown = computed(
-  () => uiEnabled.value && !!status.value?.tunnel && status.value.tunnel.status !== 'connected'
-)
+// Causa del aviso bajo el QR: el `auth` del relay manda sobre el túnel.
+// (Lógica espejo de `resolveRelayCause` en useRemote.ts; local para no
+// romper los mocks de `useRemote` en tests existentes.)
+type RelayWarningCause = 'auth-required' | 'invalid-token' | 'rate-limited' | 'unreachable' | 'unsupported'
+const relayCause = computed<RelayWarningCause | null>(() => {
+  const relay = (status.value as { relay?: { auth?: unknown } } | null)?.relay
+  const auth = typeof relay?.auth === 'string' ? relay.auth : undefined
+  if (auth && auth !== 'ok') {
+    if (auth === 'auth-required' || auth === 'invalid-token' || auth === 'rate-limited' ||
+      auth === 'unsupported' || auth === 'unreachable') return auth
+    return 'unreachable'
+  }
+  const tunnelStatus = (status.value as { tunnel?: { status?: string } } | null)?.tunnel?.status
+  if (uiEnabled.value && tunnelStatus && tunnelStatus !== 'connected') return 'unreachable'
+  return null
+})
 
 // Lo que codifica el QR y se copia: el enlace lleva ?kiosk=1 para que el
 // escaneo aterrice en kiosco. Mostrarlo en texto permite conectarse sin
@@ -510,6 +545,15 @@ const onRegen = async () => {
     startPoll()
   } catch {
     /* noop: error visible en uiError */
+  }
+}
+
+/** Reintento de vinculación: refresca el estado (el daemon auto-reclama). Nunca muestra tokens. */
+const onRelayRetry = async () => {
+  try {
+    await refresh()
+  } catch {
+    /* el error queda en el composable */
   }
 }
 

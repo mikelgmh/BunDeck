@@ -18,6 +18,15 @@ const dir = dirname(fileURLToPath(import.meta.url));
 const daemonDir = join(dir, "..");
 const rootPkg = JSON.parse(readFileSync(join(daemonDir, "..", "package.json"), "utf8"));
 const version = process.env.BUNDECK_VERSION || process.env.LIBREDECK_VERSION || rootPkg.version;
+/**
+ * Provision de device-claim horneada en el binario (`--define`, reemplazo
+ * textual como BUNDECK_VERSION). Vacía en dev: el relay la exige solo si
+ * configura claim con provisión; `RELAY_PROVISION_TOKEN` en runtime tiene
+ * prioridad (ver `resolveProvisionToken` en `src/remote/public-relay.ts`).
+ */
+const provision = process.env.BUNDECK_RELAY_PROVISION_TOKEN || process.env.RELAY_PROVISION_TOKEN || "";
+const defineEscape = (s) =>
+  String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r");
 const win = process.argv.includes("--win");
 
 const args = ["build", "--compile"];
@@ -30,6 +39,8 @@ args.push(
   `process.env.BUNDECK_VERSION="${version}"`,
   "--define",
   `process.env.LIBREDECK_VERSION="${version}"`,
+  "--define",
+  `process.env.BUNDECK_RELAY_PROVISION_TOKEN="${defineEscape(provision)}"`,
 );
 
 console.log(`📌 daemon ${version} (${win ? "win" : "unix"})`);

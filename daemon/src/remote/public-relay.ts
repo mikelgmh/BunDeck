@@ -92,6 +92,63 @@ export function resolveRelayToken(db: RelaySettingsLike): string {
   return process.env.RELAY_TOKEN ?? db.getSetting('remote.relay.token') ?? '';
 }
 
+/** Clave del setting que guarda el device-token del relay (SECRETO). */
+export const DEVICE_TOKEN_KEY = 'remote.relay.deviceToken';
+
+/** Device-token efectivo ('' si el equipo aún no está vinculado). */
+export function resolveDeviceToken(db: RelaySettingsLike): string {
+  try {
+    return db.getSetting(DEVICE_TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Provision para `POST /api/device-claim`: env `RELAY_PROVISION_TOKEN` en
+ * runtime, o valor horneado en el binario (`--define
+ * process.env.BUNDECK_RELAY_PROVISION_TOKEN=...`, vacío en dev).
+ * NUNCA se persiste en settings ni se expone por REST/WS/logs.
+ */
+export function resolveProvisionToken(): string {
+  return process.env.RELAY_PROVISION_TOKEN ?? process.env.BUNDECK_RELAY_PROVISION_TOKEN ?? '';
+}
+
+/**
+ * Claves de settings con secretos del relay: NUNCA exponer por REST/WS ni
+ * meter en logs/broadcasts. NOTA: `GET /api/v1/settings` (api/system.ts,
+ * fuera del alcance de este módulo) vuelca settings sin redactar: no guardar
+ * ahí nada sensible es responsabilidad del llamante; aquí se redacta en
+ * `api/remote.ts`.
+ */
+export const RELAY_SECRET_SETTING_KEYS: ReadonlySet<string> = new Set([
+  DEVICE_TOKEN_KEY,
+  'remote.relay.token',
+  'remote.relay.signPriv',
+]);
+
+/** `true` si la clave es un secreto del relay (no serializable). */
+export function isRelaySecretSetting(key: string): boolean {
+  return RELAY_SECRET_SETTING_KEYS.has(String(key ?? ''));
+}
+
+/**
+ * Origen `http(s)://` del relay a partir de su URL `ws(s)://`
+ * (para `/api/caps` y `/api/device-*`). Devuelve `null` si no es
+ * una URL de relay válida.
+ */
+export function relayHttpOrigin(wsUrl: string): string | null {
+  try {
+    const u = new URL(String(wsUrl ?? '').trim());
+    if (u.protocol === 'ws:') u.protocol = 'http:';
+    else if (u.protocol === 'wss:') u.protocol = 'https:';
+    else return null;
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Añade `?token=` a la URL del WS cuando hay token configurado.
  * El relay lo acepta por query, `Authorization: Bearer` o `x-relay-token`;

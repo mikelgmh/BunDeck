@@ -249,6 +249,7 @@ jobs:
       shell: bash
       env:
         BUNDECK_VERSION: ${{ steps.version.outputs.version }}
+        BUNDECK_RELAY_PROVISION_TOKEN: ${{ secrets.BUNDECK_RELAY_PROVISION_TOKEN }}
       run: |
         cd daemon
         if [ "${{ matrix.os }}" = "windows-latest" ]; then

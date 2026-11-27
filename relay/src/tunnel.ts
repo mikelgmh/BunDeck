@@ -8,7 +8,19 @@
  *  `v:1` + `kind`; el relay responde acks `{v:1, kind, ...}` que el daemon
  *  puede ignorar):
  *  - daemon→relay `{v:1, kind:'tunnel-register', deviceId}` →
- *    `{v:1, kind:'tunnel-registered', deviceId}`.
+ *    `{v:1, kind:'tunnel-registered', deviceId}` (SOLO sockets con el
+ *    RELAY_TOKEN maestro = legacy de confianza).
+ *  - daemon→relay `{v:1, kind:'tunnel-register', deviceId, ts, sig}` →
+ *    `{v:1, kind:'tunnel-registered', deviceId}` (OBLIGATORIO en sockets
+ *    ligados a un device token). `sig` = hex minúsculas de la firma ed25519
+ *    cruda de 64 B (tweetnacl `sign.detached`) sobre UTF-8 `${deviceId}|${ts}`,
+ *    con la signing-key dedicada cuya verify-key de 32 B se registró en
+ *    `POST /api/device-claim` (NO la identidad X25519 de box: esa no firma).
+ *    `ts` = epoch ms, tolerancia ±5 min; se verifica con
+ *    `sign.detached.verify` contra la pubKey guardada. `deviceId` debe
+ *    coincidir con el ligado al token. Fallo/desfase → `{v:1, kind:'error',
+ *    error:'bad-register'}` y se IGNORAN los siguientes mensajes `kind:`
+ *    de ese socket hasta que llegue un register válido.
  *  - daemon→relay `{v:1, kind:'ui-publish', urlCode, exp}` (urlCode string
  *    12+ chars, `exp` epochMs) → `{v:1, kind:'ui-published', urlCode}`.
  *    Extensión fast-path LAN (backward-compatible, opcional): el daemon puede

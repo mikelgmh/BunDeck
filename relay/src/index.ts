@@ -25,6 +25,11 @@ const store = new DeviceStore(config.dataDir);
 const pairing = new PairingStore(PAIRING_TTL_MS);
 const relay = new RelayServer({
   token: config.token,
+  provisionToken: config.provisionToken,
+  claimPerDay: config.claimPerDay,
+  claimBurstPerHour: config.claimBurstPerHour,
+  rotateGraceMs: config.rotateGraceMs,
+  dataDir: config.dataDir,
   rateLimitT: config.rateLimitT,
   rateLimitUi: config.rateLimitUi,
   rateLimitWs: config.rateLimitWs,

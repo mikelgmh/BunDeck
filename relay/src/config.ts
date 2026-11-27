@@ -24,6 +24,14 @@ export interface RelayConfig {
   /** App de Discord del maintainer (cero-config): el secret NUNCA sale del servidor. */
   discordClientId: string;
   discordClientSecret: string;
+  /** Secreto de aprovisionamiento para POST /api/device-claim. Vacío = claim deshabilitado. */
+  provisionToken: string;
+  /** Cuota de claims por IP y día (def 200). */
+  claimPerDay: number;
+  /** Ráfaga de claims por IP y hora (def 50). */
+  claimBurstPerHour: number;
+  /** Ventana de gracia tras rotar: el token viejo sigue válido este tiempo (def 5 min). */
+  rotateGraceMs: number;
 }
 
 export const VERSION = '0.2.0';
@@ -40,6 +48,13 @@ export const VERSION = '0.2.0';
  * - RELAY_RATE_LIMIT_UI (def 120): cuota /ui/* por IP.
  * - RELAY_RATE_LIMIT_WS (def 120): cuota mensajes WS por IP.
  * - RELAY_RATE_LIMIT_PAIR (def 30): cuota POST /pair por IP.
+ * - RELAY_PROVISION_TOKEN: secreto de aprovisionamiento para POST
+ *   /api/device-claim (auto-provisión de device tokens). Vacío = claim
+ *   deshabilitado (POST /api/device-claim responde 503 claim-disabled).
+ * - RELAY_CLAIM_PER_DAY (def 200): cuota de claims por IP y día.
+ * - RELAY_CLAIM_BURST_PER_HOUR (def 50): ráfaga de claims por IP y hora.
+ * - RELAY_ROTATE_GRACE_MS (def 300000 = 5 min): tras POST /api/device-rotate
+ *   el token viejo sigue aceptado este tiempo y luego muere.
  * - TRUST_PROXY=1: respeta X-Forwarded-For / X-Real-IP / CF-Connecting-IP para rate-limit
  *   (solo activar detrás de proxy confiable como openship; si no, todas las IPs colapsan).
  * - DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET: app de Discord del maintainer para
@@ -67,5 +82,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     trustProxy,
     discordClientId: (env.DISCORD_CLIENT_ID ?? '').trim(),
     discordClientSecret: (env.DISCORD_CLIENT_SECRET ?? '').trim(),
+    provisionToken: (env.RELAY_PROVISION_TOKEN ?? '').trim(),
+    claimPerDay: parseLimit(env.RELAY_CLAIM_PER_DAY, 200),
+    claimBurstPerHour: parseLimit(env.RELAY_CLAIM_BURST_PER_HOUR, 50),
+    rotateGraceMs: parseLimit(env.RELAY_ROTATE_GRACE_MS, 5 * 60_000),
   };
 }

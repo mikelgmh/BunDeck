@@ -85,6 +85,39 @@
       <p class="bd-hint" data-cy="remote-relay-current">
         {{ status?.relay?.url || t('bd.remoteDisabledShort') }} · {{ status?.relay?.status ?? '…' }}
       </p>
+      <p class="bd-hint" data-cy="remote-relay-link-state">
+        <span v-if="relayLinked" data-cy="relay-linked">{{ t('bd.remoteRelayLinked') }}</span>
+        <span v-else data-cy="relay-unlinked">{{ t('bd.remoteRelayUnlinked') }}</span>
+      </p>
+      <div v-if="relayLinked" class="bd-ctl bd-remote-qr-actions">
+        <template v-if="!relayUnlinkArmed && !relayRotateArmed">
+          <button class="bd-btn" :disabled="relayLinkLoading" data-cy="remote-relay-unlink" @click="relayUnlinkArmed = true">
+            {{ t('bd.remoteRelayUnlink') }}
+          </button>
+          <button class="bd-btn" :disabled="relayLinkLoading" data-cy="remote-relay-rotate" @click="relayRotateArmed = true">
+            {{ t('bd.remoteRelayRotate') }}
+          </button>
+        </template>
+        <template v-else-if="relayUnlinkArmed">
+          <span class="bd-hint">{{ t('bd.remoteRelayUnlinkConfirm') }}</span>
+          <button class="bd-btn bd-dng" :disabled="relayLinkLoading" data-cy="remote-relay-unlink-confirm" @click="onUnlinkRelay">
+            {{ t('bd.remoteRelayUnlink') }}
+          </button>
+          <button class="bd-btn" :disabled="relayLinkLoading" data-cy="remote-relay-unlink-cancel" @click="relayUnlinkArmed = false">
+            {{ t('bd.cancel') }}
+          </button>
+        </template>
+        <template v-else>
+          <span class="bd-hint">{{ t('bd.remoteRelayRotateConfirm') }}</span>
+          <button class="bd-btn bd-dng" :disabled="relayLinkLoading" data-cy="remote-relay-rotate-confirm" @click="onRotateRelayToken">
+            {{ t('bd.remoteRelayRotate') }}
+          </button>
+          <button class="bd-btn" :disabled="relayLinkLoading" data-cy="remote-relay-rotate-cancel" @click="relayRotateArmed = false">
+            {{ t('bd.cancel') }}
+          </button>
+        </template>
+      </div>
+      <p v-if="relayLinkError" class="bd-err" role="alert" data-cy="remote-relay-link-error">{{ relayLinkError }}</p>
       <p v-if="relayEnvOverride" class="bd-hint" data-cy="remote-relay-env">{{ t('bd.remoteRelayEnvHint') }}</p>
       <div class="bd-form" role="radiogroup" :aria-label="t('bd.remoteRelayTitle')">
         <label class="bd-check">
@@ -171,8 +204,32 @@
       <p class="bd-hint" data-cy="remote-ui-tunnel">
         {{ t('bd.remoteUiTunnel') }}:
         <span class="bd-mono">{{ status?.tunnel?.status ?? '…' }}</span>
-        <template v-if="uiEnabled && status?.tunnel && status.tunnel.status !== 'connected'">
-          {{ t('bd.remoteUiTunnelDown') }}
+        <template v-if="relayCause">
+          <span v-if="relayCause === 'auth-required'" data-cy="relay-auth-required">{{ t('bd.remoteRelayAuthRequired') }} {{ t('bd.remoteRelayAuthAuto') }}</span>
+          <span v-else-if="relayCause === 'invalid-token'" data-cy="relay-invalid-token">{{ t('bd.remoteRelayInvalidToken') }}</span>
+          <span v-else-if="relayCause === 'rate-limited'" data-cy="relay-rate-limited">{{ t('bd.remoteRelayRateLimited') }}</span>
+          <span v-else-if="relayCause === 'unsupported'" data-cy="relay-unsupported">{{ t('bd.remoteRelayUnsupported') }}</span>
+          <span v-else data-cy="relay-unreachable">{{ t('bd.remoteUiTunnelDown') }}</span>
+          <button
+            v-if="relayCause === 'auth-required' || relayCause === 'invalid-token'"
+            class="bd-btn bd-pri"
+            style="margin-left: 8px"
+            :disabled="loading"
+            data-cy="remote-relay-link-now"
+            @click="onRelayRetry"
+          >
+            {{ relayCause === 'auth-required' ? t('bd.remoteRelayLinkNow') : t('bd.remoteRelayRelink') }}
+          </button>
+          <button
+            v-else-if="relayCause === 'rate-limited'"
+            class="bd-btn"
+            style="margin-left: 8px"
+            :disabled="loading"
+            data-cy="remote-relay-retry"
+            @click="onRelayRetry"
+          >
+            {{ t('bd.remoteRelayRetry') }}
+          </button>
         </template>
       </p>
 
@@ -711,7 +768,8 @@ const { status, devices, pair, events, loading, error, qr, qrDataUrl, qrUnsuppor
   uiEnabled, uiUnsupported, uiLoading, uiError, uiCode, uiCodeDataUrl, uiPending, uiSessions, uiJustToken,
   setUiEnabled, requestUiCode, revokeUiCode, loadUiPending, loadUiSessions, allowPending, denyPending, revokeSession, setSessionDeviceName, clearJustToken, onRemoteEvent,
   setRelayUrl, relayUrl, relayEnvOverride, relayLoading,
-  apiBase, lanInvite, lanSessions, lanLoading, lanError, requestLanInvite, revokeLanInvite, loadLanSessions, revokeLanSession } = useRemote()
+  apiBase, lanInvite, lanSessions, lanLoading, lanError, requestLanInvite, revokeLanInvite, loadLanSessions, revokeLanSession,
+  unlinkRelay, rotateRelayToken, relayLinkLoading, relayLinkError } = useRemote()
 
 /** Relay público por defecto (espejo del daemon `DEFAULT_PUBLIC_RELAY_URL`). */
 const DEFAULT_PUBLIC_RELAY_URL = 'wss://relay.bundeck.app'
@@ -774,6 +832,55 @@ const onResetRelay = async () => {
     syncRelayForm()
   } catch (e) {
     relayFormError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+// --- Vínculo con el relay (auth/deviceLinked del status) ---
+// Lógica espejo de `resolveRelayCause` en useRemote.ts (local para no
+// romper los mocks de `useRemote` en tests existentes).
+type RelayWarningCause = 'auth-required' | 'invalid-token' | 'rate-limited' | 'unreachable' | 'unsupported'
+const relayCause = computed<RelayWarningCause | null>(() => {
+  const relay = (status.value as { relay?: { auth?: unknown } } | null)?.relay
+  const auth = typeof relay?.auth === 'string' ? relay.auth : undefined
+  if (auth && auth !== 'ok') {
+    if (auth === 'auth-required' || auth === 'invalid-token' || auth === 'rate-limited' ||
+      auth === 'unsupported' || auth === 'unreachable') return auth
+    return 'unreachable'
+  }
+  const tunnelStatus = (status.value as { tunnel?: { status?: string } } | null)?.tunnel?.status
+  if (uiEnabled.value && tunnelStatus && tunnelStatus !== 'connected') return 'unreachable'
+  return null
+})
+const relayLinked = computed(() => (status.value as { relay?: { deviceLinked?: unknown } } | null)?.relay?.deviceLinked === true)
+const relayUnlinkArmed = ref(false)
+const relayRotateArmed = ref(false)
+
+const onUnlinkRelay = async () => {
+  try {
+    await unlinkRelay()
+  } catch {
+    /* el error queda en relayLinkError */
+  } finally {
+    relayUnlinkArmed.value = false
+  }
+}
+
+const onRotateRelayToken = async () => {
+  try {
+    await rotateRelayToken()
+  } catch {
+    /* el error queda en relayLinkError */
+  } finally {
+    relayRotateArmed.value = false
+  }
+}
+
+/** Reintento de vinculación: refresca el estado (el daemon auto-reclama). Nunca muestra tokens. */
+const onRelayRetry = async () => {
+  try {
+    await refresh()
+  } catch {
+    /* el error queda en el composable */
   }
 }
 

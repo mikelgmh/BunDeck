@@ -2,6 +2,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import { timingSafeEqual } from 'node:crypto';
 import type { DeviceStore } from './store';
 import type { PairingStore } from './pairing';
+import { DeviceAuthStore, verifyDeviceRegisterSignature } from './device-auth';
 import { pickLang, publicHostname, relayWsUrl, renderLanding } from './landing';
 import JSQR_VENDOR_JS from './vendor/jsqr-1.4.0.js' with { type: 'text' };
 import { RateLimiter } from './ratelimit';
@@ -41,7 +42,18 @@ export const RATE_LIMIT_UI_PER_MIN = 120;
 export const RATE_LIMIT_WS_PER_MIN = 120;
 export const RATE_LIMIT_PAIR_PER_MIN = 30;
 
-type WsData = { ip: string; tunnelBridge?: { id: string; token: string; deviceId: string } };
+type WsData = {
+  ip: string;
+  tunnelBridge?: { id: string; token: string; deviceId: string };
+  /** Auth del socket: master = secreto compartido (legacy), device = token por dispositivo. */
+  authKind?: 'master' | 'device' | 'open';
+  /** deviceId ligado al token (solo authKind device). */
+  boundDeviceId?: string;
+  /** sha256 del device token (para recuperar su pubKey sin guardar el token). */
+  tokenHash?: string;
+  /** Tras un tunnel-register fallido (firma), se ignoran los kind: hasta un register válido. */
+  tunnelBlocked?: boolean;
+};
 type AnyWs = ServerWebSocket<WsData>;
 type TunnelBridgeData = NonNullable<WsData['tunnelBridge']>;
 
@@ -59,6 +71,18 @@ export interface WireMessage {
 export interface RelayServerOptions {
   /** Secreto compartido. Vacío = sin auth (solo dev local). */
   token?: string;
+  /** Secreto de aprovisionamiento para POST /api/device-claim. Vacío = claim deshabilitado. */
+  provisionToken?: string;
+  /** Cuota de claims por IP y día (def 200). */
+  claimPerDay?: number;
+  /** Ráfaga de claims por IP y hora (def 50). */
+  claimBurstPerHour?: number;
+  /** Gracia tras rotar: el token viejo sigue válido (def 5 min). */
+  rotateGraceMs?: number;
+  /** Directorio de datos para device-tokens.json. Null = solo memoria (tests/dev). */
+  dataDir?: string | null;
+  /** Store inyectable (tests). Si se da, manda sobre dataDir. */
+  deviceAuth?: DeviceAuthStore | null;
   rateLimitPerMin?: number;
   rateLimitT?: number;
   rateLimitUi?: number;
@@ -178,7 +202,14 @@ export class RelayServer {
   private discordLimiter: RateLimiter;
   private now: () => number;
   readonly startedAt: number;
-  /** Núcleo del túnel inverso (estado + decisiones; el E2E sigue aparte). */
+  /** Tokens por dispositivo (auto-provisión; JSON persistente en dataDir). */
+  readonly deviceTokens: DeviceAuthStore;
+  /** Cuota de POST /api/device-claim por IP. */
+  private readonly claimPerDay: number;
+  private readonly claimBurstPerHour: number;
+  private readonly claimHits = new Map<string, number[]>();
+  /** deviceId -> sockets WS autenticados con device token (para cerrar al revocar). */
+  private deviceSockets = new Map<string, Set<AnyWs>>();
   readonly tunnel: TunnelState;
   private readonly httpTimeoutMs: number;
 
@@ -191,6 +222,10 @@ export class RelayServer {
     this.wsLimiter = new RateLimiter(opts.rateLimitWs ?? legacy ?? RATE_LIMIT_WS_PER_MIN, 60_000, nowFn);
     this.discordLimiter = new RateLimiter(opts.rateLimitDiscord ?? 30, 60_000, nowFn);
     this.now = opts.now ?? Date.now;
+    this.claimPerDay = opts.claimPerDay ?? 200;
+    this.claimBurstPerHour = opts.claimBurstPerHour ?? 50;
+    this.deviceTokens =
+      opts.deviceAuth ?? new DeviceAuthStore(opts.dataDir ?? null, { now: this.now, rotateGraceMs: opts.rotateGraceMs });
     this.startedAt = opts.startedAt ?? this.now();
     this.tunnel = new TunnelState({ now: this.now, uiRequestTimeoutMs: opts.uiRequestTimeoutMs, persist: opts.tunnelPersist ?? null });
     // Rehidrata sesiones vigentes persistidas (reinicio del relay sin perder
@@ -242,6 +277,16 @@ export class RelayServer {
             self.onTunnelBridgeOpen(ws, ws.data.tunnelBridge);
             return;
           }
+          // Registra los sockets con device token para poder cerrarlos al
+          // revocar (best-effort), aunque nunca hagan E2E `register`.
+          if (ws.data.authKind === 'device' && ws.data.boundDeviceId) {
+            let set = self.deviceSockets.get(ws.data.boundDeviceId);
+            if (!set) {
+              set = new Set();
+              self.deviceSockets.set(ws.data.boundDeviceId, set);
+            }
+            set.add(ws);
+          }
           ws.send(
             JSON.stringify({
               v: PROTOCOL_VERSION,
@@ -289,6 +334,7 @@ export class RelayServer {
     this.tunnel.shutdown();
     this.byDevice.clear();
     this.deviceByWs.clear();
+    this.deviceSockets.clear();
     this.server?.stop(true);
     this.server = null;
   }
@@ -296,6 +342,11 @@ export class RelayServer {
   /** Limpieza periódica del túnel (la llama el intervalo de index.ts). */
   pruneTunnel(): void {
     this.tunnel.prune();
+    try {
+      this.deviceTokens.prune();
+    } catch {
+      /* noop */
+    }
   }
 
   // ---- HTTP ----
@@ -431,12 +482,208 @@ export class RelayServer {
       return this.handleSidFetch(req, server);
     }
 
+    // Auth por dispositivo (auto-provisión; el master sigue valiendo para compat).
+    // GET /api/caps es público (los daemons detectan relay nuevo vs viejo).
+    if (url.pathname === '/api/caps' && req.method === 'GET') {
+      return Response.json({ deviceAuth: true, version: this.opts.version ?? '0.1.0' });
+    }
+    if (url.pathname === '/api/device-claim' && req.method === 'POST') {
+      return this.handleDeviceClaim(req, server);
+    }
+    if (url.pathname === '/api/device-revoke' && req.method === 'POST') {
+      return this.handleDeviceRevoke(req, server);
+    }
+    if (url.pathname === '/api/device-rotate' && req.method === 'POST') {
+      return this.handleDeviceRotate(req);
+    }
+    if (
+      url.pathname === '/api/device-claim' ||
+      url.pathname === '/api/device-revoke' ||
+      url.pathname === '/api/device-rotate'
+    ) {
+      return Response.json({ error: 'method-not-allowed' }, { status: 405 });
+    }
+
     // Todo lo demás: WebSocket (wss en prod tras reverse proxy; local ws).
-    if (!this.isAuthorized(req)) return new Response('unauthorized', { status: 401 });
-    const ip = getClientIp(req, server, this.opts.trustProxy ?? false);
-    const ok = server.upgrade(req, { data: { ip } });
-    if (!ok) return new Response('websocket only', { status: 426 });
+    // Sin token -> 401 auth-required; token malo/revocado -> 401 invalid-token.
+    // Master válido -> socket legacy de confianza; device token válido ->
+    // socket ligado a su deviceId.
+    const master = this.opts.token?.trim() ?? '';
+    if (!master) {
+      // Dev sin RELAY_TOKEN: abierto como antes, pero si traen device token
+      // se liga igual (compat + tests).
+      const ipOpen = getClientIp(req, server, this.opts.trustProxy ?? false);
+      const gotOpen = extractToken(req);
+      if (gotOpen) {
+        const v = this.deviceTokens.verify(gotOpen);
+        if (v) {
+          const okOpen = server.upgrade(req, {
+            data: { ip: ipOpen, authKind: 'device', boundDeviceId: v.deviceId, tokenHash: v.hash } as WsData,
+          });
+          if (!okOpen) return new Response('websocket only', { status: 426 });
+          return undefined;
+        }
+      }
+      const ok = server.upgrade(req, { data: { ip: ipOpen, authKind: 'open' } as WsData });
+      if (!ok) return new Response('websocket only', { status: 426 });
+      return undefined;
+    }
+    const got = extractToken(req);
+    if (!got) return Response.json({ error: 'auth-required' }, { status: 401 });
+    if (sameSecret(got, master)) {
+      const ip = getClientIp(req, server, this.opts.trustProxy ?? false);
+      const ok = server.upgrade(req, { data: { ip, authKind: 'master' } as WsData });
+      if (!ok) return new Response('websocket only', { status: 426 });
+      return undefined;
+    }
+    const v = this.deviceTokens.verify(got);
+    if (!v) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    const ipDev = getClientIp(req, server, this.opts.trustProxy ?? false);
+    const okDev = server.upgrade(req, {
+      data: { ip: ipDev, authKind: 'device', boundDeviceId: v.deviceId, tokenHash: v.hash } as WsData,
+    });
+    if (!okDev) return new Response('websocket only', { status: 426 });
     return undefined;
+  }
+
+  /** ¿El credential coincide con el master (timing-safe)? */
+  private isMaster(got: string): boolean {
+    const master = this.opts.token?.trim() ?? '';
+    return master !== '' && got !== '' && sameSecret(got, master);
+  }
+
+  /** ¿El credential coincide con el provisionToken (timing-safe)? */
+  private isProvision(got: string): boolean {
+    const p = this.opts.provisionToken?.trim() ?? '';
+    return p !== '' && got !== '' && sameSecret(got, p);
+  }
+
+  private checkClaimLimit(ip: string): { ok: true } | { ok: false; retryAfterMs: number } {
+    const now = this.now();
+    const arr = (this.claimHits.get(ip) ?? []).filter((ts) => now - ts < 24 * 60 * 60_000);
+    const hour = arr.filter((ts) => now - ts < 60 * 60_000);
+    if (hour.length >= this.claimBurstPerHour) {
+      this.claimHits.set(ip, arr);
+      return { ok: false, retryAfterMs: Math.max(1, hour[0] + 60 * 60_000 - now) };
+    }
+    if (arr.length >= this.claimPerDay) {
+      this.claimHits.set(ip, arr);
+      return { ok: false, retryAfterMs: Math.max(1, arr[0] + 24 * 60 * 60_000 - now) };
+    }
+    return { ok: true };
+  }
+
+  private recordClaimHit(ip: string): void {
+    const now = this.now();
+    const arr = (this.claimHits.get(ip) ?? []).filter((ts) => now - ts < 24 * 60 * 60_000);
+    arr.push(now);
+    this.claimHits.set(ip, arr);
+  }
+
+  private async readJsonBody(req: Request): Promise<Record<string, unknown>> {
+    try {
+      const b = (await req.json()) as unknown;
+      return b && typeof b === 'object' ? (b as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** POST /api/device-claim — emite un device token (auth con provisionToken). */
+  private async handleDeviceClaim(req: Request, server: Server<WsData>): Promise<Response> {
+    const provision = this.opts.provisionToken?.trim() ?? '';
+    if (!provision) return Response.json({ error: 'claim-disabled' }, { status: 503 });
+    const ip = getClientIp(req, server, this.opts.trustProxy ?? false);
+    const lim = this.checkClaimLimit(ip);
+    if (!lim.ok) {
+      return Response.json({ error: 'rate-limited', retryAfterMs: lim.retryAfterMs }, { status: 429 });
+    }
+    this.recordClaimHit(ip);
+    const cred = extractToken(req);
+    if (!cred) return Response.json({ error: 'provision-required' }, { status: 401 });
+    if (!this.isProvision(cred)) return Response.json({ error: 'bad-provision' }, { status: 401 });
+    const body = await this.readJsonBody(req);
+    const deviceId = body.deviceId;
+    if (typeof deviceId !== 'string' || deviceId.length < 1 || deviceId.length > 128) {
+      return Response.json({ error: 'bad-device' }, { status: 400 });
+    }
+    const pubKey = body.pubKeyB64 ?? body.pubKey;
+    if (typeof pubKey !== 'string' || pubKey === '') {
+      return Response.json({ error: 'bad-pubkey' }, { status: 400 });
+    }
+    let raw: Buffer;
+    try {
+      raw = Buffer.from(pubKey, 'base64');
+    } catch {
+      return Response.json({ error: 'bad-pubkey' }, { status: 400 });
+    }
+    if (raw.length !== 32) return Response.json({ error: 'bad-pubkey' }, { status: 400 });
+    const deviceToken = this.deviceTokens.issue(deviceId, pubKey);
+    return Response.json({ deviceToken });
+  }
+
+  /** POST /api/device-revoke — el token se revoca a sí mismo, o el master revoca todo un deviceId. */
+  private async handleDeviceRevoke(req: Request, server: Server<WsData>): Promise<Response> {
+    const cred = extractToken(req);
+    if (!cred) return Response.json({ error: 'auth-required' }, { status: 401 });
+    if (this.isMaster(cred)) {
+      const body = await this.readJsonBody(req);
+      const deviceId = body.deviceId;
+      if (typeof deviceId !== 'string' || deviceId.length < 1 || deviceId.length > 128) {
+        return Response.json({ error: 'bad-device' }, { status: 400 });
+      }
+      this.deviceTokens.revokeDevice(deviceId);
+      this.dropDeviceSockets(deviceId);
+      return Response.json({ revoked: true });
+    }
+    const v = this.deviceTokens.verify(cred);
+    if (!v) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    this.deviceTokens.revokeToken(cred);
+    this.dropDeviceSockets(v.deviceId);
+    return Response.json({ revoked: true });
+  }
+
+  /** POST /api/device-rotate — cambia un device token por uno nuevo (gracia al viejo). */
+  private async handleDeviceRotate(req: Request): Promise<Response> {
+    const cred = extractToken(req);
+    if (!cred) return Response.json({ error: 'auth-required' }, { status: 401 });
+    const v = this.deviceTokens.verify(cred);
+    if (!v) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    const next = this.deviceTokens.rotate(cred);
+    if (!next) return Response.json({ error: 'invalid-token' }, { status: 401 });
+    return Response.json({ deviceToken: next });
+  }
+
+  /** Cierra (best-effort) los sockets E2E + túnel de un deviceId revocado. */
+  private dropDeviceSockets(deviceId: string): void {
+    const seen = new Set<object>();
+    const targets: AnyWs[] = [];
+    const e2e = this.byDevice.get(deviceId);
+    if (e2e) targets.push(e2e);
+    const tun = this.tunnel.devices.get(deviceId) as AnyWs | undefined;
+    if (tun && !targets.includes(tun)) targets.push(tun);
+    for (const ws of this.deviceSockets.get(deviceId) ?? []) {
+      if (!targets.includes(ws)) targets.push(ws);
+    }
+    for (const ws of targets) {
+      if (seen.has(ws)) continue;
+      seen.add(ws);
+      try {
+        ws.close(4401, 'revoked');
+      } catch {
+        /* noop */
+      }
+      try {
+        this.handleSocketClose(ws);
+      } catch {
+        /* noop */
+      }
+      try {
+        this.tunnel.removeSocket(ws);
+      } catch {
+        /* noop */
+      }
+    }
   }
 
   // ---- Túnel inverso ----
@@ -828,11 +1075,56 @@ export class RelayServer {
     const err = (error: string, detail?: string): void => {
       ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error, ...(detail ? { detail } : {}) }));
     };
+    // Tras un tunnel-register fallido con firma, se ignoran los kind:
+    // hasta que llegue un register válido (anti-fuerza bruta).
+    if (ws.data.tunnelBlocked === true && msg.kind !== 'tunnel-register') return;
     switch (msg.kind as string) {
       case 'tunnel-register': {
         const deviceId = msg.deviceId;
         if (typeof deviceId !== 'string' || deviceId === '') {
           err('bad-register', 'deviceId required');
+          return;
+        }
+        const authKind = ws.data.authKind ?? 'open';
+        if (authKind === 'device') {
+          const bound = ws.data.boundDeviceId ?? '';
+          const entry = ws.data.tokenHash ? this.deviceTokens.getByHash(ws.data.tokenHash) : null;
+          const fail = (detail: string): void => {
+            ws.data.tunnelBlocked = true;
+            err('bad-register', detail);
+          };
+          if (!entry) {
+            fail('invalid-token');
+            return;
+          }
+          if (deviceId !== bound) {
+            fail('device-mismatch');
+            return;
+          }
+          const ok = verifyDeviceRegisterSignature({
+            deviceId,
+            ts: msg.ts,
+            sigHex: msg.sig,
+            pubKeyB64: entry.pubKeyB64,
+            now: this.now(),
+          });
+          if (!ok) {
+            fail(typeof msg.ts === 'number' ? 'bad-signature' : 'ts required');
+            return;
+          }
+          ws.data.tunnelBlocked = false;
+          this.tunnel.registerDevice(ws, deviceId);
+          ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'tunnel-registered', deviceId }));
+          // Entrega peticiones creadas mientras el daemon estaba offline.
+          for (const p of this.tunnel.takeUnsent(deviceId)) {
+            try {
+              ws.send(
+                JSON.stringify({ v: PROTOCOL_VERSION, kind: 'ui-request', reqId: p.reqId, urlCode: p.urlCode, ua: p.ua, ip: p.ip }),
+              );
+            } catch {
+              /* noop */
+            }
+          }
           return;
         }
         this.tunnel.registerDevice(ws, deviceId);
@@ -1259,6 +1551,13 @@ export class RelayServer {
       if (this.byDevice.get(deviceId) === ws) {
         this.byDevice.delete(deviceId);
         this.broadcastPresence(deviceId, false);
+      }
+    }
+    if (ws.data.authKind === 'device' && ws.data.boundDeviceId) {
+      const set = this.deviceSockets.get(ws.data.boundDeviceId);
+      if (set) {
+        set.delete(ws);
+        if (set.size === 0) this.deviceSockets.delete(ws.data.boundDeviceId);
       }
     }
     // Túnel: al caer el socket se borran sus publicaciones y sesiones.

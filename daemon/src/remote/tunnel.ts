@@ -33,7 +33,16 @@
  * códigos vigentes.
  */
 
-import { resolveRelayUrl, resolveRelayToken, withRelayToken } from './public-relay';
+import { resolveRelayUrl, resolveRelayToken, withRelayToken, DEVICE_TOKEN_KEY, resolveProvisionToken } from './public-relay';
+import { getRelaySigningKeys, signTunnelRegister } from './identity';
+import {
+  RelayAuthTracker,
+  ensureDeviceClaim,
+  refreshDeviceClaim,
+  defaultAuthDeps,
+  type RelayAuthDeps,
+  type RelayAuthState,
+} from './relay-auth';
 import { RtcManager, buildTurnCreds } from './rtc';
 import { UI_CODE_KEY, UI_SESSION_PREFIX, UI_UNBIND_PENDING_PREFIX } from './ui-policy';
 import type { UiFastPathLan } from './ui-policy';
@@ -211,6 +220,32 @@ export interface TunnelClientOpts {
    * Inyectable para tests (intervalo corto + `send` stub = sin red real).
    */
   keepaliveMs?: number;
+  /** Backoff de reconexión (tests): base y máximo en ms. */
+  reconnectBaseMs?: number;
+  reconnectMaxMs?: number;
+}
+
+/**
+ * Mensaje `tunnel-register`:
+ * - Sockets con device-token (relay con `deviceAuth`): `{v, kind, deviceId,
+ *   ts, sig}` con `sig` = hex detached-ed25519 sobre
+ *   UTF-8(`${deviceId}|${ts}`) y `ts` fresco (ventana ±5 min en el relay).
+ * - Sockets legacy (master-token o relay viejo): `{v, kind, deviceId}`.
+ */
+export function buildTunnelRegister(
+  db: { getSetting: (k: string) => string | null; setSetting?: (k: string, v: string) => void },
+  deviceId: string,
+  opts?: { signed?: boolean; now?: number },
+): Record<string, unknown> {
+  const base: Record<string, unknown> = { v: 1, kind: 'tunnel-register', deviceId };
+  if (!opts?.signed) return base;
+  const ts = Math.floor(typeof opts?.now === 'number' ? opts.now : Date.now());
+  try {
+    const { sig } = signTunnelRegister(db as any, deviceId, ts);
+    return { ...base, ts, sig };
+  } catch {
+    return base;
+  }
 }
 
 export class TunnelClient {
@@ -238,14 +273,47 @@ export class TunnelClient {
   /** Último ping emitido / último pong (o ping entrante) visto. */
   private lastPingAt = 0;
   private lastPongAt = 0;
+  /** Auth device-token (mismas reglas que `relay-client.ts`). */
+  private readonly auth = new RelayAuthTracker();
+  private readonly authDeps: RelayAuthDeps;
+  /** ¿El relay exige device-auth? (`null` = caps ilegibles → legacy.) */
+  private deviceAuthRequired: boolean | null = null;
+  private openedThisAttempt = false;
+  private rateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly reconnectBaseMs: number;
+  private readonly reconnectMaxMs: number;
 
   constructor(
     private db: DbLike,
     private wsManager: TunnelWsHost | null,
     private opts: TunnelClientOpts,
+    authDeps?: Partial<RelayAuthDeps>,
   ) {
     this.now = opts.now ?? Date.now;
     this.keepaliveMs = opts.keepaliveMs ?? TUNNEL_KEEPALIVE_MS;
+    this.reconnectBaseMs = opts.reconnectBaseMs ?? 1000;
+    this.reconnectMaxMs = opts.reconnectMaxMs ?? TUNNEL_MAX_BACKOFF_MS;
+    const d = db;
+    this.authDeps = defaultAuthDeps({
+      getDeviceToken: () => {
+        try { return (d.getSetting(DEVICE_TOKEN_KEY) ?? '') as string; } catch { return ''; }
+      },
+      setDeviceToken: (t) => {
+        try {
+          if (t) d.setSetting?.(DEVICE_TOKEN_KEY, t);
+          else d.deleteSetting?.(DEVICE_TOKEN_KEY);
+        } catch { /* noop */ }
+      },
+      getProvision: () => resolveProvisionToken(),
+      getDeviceId: () => this.opts.deviceId,
+      getPubKeyB64: () => {
+        try { return getRelaySigningKeys(d as any).publicKeyB64; } catch { return ''; }
+      },
+      getMasterToken: () => {
+        try { return resolveRelayToken(d as any); } catch { return ''; }
+      },
+      ...authDeps,
+    });
   }
 
   // ---- estado / config ----
@@ -273,6 +341,16 @@ export class TunnelClient {
 
   relayToken(): string {
     return resolveRelayToken(this.db);
+  }
+
+  /** Estado de enlace device-token (para `GET /status`). */
+  getAuthState(): RelayAuthState { return this.auth.state; }
+
+  onAuthState(cb: (s: RelayAuthState) => void): () => void { return this.auth.onChange(cb); }
+
+  /** ¿Hay device-token guardado (vinculado)? Nunca expone el valor. */
+  isDeviceLinked(): boolean {
+    try { return !!this.authDeps.getDeviceToken(); } catch { return false; }
   }
 
   /** UI remota habilitada (`remote.ui.enabled`, default false). */
@@ -306,15 +384,22 @@ export class TunnelClient {
       return;
     }
     this.startSweep();
-    this.connect();
+    // Un stop/start manual (p. ej. cambio de URL) reabre el episodio:
+    // el claim único vuelve a intentarse.
+    this.auth.initialClaimDone = false;
+    this.auth.rateRetryUsed = false;
+    this.auth.resetFailures();
+    void this.bootstrap();
   }
 
   stop(): void {
     this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.rateRetryTimer) clearTimeout(this.rateRetryTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.reconnectTimer = null;
+    this.rateRetryTimer = null;
     this.heartbeatTimer = null;
     this.sweepTimer = null;
     try {
@@ -336,6 +421,49 @@ export class TunnelClient {
     this.sweepTimer = setInterval(() => this.purgeExpired(), 15_000);
   }
 
+  /**
+   * Puerta de arranque: caps → claim único si el relay exige device-auth.
+   * Sin provisión / claim deshabilitado → aparcado (`auth-required`, sin
+   * hot loop). 429 → UN reintento tras `retryAfterMs`.
+   */
+  private async bootstrap(isRetry = false): Promise<void> {
+    if (this.closed) return;
+    const url = this.relayUrl();
+    if (!url) { this.setStatus('disabled'); return; }
+    let r: Awaited<ReturnType<typeof ensureDeviceClaim>>;
+    try {
+      r = await ensureDeviceClaim(this.authDeps, url, this.auth, { isRetry });
+    } catch {
+      if (!this.closed) { this.setStatus('disconnected'); this.scheduleReconnect(); }
+      return;
+    }
+    if (this.closed) return;
+    this.deviceAuthRequired = r.deviceAuth;
+    if (r.rateLimited) {
+      this.auth.set('rate-limited');
+      this.setStatus('disconnected');
+      this.scheduleRateRetry(r.retryAfterMs);
+      return;
+    }
+    if (!r.proceed) {
+      this.setStatus('disconnected');
+      return;
+    }
+    this.connect();
+  }
+
+  /** UN reintento del claim tras 429; después se aparca (backoff, sin girar). */
+  private scheduleRateRetry(retryAfterMs?: number): void {
+    if (this.closed || this.auth.rateRetryUsed) return;
+    this.auth.rateRetryUsed = true;
+    const wait = Math.min(Math.max(retryAfterMs ?? 60_000, 1000), 5 * 60_000);
+    if (this.rateRetryTimer) clearTimeout(this.rateRetryTimer);
+    this.rateRetryTimer = setTimeout(() => {
+      this.rateRetryTimer = null;
+      if (!this.closed) void this.bootstrap(true);
+    }, wait);
+  }
+
   private connect(): void {
     if (this.closed) return;
     const base = this.relayUrl();
@@ -343,8 +471,12 @@ export class TunnelClient {
       this.setStatus('disabled');
       return;
     }
-    const url = withRelayToken(base, this.relayToken());
+    // Device-token primero; master legacy (`RELAY_TOKEN`) como respaldo.
+    let token = '';
+    try { token = this.authDeps.getDeviceToken() || this.relayToken(); } catch { token = this.relayToken(); }
+    const url = withRelayToken(base, token);
     this.setStatus('connecting');
+    this.openedThisAttempt = false;
     try {
       this.ws = new WebSocket(url);
     } catch {
@@ -352,9 +484,19 @@ export class TunnelClient {
       return;
     }
     this.ws.onopen = () => {
-      this.backoffMs = 1000;
+      this.backoffMs = this.reconnectBaseMs;
+      this.openedThisAttempt = true;
+      this.auth.noteConnected();
+      if (this.auth.state !== 'ok' && this.auth.state !== 'unsupported') this.auth.set('ok');
       this.setStatus('connected');
-      this.send({ v: 1, kind: 'tunnel-register', deviceId: this.opts.deviceId });
+      // Firmado SOLO con device-token en relay con deviceAuth; en sockets
+      // master/open se envía el legacy (el relay lo ignora en master).
+      let hasDeviceToken = false;
+      try { hasDeviceToken = !!this.authDeps.getDeviceToken(); } catch { hasDeviceToken = false; }
+      this.send(buildTunnelRegister(this.db as any, this.opts.deviceId, {
+        signed: this.deviceAuthRequired === true && hasDeviceToken,
+        now: this.now(),
+      }));
       // Keepalive: sin tráfico periódico el LB/proxy corta el socket
       // ocioso (micro-corte → resync pesado + tormenta de hellos).
       this.startHeartbeat();
@@ -392,10 +534,33 @@ export class TunnelClient {
     this.ws.onclose = () => {
       this.ws = null;
       this.stopHeartbeat();
-      if (!this.closed) {
+      const opened = this.openedThisAttempt;
+      this.openedThisAttempt = false;
+      if (this.closed) return;
+      if (opened) {
+        this.auth.noteClosedAfterOpen();
         this.setStatus('disconnected');
         this.scheduleReconnect();
+        return;
       }
+      // Handshake fallido (401 auth-required/invalid-token, red caída…).
+      let stored = '';
+      try { stored = this.authDeps.getDeviceToken(); } catch { stored = ''; }
+      const decision = this.auth.noteHandshakeFailure(!!stored);
+      if (decision === 'reclaim') {
+        this.setStatus('disconnected');
+        void this.reclaimAndReconnect();
+        return;
+      }
+      if (decision === 'invalid') this.auth.set('invalid-token');
+      else if (decision === 'none' && !stored) {
+        // Bare (sin device ni master): el fallo resuelve a `unreachable`.
+        let master = '';
+        try { master = this.authDeps.getMasterToken(); } catch { master = ''; }
+        if (!master) this.auth.set('unreachable');
+      }
+      this.setStatus('disconnected');
+      this.scheduleReconnect(decision === 'invalid');
     };
     this.ws.onerror = () => {
       try {
@@ -404,11 +569,33 @@ export class TunnelClient {
     };
   }
 
-  private scheduleReconnect(): void {
+  /** Tras 3 handshakes fallidos: UN re-claim fresco y reconectar. */
+  private async reclaimAndReconnect(): Promise<void> {
+    if (this.closed) return;
+    const url = this.relayUrl();
+    if (!url) { this.setStatus('disabled'); return; }
+    try {
+      const r = await refreshDeviceClaim(this.authDeps, url, this.auth);
+      if (this.closed) return;
+      if (r.rateLimited) {
+        this.setStatus('disconnected');
+        this.scheduleRateRetry(r.retryAfterMs);
+        return;
+      }
+    } catch {
+      if (!this.closed) { this.auth.set('invalid-token'); this.setStatus('disconnected'); this.scheduleReconnect(true); }
+      return;
+    }
+    if (!this.closed) this.connect();
+  }
+
+  private scheduleReconnect(slow = false): void {
     if (this.closed) return;
     const jitter = Math.random() * 500;
-    const wait = Math.min(this.backoffMs + jitter, TUNNEL_MAX_BACKOFF_MS);
-    this.backoffMs = Math.min(this.backoffMs * 2, TUNNEL_MAX_BACKOFF_MS);
+    let wait = Math.min(this.backoffMs + jitter, this.reconnectMaxMs);
+    // Token inválido: backoff lento fijo (nunca girar contra 401s).
+    if (slow || this.auth.state === 'invalid-token') wait = this.reconnectMaxMs;
+    this.backoffMs = Math.min(this.backoffMs * 2, this.reconnectMaxMs);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => this.connect(), wait);
   }

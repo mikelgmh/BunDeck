@@ -12,12 +12,28 @@
  * (sus `seq` antiguos ya no valen: deben re-emparejar si hace falta).
  */
 import { v4 as uuidv4 } from 'uuid';
+import nacl from 'tweetnacl';
 import { DatabaseService } from '../db';
 import { generateKeyPair, fingerprint, resetLocalSeq } from './crypto';
 
 const K_ID = 'remote.device.id';
 const K_PUB = 'remote.device.pub';
 const K_PRIV = 'remote.device.priv';
+
+/**
+ * Claves de firma ed25519 DEDICADAS a la auth del relay (NO reutilizar las
+ * X25519 de E2E: `crypto.ts`/`nacl.box` no puede firmar).
+ *
+ * - `remote.relay.signPub`: pública ed25519 (b64 raw 32B). Se envía como
+ *   `pubKeyB64` en `device-claim` y el relay la usa para verificar el
+ *   `tunnel-register` firmado.
+ * - `remote.relay.signPriv`: privada ed25519 (b64 raw 64B). NUNCA sale del
+ *   equipo (igual que `remote.device.priv`).
+ * - Estables ante `rotateKeys()`: el vínculo con el relay es por
+ *   `deviceId`+`signPub`, independiente de la identidad E2E.
+ */
+const K_SIGN_PUB = 'remote.relay.signPub';
+const K_SIGN_PRIV = 'remote.relay.signPriv';
 
 export interface DeviceIdentity {
   deviceId: string;
@@ -74,4 +90,53 @@ export function rotateKeys(db?: DatabaseService): DeviceIdentity {
 export function publicIdentity(db?: DatabaseService): { deviceId: string; publicKey: string; fingerprint: string } {
   const i = getIdentity(db);
   return { deviceId: i.deviceId, publicKey: i.publicKeyB64, fingerprint: i.fingerprint };
+}
+
+export interface RelaySigningKeys {
+  /** Pública ed25519 en b64 (raw 32B). Se envía como `pubKeyB64` en device-claim. */
+  publicKeyB64: string;
+  /** Privada ed25519 en b64 (raw 64B). SOLO memoria del daemon: nunca serializar. */
+  secretKeyB64: string;
+}
+
+function b64ByteLength(b64: string): number {
+  try {
+    return Buffer.from(String(b64 ?? ''), 'base64').length;
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Par de firma del relay (ed25519 `nacl.sign`). Se genera UNA vez y persiste;
+ * NO rota con `rotateKeys()` (el vínculo relay es deviceId+signPub).
+ */
+export function getRelaySigningKeys(db?: DatabaseService): RelaySigningKeys {
+  const d = db ?? new DatabaseService();
+  const pub = d.getSetting(K_SIGN_PUB);
+  const priv = d.getSetting(K_SIGN_PRIV);
+  if (pub && priv && b64ByteLength(pub) === 32 && b64ByteLength(priv) === 64) {
+    return { publicKeyB64: pub, secretKeyB64: priv };
+  }
+  // Generar el par completo si falta algo (no mezclar mitades).
+  const kp = nacl.sign.keyPair();
+  const out: RelaySigningKeys = {
+    publicKeyB64: Buffer.from(kp.publicKey).toString('base64'),
+    secretKeyB64: Buffer.from(kp.secretKey).toString('base64'),
+  };
+  try { d.setSetting(K_SIGN_PUB, out.publicKeyB64); } catch { /* noop */ }
+  try { d.setSetting(K_SIGN_PRIV, out.secretKeyB64); } catch { /* noop */ }
+  return out;
+}
+
+/**
+ * Firma `UTF-8(`${deviceId}|${ts}`)` con detached ed25519.
+ * Devuelve `{ts, sig}` con `sig` en hex minúsculas (raw 64B) para el
+ * `tunnel-register` en sockets vinculados a device-token.
+ */
+export function signTunnelRegister(db: DatabaseService | undefined, deviceId: string, ts: number): { ts: number; sig: string } {
+  const keys = getRelaySigningKeys(db);
+  const msg = Buffer.from(`${deviceId}|${ts}`, 'utf8');
+  const sig = nacl.sign.detached(new Uint8Array(msg), new Uint8Array(Buffer.from(keys.secretKeyB64, 'base64')));
+  return { ts, sig: Buffer.from(sig).toString('hex') };
 }

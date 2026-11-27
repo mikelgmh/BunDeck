@@ -8,6 +8,10 @@ Sin cola: si el destino está offline responde error (no guarda comandos).
   con TLS (`wss://`); en local `ws://`.
 - Auth: token compartido `RELAY_TOKEN` (query `?token=`, `Authorization: Bearer`,
   o header `x-relay-token`). Sin token solo se permite en dev local (avisa en logs).
+  Daemons sin token se auto-aprovisionan con `RELAY_PROVISION_TOKEN`
+  (`POST /api/device-claim` → `deviceToken` por dispositivo); el WS acepta el
+  master (legacy) o un device token válido (ligado a su `deviceId`, con
+  `tunnel-register` firmado ed25519). Ver `src/device-auth.ts`.
 - E2E real: NaCl `box` (X25519 + XSalsa20-Poly1305) vía `tweetnacl`
   (primitiva estándar, no cripto propia). Ver `src/crypto.ts`.
 - Pairing: código de 6 dígitos, un solo uso, TTL 5 min, solo en memoria.
@@ -102,6 +106,10 @@ por mensaje). Límite: **64 KB** por mensaje; **60 msg/min por IP**.
 | GET | `/health` | no | `{ ok, service, version, uptime }` |
 | GET | `/stats` | no | `{ online, devices, pairingPending, uptime }` — solo conteos, sin datos sensibles |
 | POST | `/pair` | **sí** (`RELAY_TOKEN`) | `{ code: "123456", expiresIn: 300 }` — código de un solo uso |
+| GET | `/api/caps` | no | `{ deviceAuth: true, version }` — detecta relay nuevo vs viejo |
+| POST | `/api/device-claim` | **sí** (`RELAY_PROVISION_TOKEN` por Bearer o `?token=`) | `{ deviceToken }` — auto-provisión por dispositivo (`{deviceId, pubKey}` ed25519 32 B en base64; 503 `claim-disabled` sin provision; 429 `rate-limited`) |
+| POST | `/api/device-revoke` | **sí** (device token propio o master + `{deviceId}`) | `{ revoked: true }` |
+| POST | `/api/device-rotate` | **sí** (device token vigente) | `{ deviceToken }` nuevo (el viejo vale durante `RELAY_ROTATE_GRACE_MS`) |
 | * | resto | **sí** | upgrade a WebSocket (`401` sin token, `426` si no es WS) |
 
 > Nota: `GET /` es público a propósito (antes devolvía `401 unauthorized`
@@ -135,7 +143,11 @@ RELAY_DOMAIN=relay.bundeck.app
   (detrás de un reverse proxy funciona vía `Host` / `X-Forwarded-Host`).
 - Clientes máquina-a-máquina: `curl -H 'Accept: application/json' https://tu-dominio/`
   → `{ service, version, online }`.
-| `DATA_DIR` / `RELAY_DATA_DIR` | `relay/data` | Directorio de `relay.db` (en docker: `/data`). |
+| `DATA_DIR` / `RELAY_DATA_DIR` | `relay/data` | Directorio de `relay.db` y `device-tokens.json` (en docker: `/data`). |
+| `RELAY_PROVISION_TOKEN` | vacío (= claim deshabilitado) | Secreto para `POST /api/device-claim`. Generar: `openssl rand -hex 32`. |
+| `RELAY_CLAIM_PER_DAY` | `200` | Cuota de claims por IP y día. |
+| `RELAY_CLAIM_BURST_PER_HOUR` | `50` | Ráfaga de claims por IP y hora. |
+| `RELAY_ROTATE_GRACE_MS` | `300000` (5 min) | Gracia del token viejo tras `POST /api/device-rotate`. |
 
 ## Cómo correr
 

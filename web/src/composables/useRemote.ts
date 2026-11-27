@@ -11,11 +11,16 @@ export interface RemoteDeviceView {
   revoked: boolean
 }
 
+export type RelayAuthStatus = 'ok' | 'auth-required' | 'invalid-token' | 'rate-limited' | 'unreachable' | 'unsupported'
+
+/** Causa visible del aviso de túnel/relay (auth distinta de `ok`, o caída de red). */
+export type RelayWarningCause = 'auth-required' | 'invalid-token' | 'rate-limited' | 'unreachable' | 'unsupported'
+
 export interface RemoteStatusView {
   deviceId: string
   fingerprint: string
   publicKey: string
-  relay: { url: string; status: string; envOverride?: boolean }
+  relay: { url: string; status: string; envOverride?: boolean; auth?: RelayAuthStatus; deviceLinked?: boolean }
   pending: number
   trusted: number
   policy: string[]
@@ -23,6 +28,41 @@ export interface RemoteStatusView {
   uiEnabled?: boolean
   /** Estado del túnel UI (nuevo backend). Ausente en daemons antiguos. */
   tunnel?: { status: string }
+}
+
+/**
+ * Normaliza el campo `relay.auth` del daemon (daemons antiguos: ausente).
+ * Devuelve `undefined` si no es un valor conocido.
+ */
+export function normalizeRelayAuth(value: unknown): RelayAuthStatus | undefined {
+  if (value === 'ok' || value === 'auth-required' || value === 'invalid-token' ||
+    value === 'rate-limited' || value === 'unreachable' || value === 'unsupported') {
+    return value
+  }
+  return undefined
+}
+
+/**
+ * Causa del aviso de túnel/relay para un estado dado. Lógica espejo en
+ * `QrDialog.vue` / `RemotePane.vue` (computadas locales, sin importar este
+ * helper, para no romper los mocks de `useRemote` en tests existentes).
+ * - `auth` distinta de `ok` (o ausente→`undefined`) manda sobre el túnel.
+ * - Sin auth problemática y con UI habilitada + túnel no conectado → `unreachable`.
+ * - En otro caso no hay aviso (`null`).
+ */
+export function resolveRelayCause(
+  relay?: { auth?: unknown } | null,
+  tunnelStatus?: string | null,
+  uiEnabled?: boolean
+): RelayWarningCause | null {
+  const auth = normalizeRelayAuth((relay as { auth?: unknown } | undefined)?.auth)
+  if (auth && auth !== 'ok') return auth as RelayWarningCause
+  if (auth === undefined && relay && typeof (relay as { auth?: unknown }).auth === 'string') {
+    // Valor de auth desconocido (daemon futuro): tratarlo como caída genérica.
+    return 'unreachable'
+  }
+  if (uiEnabled && tunnelStatus && tunnelStatus !== 'connected') return 'unreachable'
+  return null
 }
 
 export interface UiPendingItem {
@@ -486,6 +526,46 @@ export function useRemote() {
     }
   }
 
+  // --- Vínculo con el relay (daemon auto-claim; la UI nunca muestra tokens) ---
+  const relayLinkLoading = ref(false)
+  const relayLinkError = ref('')
+
+  /**
+   * Desvincula este equipo del relay (`POST /api/v1/remote/relay-unlink`)
+   * y refresca el estado. Nunca expone tokens (ni en UI ni en logs).
+   */
+  const unlinkRelay = async () => {
+    relayLinkError.value = ''
+    relayLinkLoading.value = true
+    try {
+      await api('/remote/relay-unlink', { method: 'POST', body: JSON.stringify({}) })
+      await loadStatus()
+    } catch (e) {
+      relayLinkError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      relayLinkLoading.value = false
+    }
+  }
+
+  /**
+   * Rota el token del relay (`POST /api/v1/remote/relay-rotate`) y refresca
+   * el estado. El token nuevo nunca se muestra en la UI.
+   */
+  const rotateRelayToken = async () => {
+    relayLinkError.value = ''
+    relayLinkLoading.value = true
+    try {
+      await api('/remote/relay-rotate', { method: 'POST', body: JSON.stringify({}) })
+      await loadStatus()
+    } catch (e) {
+      relayLinkError.value = e instanceof Error ? e.message : String(e)
+      throw e
+    } finally {
+      relayLinkLoading.value = false
+    }
+  }
+
   /** Suscripción WS al topic `remote` (mismo patrón que useStreamDeck). */
   const connectWs = () => {
     try {
@@ -720,6 +800,10 @@ export function useRemote() {
     relayEnvOverride,
     relayLoading,
     relayError,
+    unlinkRelay,
+    rotateRelayToken,
+    relayLinkLoading,
+    relayLinkError,
     connectWs,
     disconnectWs,
     pushEvent,

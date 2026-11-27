@@ -11,6 +11,7 @@ import {
 } from '../hw-driver/streamdeck-conflict';
 import { getVersion } from '../version';
 import { jsonResponse } from './http-helpers';
+import { isRelaySecretSetting } from '../remote/public-relay';
 import type { ApiHandler } from './types';
 
 /** Degradado honesto: nulls + motivo, nunca datos aleatorios. */
@@ -307,10 +308,16 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
       const key = url.searchParams.get('key');
       if (key) {
         const value = db.getSetting(key);
+        // Los secretos del relay nunca salen por la API (ni lectura ni eco).
+        if (isRelaySecretSetting(key)) return jsonResponse({ key, value: null });
         return jsonResponse({ key, value });
       }
       try {
-        return jsonResponse(db.getAllSettings());
+        const all = db.getAllSettings() as Record<string, unknown>;
+        for (const k of Object.keys(all)) {
+          if (isRelaySecretSetting(k)) all[k] = null;
+        }
+        return jsonResponse(all);
       } catch {
         return jsonResponse({});
       }
@@ -335,12 +342,14 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
       db.setSetting(key, value);
       // Difusión en vivo para sincronizar clientes (p. ej. `ui.appearance`
       // entre host y dispositivos remotos). Best-effort: nunca rompe el POST.
+      // Los secretos del relay se confirman sin eco del valor.
+      const safeValue = isRelaySecretSetting(key) ? null : value;
       try {
-        services.wsManager?.broadcast('settings.changed', { key, value }, 'settings');
+        services.wsManager?.broadcast('settings.changed', { key, value: safeValue }, 'settings');
       } catch {
         /* noop */
       }
-      return jsonResponse({ key, value });
+      return jsonResponse({ key, value: safeValue });
     }
   }
 
