@@ -11,6 +11,10 @@
 
 use std::sync::mpsc::{self, Receiver};
 
+const MENU_OPEN: usize = 1;
+const MENU_WEB: usize = 2;
+const MENU_QUIT: usize = 3;
+
 /// Eventos del tray hacia el hilo de GPUI.
 #[derive(Debug, Clone, Copy)]
 pub enum TrayEvent {
@@ -20,6 +24,17 @@ pub enum TrayEvent {
     OpenPanel,
     /// "Salir": apaga el daemon y cierra el launcher.
     Quit,
+    /// Reinicio del launcher para self-update: conserva el daemon actualizado.
+    Restart,
+}
+
+fn menu_event(command: usize) -> Option<TrayEvent> {
+    match command {
+        MENU_OPEN => Some(TrayEvent::ShowLauncher),
+        MENU_WEB => Some(TrayEvent::OpenPanel),
+        MENU_QUIT => Some(TrayEvent::Quit),
+        _ => None,
+    }
 }
 
 /// Control para apagar el hilo del tray de forma limpia.
@@ -69,10 +84,6 @@ mod imp {
 
     pub(super) const WM_TRAYICON: u32 = WM_APP + 41;
     pub(super) const WM_TRAY_SHUTDOWN: u32 = WM_APP + 42;
-    const MENU_OPEN: usize = 1;
-    const MENU_WEB: usize = 2;
-    const MENU_QUIT: usize = 3;
-
     struct TrayThread {
         tx: Sender<TrayEvent>,
         hicon: HICON,
@@ -161,10 +172,10 @@ mod imp {
                 Ok(m) => m,
                 Err(_) => return,
             };
-            let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN, w!("Abrir panel"));
-            let _ = AppendMenuW(menu, MF_STRING, MENU_WEB, w!("Abrir en la web"));
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_OPEN, w!("Abrir panel"));
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_WEB, w!("Abrir en la web"));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Salir"));
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_QUIT, w!("Salir"));
             let mut pt = POINT { x: 0, y: 0 };
             if GetCursorPos(&mut pt).is_err() {
                 let _ = DestroyMenu(menu);
@@ -182,13 +193,7 @@ mod imp {
                 None,
             );
             let _ = DestroyMenu(menu);
-            let ev = match cmd.0 as usize {
-                MENU_OPEN => Some(TrayEvent::ShowLauncher),
-                MENU_WEB => Some(TrayEvent::OpenPanel),
-                MENU_QUIT => Some(TrayEvent::Quit),
-                _ => None,
-            };
-            if let Some(ev) = ev {
+            if let Some(ev) = super::menu_event(cmd.0 as usize) {
                 let _ = tx.send(ev);
             }
         }
@@ -288,6 +293,20 @@ mod imp {
             let _ = state;
         });
         (ready_rx, thread)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{menu_event, TrayEvent};
+
+    #[test]
+    fn tray_menu_commands_map_to_the_expected_events() {
+        assert!(matches!(menu_event(1), Some(TrayEvent::ShowLauncher)));
+        assert!(matches!(menu_event(2), Some(TrayEvent::OpenPanel)));
+        assert!(matches!(menu_event(3), Some(TrayEvent::Quit)));
+        assert!(menu_event(0).is_none());
+        assert!(menu_event(99).is_none());
     }
 }
 

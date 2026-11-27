@@ -326,6 +326,7 @@ fn write_pending_update(root: &Path, version: &str) -> Result<(), String> {
             .and_then(|raw| serde_json::from_str::<PendingUpdateDoc>(&raw).ok());
         if let Some(previous) = previous {
             if previous.version != version
+                && valid_version_name(&previous.version)
                 && active_version(root).as_deref() != Some(previous.version.as_str())
             {
                 let _ = std::fs::remove_dir_all(versions_dir(root).join(previous.version));
@@ -345,6 +346,9 @@ pub fn mark_staged_update_pending(root: &Path, version: &str) -> Result<(), Stri
 }
 
 pub fn clear_pending_update(root: &Path, version: &str) {
+    if !valid_version_name(version) {
+        return;
+    }
     let pending = std::fs::read_to_string(pending_update_path(root))
         .ok()
         .and_then(|raw| serde_json::from_str::<PendingUpdateDoc>(&raw).ok());
@@ -526,6 +530,16 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
 
 fn verify_signature(version: &str, target: &str, sha256: &str, sig_hex: &str) -> Result<(), String> {
     let pub_hex = update_pubkey().ok_or_else(|| "sin pubkey compilada".to_string())?;
+    verify_signature_with_pubkey(version, target, sha256, sig_hex, &pub_hex)
+}
+
+fn verify_signature_with_pubkey(
+    version: &str,
+    target: &str,
+    sha256: &str,
+    sig_hex: &str,
+    pub_hex: &str,
+) -> Result<(), String> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let pub_bytes = hex::decode(pub_hex.trim()).map_err(|e| format!("pubkey hex: {e}"))?;
     let pub_arr: [u8; 32] = pub_bytes
@@ -547,14 +561,30 @@ fn verify_signature(version: &str, target: &str, sha256: &str, sig_hex: &str) ->
 /// la versión en el directorio de instalación, que es escribible porque el
 /// instalador usa un destino por usuario.
 pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgress>>) -> Result<PathBuf, String> {
-    let set = |stage: &str| {
-        if let Ok(mut p) = progress.lock() {
-            p.stage = stage.to_string();
-        }
-    };
-    set(&format!("Descargando {}…", check.asset.bundle));
-    // Temporal de usuario. Nombre único por versión+pid para no chocar entre
-    // reintentos o procesos concurrentes.
+    download_and_stage_at(check, progress, &install_root())
+}
+
+fn download_and_stage_at(
+    check: &UpdateCheck,
+    progress: &Arc<Mutex<UpdateProgress>>,
+    root: &Path,
+) -> Result<PathBuf, String> {
+    update_progress(progress, |p| {
+        p.stage = format!("Descargando {}...", check.asset.bundle);
+        p.downloaded = 0;
+        p.total = None;
+        p.done = false;
+        p.error = None;
+        p.staged_version = None;
+    });
+
+    if !valid_version_name(&check.latest) {
+        let error = "version invalida para actualizar".to_string();
+        record_download_failure(progress, &error);
+        return Err(error);
+    }
+
+    // Nombre unico por version + proceso para evitar colisiones entre reintentos.
     let tmp_file = std::env::temp_dir().join(format!(
         "bundeck-{}-{}-{}.zip",
         check.latest,
@@ -562,34 +592,28 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
         std::process::id()
     ));
 
-    let res = agent()
-        .get(&check.asset.url)
-        .set("User-Agent", "bundeck-launcher")
-        .call()
-        .map_err(|e| {
-            let msg = format!("descarga fallida: {e}");
-            if let Ok(mut p) = progress.lock() {
-                p.error = Some(msg.clone());
-            }
-            msg
-        })?;
-    let total: Option<u64> = res
-        .header("Content-Length")
-        .and_then(|v| v.parse().ok())
-        .filter(|t: &u64| *t > 0)
-        .or(if check.asset.size > 0 {
-            Some(check.asset.size)
-        } else {
-            None
+    let result = (|| {
+        let res = agent()
+            .get(&check.asset.url)
+            .set("User-Agent", "bundeck-launcher")
+            .call()
+            .map_err(|e| format!("descarga fallida: {e}"))?;
+        let total: Option<u64> = res
+            .header("Content-Length")
+            .and_then(|v| v.parse().ok())
+            .filter(|t: &u64| *t > 0)
+            .or(if check.asset.size > 0 {
+                Some(check.asset.size)
+            } else {
+                None
+            });
+        update_progress(progress, |p| {
+            p.total = total;
+            p.downloaded = 0;
         });
-    if let Ok(mut p) = progress.lock() {
-        p.total = total;
-        p.downloaded = 0;
-    }
-    {
+
         let mut reader = res.into_reader();
         let mut out = std::fs::File::create(&tmp_file).map_err(|e| {
-            // %TEMP% casi siempre es escribible; si falla, igual se informa claro.
             format!("crear temporal en {}: {e}", std::env::temp_dir().display())
         })?;
         let mut buf = [0u8; 65536];
@@ -600,55 +624,80 @@ pub fn download_and_stage(check: &UpdateCheck, progress: &Arc<Mutex<UpdateProgre
             }
             out.write_all(&buf[..n])
                 .map_err(|e| format!("escribir temporal: {e}"))?;
-            if let Ok(mut p) = progress.lock() {
-                p.downloaded += n as u64;
+            update_progress(progress, |p| p.downloaded += n as u64);
+        }
+        drop(out);
+
+        set_download_stage(progress, "Verificando integridad...");
+        verify_sha256(&tmp_file, &check.asset.sha256)?;
+        if let Some(sig) = check.asset.signature.as_deref().filter(|s| !s.is_empty()) {
+            set_download_stage(progress, "Verificando firma...");
+            match verify_signature(&check.latest, current_target(), &check.asset.sha256, sig) {
+                Ok(()) => {}
+                Err(_e) if update_pubkey().is_none() => {
+                    // Without a configured public key, signature verification is unavailable.
+                }
+                Err(e) => return Err(format!("firma del bundle no valida: {e}")),
             }
         }
-    }
 
-    set("Verificando integridad…");
-    verify_sha256(&tmp_file, &check.asset.sha256)?;
-    if let Some(sig) = check.asset.signature.as_deref().filter(|s| !s.is_empty()) {
-        set("Verificando firma…");
-        match verify_signature(&check.latest, current_target(), &check.asset.sha256, sig) {
-            Ok(()) => {}
-            Err(e) if update_pubkey().is_none() => {
-                // Sin pubkey no se puede verificar: aviso, no bloqueo.
-                let _ = e;
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp_file);
-                return Err(format!("firma del bundle no válida: {e}"));
-            }
+        set_download_stage(progress, "Extrayendo archivos...");
+        let dest = versions_dir(root).join(&check.latest);
+        clear_pending_update(root, &check.latest);
+        if dest.is_dir() {
+            std::fs::remove_dir_all(&dest)
+                .map_err(|e| friendly_fs_error(root, "limpiar stage previo", e))?;
         }
-    }
+        std::fs::create_dir_all(&dest)
+            .map_err(|e| friendly_fs_error(root, "crear stage", e))?;
+        extract_bundle(&tmp_file, &dest)?;
 
-    set("Extrayendo archivos…");
-    let root = install_root();
-    let dest = versions_dir(&root).join(&check.latest);
-    clear_pending_update(&root, &check.latest);
-    if dest.is_dir() {
-        std::fs::remove_dir_all(&dest)
-            .map_err(|e| friendly_fs_error(&root, "limpiar stage previo", e))?;
-    }
-    std::fs::create_dir_all(&dest)
-        .map_err(|e| friendly_fs_error(&root, "crear stage", e))?;
-    extract_bundle(&tmp_file, &dest)?;
+        let has_daemon = dest.join(daemon_file_name()).is_file();
+        let has_web = dest.join("web-dist").is_dir();
+        if !has_daemon && !has_web {
+            return Err("el bundle no trae ni daemon ni web-dist".to_string());
+        }
+        set_executable_permissions(&dest)?;
+        mark_staged_update_pending(root, &check.latest)?;
+        Ok(dest)
+    })();
+
+    // Best-effort cleanup on every exit, including network and staging failures.
     let _ = std::fs::remove_file(&tmp_file);
+    match &result {
+        Ok(_) => update_progress(progress, |p| {
+            p.done = true;
+            p.error = None;
+            p.stage = format!("Lista la version {}", check.latest);
+            p.staged_version = Some(check.latest.clone());
+        }),
+        Err(error) => record_download_failure(progress, error),
+    }
+    result
+}
 
-    let has_daemon = dest.join(daemon_file_name()).is_file();
-    let has_web = dest.join("web-dist").is_dir();
-    if !has_daemon && !has_web {
-        return Err("el bundle no trae ni daemon ni web-dist".to_string());
-    }
-    set_executable_permissions(&dest)?;
-    mark_staged_update_pending(&root, &check.latest)?;
-    if let Ok(mut p) = progress.lock() {
-        p.done = true;
-        p.stage = format!("Lista la versión {}", check.latest);
-        p.staged_version = Some(check.latest.clone());
-    }
-    Ok(dest)
+fn update_progress(
+    progress: &Arc<Mutex<UpdateProgress>>,
+    update: impl FnOnce(&mut UpdateProgress),
+) {
+    let mut progress = match progress.lock() {
+        Ok(progress) => progress,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    update(&mut progress);
+}
+
+fn set_download_stage(progress: &Arc<Mutex<UpdateProgress>>, stage: &str) {
+    update_progress(progress, |p| p.stage = stage.to_string());
+}
+
+fn record_download_failure(progress: &Arc<Mutex<UpdateProgress>>, error: &str) {
+    update_progress(progress, |p| {
+        p.done = false;
+        p.error = Some(error.to_string());
+        p.stage = format!("Fallo de actualizacion: {error}");
+        p.staged_version = None;
+    });
 }
 
 fn extract_bundle(zip_path: &Path, dest: &Path) -> Result<(), String> {
@@ -752,6 +801,9 @@ pub fn backup_database() -> Result<Option<PathBuf>, String> {
 /// `active.json`, arranca y verifica. Si el nuevo daemon no responde hace
 /// rollback a la versión anterior.
 pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), String> {
+    if !valid_version_name(version) {
+        return Err("versión inválida para aplicar actualización".to_string());
+    }
     let root = install_root();
     let staged = versions_dir(&root).join(version);
     if !staged.is_dir() {
@@ -780,7 +832,6 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
     super::monitor::wait_for_api_down();
 
     log(format!("Activando versión {version}…"));
-    write_active(&root, version)?;
 
     // Self-update del launcher: no puede reemplazarse en caliente
     // (bloqueo en Windows). El helper lo hace tras salir este proceso.
@@ -788,16 +839,30 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
         log("El launcher también cambia: se aplicará al reiniciar.".to_string());
     }
 
+    let mut launch_and_wait = |expected: &str, emit: &mut dyn FnMut(String)| {
+        let (boot, _) = super::monitor::ensure_daemon_spawned();
+        for line in boot {
+            emit(line);
+        }
+        wait_for_api_version(expected)
+    };
+    activate_staged_and_verify(&root, version, previous.as_deref(), log, &mut launch_and_wait)
+}
+
+fn activate_staged_and_verify(
+    root: &Path,
+    version: &str,
+    previous: Option<&str>,
+    log: &mut dyn FnMut(String),
+    launch_and_wait: &mut dyn FnMut(&str, &mut dyn FnMut(String)) -> Result<(), String>,
+) -> Result<(), String> {
     log("Arrancando daemon nuevo…".to_string());
-    let (boot, _) = super::monitor::ensure_daemon_spawned();
-    for line in boot {
-        log(line);
-    }
-    match wait_for_api_version(version) {
+    write_active(root, version)?;
+    match launch_and_wait(version, log) {
         Ok(()) => {
             log(format!("BunDeck {version} en línea."));
-            prune_old_versions(&root, version);
-            clear_pending_update(&root, version);
+            prune_old_versions(root, version);
+            clear_pending_update(root, version);
             Ok(())
         }
         Err(reason) => {
@@ -805,10 +870,9 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
                 "El daemon no confirmó la versión {version} ({reason}); revierto…"
             ));
             if let Some(prev) = previous {
-                write_active(&root, &prev)?;
-                clear_pending_update(&root, version);
-                let _ = super::monitor::ensure_daemon_spawned();
-                return match wait_for_api_version(&prev) {
+                write_active(root, prev)?;
+                clear_pending_update(root, version);
+                return match launch_and_wait(prev, log) {
                     Ok(()) => Err(format!(
                         "update a {version} falló ({reason}); restaurada {prev}"
                     )),
@@ -817,7 +881,7 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
                     )),
                 };
             }
-            clear_pending_update(&root, version);
+            clear_pending_update(root, version);
             Err(format!(
                 "update a {version} falló ({reason}) y no había versión anterior para rollback"
             ))
@@ -993,6 +1057,52 @@ pub fn handoff_self_update(version: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn test_dir(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "bundeck-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    struct BenchmarkTempDir(PathBuf);
+
+    impl BenchmarkTempDir {
+        fn new(label: &str) -> Self {
+            Self(test_dir(label))
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for BenchmarkTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn create_complete_stage(root: &Path, version: &str) -> PathBuf {
+        let stage = versions_dir(root).join(version);
+        std::fs::create_dir_all(stage.join("web-dist")).unwrap();
+        for name in [
+            daemon_file_name(),
+            format!("bundeck-cli{}", exe_suffix()),
+            format!("bundeck-launcher{}", exe_suffix()),
+            format!("bundeck-updater{}", exe_suffix()),
+        ] {
+            std::fs::write(stage.join(name), b"test").unwrap();
+        }
+        std::fs::write(stage.join("web-dist").join("index.html"), b"<html/>").unwrap();
+        stage
+    }
+
     #[test]
     fn newer_comparison() {
         assert!(is_newer("1.5.0", "v1.6.0"));
@@ -1094,6 +1204,269 @@ mod tests {
     }
 
     #[test]
+    fn stage_validation_requires_every_runtime_component() {
+        let dir = test_dir("stage-validation");
+        let stage = create_complete_stage(&dir, "2.3.4");
+        assert!(staged_update_is_complete(&dir, "2.3.4"));
+
+        let missing_cli = stage.join(format!("bundeck-cli{}", exe_suffix()));
+        std::fs::remove_file(&missing_cli).unwrap();
+        assert!(!staged_update_is_complete(&dir, "2.3.4"));
+        std::fs::write(&missing_cli, b"test").unwrap();
+
+        std::fs::remove_file(stage.join("web-dist").join("index.html")).unwrap();
+        assert!(!staged_update_is_complete(&dir, "2.3.4"));
+        assert!(!staged_update_is_complete(&dir, "../2.3.4"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn pending_cleanup_only_removes_matching_inactive_stage() {
+        let dir = test_dir("pending-cleanup");
+        let active_stage = create_complete_stage(&dir, "1.0.0");
+        let pending_stage = create_complete_stage(&dir, "2.0.0");
+        write_active(&dir, "1.0.0").unwrap();
+        write_pending_update(&dir, "2.0.0").unwrap();
+
+        clear_pending_update(&dir, "1.0.0");
+        assert_eq!(pending_update_version_at(&dir).as_deref(), Some("2.0.0"));
+        assert!(pending_stage.exists());
+
+        clear_pending_update(&dir, "2.0.0");
+        assert!(!pending_update_path(&dir).exists());
+        assert!(active_stage.is_dir());
+        assert!(!pending_stage.exists());
+        assert_eq!(active_version(&dir).as_deref(), Some("1.0.0"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn pending_cleanup_rejects_path_like_marker_versions() {
+        let dir = test_dir("pending-path-safety");
+        let outside_stage = dir.join("victim");
+        std::fs::create_dir_all(&outside_stage).unwrap();
+        std::fs::write(outside_stage.join("keep.txt"), b"keep").unwrap();
+        std::fs::write(
+            pending_update_path(&dir),
+            serde_json::to_vec(&PendingUpdateDoc {
+                version: "../victim".to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        clear_pending_update(&dir, "../victim");
+
+        assert!(outside_stage.join("keep.txt").is_file());
+        assert!(pending_update_path(&dir).is_file());
+        assert!(pending_update_version_at(&dir).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundle_extraction_rejects_parent_traversal() {
+        let dir = test_dir("zip-path-safety");
+        let zip_path = dir.join("unsafe.zip");
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let options: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default();
+            writer.start_file("../escaped.txt", options).unwrap();
+            writer.write_all(b"outside").unwrap();
+            writer.finish().unwrap();
+        }
+        let dest = dir.join("stage");
+        std::fs::create_dir_all(&dest).unwrap();
+
+        let error = extract_bundle(&zip_path, &dest).unwrap_err();
+
+        assert!(error.contains("ruta insegura"));
+        assert!(!dir.join("escaped.txt").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn apply_staged_rejects_path_like_version_before_touching_install() {
+        let mut log = Vec::new();
+        let result = apply_staged(&mut |line| log.push(line), "../outside");
+
+        assert!(result.unwrap_err().contains("inválida"));
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn failed_health_check_restores_previous_active_stage() {
+        let root = BenchmarkTempDir::new("apply-rollback");
+        create_complete_stage(root.path(), "1.0.0");
+        let failed_stage = create_complete_stage(root.path(), "2.0.0");
+        write_active(root.path(), "1.0.0").unwrap();
+        mark_staged_update_pending(root.path(), "2.0.0").unwrap();
+
+        let mut attempts = Vec::new();
+        let mut log = Vec::new();
+        let mut launch_and_wait = |version: &str, _emit: &mut dyn FnMut(String)| {
+            attempts.push(version.to_string());
+            if version == "2.0.0" {
+                Err("fake health-check failure".to_string())
+            } else {
+                Ok(())
+            }
+        };
+
+        let error = activate_staged_and_verify(
+            root.path(),
+            "2.0.0",
+            Some("1.0.0"),
+            &mut |line| log.push(line),
+            &mut launch_and_wait,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("restaurada 1.0.0"));
+        assert_eq!(
+            attempts,
+            vec!["2.0.0".to_string(), "1.0.0".to_string()]
+        );
+        assert_eq!(active_version(root.path()).as_deref(), Some("1.0.0"));
+        assert!(!pending_update_path(root.path()).exists());
+        assert!(!failed_stage.exists());
+        assert!(log.iter().any(|line| line.contains("revierto")));
+    }
+
+    #[test]
+    fn download_failure_updates_progress_from_local_http_error() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope")
+                .unwrap();
+        });
+        let progress = Arc::new(Mutex::new(UpdateProgress {
+            done: true,
+            staged_version: Some("1.2.3".to_string()),
+            ..UpdateProgress::default()
+        }));
+        let check = UpdateCheck {
+            current: "1.0.0".to_string(),
+            latest: "9.8.7".to_string(),
+            notes_url: String::new(),
+            asset: TargetAsset {
+                bundle: "local-test.zip".to_string(),
+                url: format!("http://{address}/bundle.zip"),
+                sha256: "00".repeat(32),
+                size: 4,
+                signature: None,
+            },
+            manifest_signed: false,
+        };
+
+        let result = download_and_stage(&check, &progress);
+        server.join().unwrap();
+
+        assert!(result.unwrap_err().contains("descarga fallida"));
+        let progress = progress.lock().unwrap();
+        assert!(!progress.done);
+        assert!(progress.error.is_some());
+        assert!(progress.stage.contains("Fallo de actualizacion"));
+        assert!(progress.staged_version.is_none());
+    }
+
+    #[test]
+    fn local_http_bundle_is_verified_extracted_and_staged_in_isolated_root() {
+        use sha2::{Digest, Sha256};
+        use std::io::{Cursor, Write};
+        use std::net::TcpListener;
+
+        let version = "8.7.6";
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut cursor);
+            let options: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored);
+            for (name, contents) in [
+                (daemon_file_name(), b"fake daemon".as_slice()),
+                (format!("bundeck-cli{}", exe_suffix()), b"fake cli".as_slice()),
+                (
+                    format!("bundeck-launcher{}", exe_suffix()),
+                    b"fake launcher".as_slice(),
+                ),
+                (
+                    format!("bundeck-updater{}", exe_suffix()),
+                    b"fake updater".as_slice(),
+                ),
+                ("web-dist/index.html".to_string(), b"<html/>".as_slice()),
+            ] {
+                zip.start_file(name, options).unwrap();
+                zip.write_all(contents).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let bundle = cursor.into_inner();
+        let bundle_size = bundle.len() as u64;
+        let expected_sha256 = hex::encode(Sha256::digest(&bundle));
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bundle.len()
+            )
+            .unwrap();
+            stream.write_all(&bundle).unwrap();
+        });
+
+        let root = BenchmarkTempDir::new("download-stage");
+        let progress = Arc::new(Mutex::new(UpdateProgress::default()));
+        let check = UpdateCheck {
+            current: "8.7.5".to_string(),
+            latest: version.to_string(),
+            notes_url: String::new(),
+            asset: TargetAsset {
+                bundle: format!("bundeck-v{version}-{}.zip", current_target()),
+                url: format!("http://{address}/bundle.zip"),
+                sha256: expected_sha256,
+                size: bundle_size,
+                signature: None,
+            },
+            manifest_signed: false,
+        };
+
+        let stage = download_and_stage_at(&check, &progress, root.path()).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(stage, versions_dir(root.path()).join(version));
+        assert!(staged_update_is_complete(root.path(), version));
+        assert_eq!(pending_update_version_at(root.path()).as_deref(), Some(version));
+        assert!(stage.join("web-dist").join("index.html").is_file());
+        let progress = progress.lock().unwrap();
+        assert!(progress.done);
+        assert!(progress.error.is_none());
+        assert_eq!(progress.staged_version.as_deref(), Some(version));
+        drop(progress);
+
+        let temp_zip = std::env::temp_dir().join(format!(
+            "bundeck-{version}-{}-{}.zip",
+            current_target(),
+            std::process::id()
+        ));
+        assert!(!temp_zip.exists(), "downloaded archive should be cleaned up");
+    }
+
+    #[test]
     fn permission_error_recommends_user_install() {
         let root = PathBuf::from(r"C:\Program Files\BunDeck");
         let e = std::io::Error::from_raw_os_error(5);
@@ -1119,19 +1492,51 @@ mod tests {
     }
 
     #[test]
+    fn download_failure_records_error_without_marking_success() {
+        let progress = Arc::new(Mutex::new(UpdateProgress {
+            done: true,
+            staged_version: Some("1.2.3".to_string()),
+            ..UpdateProgress::default()
+        }));
+
+        record_download_failure(&progress, "leer red: conexión interrumpida");
+
+        let progress = progress.lock().unwrap();
+        assert!(!progress.done);
+        assert_eq!(
+            progress.error.as_deref(),
+            Some("leer red: conexión interrumpida")
+        );
+        assert!(progress.stage.contains("conexión interrumpida"));
+        assert!(progress.staged_version.is_none());
+    }
+
+    #[test]
     fn signature_roundtrip_fixed_seed() {
         use ed25519_dalek::{Signer, SigningKey};
         let seed = [7u8; 32];
         let sk = SigningKey::from_bytes(&seed);
         let pub_hex = hex::encode(sk.verifying_key().to_bytes());
-        std::env::set_var("BUNDECK_UPDATE_PUBKEY", &pub_hex);
         let sha = "ab".repeat(32);
         let msg = format!("1.6.0|linux-x64|{sha}");
         let sig_hex = hex::encode(sk.sign(msg.as_bytes()).to_bytes());
-        assert!(verify_signature("1.6.0", "linux-x64", &sha, &sig_hex).is_ok());
+        assert!(verify_signature_with_pubkey(
+            "1.6.0",
+            "linux-x64",
+            &sha,
+            &sig_hex,
+            &pub_hex,
+        )
+        .is_ok());
         // Otro mensaje no valida con la misma firma.
-        assert!(verify_signature("9.9.9", "linux-x64", &sha, &sig_hex).is_err());
-        std::env::remove_var("BUNDECK_UPDATE_PUBKEY");
+        assert!(verify_signature_with_pubkey(
+            "9.9.9",
+            "linux-x64",
+            &sha,
+            &sig_hex,
+            &pub_hex,
+        )
+        .is_err());
     }
 
     #[test]
@@ -1157,5 +1562,112 @@ mod tests {
         assert!(dest.join("bundeck-daemon").is_file());
         assert!(dest.join("web-dist").join("index.html").is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "opt-in throughput benchmark; run with --release -- --ignored --nocapture"]
+    fn benchmark_sha256_verification_throughput() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        use std::time::Instant;
+
+        const CHUNK_BYTES: usize = 1024 * 1024;
+        const CHUNK_COUNT: usize = 128;
+        let total_bytes = (CHUNK_BYTES * CHUNK_COUNT) as u64;
+        let temp = BenchmarkTempDir::new("benchmark-sha256");
+        let file_path = temp.path().join("sha256-throughput.bin");
+        let mut file = std::fs::File::create(&file_path).expect("create SHA-256 fixture");
+        let mut chunk = vec![0u8; CHUNK_BYTES];
+        for (index, byte) in chunk.iter_mut().enumerate() {
+            *byte = (index.wrapping_mul(31).wrapping_add(17) & 0xff) as u8;
+        }
+
+        let mut digest = Sha256::new();
+        for _ in 0..CHUNK_COUNT {
+            file.write_all(&chunk).expect("write SHA-256 fixture");
+            digest.update(&chunk);
+        }
+        file.sync_all().expect("flush SHA-256 fixture");
+        drop(file);
+        let expected = hex::encode(digest.finalize());
+
+        let started = Instant::now();
+        verify_sha256(&file_path, &expected).expect("verify generated SHA-256 fixture");
+        let elapsed = started.elapsed();
+        let mebibytes = total_bytes as f64 / (1024.0 * 1024.0);
+        let throughput = mebibytes / elapsed.as_secs_f64();
+
+        println!(
+            "benchmark_sha256_verification_throughput: {mebibytes:.1} MiB verified in {:.3}s ({throughput:.1} MiB/s, warm filesystem cache)",
+            elapsed.as_secs_f64()
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in throughput benchmark; run with --release -- --ignored --nocapture"]
+    fn benchmark_zip_extraction_throughput() {
+        use std::io::Write;
+        use std::time::Instant;
+
+        const FILE_COUNT: usize = 32;
+        const FILE_BYTES: usize = 4 * 1024 * 1024;
+        let total_uncompressed_bytes = (FILE_COUNT * FILE_BYTES) as u64;
+        let temp = BenchmarkTempDir::new("benchmark-zip-extraction");
+        let zip_path = temp.path().join("extraction-throughput.zip");
+        let payload: Vec<u8> = (0..FILE_BYTES)
+            .map(|index| (index.wrapping_mul(31).wrapping_add(17) & 0xff) as u8)
+            .collect();
+
+        {
+            let file = std::fs::File::create(&zip_path).expect("create ZIP fixture");
+            let mut writer = zip::ZipWriter::new(file);
+            let options: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored);
+            for index in 0..FILE_COUNT {
+                writer
+                    .start_file(
+                        format!("bundeck-v0.0.0/web-dist/assets/chunk-{index:02}.bin"),
+                        options,
+                    )
+                    .expect("start ZIP fixture entry");
+                writer
+                    .write_all(&payload)
+                    .expect("write ZIP fixture entry");
+            }
+            let file = writer.finish().expect("finish ZIP fixture");
+            file.sync_all().expect("flush ZIP fixture");
+        }
+
+        let archive_bytes = std::fs::metadata(&zip_path)
+            .expect("stat ZIP fixture")
+            .len();
+        let destination = temp.path().join("extracted");
+        std::fs::create_dir_all(&destination).expect("create extraction destination");
+
+        let started = Instant::now();
+        extract_bundle(&zip_path, &destination).expect("extract generated ZIP fixture");
+        let elapsed = started.elapsed();
+
+        let extracted_bytes: u64 = (0..FILE_COUNT)
+            .map(|index| {
+                let path = destination
+                    .join("web-dist")
+                    .join("assets")
+                    .join(format!("chunk-{index:02}.bin"));
+                std::fs::metadata(path)
+                    .expect("stat extracted fixture entry")
+                    .len()
+            })
+            .sum();
+        assert_eq!(extracted_bytes, total_uncompressed_bytes);
+
+        let seconds = elapsed.as_secs_f64();
+        let archive_mib = archive_bytes as f64 / (1024.0 * 1024.0);
+        let extracted_mib = extracted_bytes as f64 / (1024.0 * 1024.0);
+        println!(
+            "benchmark_zip_extraction_throughput: {FILE_COUNT} stored entries, {archive_mib:.1} MiB archive, {extracted_mib:.1} MiB extracted in {seconds:.3}s ({:.1} MiB/s uncompressed, warm filesystem cache)",
+            extracted_mib / seconds
+        );
     }
 }

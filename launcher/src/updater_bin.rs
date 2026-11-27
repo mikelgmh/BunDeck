@@ -14,6 +14,18 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+fn log(root: &std::path::Path, message: &str) {
+    use std::io::Write;
+    let path = root.join("launcher-update.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let _ = writeln!(file, "{now} [updater] {message}");
+    }
+}
+
 fn arg(name: &str) -> Option<String> {
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -65,6 +77,7 @@ fn main() {
         .join(&version)
         .join(format!("bundeck-launcher{exe_suffix}"));
     let dest = target.unwrap_or_else(|| root.join(format!("bundeck-launcher{exe_suffix}")));
+    log(&root, &format!("Esperando al launcher PID {pid} para instalar {version}."));
 
     // Espera a que el launcher salga (máx ~30s).
     for _ in 0..150 {
@@ -72,6 +85,10 @@ fn main() {
             break;
         }
         std::thread::sleep(Duration::from_millis(200));
+    }
+    if pid_alive(pid) {
+        log(&root, &format!("El launcher PID {pid} sigue activo; no se reemplazará."));
+        return;
     }
     // Copia con reintentos (Windows libera el bloqueo con retardo).
     let mut last_err = String::new();
@@ -84,18 +101,62 @@ fn main() {
         }
         match std::fs::copy(&staged, &dest) {
             Ok(_) => {
-                // Relanza el launcher (no bloquea).
-                let _ = std::process::Command::new(&dest)
+                log(&root, "Launcher actualizado; intentando relanzar el panel.");
+                // Relanza el launcher (no bloquea). Si el nuevo binario no se
+                // puede iniciar, restaura el anterior y lo vuelve a abrir.
+                match std::process::Command::new(&dest)
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
-                    .spawn();
-                return;
+                    .spawn()
+                {
+                    Ok(_) => return,
+                    Err(error) => {
+                        log(&root, &format!("No se pudo arrancar el launcher nuevo: {error}"));
+                        let backup = dest.with_extension(format!("bak{exe_suffix}"));
+                        match std::fs::copy(&backup, &dest) {
+                            Ok(_) => {
+                                log(&root, "Launcher anterior restaurado; relanzándolo.");
+                                let _ = std::process::Command::new(&dest)
+                                    .stdin(std::process::Stdio::null())
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
+                                    .spawn();
+                            }
+                            Err(restore_error) => log(
+                                &root,
+                                &format!("No se pudo restaurar el launcher anterior: {restore_error}"),
+                            ),
+                        }
+                        return;
+                    }
+                }
             }
             Err(e) => {
                 last_err = e.to_string();
                 std::thread::sleep(Duration::from_millis(500));
             }
+        }
+    }
+    log(
+        &root,
+        &format!("No se pudo reemplazar el launcher: {last_err}"),
+    );
+    let backup = dest.with_extension(format!("bak{exe_suffix}"));
+    if backup.is_file() {
+        match std::fs::copy(&backup, &dest) {
+            Ok(_) => {
+                log(&root, "Se restauró el launcher anterior tras fallar el reemplazo.");
+                let _ = std::process::Command::new(&dest)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+            Err(error) => log(
+                &root,
+                &format!("Falló la restauración del launcher anterior: {error}"),
+            ),
         }
     }
     eprintln!("[updater] no se pudo reemplazar el launcher: {last_err}");

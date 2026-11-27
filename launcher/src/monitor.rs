@@ -79,12 +79,7 @@ pub fn frontend_port() -> u16 {
     env_port("FRONTEND_PORT", 3002)
 }
 
-fn http_ok(url: &str, timeout: Duration) -> Option<String> {
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(timeout)
-        .timeout_read(timeout)
-        .timeout_write(timeout)
-        .build();
+fn http_ok_with_agent(agent: &ureq::Agent, url: &str) -> Option<String> {
     match agent.get(url).call() {
         Ok(res) => res.into_string().ok(),
         Err(_) => None,
@@ -93,7 +88,16 @@ fn http_ok(url: &str, timeout: Duration) -> Option<String> {
 
 fn check_api(port: u16) -> ServiceSnapshot {
     let url = format!("http://127.0.0.1:{port}/health");
-    match http_ok(&url, Duration::from_millis(900)) {
+    let agent: ureq::Agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(900))
+        .timeout_read(Duration::from_millis(900))
+        .timeout_write(Duration::from_millis(900))
+        .build();
+    check_api_with_agent(port, &url, &agent)
+}
+
+fn check_api_with_agent(port: u16, url: &str, agent: &ureq::Agent) -> ServiceSnapshot {
+    match http_ok_with_agent(agent, url) {
         // El título ya no lleva el puerto; aquí tampoco: solo ":puerto".
         // (La versión se muestra en la sección ACTUALIZACIÓN.)
         Some(_) => ServiceSnapshot {
@@ -313,7 +317,7 @@ pub fn prepare_update() -> bool {
         .timeout_read(Duration::from_millis(1500))
         .timeout_write(Duration::from_millis(1500))
         .build();
-    agent.post(&url).call().is_ok()
+    post_ok_with_agent(&agent, &url)
 }
 
 /// Pide al daemon que se apague (POST /api/v1/admin/shutdown: responde al
@@ -325,7 +329,11 @@ pub fn shutdown_daemon() -> bool {
         .timeout_read(Duration::from_millis(1500))
         .timeout_write(Duration::from_millis(1500))
         .build();
-    agent.post(&url).call().is_ok()
+    post_ok_with_agent(&agent, &url)
+}
+
+fn post_ok_with_agent(agent: &ureq::Agent, url: &str) -> bool {
+    agent.post(url).call().is_ok()
 }
 
 /// Espera a que termine el daemon tras aceptar el apagado.
@@ -352,7 +360,11 @@ pub fn installed_version() -> Option<String> {
         .timeout_read(Duration::from_millis(1500))
         .timeout_write(Duration::from_millis(1500))
         .build();
-    let body = agent.get(&url).call().ok()?;
+    installed_version_with_agent(&agent, &url)
+}
+
+fn installed_version_with_agent(agent: &ureq::Agent, url: &str) -> Option<String> {
+    let body = agent.get(url).call().ok()?;
     let v: serde_json::Value = body.into_json().ok()?;
     v.get("version")?.as_str().map(|s| s.to_string())
 }
@@ -564,4 +576,129 @@ fn find_project_root() -> Option<std::path::PathBuf> {
         return Some(cwd);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    fn test_agent(timeout: Duration) -> ureq::Agent {
+        ureq::AgentBuilder::new()
+            .timeout_connect(timeout)
+            .timeout_read(timeout)
+            .timeout_write(timeout)
+            .build()
+    }
+
+    fn fake_daemon(
+        request_count: usize,
+        delay: Duration,
+    ) -> (String, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
+        let address = listener.local_addr().expect("read listener address");
+        let worker = std::thread::spawn(move || {
+            let mut requests = Vec::with_capacity(request_count);
+            for _ in 0..request_count {
+                let (mut stream, _) = listener.accept().expect("accept local request");
+                let mut bytes = [0; 2048];
+                let read = stream.read(&mut bytes).expect("read local request");
+                let request = String::from_utf8_lossy(&bytes[..read]).into_owned();
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                requests.push(request);
+
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                let (status, body) = match path.as_str() {
+                    "/health" => ("200 OK", r#"{"status":"ok"}"#),
+                    "/api/v1/version" => ("200 OK", r#"{"version":"2.3.4"}"#),
+                    "/api/v1/admin/prepare-update" | "/api/v1/admin/shutdown" => {
+                        ("200 OK", r#"{"ok":true}"#)
+                    }
+                    "/unavailable" => ("503 Service Unavailable", "unavailable"),
+                    "/malformed-version" => ("200 OK", r#"{"version":42}"#),
+                    _ => ("404 Not Found", "not found"),
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+            requests
+        });
+        (format!("http://{address}"), worker)
+    }
+
+    #[test]
+    fn local_daemon_routes_probe_health_version_and_admin_actions() {
+        let (base_url, worker) = fake_daemon(4, Duration::ZERO);
+        let agent = test_agent(Duration::from_secs(1));
+
+        let health = check_api_with_agent(
+            4567,
+            &format!("{base_url}/health"),
+            &agent,
+        );
+        assert_eq!(health.state, State::Ok);
+        assert_eq!(health.detail, ":4567");
+        assert_eq!(
+            installed_version_with_agent(&agent, &format!("{base_url}/api/v1/version")),
+            Some("2.3.4".to_string())
+        );
+        assert!(post_ok_with_agent(
+            &agent,
+            &format!("{base_url}/api/v1/admin/prepare-update")
+        ));
+        assert!(post_ok_with_agent(
+            &agent,
+            &format!("{base_url}/api/v1/admin/shutdown")
+        ));
+
+        let requests = worker.join().expect("fake daemon completed");
+        assert!(requests[0].starts_with("GET /health "));
+        assert!(requests[1].starts_with("GET /api/v1/version "));
+        assert!(requests[2].starts_with("POST /api/v1/admin/prepare-update "));
+        assert!(requests[3].starts_with("POST /api/v1/admin/shutdown "));
+    }
+
+    #[test]
+    fn probes_report_unavailable_and_reject_malformed_version_data() {
+        let (base_url, unavailable_worker) = fake_daemon(1, Duration::ZERO);
+        let agent = test_agent(Duration::from_secs(1));
+        let unavailable = check_api_with_agent(
+            4568,
+            &format!("{base_url}/unavailable"),
+            &agent,
+        );
+        assert_eq!(unavailable.state, State::Down);
+        assert_eq!(unavailable.detail, ":4568");
+        unavailable_worker.join().expect("fake daemon completed");
+
+        let (base_url, malformed_worker) = fake_daemon(1, Duration::ZERO);
+        assert_eq!(
+            installed_version_with_agent(&agent, &format!("{base_url}/malformed-version")),
+            None
+        );
+        malformed_worker.join().expect("fake daemon completed");
+    }
+
+    #[test]
+    fn health_probe_respects_http_read_timeout() {
+        let (base_url, worker) = fake_daemon(1, Duration::from_millis(200));
+        let agent = test_agent(Duration::from_millis(40));
+        let probe = check_api_with_agent(4569, &format!("{base_url}/health"), &agent);
+
+        assert_eq!(probe.state, State::Down);
+        assert_eq!(probe.detail, ":4569");
+        worker.join().expect("fake daemon completed");
+    }
 }

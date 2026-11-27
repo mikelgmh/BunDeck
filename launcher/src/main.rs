@@ -7,7 +7,8 @@
 //! - Al abrir: intenta que el daemon esté corriendo (espejo de
 //!   `spawnDaemon()` en `src/bun/index.ts`), luego sondea cada 2s:
 //!   API :3001 (/health), WS :3003 (TCP), Frontend :3002 o :4321 (HEAD /).
-//! - Botones: Abrir panel (navegador), Iniciar/Detener/Reiniciar, Salir.
+//! - Botones: Abrir panel (navegador), Iniciar/Detener/Reiniciar y ocultar
+//!   la ventana al tray. "Salir" solo está en el menú del tray.
 //!   Si Spotify pide login (POST /api/v1/plugins/spotify/login-request
 //!   desde cualquier UI, incluida la remota por túnel), abre el navegador
 //!   del sistema una vez y avisa en el panel hasta que se complete o se
@@ -23,12 +24,13 @@
 //!   Cerrar la ventana NO cierra la app (ni la manda a ningún sitio
 //!   distinto: la ventana simplemente se oculta): una ventana ancla
 //!   invisible mantiene vivo el proceso para que el tray siga
-//!   respondiendo. Solo "Salir" (de la ventana o del menú del tray)
-//!   termina el proceso. El menú del tray ofrece Abrir panel (esta
+//!   respondiendo. Solo "Salir" del menú del tray termina el proceso.
+//!   El menú del tray ofrece Abrir panel (esta
 //!   ventana GPUI), Abrir en la web (navegador) y Salir.
 
 mod monitor;
 mod autostart;
+mod instance;
 mod shortcuts;
 mod theme;
 mod tray;
@@ -38,6 +40,8 @@ use gpui::{
     div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, FontWeight,
     SharedString, WindowBounds, WindowOptions,
 };
+use std::fs::OpenOptions;
+use std::io::Write;
 #[cfg(windows)]
 use gpui::{AnyWindowHandle, MouseButton, Window, WindowKind};
 use std::path::PathBuf;
@@ -58,12 +62,287 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsZoomed, SendMessageW, ShowWindowAsync, HTCAPTION, ICON_BIG, ICON_SMALL, SW_MAXIMIZE,
-    SW_RESTORE, WM_NCLBUTTONDOWN, WM_SETICON,
+    IsZoomed, MessageBoxW, SendMessageW, ShowWindowAsync, HTCAPTION, ICON_BIG, ICON_SMALL,
+    IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_YESNO, SW_MAXIMIZE, SW_RESTORE,
+    WM_NCLBUTTONDOWN, WM_SETICON,
 };
 
 fn auto_updates_enabled() -> bool {
     std::env::var("DEV_MODE").as_deref() != Ok("true")
+}
+
+fn launcher_version() -> Option<String> {
+    option_env!("BUNDECK_VERSION")
+        .filter(|version| !version.trim().is_empty())
+        .map(str::to_string)
+}
+
+/// Persist updater events: release builds have no console and the in-memory
+/// UI log disappears when the launcher is replaced and restarted.
+fn persist_update_log(message: &str) {
+    let path = updater::user_data_dir().join("launcher-update.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let _ = writeln!(file, "{now} {message}");
+    }
+}
+
+/// Use the older of the launcher and daemon versions so a partially updated
+/// installation still receives the complete release bundle.
+fn oldest_component_version(daemon: &str) -> String {
+    match launcher_version() {
+        Some(launcher) if updater::is_newer(&launcher, daemon) => launcher,
+        _ => daemon.to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn acquire_single_instance() -> Option<instance::InstanceLock> {
+    let lock = match instance::InstanceLock::acquire() {
+        Ok(lock) => lock,
+        Err(error) => {
+            let text = format!("No se pudo comprobar si BunDeck ya está abierto:\n\n{error}");
+            let text_wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+            unsafe {
+                let _ = MessageBoxW(
+                    None,
+                    windows::core::PCWSTR(text_wide.as_ptr()),
+                    windows::core::w!("BunDeck"),
+                    windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR
+                        | MB_SETFOREGROUND,
+                );
+            }
+            return None;
+        }
+    };
+    if lock.is_owner() {
+        return Some(lock);
+    }
+
+    let Some(existing) = lock.existing_instance().cloned() else {
+        show_instance_message(
+            "Ya hay otra instancia de BunDeck abierta, pero no pude leer sus datos. \
+             Espera unos segundos e inténtalo de nuevo.",
+            false,
+        );
+        return None;
+    };
+    let question = format!(
+        "Ya hay BunDeck abierto en modo {} (PID {}).\n\n\
+         ¿Quieres cerrarlo y arrancar esta instancia?\n\
+         No: cancelar; la instancia anterior seguirá ejecutándose.",
+        existing.mode.as_str(),
+        existing.pid
+    );
+    if !show_instance_message(&question, true) {
+        return None;
+    }
+
+    persist_update_log(&format!(
+        "El usuario confirmó reemplazar la instancia PID {} ({})",
+        existing.pid,
+        existing.mode.as_str()
+    ));
+    // Best-effort: pedir al daemon que cierre limpio antes de terminar el
+    // launcher. La confirmación explícita autoriza el fallback a taskkill.
+    let _ = monitor::shutdown_daemon();
+    if !terminate_existing_instance(existing.pid) {
+        show_instance_message(
+            "No se pudo cerrar la instancia anterior. BunDeck seguirá abierto en su lugar.",
+            false,
+        );
+        return None;
+    }
+    drop(lock);
+
+    for _ in 0..60 {
+        match instance::InstanceLock::acquire() {
+            Ok(next) if next.is_owner() => return Some(next),
+            Ok(next) => drop(next),
+            Err(_) => {}
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    show_instance_message(
+        "La instancia anterior no liberó el control a tiempo. No se inició una segunda copia.",
+        false,
+    );
+    None
+}
+
+#[cfg(windows)]
+fn show_instance_message(text: &str, ask_yes_no: bool) -> bool {
+    let text_wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    let (style, caption) = if ask_yes_no {
+        (
+            MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
+            windows::core::w!("BunDeck ya está abierto"),
+        )
+    } else {
+        (
+            windows::Win32::UI::WindowsAndMessaging::MB_ICONWARNING | MB_SETFOREGROUND,
+            windows::core::w!("BunDeck"),
+        )
+    };
+    let result = unsafe {
+        MessageBoxW(
+            None,
+            windows::core::PCWSTR(text_wide.as_ptr()),
+            caption,
+            style,
+        )
+    };
+    !ask_yes_no || result == IDYES
+}
+
+#[cfg(windows)]
+fn terminate_existing_instance(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(0x08000000)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn prepare_existing_server() {
+    let snapshot = monitor::snapshot(false);
+    let api_up = snapshot.api.state == State::Ok;
+    let is_dev = snapshot.frontend.state == State::Ok && snapshot.frontend.detail == ":4321";
+    if !api_up && !is_dev {
+        return;
+    }
+
+    let version = monitor::installed_version().unwrap_or_else(|| "API no disponible".to_string());
+    let mode = if is_dev {
+        "desarrollo (Astro en :4321)"
+    } else {
+        "producción / servidor BunDeck"
+    };
+    let question = format!(
+        "Ya hay un servicio BunDeck activo{} (v{version}, {mode}).\n\n\
+         Sí: cerrarlo y arrancar uno nuevo.\nNo: conservarlo y abrir el panel con ese servidor.",
+        if api_up {
+            format!(" en :{}", monitor::api_port())
+        } else {
+            String::new()
+        }
+    );
+    if !show_instance_message(&question, true) {
+        return;
+    }
+
+    if api_up {
+        if !monitor::shutdown_daemon() {
+            show_instance_message(
+                "El servidor activo no aceptó la orden de cierre. Se conservará y BunDeck no iniciará una copia duplicada.",
+                false,
+            );
+            return;
+        }
+        monitor::wait_for_api_down();
+        if monitor::snapshot(false).api.state == State::Ok {
+            show_instance_message(
+                "El servidor BunDeck sigue respondiendo. Se abrirá el panel conectado al servidor existente.",
+                false,
+            );
+            return;
+        }
+    }
+
+    if is_dev {
+        let Some(pid) = process_listening_on(4321) else {
+            show_instance_message(
+                "Se detuvo el daemon, pero no pude identificar el proceso de Astro en :4321. \
+                 No lo cerraré; el panel seguirá disponible.",
+                false,
+            );
+            return;
+        };
+        if !is_bundeck_dev_process(pid) {
+            show_instance_message(
+                "Hay un proceso escuchando en :4321, pero no pude confirmar que sea BunDeck/Astro. \
+                 No lo cerraré; el panel seguirá disponible.",
+                false,
+            );
+            return;
+        }
+        if pid != std::process::id() && !terminate_existing_instance(pid) {
+            show_instance_message(
+                "Se detuvo el daemon, pero no se pudo cerrar el servidor de desarrollo en :4321. \
+                 El panel seguirá disponible y usará los servicios que respondan.",
+                false,
+            );
+            return;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn is_bundeck_dev_process(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    let filter = format!("ProcessId = {pid}");
+    let script = format!(
+        "$p=Get-CimInstance Win32_Process -Filter '{filter}'; \
+         if ($p -and $p.CommandLine -match '(?i)astro|bundeck|libredeck|daemon[\\\\/]+src[\\\\/]+server') {{ 'yes' }}"
+    );
+    std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ])
+        .creation_flags(0x08000000)
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "yes")
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn process_listening_on(port: u16) -> Option<u32> {
+    use std::os::windows::process::CommandExt;
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .creation_flags(0x08000000)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let suffix = format!(":{port}");
+    text.lines().find_map(|line| {
+        let columns: Vec<_> = line.split_whitespace().collect();
+        if columns.len() < 5
+            || !columns[0].eq_ignore_ascii_case("TCP")
+            || !columns[1].ends_with(&suffix)
+            || !columns[3].eq_ignore_ascii_case("LISTENING")
+        {
+            return None;
+        }
+        columns[4].parse().ok()
+    })
+}
+
+#[cfg(not(windows))]
+fn acquire_single_instance() -> Option<instance::InstanceLock> {
+    match instance::InstanceLock::acquire() {
+        Ok(lock) if lock.is_owner() => Some(lock),
+        Ok(_) => {
+            eprintln!("[launcher] BunDeck ya está abierto; no iniciar otra instancia.");
+            None
+        }
+        Err(error) => {
+            eprintln!("[launcher] no se pudo comprobar la instancia: {error}");
+            None
+        }
+    }
 }
 
 /// Canal hacia el bucle de eventos del tray (Windows): "Salir" pasa por
@@ -148,6 +427,41 @@ enum BackgroundEvent {
 }
 
 impl LauncherView {
+    /// Build the view without starting monitor or update workers. This keeps
+    /// headless UI tests deterministic and isolated from local services.
+    #[cfg(test)]
+    fn new_for_test() -> Self {
+        let (background_tx, background_rx) = mpsc::channel();
+        let (monitor_tx, _monitor_rx) = mpsc::channel();
+
+        Self {
+            snapshot: Snapshot::initial(),
+            log: vec!["Launcher iniciado.".to_string()],
+            polls: 1,
+            tab: Tab::Status,
+            installed: None,
+            latest: None,
+            update_check: None,
+            update_progress: Arc::new(Mutex::new(updater::UpdateProgress::default())),
+            update_busy: false,
+            update_applying: false,
+            update_checking: false,
+            auto_update_initialized: false,
+            next_auto_update_check: Instant::now() + Duration::from_secs(6 * 60 * 60),
+            restart_after_update: false,
+            last_applied: None,
+            launcher_pending_restart: false,
+            pending_start: false,
+            logo: None,
+            spotify_notice: None,
+            background_tx,
+            background_rx,
+            monitor_tx,
+            #[cfg(windows)]
+            last_chrome_click: None,
+        }
+    }
+
     fn new(cx: &mut Context<Self>) -> Self {
         let (background_tx, background_rx) = mpsc::channel();
         let (monitor_tx, monitor_rx) = mpsc::channel();
@@ -232,8 +546,19 @@ impl LauncherView {
                                 }
                                 if let Some(msg) = finished_msg {
                                     view.update_busy = false;
+                                    persist_update_log(&msg);
                                     view.log.push(msg);
                                     if download_failed {
+                                        if let Some(error) = view
+                                            .update_progress
+                                            .lock()
+                                            .ok()
+                                            .and_then(|p| p.error.clone())
+                                        {
+                                            persist_update_log(&format!(
+                                                "Falló la descarga de la actualización: {error}"
+                                            ));
+                                        }
                                         view.next_auto_update_check =
                                             Instant::now() + Duration::from_secs(15 * 60);
                                     }
@@ -263,26 +588,36 @@ impl LauncherView {
                                         view.update_check = None;
                                         if changed {
                                             view.launcher_pending_restart = true;
-                                            view.log.push(
+                                            let message =
                                                 "La actualización está activa; reiniciando el launcher."
-                                                    .to_string(),
-                                            );
+                                                    .to_string();
+                                            persist_update_log(&message);
+                                            view.log.push(message);
                                             if view.restart_after_update {
                                                 let should_quit = view.restart_for_self_update();
                                                 view.restart_after_update = false;
                                                 if should_quit {
-                                                    quit_app(cx);
+                                                    restart_app_for_update(cx);
                                                 }
                                             }
                                         } else {
                                             view.restart_after_update = false;
                                         }
-                                        *view.update_progress.lock().unwrap() =
+                                        *view
+                                            .update_progress
+                                            .lock()
+                                            .unwrap_or_else(|poison| poison.into_inner()) =
                                             updater::UpdateProgress::default();
                                     } else if let Some(e) = apply_err {
                                         view.restart_after_update = false;
                                         view.log.push(format!("No se pudo aplicar: {e}"));
-                                        *view.update_progress.lock().unwrap() =
+                                        persist_update_log(&format!(
+                                            "No se pudo aplicar la actualización: {e}"
+                                        ));
+                                        *view
+                                            .update_progress
+                                            .lock()
+                                            .unwrap_or_else(|poison| poison.into_inner()) =
                                             updater::UpdateProgress {
                                                 stage: "No se pudo instalar la actualización."
                                                     .to_string(),
@@ -290,6 +625,23 @@ impl LauncherView {
                                                 ..Default::default()
                                             };
                                     }
+                                }
+                            }
+                            // Una descarga verificada se aplica sin exigir un
+                            // reinicio manual. Si también cambió el launcher,
+                            // el helper lo sustituye y relanza con el tray.
+                            if !view.update_busy
+                                && !view.update_applying
+                                && !view.launcher_pending_restart
+                            {
+                                if let Some(ver) = view.update_staged_version() {
+                                    let message = format!(
+                                        "Descarga de BunDeck {ver} lista; aplicando actualización."
+                                    );
+                                    view.log.push(message.clone());
+                                    persist_update_log(&message);
+                                    view.restart_after_update = true;
+                                    view.finish_apply(&ver);
                                 }
                             }
                             if view.auto_update_initialized
@@ -478,11 +830,16 @@ impl LauncherView {
         self.update_checking = true;
         self.update_check = None;
         self.log.push("Buscando actualizaciones…".to_string());
+        persist_update_log("Buscando actualizaciones.");
         let tx = self.background_tx.clone();
         std::thread::spawn(move || {
             let installed = monitor::installed_version();
-            let current = installed.clone().unwrap_or_else(|| "dev".to_string());
-            let result = updater::check_for_update(&current);
+            let result = match installed.as_deref() {
+                Some(daemon_version) => {
+                    updater::check_for_update(&oldest_component_version(daemon_version))
+                }
+                None => Err("daemon no responde con una versión instalada".to_string()),
+            };
             let latest_fallback = result
                 .as_ref()
                 .err()
@@ -515,6 +872,10 @@ impl LauncherView {
                     check.asset.bundle,
                     check.asset.size as f64 / 1_048_576.0
                 ));
+                persist_update_log(&format!(
+                    "Actualización detectada: {} -> {} ({})",
+                    check.current, check.latest, check.asset.bundle
+                ));
                 if !check.manifest_signed {
                     self.log.push(
                         "Aviso: bundle sin firma (solo sha256).".to_string(),
@@ -531,16 +892,24 @@ impl LauncherView {
                     .map(|c| c.latest != check.latest)
                     .unwrap_or(true)
                 {
-                    *self.update_progress.lock().unwrap() = updater::UpdateProgress::default();
+                    *self
+                        .update_progress
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner()) =
+                        updater::UpdateProgress::default();
                 }
                 self.update_check = Some(check);
             }
             Ok(None) => {
                 let current = self.installed.as_deref().unwrap_or("dev");
                 self.log.push(format!("Estás al día (v{current})."));
+                persist_update_log(&format!("Componentes al día (v{current})."));
                 self.update_check = None;
                 if self.update_staged_version().is_none() {
-                    *self.update_progress.lock().unwrap() =
+                    *self
+                        .update_progress
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner()) =
                         updater::UpdateProgress::default();
                 }
                 self.latest = Some(LatestRelease {
@@ -556,7 +925,10 @@ impl LauncherView {
                 // Fallback informativo a latest_release clásico.
                 self.latest = latest_fallback;
                 if self.update_staged_version().is_none() {
-                    let mut progress = self.update_progress.lock().unwrap();
+                    let mut progress = self
+                        .update_progress
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
                     progress.stage = "No se pudo verificar la actualización.".to_string();
                     progress.error = Some(format!("No se pudo comprobar el manifiesto: {e}"));
                 }
@@ -573,6 +945,7 @@ impl LauncherView {
                     )),
                     _ => self.log.push(format!("No se pudo completar el chequeo: {e}")),
                 }
+                persist_update_log(&format!("Falló el chequeo de actualizaciones: {e}"));
             }
         }
         if let Some(check) = self.update_check.clone() {
@@ -582,7 +955,10 @@ impl LauncherView {
                     &check.latest,
                 ) {
                     Ok(()) => {
-                        *self.update_progress.lock().unwrap() = updater::UpdateProgress {
+                        *self
+                            .update_progress
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner()) = updater::UpdateProgress {
                             done: true,
                             stage: format!("Lista la versión {}", check.latest),
                             staged_version: Some(check.latest),
@@ -590,7 +966,10 @@ impl LauncherView {
                         };
                     }
                     Err(e) => {
-                        let mut progress = self.update_progress.lock().unwrap();
+                        let mut progress = self
+                            .update_progress
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
                         progress.error = Some(e);
                     }
                 }
@@ -667,7 +1046,10 @@ impl LauncherView {
         }
         // 4) Descarga en hilo de fondo (progreso vía Arc<Mutex>).
         self.update_busy = true;
-        *self.update_progress.lock().unwrap() = updater::UpdateProgress {
+        *self
+            .update_progress
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = updater::UpdateProgress {
             stage: format!("Descargando {}…", check.asset.bundle),
             ..Default::default()
         };
@@ -973,13 +1355,9 @@ impl Render for LauncherView {
         let update_checking = self.update_checking;
         let update_applying = self.update_applying;
         let launcher_pending_restart = self.launcher_pending_restart;
-        let update_ready = staged_ver.is_some() || launcher_pending_restart;
+        let update_ready = launcher_pending_restart;
         let update_btn_label = if launcher_pending_restart {
             "Reiniciar launcher"
-        } else if update_applying {
-            "Instalando…"
-        } else if staged_ver.is_some() {
-            "Reiniciar para actualizar"
         } else {
             ""
         };
@@ -1064,6 +1442,7 @@ impl Render for LauncherView {
                     .gap_1()
                     .child(
                         div()
+                            .debug_selector(|| "tab-status".to_string())
                             .id("tab-status")
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
@@ -1090,6 +1469,7 @@ impl Render for LauncherView {
                     )
                     .child(
                         div()
+                            .debug_selector(|| "tab-log".to_string())
                             .id("tab-log")
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
@@ -1147,6 +1527,7 @@ impl Render for LauncherView {
                     .gap_2()
                     .child(
                         div()
+                            .debug_selector(|| "daemon-start".to_string())
                             .id("daemon-start")
                             .flex_1()
                             .text_center()
@@ -1250,9 +1631,11 @@ impl Render for LauncherView {
                                 theme::secondary_text()
                             })
                             .child(if launcher_pending_restart {
-                                "La actualización está instalada; reinicia para cargar el launcher nuevo.".to_string()
+                                "Actualización aplicada; reinicia el launcher para cargar los cambios.".to_string()
+                            } else if update_applying {
+                                "Aplicando la actualización; el panel volverá a abrirse al terminar.".to_string()
                             } else if let Some(version) = staged_ver.as_deref() {
-                                format!("v{version} descargada. Se instalará al reiniciar BunDeck.")
+                                format!("v{version} descargada y verificada; iniciando instalación…")
                             } else if update_busy {
                                 "Descargando la actualización en segundo plano…".to_string()
                             } else if update_checking {
@@ -1303,6 +1686,7 @@ impl Render for LauncherView {
                     .child(
                         if update_ready {
                             div()
+                                .debug_selector(|| "restart-update".to_string())
                                 .id("restart-update")
                                 .flex_1()
                                 .text_center()
@@ -1496,10 +1880,10 @@ impl Render for LauncherView {
                     .text_color(theme::secondary_text())
                     .cursor_pointer()
                     .hover(|s| s.border_color(theme::secondary_text()))
-                    .on_click(|_, _, cx: &mut App| {
-                        quit_app(cx);
-                    })
-                    .child("Salir".to_string())
+                    .on_click(cx.listener(|_, _, window, _| {
+                        window.remove_window();
+                    }))
+                    .child("Ocultar al tray".to_string())
                     .into_any_element()
             } else {
                 div().hidden().into_any_element()
@@ -1511,6 +1895,7 @@ impl Render for LauncherView {
                     .gap_2()
                     .child(
                         div()
+                            .debug_selector(|| "clear-log".to_string())
                             .id("clear-log")
                             .flex_1()
                             .text_center()
@@ -1663,6 +2048,12 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
             }
             cx.quit();
         }
+        TrayEvent::Restart => {
+            if let Some(tray) = state.borrow_mut().tray.take() {
+                tray.shutdown();
+            }
+            cx.quit();
+        }
     }
 }
 
@@ -1677,10 +2068,25 @@ fn quit_app(cx: &mut App) {
     cx.quit();
 }
 
+#[cfg(windows)]
+fn restart_app_for_update(cx: &mut App) {
+    if let Some(tx) = TRAY_TX.get() {
+        if tx.send(TrayEvent::Restart).is_ok() {
+            return;
+        }
+    }
+    cx.quit();
+}
+
 /// Sin tray: salir directamente (apagando antes el daemon si está en marcha).
 #[cfg(not(windows))]
 fn quit_app(cx: &mut App) {
     let _ = monitor::shutdown_daemon();
+    cx.quit();
+}
+
+#[cfg(not(windows))]
+fn restart_app_for_update(cx: &mut App) {
     cx.quit();
 }
 
@@ -1806,11 +2212,17 @@ fn begin_native_drag(window: &mut Window) {
 }
 
 /// ¿Ventana maximizada? (para el icono de maximizar/restaurar).
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 fn is_maximized(window: &mut Window) -> bool {
     hwnd_of(window)
         .map(|hwnd| unsafe { IsZoomed(hwnd).0 != 0 })
         .unwrap_or(false)
+}
+
+/// Headless GPUI test windows do not expose an HWND.
+#[cfg(all(windows, test))]
+fn is_maximized(_window: &mut Window) -> bool {
+    false
 }
 
 /// Glifos de la barra (12px, trazo 1.5), estilo TitleBar de bundeck.
@@ -2026,11 +2438,18 @@ fn pending_update_for_startup() -> Option<String> {
 }
 
 fn main() {
+    // El mutex se mantiene durante toda la vida del launcher. Se comparte
+    // entre instalaciones y DEV_MODE para impedir dos paneles/daemons a la vez.
+    let Some(_instance_lock) = acquire_single_instance() else {
+        return;
+    };
+    #[cfg(windows)]
+    prepare_existing_server();
     // Atajos globales (hilo dedicado; no bloquea el arranque ni la UI).
     shortcuts::start_shortcuts();
-    // Las actualizaciones se descargan mientras la app está abierta, pero se
-    // activan al reiniciar. Si el usuario cerró BunDeck sin reiniciarlo,
-    // aplica aquí el stage antes de abrir la ventana o arrancar el daemon.
+    // Las actualizaciones se descargan y aplican con la app abierta. Si el
+    // proceso se cerró antes de completar la activación, aplica el stage
+    // pendiente antes de abrir la ventana o arrancar el daemon.
     if auto_updates_enabled() {
         if let Some(version) = pending_update_for_startup() {
             let mut lines = Vec::new();
@@ -2040,8 +2459,9 @@ fn main() {
                         eprintln!("[launcher] no se pudo actualizar el launcher: {e}");
                     } else {
                         return;
-                    }
-                }
+    }
+}
+
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("[launcher] no se pudo aplicar la actualización pendiente: {e}")
@@ -2128,4 +2548,60 @@ fn main() {
             .expect("no se pudo abrir la ventana del launcher");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Modifiers, TestAppContext};
+
+    #[gpui::test]
+    fn renders_initial_state_and_updates_readiness(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| LauncherView::new_for_test());
+        cx.refresh().expect("schedule initial render");
+        cx.run_until_parked();
+
+        assert!(cx.debug_bounds("tab-status").is_some());
+        assert!(cx.debug_bounds("tab-log").is_some());
+        assert!(cx.debug_bounds("daemon-start").is_some());
+
+        view.update(cx, |view, cx| {
+            assert!(!view.ready_to_close());
+            view.snapshot.api.state = State::Ok;
+            view.snapshot.frontend.state = State::Ok;
+            view.launcher_pending_restart = true;
+            cx.notify();
+        });
+        cx.refresh().expect("schedule updated render");
+        cx.run_until_parked();
+
+        view.update(cx, |view, _| {
+            assert!(view.ready_to_close());
+            assert!(view.update_available());
+        });
+        assert!(cx.debug_bounds("restart-update").is_some());
+
+        view.update(cx, |view, cx| {
+            view.launcher_pending_restart = false;
+            assert!(!view.update_available());
+            cx.notify();
+        });
+        cx.refresh().expect("schedule render after clearing update state");
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn clicking_log_tab_changes_rendered_content(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| LauncherView::new_for_test());
+        cx.refresh().expect("schedule initial render");
+        cx.run_until_parked();
+        let tab_log = cx.debug_bounds("tab-log").expect("log tab is rendered");
+
+        cx.simulate_click(tab_log.center(), Modifiers::none());
+        cx.refresh().expect("schedule render after clicking log tab");
+        cx.run_until_parked();
+
+        view.update(cx, |view, _| assert_eq!(view.tab, Tab::Log));
+        assert!(cx.debug_bounds("clear-log").is_some());
+    }
 }

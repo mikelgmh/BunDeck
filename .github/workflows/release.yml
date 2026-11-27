@@ -75,8 +75,32 @@ jobs:
     - name: Run tests
       run: bun run test
 
+  launcher-tests:
+    name: Launcher Rust tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Linux system dependencies (GPUI)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+    - name: Run launcher tests
+      run: cargo test --manifest-path launcher/Cargo.toml
+
   release-version:
-    needs: test
+    needs: [test, launcher-tests]
     runs-on: ubuntu-latest
     permissions:
       # semantic-release necesita permiso de push incluso en --dry-run
@@ -129,7 +153,7 @@ jobs:
         echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [test, release-version]
+    needs: [test, launcher-tests, release-version]
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
