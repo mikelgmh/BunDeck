@@ -1,3 +1,17 @@
+# [1.25.0](https://github.com/mikelgmh/BunDeck/compare/v1.24.0...v1.25.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **web:** clic en edicion, animaciones de datos y padding del kiosco ([6aae681](https://github.com/mikelgmh/BunDeck/commit/6aae681e89d2f9551d88c5a18b46818e8ccbb13d))
+
+
+### Features
+
+* **daemon:** parametro carouselMs en los schemas de superficie de widgets ([d759533](https://github.com/mikelgmh/BunDeck/commit/d75953345b7ff9a546f96d009e7279ddf1fd7005))
+* **web:** infraestructura compartida de widgets del modo libre ([d161416](https://github.com/mikelgmh/BunDeck/commit/d161416902be8b49b5b26f6e4f5ff7cd35c320cd))
+* **web:** rediseno de los 12 widgets del modo libre ([144d248](https://github.com/mikelgmh/BunDeck/commit/144d2481bca52b2bda96a6cc57e0b39900d9b44d))
+
 # [1.24.0](https://github.com/mikelgmh/BunDeck/compare/v1.23.0...v1.24.0) (2026-11-27)
 
 
