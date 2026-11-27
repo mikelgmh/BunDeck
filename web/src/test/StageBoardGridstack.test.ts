@@ -249,4 +249,63 @@ describe('StageBoard GridStack por página', () => {
     expect(se.attributes('gs-y')).toBe('2')
     wrapper.unmount()
   })
+
+  it('la retícula de puntitos tiene fase estable (no se desplaza al crecer la placa)', () => {
+    // Regresión: con `background-position: center` la fase de los puntitos
+    // dependía de la altura total (offset = (H-88)/2 mod 88), así que al
+    // mover/redimensionar widgets los puntitos "saltaban" media celda y el
+    // grid parecía descuadrado respecto a las teclas. Con origen fijo la
+    // retícula coincide siempre con el paso de GridStack (unidad 88px).
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/bundeck.css'), 'utf8')
+    const bdGs = css.match(/\.bundeck\s+\.bd-gs\s*\{[^}]*\}/s)?.[0] ?? ''
+    expect(bdGs).toContain('background-position: left top')
+    expect(bdGs).not.toContain('background-position: center')
+  })
+
+  it('en kiosco la unidad libre es cuadrada (fit): puntitos unit×unit sin scroll interno', () => {
+    // Antes la placa de kiosco era fluida (100%) con cellHeight fijo: las
+    // celdas no eran cuadradas y los puntitos repartían el ancho con
+    // `calc(100%/cols)`. Ahora updateKioskGsFit encaja unit=min(ancho,alto)
+    // y la propaga a gs.cellHeight: celdas cuadradas, puntitos unit×unit y
+    // sin scroll interno (el scroll lo absorbe .bd-floor).
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/bundeck.css'), 'utf8')
+    expect(css).toContain('.bundeck.bd-kiosk .bd-gs')
+    const kioskGs = css.match(/\.bundeck\.bd-kiosk\s+\.bd-gs\s*\{[^}]*\}/s)?.[0] ?? ''
+    expect(kioskGs).toContain('background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px))')
+    expect(kioskGs).not.toContain('calc(100% / var(--bd-c')
+    const kioskViewport = css.match(/\.bundeck\.bd-kiosk\s+\.bd-gs-viewport\s*\{[^}]*\}/s)?.[0] ?? ''
+    expect(kioskViewport).toContain('overflow: visible')
+    const kioskWrap = css.match(/\.bundeck\.bd-kiosk\s+\.bd-gs-wrap\s*\{[^}]*\}/s)?.[0] ?? ''
+    expect(kioskWrap).toContain('var(--bd-gs-unit')
+  })
+
+  it('persiste geometría solo al soltar el gesto, nunca al montar (sin "change")', async () => {
+    // Regresión: persistir el evento 'change' de GridStack reescribía la
+    // geometría guardada en cada visita (init/makeWidget/column emiten
+    // 'change' al adoptar y resolver colisiones heredadas: widgets
+    // teletransportados por el clamp, solapes "resueltos", nodos fantasma
+    // `<id>_1` con PUTs 500). Solo dragstop/resizestop persisten.
+    const mockedInit = vi.mocked(GridStack.init)
+    mockedInit.mockClear()
+    const wrapper = mount(StageBoard, { props: { ...baseProps, layoutMode: 'gridstack' } })
+    await vi.waitFor(() => {
+      expect(mockedInit).toHaveBeenCalled()
+    })
+    const instance = mockedInit.mock.results[0]?.value as any
+    const wired = (instance.on.mock.calls as any[]).map((c) => c[0])
+    expect(wired).toContain('dragstop')
+    expect(wired).toContain('resizestop')
+    expect(wired).not.toContain('change')
+    // Y al soltar emite layout-change con la geometría final del gesto.
+    const dragstop = (instance.on.mock.calls as any[]).find((c) => c[0] === 'dragstop')?.[1]
+    const el = document.createElement('div')
+    el.setAttribute('gs-id', 'a')
+    ;(el as any).gridstackNode = { id: 'a', x: 3, y: 1, w: 2, h: 2 }
+    dragstop(null, el)
+    await vi.waitFor(() => {
+      expect(wrapper.emitted('layout-change')).toBeTruthy()
+    })
+    expect(wrapper.emitted('layout-change')?.[0]).toEqual([[{ id: 'a', x: 3, y: 1, w: 2, h: 2 }]])
+    wrapper.unmount()
+  })
 })

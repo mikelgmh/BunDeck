@@ -833,7 +833,7 @@
    altura de celda; asÃ­ cada 1Ã1 queda cuadrado en desktop y mÃ³vil. */
 .bundeck .bd-gs-wrap { position: relative; width: calc(var(--bd-c, 5) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) + 48px); max-width: none; min-width: 0; flex: none; display: flex; flex-direction: column; padding: 24px; border-radius: calc(var(--bd-rk) + 12px); background: linear-gradient(180deg, var(--bd-p1), var(--bd-p2)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 32px 48px -28px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .bundeck .bd-gs-add { display: inline-flex; align-items: center; gap: 6px; }
-.bundeck .bd-gs { width: 100%; min-width: 0; min-height: calc(var(--bd-r, 3) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px))); background-color: transparent; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1.2px, transparent 1.8px); background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px)); background-position: center; border: 0; border-radius: 12px; padding: 0; }
+.bundeck .bd-gs { width: 100%; min-width: 0; min-height: calc(var(--bd-r, 3) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px))); background-color: transparent; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1.2px, transparent 1.8px); background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px)); background-position: left top; border: 0; border-radius: 12px; padding: 0; }
 .bundeck .bd-gs .grid-stack-item-content { overflow: visible; }
 .bundeck .bd-gs .bd-key { width: 100%; height: 100%; min-height: 0; }
 /* Control de volumen (solo modo libre): misma tecla, pero el contenido
@@ -844,6 +844,11 @@
 .bundeck .bd-gs-drag-handle { position: absolute; z-index: 102; top: 10px; right: 10px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--bd-kt); background: rgba(0, 0, 0, .45); opacity: 0; cursor: grab; transition: opacity .12s; }
 .bundeck .grid-stack-item:hover .bd-gs-drag-handle, .bundeck .bd-gs-drag-handle:focus-visible { opacity: 1; }
 .bundeck .bd-gs-drag-handle:active { cursor: grabbing; }
+/* Táctil (sin hover): el tirador siempre visible; si no, no se puede
+   descubrir ni agarrar para mover el widget (GridStack arrastra por handle). */
+@media (pointer: coarse) {
+  .bundeck .bd-gs-drag-handle { opacity: 1; }
+}
 .bundeck .bd-deck-cell.bd-over { outline: 2px dashed var(--bd-ac); outline-offset: 2px; }
 .bundeck .bd-widget { border: 1px solid var(--bd-ln); border-radius: 10px; background: var(--bd-k1); padding: 8px; display: flex; min-height: 72px; }
 .bundeck .bd-widget--sel { outline: 2px solid var(--bd-ac); outline-offset: 1px; }
@@ -962,6 +967,9 @@
 }
 .bundeck.bd-kiosk .bd-floor {
   padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  /* La kiosk-bar es fixed (overlay): reservar su aire abajo o la última
+     fila del grid quedaría detrás de la barra y parecería "cortada". */
+  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
 }
 .bundeck.bd-kiosk .bd-stack {
   width: 100%;
@@ -970,7 +978,7 @@
   width: 100%;
   grid-template-columns: repeat(var(--bd-c), minmax(0, 1fr));
 }
-.bundeck.bd-kiosk .bd-key {
+.bundeck.bd-kiosk .bd-plate .bd-key {
   width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
@@ -979,6 +987,13 @@
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+}
+/* Libre en kiosco: la altura la manda GridStack (filas), nunca el ancho.
+   Sin esto, aspect-ratio:1/1 heredado cuadraba la tecla (w=4 → alta como
+   ancha) y se solapaba con las filas de abajo pareciendo "cortada". */
+.bundeck.bd-kiosk .bd-gs .bd-key {
+  aspect-ratio: auto;
+  height: 100%;
 }
 /* El icono/imagen hereda el tamaño de la tecla: en móvil las teclas
    pueden quedar en ~35px y el icono fijo de 28px / imagen de 40px
@@ -991,15 +1006,24 @@
   width: 42%;
   height: 42%;
 }
-/* Libre (gridstack) en kiosco: que no desborde en horizontal; las
-   columnas ya reparten el ancho disponible. */
+/* Libre (gridstack) en kiosco: sin scroll interno — el scroll lo absorbe
+   .bd-floor (overflow:auto). El viewport con overflow-x:auto forzaba
+   overflow-y:auto efectivo y recortaba los widgets 2×2 contra .bd-key
+   (overflow:hidden). Con la unidad del fit cuadrada, el fondo vuelve a
+   unit × unit y el wrap se ciñe a cols×unit+48 (como en escritorio) para
+   que el ancho de columna coincida con el alto de fila. */
 .bundeck.bd-kiosk .bd-gs-viewport {
   width: 100%;
   max-width: 100%;
+  overflow: visible;
 }
 .bundeck.bd-kiosk .bd-gs-wrap {
-  width: 100%;
+  width: min(100%, calc(var(--bd-c, 5) * var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) + 48px));
   max-width: 100%;
+  margin: 0 auto;
+}
+.bundeck.bd-kiosk .bd-gs {
+  background-size: var(--bd-gs-unit, calc(var(--bd-ks) + 12px)) var(--bd-gs-unit, calc(var(--bd-ks) + 12px));
 }
 /* Zona invisible de triple-tap (esquina superior derecha, 96x96). */
 .bundeck .bd-kiosk-corner {
@@ -1144,6 +1168,7 @@
 @media (max-width: 640px) {
   .bundeck.bd-kiosk .bd-floor {
     padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
   .bundeck.bd-kiosk .bd-plate {
     gap: 8px;

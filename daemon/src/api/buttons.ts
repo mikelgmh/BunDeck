@@ -171,10 +171,23 @@ export const handleButtons: ApiHandler = async (_req, { url, method, path, db, s
         if (isUniqueConstraintError(error)) {
           return jsonResponse({ error: `La posición ${body.position} ya está ocupada en esta página` }, 409);
         }
+        // IDs desconocidos (p. ej. nodos GridStack duplicados con sufijo
+        // `_1`, ecos tardíos tras borrar): 404, no 500. El 500 genérico
+        // oculta el problema y rompe el flujo de edición en modo libre.
+        if (error instanceof Error && /no encontrado/i.test(error.message)) {
+          return jsonResponse({ error: error.message }, 404);
+        }
+        // Geometría/payload inválido (w=99, x=-1, ids vacíos…): 400, no 500.
+        if (error instanceof Error && /inv[aá]lid|requerido/i.test(error.message)) {
+          return jsonResponse({ error: error.message }, 400);
+        }
         throw error;
       }
 
       const updatedButton = db.getButton(buttonId);
+      if (!updatedButton) {
+        return jsonResponse({ error: `Botón no encontrado: ${buttonId}` }, 404);
+      }
       services.wsManager.broadcastButtonUpdate(buttonId, updatedButton, (body as any)?.mutationId);
 
       // Fuera del camino crítico (ver scheduleResyncButtonAutomations).

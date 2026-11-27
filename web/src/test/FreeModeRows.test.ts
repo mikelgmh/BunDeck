@@ -30,6 +30,7 @@ vi.mock('gridstack', () => ({
       makeWidget: vi.fn(),
       compact: vi.fn(),
       column: vi.fn(),
+      cellHeight: vi.fn(),
       updateOptions: vi.fn(),
       getCellFromPixel: vi.fn(() => ({ x: 0, y: 0 })),
     })),
@@ -167,3 +168,81 @@ describe('StageBoard filas renderizadas == filas configuradas', () => {
     wrapper.unmount()
   })
 })
+
+describe('StageBoard kiosco + libre: la unidad encaja sin recortar 2×2', () => {
+  beforeEach(() => {
+    createSwapyMock.mockReset()
+    createSwapyMock.mockImplementation(() => ({
+      onSwapEnd: vi.fn(),
+      destroy: vi.fn(),
+      update: vi.fn(),
+    }))
+  })
+
+  it('widget 2×2: --bd-gs-unit cabe en el viewport y se propaga a cellHeight', async () => {
+    const { GridStack } = await import('gridstack')
+    const initMock = GridStack.init as unknown as ReturnType<typeof vi.fn>
+    initMock.mockClear()
+    // Viewport determinista: sin visualViewport jsdom cae a clientWidth=0.
+    const vvDesc = Object.getOwnPropertyDescriptor(window, 'visualViewport')
+    Object.defineProperty(window, 'visualViewport', {
+      value: { width: 1280, height: 800, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      configurable: true,
+    })
+    try {
+      const big = { id: 'big', page_id: 'p', position: 0, x: 0, y: 0, w: 2, h: 2, data: { label: 'B', actions: [] } }
+      const wrapper = mount(StageBoard, {
+        props: {
+          ...baseProps,
+          kiosk: true,
+          mode: 'use',
+          layoutMode: 'gridstack',
+          gridCols: 5,
+          gridRows: 3,
+          allButtons: [big],
+          getButton: (pos: number) => (pos === 0 ? big : undefined),
+          getButtonData: (pos: number) => (pos === 0 ? big.data : null),
+        },
+      })
+      await nextTick()
+      await nextTick()
+      await flushPromisesIfAvailable()
+      // El fit de kiosco ya corrió: cols=5, total=3 → unit=min(1232/5, 752/3)=246.
+      const wrap = () => wrapper.find('.bd-gs-wrap')
+      let unit = NaN
+      await vi.waitFor(() => {
+        const style = wrap().attributes('style') ?? ''
+        const m = style.match(/--bd-gs-unit:\s*(\d+)px/)
+        expect(m).not.toBeNull()
+        unit = Number(m![1])
+        expect(unit).toBe(246)
+      })
+      // Cabe a lo ancho y a lo alto (wrap padding 48 por lado).
+      expect(unit * 5 + 48).toBeLessThanOrEqual(1280)
+      expect(unit * 3 + 48).toBeLessThanOrEqual(800)
+      // GridStack recibe la unidad cuadrada: o bien en el init, o bien vía
+      // el watcher de kioskFit → gs.cellHeight(unit) sin re-crear.
+      await vi.waitFor(() => {
+        expect(initMock).toHaveBeenCalled()
+      })
+      const initUnit = (initMock.mock.calls as any[])
+        .map((c) => c?.[0]?.cellHeight)
+        .filter((v) => typeof v === 'number')
+      const pushedUnits = initMock.mock.results
+        .map((r) => (r?.value as any)?.cellHeight)
+        .filter((fn) => typeof fn === 'function')
+        .flatMap((fn: any) => fn.mock.calls.map((c: any[]) => c?.[0]))
+        .filter((v: any) => typeof v === 'number')
+      expect([...initUnit, ...pushedUnits]).toContain(246)
+      wrapper.unmount()
+    } finally {
+      if (vvDesc) Object.defineProperty(window, 'visualViewport', vvDesc)
+      else delete (window as any).visualViewport
+    }
+  })
+})
+
+async function flushPromisesIfAvailable() {
+  const { flushPromises } = await import('@vue/test-utils')
+  await flushPromises()
+}

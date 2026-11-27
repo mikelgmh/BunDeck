@@ -639,17 +639,27 @@ const noCompatibleTitle = (d: LogicalDevice): string | undefined => {
 }
 
 /** Igual que el ejemplo: unidad = tecla + 12px; margen 6px por lado deja
- *  el contenido de cada celda cuadrado y del mismo tamaño que la tecla fija. */
+ *  el contenido de cada celda cuadrado y del mismo tamaño que la tecla fija.
+ *  En kiosco + libre la unidad la impone el fit (kioskFit): celdas cuadradas
+ *  que encajan en el viewport; GridStack recibe ese valor vía cellHeight. */
 const GS_GUTTER = 12
 const GS_MARGIN = 6
-const gsCellSize = computed(() => Math.max(1, Math.round(props.keySize)) + GS_GUTTER)
+const gsCellSize = computed(() => {
+  if (props.kiosk && isGsMode.value && kioskFit.value != null) {
+    return Math.max(12, Math.floor(kioskFit.value))
+  }
+  return Math.max(1, Math.round(props.keySize)) + GS_GUTTER
+})
 let gsChangeTimer: ReturnType<typeof setTimeout> | null = null
+/** Nodos pendientes de persistir (por id): solo gestos del usuario. */
+const pendingGs = new Map<string, { id: string; x: number; y: number; w: number; h: number }>()
 
 const destroyGs = () => {
   if (gsChangeTimer) {
     clearTimeout(gsChangeTimer)
     gsChangeTimer = null
   }
+  pendingGs.clear()
   clearHoldTimer()
   fx.cancel()
   destroyFxNodes()
@@ -716,15 +726,48 @@ const initGs = async (retries = 2) => {
       }
     }
     gsReady.value = true
-    // GridStack emite 'change' por cada paso del drag/resize: coalescar a un
-    // solo evento para no acribillar al daemon con PUTs.
-    gs.on('change', (_e: any, items: any[]) => {
+    // Persistir SOLO al terminar un gesto del usuario (dragstop/resizestop).
+    // El evento 'change' también lo emite GridStack al adoptar/montar los
+    // widgets que Vue ya renderizó (init, makeWidget, column(),
+    // updateOptions...) y al resolver colisiones heredadas: persistirlo
+    // reescribía la geometría guardada en cada visita a la página (widgets
+    // históricos fuera de rango teletransportados por el clamp, solapes
+    // "resueltos" por GridStack, nodos fantasma duplicados con sufijo `_1`
+    // cuyos PUTs devolvían 500 "Botón no encontrado").
+    const queueGsNode = (el: any) => {
+      try {
+        const node = (el as any)?.gridstackNode
+          ?? (typeof gs.getNode === 'function' ? gs.getNode(el) : null)
+          ?? null
+        const id = node?.id
+          ?? (el as HTMLElement)?.getAttribute?.('gs-id')
+          ?? (el as HTMLElement)?.getAttribute?.('data-gs-id')
+        if (!id) return
+        pendingGs.set(String(id), {
+          id: String(id),
+          x: Number(node?.x ?? (el as HTMLElement)?.getAttribute?.('gs-x') ?? 0),
+          y: Number(node?.y ?? (el as HTMLElement)?.getAttribute?.('gs-y') ?? 0),
+          w: Number(node?.w ?? (el as HTMLElement)?.getAttribute?.('gs-w') ?? 1),
+          h: Number(node?.h ?? (el as HTMLElement)?.getAttribute?.('gs-h') ?? 1),
+        })
+      } catch { /* noop */ }
+    }
+    const scheduleGsEmit = () => {
       if (gsChangeTimer) clearTimeout(gsChangeTimer)
-      const snapshot = Array.isArray(items) ? items.slice() : []
       gsChangeTimer = setTimeout(() => {
         gsChangeTimer = null
-        emitGsLayout(snapshot)
-      }, 350)
+        if (pendingGs.size === 0) return
+        emitGsLayout([...pendingGs.values()])
+        pendingGs.clear()
+      }, 250)
+    }
+    gs.on('dragstop', (_e: any, el: any) => {
+      queueGsNode(el)
+      scheduleGsEmit()
+    })
+    gs.on('resizestop', (_e: any, el: any) => {
+      queueGsNode(el)
+      scheduleGsEmit()
     })
   } catch (e) {
     console.error('[gridstack] init failed:', e)
@@ -789,6 +832,9 @@ watch(() => props.gridRows, () => {
 })
 watch(() => props.keySize, () => {
   if (!isGsMode.value || !gs) return
+  // En kiosco + libre la unidad la manda kioskFit (ver watcher junto a
+  // startKioskFit); aquí solo el caso escritorio para no pisarla.
+  if (props.kiosk && kioskFit.value != null) return
   try {
     if (typeof gs.cellHeight === 'function') gs.cellHeight(gsCellSize.value)
     else void nextTick().then(initGs)
@@ -914,8 +960,12 @@ const plateStyle = computed<Record<string, string | number>>(() => {
 let kioskRO: ResizeObserver | null = null
 
 function updateKioskFit() {
-  if (!props.kiosk || isGsMode.value) {
+  if (!props.kiosk) {
     if (kioskFit.value !== null) kioskFit.value = null
+    return
+  }
+  if (isGsMode.value) {
+    updateKioskGsFit()
     return
   }
   const plate = container.value
@@ -966,14 +1016,96 @@ function updateKioskFit() {
   if (kioskFit.value !== s) kioskFit.value = s
 }
 
+/** Kiosco + página libre (GridStack): la unidad --bd-gs-unit debe encajar en
+ *  el viewport a lo ancho Y a lo alto para que las celdas sigan cuadradas.
+ *  unit = min((availW - wrapPadX) / cols, (availH - wrapPadY - extraH) / total)
+ *  con total = gsMaxRow (filas configuradas o fondo real de widgets, lo que
+ *  ya limita el arrastre). extraH incluye los hermanos del viewport en el
+ *  stack más la kiosk-bar fija (overlay que no reserva espacio). */
+function updateKioskGsFit() {
+  if (typeof window === 'undefined') return
+  const floor = floorRef.value
+  if (!floor) return
+  const vv = window.visualViewport
+  const vpW = Math.max(1, vv?.width ?? document.documentElement.clientWidth ?? window.innerWidth)
+  const vpH = Math.max(1, vv?.height ?? window.innerHeight)
+  const fcs = getComputedStyle(floor)
+  const fPadX = (parseFloat(fcs.paddingLeft) || 0) + (parseFloat(fcs.paddingRight) || 0)
+  const fPadY = (parseFloat(fcs.paddingTop) || 0) + (parseFloat(fcs.paddingBottom) || 0)
+  // Paddings reales del wrap libre; fallback 48 (24+24 de escritorio).
+  let padX = 48
+  let padY = 48
+  try {
+    const wrapEl = (gsContainer.value?.closest?.('.bd-gs-wrap') as HTMLElement | null)
+      ?? floor.querySelector?.('.bd-gs-wrap') as HTMLElement | null
+    if (wrapEl) {
+      const wcs = getComputedStyle(wrapEl)
+      padX = (parseFloat(wcs.paddingLeft) || 0) + (parseFloat(wcs.paddingRight) || 0) || 48
+      padY = (parseFloat(wcs.paddingTop) || 0) + (parseFloat(wcs.paddingBottom) || 0) || 48
+    }
+  } catch { /* fallback 48 */ }
+  // Hermanos del viewport dentro del stack (breadcrumb, free-note…).
+  let extraH = 0
+  try {
+    const viewport = (gsContainer.value?.closest?.('.bd-gs-viewport') as HTMLElement | null)
+      ?? floor.querySelector?.('.bd-gs-viewport') as HTMLElement | null
+    const stack = viewport?.parentElement ?? floor.querySelector?.('.bd-stack') as HTMLElement | null
+    if (stack) {
+      const scs = getComputedStyle(stack)
+      const stackGap = parseFloat(scs.rowGap || scs.columnGap || (scs as any).gap) || 0
+      let n = 0
+      for (const child of Array.from(stack.children)) {
+        if (child === viewport) continue
+        const h = (child as HTMLElement).getBoundingClientRect?.().height ?? 0
+        if (h > 0) {
+          extraH += h
+          n++
+        }
+      }
+      if (n > 0) extraH += stackGap * n
+    }
+    // La kiosk-bar es fixed (overlay): el floor ya reserva aire abajo por
+    // CSS, pero el fit debe restarla del alto disponible o la última fila
+    // queda detrás de la barra y parece "cortada".
+    const bar = document.querySelector?.('.kiosk-bar') as HTMLElement | null
+    if (bar) {
+      const h = bar.getBoundingClientRect?.().height ?? 0
+      if (h > 0) extraH += h + 24
+      else extraH += 76
+    }
+  } catch { /* sin extra medible */ }
+  const cols = Math.max(1, props.gridCols)
+  const total = Math.max(1, gsMaxRow.value, props.gridRows)
+  const availW = vpW - fPadX - padX
+  const availH = vpH - fPadY - padY - extraH
+  let u = Math.floor(Math.min(availW / cols, availH / total))
+  if (!Number.isFinite(u)) return
+  u = Math.max(12, u)
+  if (kioskFit.value !== u) kioskFit.value = u
+}
+
 function startKioskFit() {
   stopKioskFit()
-  void nextTick().then(() => updateKioskFit())
+  void nextTick().then(() => {
+    updateKioskFit()
+    // El wrap/contenedor libre se montan en el patch siguiente al cambio de
+    // layoutMode: observarlos aquí o el RO nunca los vería en kiosco+libre.
+    try {
+      if (kioskRO) {
+        if (gsContainer.value) kioskRO.observe(gsContainer.value)
+        const wrapEl = gsContainer.value?.closest?.('.bd-gs-wrap') as HTMLElement | null
+        if (wrapEl) kioskRO.observe(wrapEl)
+      }
+    } catch { /* noop */ }
+  })
   if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') return
   try {
     kioskRO = new ResizeObserver(() => updateKioskFit())
     if (floorRef.value) kioskRO.observe(floorRef.value)
     if (container.value) kioskRO.observe(container.value)
+    if (gsContainer.value) kioskRO.observe(gsContainer.value)
+    const wrapEl = gsContainer.value?.closest?.('.bd-gs-wrap') as HTMLElement | null
+    if (wrapEl) kioskRO.observe(wrapEl)
   } catch { /* sin ResizeObserver: tiran los listeners de ventana */ }
   window.addEventListener('resize', updateKioskFit)
   window.addEventListener('orientationchange', updateKioskFit)
@@ -1006,6 +1138,23 @@ watch(
     }
   }
 )
+
+// Kiosco + libre: cuando el fit recalcula la unidad, propagarla a la
+// instancia viva de GridStack sin re-crearla (re-crear dejaba el primer
+// widget a ancho completo). Misma llamada que el watcher de keySize.
+// (Aquí abajo porque kioskFit/gsMaxRow se declaran justo encima.)
+watch(kioskFit, (unit) => {
+  if (!props.kiosk || !isGsMode.value || !gs || unit == null) return
+  try {
+    if (typeof gs.cellHeight === 'function') gs.cellHeight(unit)
+    else void nextTick().then(initGs)
+  } catch { /* noop */ }
+})
+// El fondo real (gsMaxRow) cambia con los widgets: el fit de kiosco debe
+// reencajar la unidad o una tecla 2×2 nueva quedaría cortada.
+watch(gsMaxRow, () => {
+  if (props.kiosk && isGsMode.value) updateKioskFit()
+})
 
 /**
  * Resolver la apariencia es relativamente caro (entorno + expresiones + texto).

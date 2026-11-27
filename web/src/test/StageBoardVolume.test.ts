@@ -87,4 +87,22 @@ describe('StageBoard modo libre: control por acción', () => {
     expect(freeEdit.emitted('gs-add-volume')).toBeUndefined()
     freeEdit.unmount()
   })
+
+  it('pulsar la tecla de volumen en edición la selecciona (emite su posición)', async () => {
+    // Regresión: el template llamaba onKeyClick(b.position) sin $event, así
+    // que `position` llegaba como undefined, la selección se perdía y añadir
+    // acciones desde la biblioteca no creaba tecla ni guardaba nada.
+    const freeEdit = mount(StageBoard, { props: baseProps({ mode: 'edit' }) as any })
+    await freeEdit.find('[data-cy="bd-key-vol"]').trigger('click')
+    expect(freeEdit.emitted('button-click')).toEqual([[0]])
+    freeEdit.unmount()
+  })
+
+  it('pulsar la tecla de volumen en uso no dispara la tecla (se usa el slider)', async () => {
+    const freeUse = mount(StageBoard, { props: baseProps({ mode: 'use' }) as any })
+    await freeUse.find('[data-cy="bd-key-vol"]').trigger('click')
+    expect(freeUse.emitted('button-tap')).toBeUndefined()
+    expect(freeUse.emitted('button-click')).toBeUndefined()
+    freeUse.unmount()
+  })
 })

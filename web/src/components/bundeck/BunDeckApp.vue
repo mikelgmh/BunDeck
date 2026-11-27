@@ -256,7 +256,7 @@
       <StageBoard
         :grid-cols="gridCols"
         :grid-rows="gridRows"
-        :key-size="bdKeySize"
+        :key-size="kiosk ? Math.max(bdKeySize, 96) : bdKeySize"
         :layout-mode="pageLayoutMode"
         :selected-button="selectedButton"
         :executing-buttons="executingButtons"
@@ -338,7 +338,7 @@
             @open-icon-picker="openIconPicker"
             @open-look-icon="(i) => openLookIconPicker(i)"
             @open-plugin-settings="(id) => openPluginSettings(id, 'settings')"
-             @clear-image="onClearImage"
+            @clear-image="onClearImage"
             @action-drop-selected="onActionDropSelected"
           />
         </div>
@@ -1010,7 +1010,9 @@ const openPalette = (path = 'acts') => {
     bdShowToast(t('bd.switchToEdit'))
     return
   }
-  if (selectedButton.value === null) {
+  // En modo libre la paleta puede abrirse sin selección: al elegir acción
+  // se crea una tecla nueva (ver ensureFreeKeyForAction).
+  if (selectedButton.value === null && pageLayoutMode.value !== 'gridstack') {
     bdShowToast(t('bd.selectKeyFirst'))
     return
   }
@@ -1019,11 +1021,18 @@ const openPalette = (path = 'acts') => {
 }
 
 const onPalettePick = async (type: string) => {
+  // Paleta sobre el clic principal en libre sin selección = tecla nueva.
+  // (double/triple/long y ramas de reglas necesitan una tecla destino.)
+  const path = palettePath.value
+  const mPress = /^(?:press:)?(click|double|triple|long)$/.exec(path)
+  const isPlainClick = (mPress?.[1] ?? (!path || path === 'acts' ? 'click' : '')) === 'click'
+  if (isPlainClick && (await ensureFreeKeyForAction(type))) {
+    palettePath.value = 'acts'
+    return
+  }
   if (!ensureEditableTarget()) return
   try {
-    const path = palettePath.value
     palettePath.value = 'acts'
-    const mPress = /^(?:press:)?(click|double|triple|long)$/.exec(path)
     if (mPress || !path || path === 'acts') {
       await addActionToKind(type, (mPress?.[1] ?? 'click') as PressKind)
     } else {
@@ -1999,7 +2008,26 @@ const addActionGuarded = async (type: string): Promise<boolean> => {
   await afterActionAdded(type, priorActions)
   return true
 }
+/** En modo libre, pulsar una acción de la biblioteca sin tecla seleccionada
+ *  crea una tecla nueva con esa acción (no hay "huecos" seleccionables como
+ *  en Fija: antes solo salía el toast "selecciona tecla"). En Fija o con
+ *  selección válida devuelve false para seguir el flujo normal.
+ *  `createFreeKey` ya deja la tecla creada y seleccionada. */
+const ensureFreeKeyForAction = async (type: string): Promise<boolean> => {
+  if (mode.value !== 'edit') return false
+  if (pageLayoutMode.value !== 'gridstack') return false
+  if (selectedButton.value !== null && getButton(selectedButton.value)) return false
+  try {
+    await createFreeKey({ actionType: type })
+  } catch (e) {
+    bdShowToast(String((e as Error)?.message ?? e))
+  }
+  return true
+}
 const onActionPick = async (type: string) => {
+  // Modo libre: pulsar una acción sin tecla seleccionada crea una tecla
+  // nueva con esa acción (no hay "huecos" que seleccionar como en Fija).
+  if (await ensureFreeKeyForAction(type)) return
   if (!ensureEditableTarget()) return
   try {
     await addActionGuarded(type)
@@ -2017,6 +2045,9 @@ const onActionDrop = async (position: number, type: string) => {
   }
 }
 const onActionDropSelected = async (type: string, kind?: PressKind) => {
+  // Igual que pulsar en la biblioteca: en libre sin selección se crea tecla.
+  // Solo para el clic principal; double/triple/long/reglas necesitan destino.
+  if ((kind ?? 'click') === 'click' && await ensureFreeKeyForAction(type)) return
   if (!ensureEditableTarget()) return
   try {
     await addActionToKind(type, kind ?? 'click')
@@ -2210,23 +2241,39 @@ const onGridSizeChange = async (dx: number, dy: number) => {
  *  Los PUT van en paralelo y el estado local se fusiona con las filas que
  *  devuelve el daemon: antes eran N PUTs en serie + un GET completo, y en
  *  modo libre con varias teclas la UI se quedaba "pillada".
- *  La geometría se acota a la cuadrícula (+1 fila de extensión, como
- *  planFreeCell): un resize salvaje (p. ej. h=25) ya no puede estirar la
- *  placa a decenas de filas con el stepper marcando 3. */
+ *  La geometría se acota a la cuadrícula configurada: un resize salvaje
+ *  (p. ej. h=25) ya no puede estirar la placa con el stepper sin tocar.
+ *  Los ids que ya no existen en la BD (nodos fantasma de GridStack tras
+ *  duplicados/optimistas, ecos tardíos tras borrar) se ignoran en vez de
+ *  acribillar al daemon con PUTs que solo devuelven 404. */
 const onGsLayoutChange = async (items: Array<{ id: string; x: number; y: number; w: number; h: number }>) => {
-  const targets = (items ?? []).filter((it) => it?.id)
-  if (!targets.length) return
+  const known = new Set((currentButtons.value ?? []).map((b: any) => b?.id).filter((id) => typeof id === 'string'))
+  const targets = (items ?? []).filter((it) => it?.id && known.has(String(it.id)))
+  if (!targets.length) {
+    // Nada que persistir (todo fantasma): reconciliar con la BD en segundo
+    // plano para expulsar los nodos duplicados del grid.
+    if ((items ?? []).some((it) => it?.id && !known.has(String(it.id)))) {
+      loadProfile().catch(() => {})
+    }
+    return
+  }
   const cols = Math.max(1, gridCols.value)
   const rows = Math.max(1, gridRows.value)
   try {
-    const updated = await Promise.all(targets.map((it) => {
+    const updated = (await Promise.all(targets.map((it) => {
       const w = Math.min(cols, Math.max(1, Math.round(Number(it.w) || 1)))
       const h0 = Math.max(1, Math.round(Number(it.h) || 1))
       const x = Math.min(Math.max(0, Math.floor(Number(it.x) || 0)), Math.max(0, cols - w))
-      const y = Math.min(Math.max(0, Math.floor(Number(it.y) || 0)), rows)
-      const h = Math.min(h0, rows, Math.max(1, rows - y + 1))
-      return apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x, y, w, h })
-    }))
+      // Dentro de la cuadrícula: y ≤ rows-1 y h sin desbordar (el desborde
+      // histórico previo se conserva hasta que el usuario lo mueva).
+      const y = Math.min(Math.max(0, Math.floor(Number(it.y) || 0)), Math.max(0, rows - 1))
+      const h = Math.min(h0, Math.max(1, rows - y))
+      return apiPut(`/buttons/${encodeURIComponent(it.id)}`, { x, y, w, h }).catch((e) => {
+        // La tecla pudo borrarse entre el drag y el PUT: no tumbar el resto.
+        if (/404|no encontrado/i.test(String((e as Error)?.message ?? e))) return null
+        throw e
+      })
+    })) ?? []).filter((b) => b && typeof b.id === 'string')
     const byId = new Map<string, any>()
     for (const b of updated ?? []) {
       if (b && typeof b.id === 'string') byId.set(b.id, b)
@@ -2301,7 +2348,16 @@ const createFreeKey = async (opts: { x?: number; y?: number; actionType?: string
     }, 15000)
     // POST devuelve la fila creada; no hace falta un segundo GET que también
     // podría quedarse pendiente y mantener bloqueado el control.
-    currentButtons.value.push(created)
+    // Upsert (no push ciego): el eco `button.created` del WS puede llegar
+    // ANTES de que responda el POST y ya habría añadido la tecla → el push
+    // duplicaba el id, GridStack veía dos nodos con el mismo gs-id,
+    // recolocaba uno (p. ej. y=1) y emitía un fantasma `<id>_1` cuyos PUTs
+    // devolvían 500 "Botón no encontrado".
+    if (created && typeof created.id === 'string') {
+      const idx = currentButtons.value.findIndex((b: any) => b?.id === created.id)
+      if (idx > -1) currentButtons.value[idx] = created
+      else currentButtons.value.push(created)
+    }
     const pos = created?.position ?? spot.position
     await selectButton(pos)
   } catch (e) {
