@@ -1,16 +1,22 @@
 <template>
   <section class="media-card spotify-card" :aria-label="label || copy.playerLabel" data-cy="spotify-player">
+    <!-- El token vive en los ajustes del plugin o en parámetros: sin
+         obligatorios en la acción; siempre configurado (estructural). -->
+    <NeedsConfig v-if="!isConfigured" :action-type="props.action.type" :position="position" />
+    <div class="spotify-main">
     <div class="spotify-art" aria-hidden="true">
-      <img v-if="track?.albumArtUrl" :src="track.albumArtUrl" alt="" />
+      <img v-if="track?.albumArtUrl" :key="track.albumArtUrl" :src="track.albumArtUrl" class="bd-data-swap" alt="" />
       <Music2 v-else :size="28" :stroke-width="1.6" />
     </div>
 
     <div class="spotify-info">
       <div class="eyebrow">SPOTIFY <span :class="{ 'is-playing': isPlaying }">{{ isPlaying ? copy.playing : stateLabel }}</span></div>
-      <strong class="track-title">{{ track?.name || copy.nothingPlaying }}</strong>
-      <span class="track-artist">{{ track?.artists || (track ? copy.unknownArtist : copy.startTrack) }}</span>
+      <Marquee :text="track?.name || copy.nothingPlaying" />
+      <span class="track-artist bd-data-swap" :key="track?.name ?? ''">{{ track?.artists || (track ? copy.unknownArtist : copy.startTrack) }}</span>
       <small v-if="track && device" class="device-name">{{ device }}</small>
-      <p v-if="error" class="widget-error" role="alert">{{ error }}</p>
+      <p v-if="error" class="widget-error" role="alert" :title="error">
+        <TriangleAlert :size="13" aria-hidden="true" /><span class="err-text">{{ error }}</span><span class="sr-only">{{ copy.unavailable }}</span>
+      </p>
       <p v-else-if="!track && !loading" class="widget-hint">{{ copy.noActiveTrack }}</p>
     </div>
 
@@ -26,12 +32,12 @@
       <button type="button" :disabled="disabled" :aria-label="copy.nextTrack" :title="copy.next" @click="playback('next')">
         <SkipForward :size="17" aria-hidden="true" />
       </button>
-      <button type="button" :disabled="disabled || !track" :aria-label="copy.likeTrack" :title="copy.likeTrack" @click="likeTrack">
+      <button class="m-only" type="button" :disabled="disabled || !track" :aria-label="copy.likeTrack" :title="copy.likeTrack" @click="likeTrack">
         <Heart :size="16" aria-hidden="true" />
       </button>
       <button
         type="button"
-        class="shuffle-control"
+        class="shuffle-control m-only"
         :class="{ 'is-active': shuffleTarget === true }"
         :disabled="disabled"
         :aria-label="shuffleTarget === true ? copy.shuffleOff : copy.shuffleOn"
@@ -43,25 +49,30 @@
       </button>
     </div>
     <span v-if="busy" class="sr-status" role="status">{{ copy.updating }}</span>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
-  Heart, LoaderCircle, Music2, Pause, Play, Shuffle, SkipBack, SkipForward,
+  Heart, LoaderCircle, Music2, Pause, Play, Shuffle, SkipBack, SkipForward, TriangleAlert,
 } from 'lucide-vue-next'
 import { executeWidgetAction } from '../../../composables/useWidgetAction'
 import { useI18nStore } from '../../../composables/useI18n'
+import Marquee from './shared/Marquee.vue'
+import NeedsConfig from './shared/NeedsConfig.vue'
 
 interface Props {
   action: { type: string; parameters: Record<string, any> }
   apiBase: string
   label?: string
   readonly?: boolean
+  /** Posición de la tecla (la reenvía ControlSurface) para NeedsConfig. */
+  position?: number | null
 }
 
-const props = withDefaults(defineProps<Props>(), { label: '', readonly: false })
+const props = withDefaults(defineProps<Props>(), { label: '', readonly: false, position: null })
 const { currentLocale } = useI18nStore()
 const spanish = computed(() => currentLocale.value.toLowerCase().startsWith('es'))
 const copy = computed(() => spanish.value ? {
@@ -87,6 +98,7 @@ const copy = computed(() => spanish.value ? {
   shuffleOnHint: 'Aleatorio activado (pulsa para desactivar)',
   setShuffleOn: 'Activar modo aleatorio',
   updating: 'Actualizando Spotify',
+  unavailable: 'Spotify no disponible',
 } : {
   playerLabel: 'Spotify player',
   playing: 'PLAYING',
@@ -110,7 +122,10 @@ const copy = computed(() => spanish.value ? {
   shuffleOnHint: 'Shuffle on (press to turn off)',
   setShuffleOn: 'Set shuffle on',
   updating: 'Updating Spotify',
+  unavailable: 'Spotify unavailable',
 })
+/** El token se resuelve en daemon (ajustes del plugin o parámetro). */
+const isConfigured = computed(() => true)
 const params = computed(() => props.action.parameters ?? {})
 const track = ref<any>(null)
 const device = ref('')
@@ -183,20 +198,30 @@ onUnmounted(() => {
 .media-card {
   container-type: size;
   container-name: spotify;
+  position: relative;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  padding: clamp(8px, 4cqi, 14px);
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  border-radius: 12px;
+  color: inherit;
+  background: color-mix(in srgb, #111 76%, transparent);
+  overflow: hidden;
+}
+/* El layout vive en el hijo: la raíz es el contenedor y no puede
+   auto-aplicarse sus propias container queries. */
+.spotify-main {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr);
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 6px 9px;
-  padding: clamp(8px, 4cqi, 14px);
-  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
-  border-radius: 12px;
-  color: inherit;
-  background: color-mix(in srgb, #111 76%, transparent);
   overflow: hidden;
 }
 .spotify-art {
@@ -218,6 +243,7 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 3px;
 }
 .eyebrow {
@@ -230,16 +256,17 @@ onUnmounted(() => {
 }
 .eyebrow span { font-weight: 500; }
 .eyebrow .is-playing { color: #83c994; }
-.track-title, .track-artist, .device-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.track-title { font-size: clamp(12px, 4.5cqi, 15px); line-height: 1.2; }
+.spotify-info :deep(.bd-marquee) { font-size: clamp(12px, 5cqi, 15px); font-weight: 700; line-height: 1.2; }
+.track-artist, .device-name, .widget-hint { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .track-artist, .device-name, .widget-hint { color: color-mix(in srgb, currentColor 66%, transparent); font-size: 11px; }
 .device-name { font-size: 9px; }
-.widget-hint, .widget-error { margin: 2px 0 0; font-size: 10px; line-height: 1.25; }
-.widget-error { color: #e89589; overflow-wrap: anywhere; }
+.widget-hint { margin: 2px 0 0; font-size: 10px; line-height: 1.25; }
+.widget-error {
+  display: flex; align-items: center; gap: 5px;
+  margin: 2px 0 0; font-size: 10px; line-height: 1.25;
+  color: #e89589; overflow-wrap: anywhere;
+}
+.widget-error .err-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spotify-controls {
   grid-column: 1 / span 2;
   grid-row: 2;
@@ -249,7 +276,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
 }
-.spotify-controls button:nth-child(n + 4) { display: none; }
+.spotify-controls .m-only { display: none; }
 .spotify-controls button, .voice-control {
   display: inline-grid;
   place-items: center;
@@ -271,27 +298,41 @@ onUnmounted(() => {
 .spotify-controls .primary-control { color: #101510; background: #1ed760; border-color: #1ed760; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible { outline: 2px solid #1ed760; outline-offset: 2px; }
-.sr-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.sr-only, .sr-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* XS (<200px): título con Marquee + 3 esenciales; error solo icono. */
+@container spotify (max-width: 199px) {
+  .device-name, .widget-hint { display: none; }
+  .widget-error { justify-content: center; }
+  .widget-error .err-text { display: none; }
+  .spotify-controls button { min-width: 36px; min-height: 36px; }
+}
+@container spotify (min-width: 165px) and (max-aspect-ratio: 13/10) {
+  .spotify-controls .m-only { display: inline-grid; }
+}
+/* Ancha: una fila (info + 3 esenciales). El arte y like/shuffle solo con
+   holgura (≥340px): si no, el título colapsa a 0px. */
 @container spotify (min-aspect-ratio: 13/10) {
-  .media-card { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr; align-items: center; gap: 12px; }
-  .spotify-art { grid-column: 1; grid-row: 1; aspect-ratio: 1; height: 100%; }
-  .spotify-info { grid-column: 2; grid-row: 1; }
-  .spotify-controls { grid-column: 3; grid-row: 1; flex-direction: row; gap: 4px; }
-  .spotify-controls button:nth-child(n + 4) { display: inline-grid; }
+  .spotify-main { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 1fr; align-items: center; gap: 12px; }
+  .spotify-art { display: none; }
+  .spotify-info { grid-column: 1; grid-row: 1; }
+  .spotify-controls { grid-column: 2; grid-row: 1; flex-direction: row; gap: 4px; }
+  .spotify-controls .m-only { display: none; }
   .spotify-controls button { min-width: 32px; min-height: 32px; }
 }
+@container spotify (min-aspect-ratio: 13/10) and (min-width: 340px) {
+  .spotify-main { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .spotify-art { display: grid; aspect-ratio: 1 / 1; height: min(100%, 38cqw); min-height: 0; max-width: 38cqw; justify-self: start; }
+  .spotify-controls .m-only { display: inline-grid; }
+}
 @container spotify (max-aspect-ratio: 77/100) {
-  .media-card { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap: 6px; }
+  .spotify-main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap: 6px; }
   .spotify-art { grid-column: 1; grid-row: 1; min-height: 0; }
   .spotify-info { grid-column: 1; grid-row: 2; }
   .spotify-controls { grid-column: 1; grid-row: 3; flex-direction: row; gap: 5px; }
-  .spotify-controls button:nth-child(n + 4) { display: none; }
+  .spotify-controls .m-only { display: none; }
   .spotify-controls button { min-width: 31px; min-height: 31px; }
   .device-name { display: none; }
-}
-@container spotify (min-width: 165px) {
-  .spotify-controls button:nth-child(n + 4) { display: inline-grid; }
 }
 </style>

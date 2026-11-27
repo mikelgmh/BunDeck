@@ -5,13 +5,21 @@
     role="group"
     :aria-label="label || heading"
     :aria-busy="busy !== ''"
+    data-cy="widget-workflow-control"
   >
+    <NeedsConfig
+      v-if="!isConfigured"
+      :action-type="props.action.type"
+      :position="props.position"
+    />
+
+    <div class="wf-body">
     <header class="workflow-head">
       <component :is="headingIcon" :size="17" aria-hidden="true" />
       <span class="workflow-title">{{ label || heading }}</span>
       <button
         v-if="supportsRefresh"
-        class="icon-button"
+        class="icon-button only-m-plus"
         type="button"
         :aria-label="copy.refresh"
         :title="copy.refresh"
@@ -27,10 +35,34 @@
     </p>
 
     <template v-if="kind === 'clipboard'">
-      <div class="workflow-scroll" :aria-label="copy.savedSlots">
+      <!-- XS: carrusel del slot actual (toque = pegar); sin lista ni formulario. -->
+      <AutoCarousel
+        :count="slots.length"
+        :interval-ms="carouselMs"
+        :show-dots="false"
+        :dots-label="copy.savedSlots"
+        class="xs-carousel"
+      >
+        <template #default="{ index }">
+          <button
+            class="carousel-slot"
+            type="button"
+            :disabled="readonly || busy !== '' || !slots[index]"
+            :aria-label="slots[index] ? copy.copySlot(slots[index].slot) : copy.savedSlots"
+            @click="slots[index] && pasteSlot(slots[index].slot)"
+          >
+            <Clipboard :size="18" aria-hidden="true" />
+            <Marquee :text="slots[index]?.slot ?? ''" />
+            <small>{{ slots[index]?.preview || copy.characters(slots[index]?.length ?? 0) }}</small>
+          </button>
+        </template>
+      </AutoCarousel>
+      <p v-if="!slots.length && !busy" class="empty-xs">{{ copy.noSlotsShort }}</p>
+      <div ref="slotListEl" class="workflow-scroll m-plus-list" :aria-label="copy.savedSlots">
         <button
           v-for="slot in slots"
           :key="slot.slot"
+          data-page-item
           class="workflow-row"
           type="button"
           :disabled="readonly || busy !== ''"
@@ -43,7 +75,21 @@
         </button>
         <p v-if="!slots.length && !busy" class="empty-state">{{ copy.noSlots }}</p>
       </div>
-      <form v-if="!readonly" class="workflow-form clipboard-form" @submit.prevent="saveSnippet">
+      <div v-if="slotPager.numPages.value > 1" class="pager fit-pager" role="tablist" :aria-label="copy.savedSlots">
+        <button
+          v-for="i in slotPager.numPages.value"
+          :key="i"
+          type="button"
+          role="tab"
+          class="pager-dot"
+          :class="{ 'is-active': slotPager.index.value === i - 1 }"
+          :aria-selected="slotPager.index.value === i - 1"
+          :aria-label="`${copy.savedSlots} ${i}/${slotPager.numPages.value}`"
+          @click.stop="slotPager.goTo(i - 1)"
+        />
+        <small>{{ slotPager.index.value + 1 }}/{{ slotPager.numPages.value }}</small>
+      </div>
+      <form v-if="!readonly" class="workflow-form clipboard-form only-m-plus" @submit.prevent="saveSnippet">
         <input
           v-model="snippetName"
           :aria-label="copy.slotName"
@@ -51,76 +97,79 @@
           maxlength="64"
           :placeholder="copy.name"
         />
-        <textarea
+        <input
           v-model="snippetText"
+          class="snippet-text"
+          type="text"
           :aria-label="copy.snippetText"
+          autocomplete="off"
           maxlength="100000"
-          rows="1"
           :placeholder="copy.newSnippet"
         />
         <button class="primary-button" type="submit" :disabled="busy !== '' || !snippetName.trim() || !snippetText">
-          {{ copy.save }}
+          <span class="lbl">{{ copy.save }}</span>
         </button>
       </form>
-      <details v-if="history.length" class="workflow-history">
+      <details v-if="history.length" class="workflow-history only-m-plus">
         <summary><History :size="14" aria-hidden="true" /> {{ copy.recent(history.length) }}</summary>
         <ul>
-          <li v-for="(entry, index) in history" :key="`${entry.ts}-${index}`">
+          <li v-for="(entry, index) in visibleHistory" :key="`${entry.ts}-${index}`">
             <span>{{ entry.preview }}</span><small>{{ entry.source }}</small>
           </li>
+          <li v-if="hiddenHistoryCount" class="more"><span>… +{{ hiddenHistoryCount }}</span></li>
         </ul>
       </details>
     </template>
 
     <template v-else-if="kind === 'flow'">
-      <label class="field-label">
+      <label class="field-label only-m-plus">
         {{ copy.variable }}
         <input v-model="variableName" :readonly="readonly" maxlength="80" :placeholder="copy.variableName" />
       </label>
       <template v-if="action.type === 'flow.set-var'">
-        <label class="field-label">
+        <label class="field-label only-m-plus">
           {{ copy.value }}
           <input v-model="variableValue" :readonly="readonly" :placeholder="copy.value" @keydown.enter.prevent="setVariable" />
         </label>
         <div class="workflow-actions">
-          <label class="type-label">{{ copy.type }}
+          <label class="type-label only-m-plus">{{ copy.type }}
             <select v-model="variableType" :disabled="readonly">
               <option value="num">{{ copy.number }}</option><option value="bool">{{ copy.boolean }}</option><option value="txt">{{ copy.text }}</option>
             </select>
           </label>
-          <button class="primary-button" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="setVariable">
-            <Check :size="15" aria-hidden="true" /> {{ copy.set }}
+          <button class="primary-button hero-action" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="setVariable">
+            <Check :size="15" aria-hidden="true" /> <span class="lbl">{{ copy.set }}</span>
           </button>
         </div>
       </template>
       <template v-else-if="action.type === 'flow.toggle-var'">
-        <div class="value-card">
+        <div class="value-card hero-value">
           <span>{{ copy.currentValue }}</span>
           <strong>{{ displayValue(variableValue) }}</strong>
         </div>
-        <button class="primary-button" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="toggleVariable">
-          <ArrowLeftRight :size="15" aria-hidden="true" /> {{ copy.toggle }}
+        <button class="primary-button hero-action" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="toggleVariable">
+          <ArrowLeftRight :size="15" aria-hidden="true" /> <span class="lbl">{{ copy.toggle }}</span>
         </button>
       </template>
       <template v-else>
-        <div class="value-card">
+        <div class="value-card hero-value">
           <span>{{ copy.currentValue }}</span>
           <strong>{{ variableValue === '' ? '—' : displayValue(variableValue) }}</strong>
-          <small v-if="variableType">{{ copy.type }}: {{ variableType }}</small>
+          <small v-if="variableType" class="only-m-plus">{{ copy.type }}: {{ variableType }}</small>
         </div>
-        <button class="secondary-button" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="readVariable">
-          <Eye :size="15" aria-hidden="true" /> {{ copy.read }}
+        <button class="secondary-button hero-action" type="button" :disabled="readonly || busy !== '' || !variableName.trim()" @click="readVariable">
+          <Eye :size="15" aria-hidden="true" /> <span class="lbl">{{ copy.read }}</span>
         </button>
       </template>
     </template>
 
     <template v-else-if="kind === 'profile'">
-      <div class="status-card">
+      <div class="status-card hero-value">
         <span class="status-dot" :class="{ active: profileStatus?.enabled }" aria-hidden="true" />
-        <span>{{ profileStatus?.enabled ? copy.autoSwitchOn : copy.autoSwitchOff }}</span>
-        <small>{{ copy.rules(profileStatus?.rules ?? '—') }}</small>
+        <span class="bd-data-swap" :key="String(profileStatus?.enabled ?? '')">{{ profileStatus?.enabled ? copy.autoSwitchOn : copy.autoSwitchOff }}</span>
+        <small class="only-m-plus">{{ copy.rules(profileStatus?.rules ?? '—') }}</small>
       </div>
-      <label class="field-label">
+      <label class="field-label only-m-plus">
         {{ copy.profile }}
         <select v-model="selectedProfile" :disabled="readonly || busy !== '' || !profiles.length">
           <option value="" disabled>{{ copy.selectProfile }}</option>
@@ -128,33 +177,58 @@
         </select>
       </label>
       <div class="workflow-actions">
-        <button class="primary-button" type="button" :disabled="readonly || busy !== '' || !selectedProfile" @click="switchProfile">
-          <ArrowLeftRight :size="15" aria-hidden="true" /> {{ copy.switch }}
+        <button class="primary-button hero-action" type="button" :disabled="readonly || busy !== '' || !selectedProfile" @click="switchProfile">
+          <ArrowLeftRight :size="15" aria-hidden="true" /> <span class="lbl">{{ copy.switch }}</span>
         </button>
-        <span v-if="profileStatus?.lastSwitch?.window?.processName" class="muted">
+        <span v-if="profileStatus?.lastSwitch?.window?.processName" class="muted only-m-plus">
           {{ profileStatus.lastSwitch.window.processName }}
         </span>
       </div>
     </template>
 
     <template v-else-if="kind === 'page'">
-      <label class="field-label">
+      <label class="field-label only-m-plus">
         {{ copy.page }}
         <select v-model="selectedPage" :disabled="readonly || busy !== '' || !pages.length">
           <option value="" disabled>{{ copy.selectPage }}</option>
           <option v-for="page in pages" :key="page.id" :value="page.id">{{ page.name }}</option>
         </select>
       </label>
-      <button class="primary-button" type="button" :disabled="readonly || busy !== '' || !selectedPage" @click="navigatePage">
-        <FileText :size="15" aria-hidden="true" /> {{ copy.openPage }}
+      <p class="page-name-xs"><Marquee :text="currentPageName || copy.page" /></p>
+      <button class="primary-button hero-action" type="button" :disabled="readonly || busy !== '' || !selectedPage" @click="navigatePage">
+        <FileText :size="15" aria-hidden="true" /> <span class="lbl">{{ copy.openPage }}</span>
       </button>
     </template>
 
     <template v-else-if="kind === 'layout'">
-      <div class="workflow-scroll" :aria-label="copy.savedLayouts">
+      <!-- XS: carrusel del layout actual (toque = restaurar). -->
+      <AutoCarousel
+        :count="layouts.length"
+        :interval-ms="carouselMs"
+        :show-dots="false"
+        :dots-label="copy.savedLayouts"
+        class="xs-carousel"
+      >
+        <template #default="{ index }">
+          <button
+            class="carousel-slot"
+            type="button"
+            :disabled="readonly || busy !== '' || !layouts[index]?.geometry"
+            :aria-label="layouts[index] ? copy.restoreLayout(layouts[index].name) : copy.savedLayouts"
+            @click="layouts[index] && restoreLayout(layouts[index].name)"
+          >
+            <LayoutTemplate :size="18" aria-hidden="true" />
+            <Marquee :text="layouts[index]?.name ?? ''" />
+            <small>{{ layouts[index]?.note || copy.readyToRestore }}</small>
+          </button>
+        </template>
+      </AutoCarousel>
+      <p v-if="!layouts.length && !busy" class="empty-xs">{{ copy.noLayoutsShort }}</p>
+      <div ref="layoutListEl" class="workflow-scroll m-plus-list" :aria-label="copy.savedLayouts">
         <button
           v-for="layout in layouts"
           :key="layout.name"
+          data-page-item
           class="workflow-row"
           type="button"
           :disabled="readonly || busy !== '' || !layout.geometry"
@@ -168,12 +242,26 @@
         </button>
         <p v-if="!layouts.length && !busy" class="empty-state">{{ copy.noLayouts }}</p>
       </div>
+      <div v-if="layoutPager.numPages.value > 1" class="pager fit-pager" role="tablist" :aria-label="copy.savedLayouts">
+        <button
+          v-for="i in layoutPager.numPages.value"
+          :key="i"
+          type="button"
+          role="tab"
+          class="pager-dot"
+          :class="{ 'is-active': layoutPager.index.value === i - 1 }"
+          :aria-selected="layoutPager.index.value === i - 1"
+          :aria-label="`${copy.savedLayouts} ${i}/${layoutPager.numPages.value}`"
+          @click.stop="layoutPager.goTo(i - 1)"
+        />
+        <small>{{ layoutPager.index.value + 1 }}/{{ layoutPager.numPages.value }}</small>
+      </div>
     </template>
 
     <template v-else-if="kind === 'osc'">
-      <div class="osc-address">{{ configuredOsc ? oscAddress : copy.configureOsc }}</div>
+      <div class="osc-address"><Marquee :text="configuredOsc ? oscAddress : copy.configureOsc" /></div>
       <button
-        class="osc-pad"
+        class="osc-pad hero-action"
         type="button"
         :disabled="readonly || busy !== '' || !configuredOsc"
         :aria-label="copy.sendOsc(oscAddress)"
@@ -184,14 +272,18 @@
       </button>
     </template>
 
-    <p v-if="feedback && !error" class="workflow-feedback" role="status">{{ feedback }}</p>
-    <p v-if="error" class="workflow-error" role="alert">{{ error }}</p>
-    <p v-if="readonly" class="readonly-note">{{ copy.readOnly }}</p>
+    <p v-if="feedback && !error" class="workflow-feedback bd-data-swap only-m-plus" :key="feedback" role="status">{{ feedback }}</p>
+    <p v-if="error" class="workflow-error" role="alert" :title="error">
+      <span class="err-text">{{ error }}</span>
+      <span class="err-short">{{ copy.failedShort }}</span>
+    </p>
+    <p v-if="readonly" class="readonly-note only-m-plus">{{ copy.readOnly }}</p>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeftRight, ArrowRight, Check, Clipboard, Copy, Eye, FileText, History,
   LayoutTemplate, Radio, RefreshCw, UserRound, Variable
@@ -199,15 +291,22 @@ import {
 import { executeWidgetAction } from '../../../composables/useWidgetAction'
 import { normalizeApiBase } from '../../../composables/useKeyShare'
 import { useI18nStore } from '../../../composables/useI18n'
+import { resolveCarouselMs } from '../../../composables/useAutoCarousel'
+import { useFitPager } from '../../../composables/useFitPager'
+import Marquee from './shared/Marquee.vue'
+import NeedsConfig from './shared/NeedsConfig.vue'
+import AutoCarousel from './shared/AutoCarousel.vue'
 
 interface Props {
   action: { type: string; parameters: Record<string, any> }
   apiBase: string
   label?: string
   readonly?: boolean
+  /** Posición de la tecla (la reenvía ControlSurface; la usa NeedsConfig). */
+  position?: number | null
 }
 
-const props = withDefaults(defineProps<Props>(), { label: '', readonly: false })
+const props = withDefaults(defineProps<Props>(), { label: '', readonly: false, position: null })
 const { currentLocale } = useI18nStore()
 const copy = computed(() => {
   const es = String(currentLocale.value).toLowerCase().startsWith('es')
@@ -218,6 +317,7 @@ const copy = computed(() => {
     copySlot: (slot: string) => `Copiar ${slot} al portapapeles`,
     characters: (count: number) => `${count} caracteres`,
     noSlots: 'Todavía no hay slots guardados.',
+    noSlotsShort: 'Sin slots',
     slotName: 'Nombre del slot',
     name: 'Nombre',
     snippetText: 'Texto del fragmento',
@@ -251,6 +351,7 @@ const copy = computed(() => {
     readyToRestore: 'Listo para restaurar',
     noPosition: 'Sin posición guardada',
     noLayouts: 'No hay diseños guardados.',
+    noLayoutsShort: 'Sin diseños',
     configureOsc: 'Configura host, puerto y dirección OSC',
     sendOsc: (address: string) => `Enviar OSC ${address}`,
     send: 'Enviar',
@@ -264,6 +365,7 @@ const copy = computed(() => {
     workflow: 'Flujo',
     refreshing: 'Actualizando…',
     executing: 'Ejecutando…',
+    failedShort: 'La acción falló.',
     noAction: 'La acción no se pudo completar.',
     optionsLoadFailed: (status: number) => `No se pudieron cargar las opciones (${status}).`,
     clipboardReady: (slot: string) => `“${slot}” listo para pegar.`,
@@ -283,6 +385,7 @@ const copy = computed(() => {
     copySlot: (slot: string) => `Copy ${slot} to clipboard`,
     characters: (count: number) => `${count} characters`,
     noSlots: 'No saved slots yet.',
+    noSlotsShort: 'No slots',
     slotName: 'Slot name',
     name: 'Name',
     snippetText: 'Snippet text',
@@ -316,6 +419,7 @@ const copy = computed(() => {
     readyToRestore: 'Ready to restore',
     noPosition: 'No saved position',
     noLayouts: 'No saved layouts.',
+    noLayoutsShort: 'No layouts',
     configureOsc: 'Configure OSC host, port, and address',
     sendOsc: (address: string) => `Send OSC ${address}`,
     send: 'Send',
@@ -329,6 +433,7 @@ const copy = computed(() => {
     workflow: 'Workflow',
     refreshing: 'Refreshing…',
     executing: 'Running…',
+    failedShort: 'The action failed.',
     noAction: 'The action could not be completed.',
     optionsLoadFailed: (status: number) => `Could not load options (${status}).`,
     clipboardReady: (slot: string) => `“${slot}” is ready to paste.`,
@@ -355,12 +460,49 @@ const kind = computed(() => {
 const heading = computed(() => ({
   clipboard: copy.value.clipboard, flow: copy.value.flowVariable, profile: copy.value.profiles, page: copy.value.pages,
   layout: copy.value.windowLayouts, osc: copy.value.oscPad
-}[kind.value] ?? copy.value.workflow))
+}[kind.value as 'clipboard'] ?? copy.value.workflow))
 const headingIcon = computed(() => ({
   clipboard: Clipboard, flow: Variable, profile: UserRound, page: FileText,
   layout: LayoutTemplate, osc: Radio
-}[kind.value] ?? FileText))
+}[kind.value as 'clipboard'] ?? FileText))
 const supportsRefresh = computed(() => ['clipboard', 'profile', 'page', 'layout', 'flow'].includes(kind.value))
+
+/**
+ * Condición "sin configurar" por acción (la pinta NeedsConfig):
+ * - clipboard save/paste-slot: exige slot; list/history no exigen nada.
+ * - flow.*: exige name. profile-auto.switch-profile y page.page exigen su id;
+ *   status no exige nada. window-manager.layout-restore exige name;
+ *   layout-list no exige nada. midi-osc.send-osc exige host/puerto/dirección.
+ */
+const isConfigured = computed(() => {
+  const p = props.action.parameters ?? {}
+  switch (kind.value) {
+    case 'clipboard':
+      if (props.action.type === 'clipboard.save-slot' || props.action.type === 'clipboard.paste-slot') {
+        return String(p.slot ?? '').trim().length > 0
+      }
+      return true
+    case 'flow':
+      return String(p.name ?? '').trim().length > 0
+    case 'profile':
+      if (props.action.type === 'profile-auto.switch-profile') {
+        return String(p.profileId ?? '').trim().length > 0
+      }
+      return true
+    case 'page':
+      return String(p.pageId ?? '').trim().length > 0
+    case 'layout':
+      if (props.action.type === 'window-manager.layout-restore') {
+        return String(p.name ?? '').trim().length > 0
+      }
+      return true
+    case 'osc':
+      return configuredOsc.value
+    default:
+      return true
+  }
+})
+
 const busy = ref('')
 const error = ref('')
 const feedback = ref('')
@@ -378,6 +520,25 @@ const pages = ref<Array<{ id: string; name: string }>>([])
 const selectedPage = ref(String(props.action.parameters.pageId ?? ''))
 const layouts = ref<Array<{ name: string; note?: string; geometry?: any }>>([])
 
+/** Rotación del carrusel en pequeño (parámetro `carouselMs`; ausente=4000, <=0=off). */
+const carouselMs = computed(() => resolveCarouselMs(props.action.parameters))
+
+/**
+ * Listas sin scroll (slots/layouts): páginas que rotan con `carouselMs`
+ * cuando no caben; lista entera cuando sí (ver useFitPager).
+ */
+const slotListEl = ref<HTMLElement | null>(null)
+const layoutListEl = ref<HTMLElement | null>(null)
+const slotPager = useFitPager(slotListEl, { intervalMs: carouselMs })
+const layoutPager = useFitPager(layoutListEl, { intervalMs: carouselMs })
+function measureLists() {
+  slotPager.measure()
+  layoutPager.measure()
+}
+/** Historial recortado sin scroll: las 4 primeras + indicación del resto. */
+const visibleHistory = computed(() => history.value.slice(0, 4))
+const hiddenHistoryCount = computed(() => Math.max(0, history.value.length - visibleHistory.value.length))
+
 const osc = computed(() => props.action.parameters ?? {})
 const configuredOsc = computed(() =>
   typeof osc.value.host === 'string' && !!osc.value.host.trim() &&
@@ -386,6 +547,7 @@ const configuredOsc = computed(() =>
   osc.value.address.startsWith('/')
 )
 const oscAddress = computed(() => `${osc.value.address ?? ''} → ${osc.value.host ?? ''}:${osc.value.port ?? ''}`)
+const currentPageName = computed(() => pages.value.find(p => p.id === selectedPage.value)?.name ?? '')
 const busyLabel = computed(() => busy.value === 'refresh' ? copy.value.refreshing : copy.value.executing)
 
 function unwrap(response: any): any {
@@ -466,6 +628,7 @@ async function refresh(): Promise<void> {
     error.value = messageOf(reason)
   } finally {
     busy.value = ''
+    void nextTick().then(measureLists)
   }
 }
 
@@ -578,17 +741,28 @@ onMounted(() => void refresh())
 .workflow-control {
   container-type: size;
   container-name: workflow;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+}
+.wf-body {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 8px;
   overflow: hidden;
-  padding: clamp(6px, 4cqi, 12px);
+  padding: 8px;
   color: inherit;
-  font: inherit;
 }
 
 .workflow-head,
@@ -618,7 +792,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   outline: 2px solid var(--bd-ac, #e0a84a);
   outline-offset: 2px;
 }
-.icon-button, .primary-button, .secondary-button, .workflow-row, .osc-pad {
+.icon-button, .primary-button, .secondary-button, .workflow-row, .osc-pad, .carousel-slot {
   border: 1px solid var(--bd-ln, #34383d);
   border-radius: 8px;
   background: var(--bd-sf, #1a1c1f);
@@ -642,20 +816,56 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-weight: 650;
   white-space: nowrap;
 }
+.lbl { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
 .primary-button {
   border-color: color-mix(in srgb, var(--bd-ac, #e0a84a) 45%, var(--bd-ln, #34383d));
   background: color-mix(in srgb, var(--bd-ac, #e0a84a) 13%, var(--bd-sf, #1a1c1f));
 }
 .secondary-button { align-self: flex-start; }
+.hero-action { touch-action: manipulation; }
+
+/* Carrusel compacto (XS): un dato + Marquee + toque para actuar. */
+.xs-carousel { display: none; min-height: 0; flex: 1 1 auto; }
+.carousel-slot {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-color: color-mix(in srgb, var(--bd-ac, #e0a84a) 35%, var(--bd-ln, #34383d));
+  background: color-mix(in srgb, var(--bd-ac, #e0a84a) 11%, var(--bd-sf, #1a1c1f));
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  touch-action: manipulation;
+}
+.carousel-slot small {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: .68;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.empty-xs { display: none; margin: 0; text-align: center; font-size: 11px; opacity: .68; }
+
 .workflow-scroll {
   min-height: 0;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
 }
+/* Paginación del carrusel: dots + "página/total" (sin scroll). */
+.pager { display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; padding-top: 2px; }
+.pager-dot { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 999px; background: currentcolor; opacity: .3; cursor: pointer; }
+.pager-dot.is-active { width: 16px; opacity: .9; }
+.pager small { font-size: 10px; opacity: .6; font-variant-numeric: tabular-nums; }
 .workflow-row {
   min-height: 38px;
   display: grid;
@@ -666,6 +876,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   text-align: left;
 }
 .workflow-row:hover:not(:disabled), .icon-button:hover:not(:disabled) { border-color: var(--bd-ac, #e0a84a); }
+.workflow-row, .empty-state { flex: none; }
 .row-main { overflow: hidden; }
 .row-main svg { flex: none; opacity: .8; }
 .row-main b, .row-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -674,7 +885,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .empty-state, .muted, .readonly-note { margin: auto 0; font-size: 11px; opacity: .68; }
 
 .workflow-form { display: flex; gap: 5px; min-width: 0; flex: 0 0 auto; }
-.workflow-form input, .workflow-form textarea, .field-label input, .field-label select, .type-label select {
+.workflow-form input, .field-label input, .field-label select, .type-label select {
   min-width: 0;
   min-height: 34px;
   border: 1px solid var(--bd-ln, #34383d);
@@ -684,9 +895,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-size: 11px;
 }
 .clipboard-form input { width: 27%; }
-.clipboard-form textarea { flex: 1; resize: vertical; }
+.clipboard-form .snippet-text { flex: 1; width: auto; overflow: hidden; text-overflow: ellipsis; }
 .clipboard-form .primary-button { min-height: 34px; padding-inline: 8px; }
-.workflow-history { flex: 0 1 auto; overflow: auto; font-size: 10px; }
+.workflow-history { flex: 0 1 auto; overflow: hidden; font-size: 10px; }
 .workflow-history summary { display: flex; align-items: center; gap: 5px; min-height: 30px; cursor: pointer; }
 .workflow-history ul { margin: 0; padding: 0 0 0 18px; }
 .workflow-history li { display: flex; justify-content: space-between; gap: 6px; padding: 3px 0; }
@@ -711,7 +922,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .value-card { flex-wrap: wrap; }
 .value-card span { opacity: .68; }
-.value-card strong { margin-left: auto; overflow-wrap: anywhere; font-size: 13px; }
+.value-card strong { margin-left: auto; overflow-wrap: anywhere; font-size: clamp(12px, 7cqi, 15px); }
 .value-card small { width: 100%; opacity: .6; }
 .status-card { flex-wrap: wrap; }
 .status-card small { margin-left: auto; opacity: .7; }
@@ -724,10 +935,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   overflow-wrap: anywhere;
 }
 .workflow-feedback { color: #7ed7a6; }
-.workflow-error { color: #ff9995; }
+.workflow-error { color: #ff9995; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.workflow-error .err-text { overflow: hidden; text-overflow: ellipsis; }
+.workflow-error .err-short { display: none; }
 .workflow-state { display: flex; align-items: center; gap: 6px; opacity: .75; }
 .spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
-.osc-address { overflow: hidden; font: 10px ui-monospace, monospace; opacity: .7; text-overflow: ellipsis; white-space: nowrap; }
+.osc-address { overflow: hidden; font: 10px ui-monospace, monospace; opacity: .7; }
+.page-name-xs { display: none; margin: 0; min-width: 0; font-size: 12px; font-weight: 650; }
 .osc-pad {
   display: flex;
   flex: 1;
@@ -743,10 +957,59 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   touch-action: manipulation;
 }
 .readonly-note { margin-top: auto; text-align: right; font-size: 9px; }
+/* Blindaje: ningún descendiente puede abrir scrollbar (sin scroll). */
+.workflow-control *, .workflow-control *::before, .workflow-control *::after {
+  scrollbar-width: none !important;
+}
+.workflow-control *::-webkit-scrollbar { display: none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
+/* XS (<200px ≈ 1×1): un dato + carrusel o botón esencial; sin refresh,
+   formularios, listas, errores largos ni notas. */
+@container workflow (max-width: 199px) {
+  .wf-body { gap: 4px; padding: 6px; }
+  .only-m-plus { display: none !important; }
+  .m-plus-list { display: none !important; }
+  .xs-carousel { display: flex; }
+  .xs-carousel :deep(.bd-carousel-dots) { display: none; }
+  .empty-xs { display: block; }
+  .page-name-xs { display: block; }
+  .workflow-title { font-size: 11px; }
+  .icon-button { display: none; }
+  .hero-action { min-height: 40px; width: 100%; font-size: 12px; padding: 5px 8px; }
+  .secondary-button.hero-action { align-self: stretch; }
+  .value-card, .status-card { min-height: 30px; padding: 4px 6px; }
+  .value-card strong, .status-card { font-size: 12px; }
+  .workflow-error .err-text { display: none; }
+  .workflow-error .err-short { display: inline; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .osc-pad { min-height: 40px; }
+}
+
+/* Alturas cortas: sin historial ni formularios secundarios; en flujo, solo valor + acción. */
+@container workflow (max-height: 270px) {
+  .workflow-history { display: none; }
+}
+/* Filas bajas con anchura M+ (p. ej. 2×1/3×1): la lista paginada manda;
+   el formulario y el historial vuelven con más altura. */
+@container workflow (min-width: 200px) and (max-height: 150px) {
+  .clipboard-form, .workflow-history, .workflow-feedback, .readonly-note { display: none !important; }
+}
+@container workflow (max-height: 150px) {
+  .workflow-control[data-kind="flow"] .field-label,
+  .workflow-control[data-kind="flow"] .type-label { display: none; }
+}
+
+/* M (≥200px): dato + acción principal; la lista y el formulario vuelven. */
+@container workflow (min-width: 200px) {
+  .workflow-error .err-short { display: none; }
+  .xs-carousel { display: none; }
+}
 
 @container workflow (min-width: 230px) and (min-height: 135px) {
-  .workflow-control[data-kind="page"], .workflow-control[data-kind="profile"] {
+  .workflow-control[data-kind="page"] .wf-body, .workflow-control[data-kind="profile"] .wf-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: auto 1fr auto;
@@ -754,22 +1017,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
   .workflow-control[data-kind="page"] .workflow-head,
   .workflow-control[data-kind="profile"] .workflow-head { grid-column: 1 / -1; }
-  .workflow-control[data-kind="page"] > .primary-button,
-  .workflow-control[data-kind="profile"] > .workflow-actions { grid-column: 2; justify-self: end; }
+  .workflow-control[data-kind="page"] .wf-body > .primary-button,
+  .workflow-control[data-kind="profile"] .wf-body > .workflow-actions { grid-column: 2; justify-self: end; }
+  .workflow-control[data-kind="page"] .wf-body > .page-name-xs { display: none; }
   .workflow-control[data-kind="page"] .field-label,
   .workflow-control[data-kind="profile"] .field-label { grid-column: 1; }
   .workflow-control[data-kind="profile"] .status-card { grid-column: 1 / -1; }
 }
 
 @container workflow (max-height: 150px) {
-  .workflow-control { gap: 4px; padding: 4px; }
+  .wf-body { gap: 4px; padding: 4px; }
   .field-label { flex-direction: row; align-items: center; gap: 5px; white-space: nowrap; }
   .field-label input, .field-label select { min-height: 28px; padding: 4px 6px; }
   .primary-button, .secondary-button { min-height: 30px; padding: 4px 7px; }
   .value-card, .status-card { min-height: 28px; padding: 4px 6px; }
   .status-card small { font-size: 9px; }
   .workflow-row { min-height: 32px; padding-block: 3px; }
-  .clipboard-form input, .clipboard-form textarea { min-height: 29px; padding: 4px 6px; }
+  .clipboard-form input { min-height: 29px; padding: 4px 6px; }
   .clipboard-form .primary-button { min-height: 29px; }
 }
 </style>

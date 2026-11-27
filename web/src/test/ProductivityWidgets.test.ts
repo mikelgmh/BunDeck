@@ -128,4 +128,122 @@ describe('productivity and status widgets', () => {
     expect(wrapper.text()).not.toContain('No upcoming events')
     wrapper.unmount()
   })
+
+  it('shows NeedsConfig when the calendar has no source and the load fails', async () => {
+    runAction.mockRejectedValue(new Error('Sin fuente de calendario'))
+    const bare = mount(CalendarAgenda, { props: props('calendar.next-event') })
+    await flushPromises()
+    expect(bare.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    bare.unmount()
+    const withIcs = mount(CalendarAgenda, { props: props('calendar.next-event', { icsPath: '/tmp/cal.ics' }) })
+    await flushPromises()
+    expect(withIcs.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    withIcs.unmount()
+  })
+
+  it('hides NeedsConfig after a successful calendar load even without params', async () => {
+    runAction.mockResolvedValue({ found: false })
+    const wrapper = mount(CalendarAgenda, { props: props('calendar.next-event') })
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No hay próximos eventos')
+    wrapper.unmount()
+  })
+
+  it('never asks for configuration on the timer (status needs no params)', async () => {
+    runAction.mockResolvedValue({ status: 'idle', mode: 'work', remainingMs: 0, totalMs: 1_500_000 })
+    const wrapper = mount(PomodoroControl, { props: props('timer.status') })
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('status cards responsive contract', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('pide configuración sin host en minecraft y sin métrica en monitor', async () => {
+    runAction.mockResolvedValue({ online: true })
+    const missing = mount(StatusCards, { props: props('minecraft.server-status') })
+    await flushPromises()
+    expect(missing.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    const ok = mount(StatusCards, { props: props('minecraft.server-status', { host: 'hypixel.net' }) })
+    await flushPromises()
+    expect(ok.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    const monitorMissing = mount(StatusCards, { props: props('pc-vitals.monitor') })
+    await flushPromises()
+    expect(monitorMissing.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    const monitorOk = mount(StatusCards, { props: props('pc-vitals.monitor', { component: 'cpu', metric: 'usage' }) })
+    await flushPromises()
+    expect(monitorOk.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    missing.unmount()
+    ok.unmount()
+    monitorMissing.unmount()
+    monitorOk.unmount()
+  })
+
+  it('NeedsConfig abre el drawer con tipo y posición', async () => {
+    runAction.mockResolvedValue({})
+    const seen: any[] = []
+    const onEvent = (e: Event) => {
+      seen.push((e as CustomEvent).detail)
+      e.preventDefault()
+    }
+    window.addEventListener('bundeck:open-action-settings', onEvent as EventListener)
+    try {
+      const wrapper = mount(StatusCards, { props: { ...props('steam.server-status'), position: 4 } })
+      await flushPromises()
+      expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+      await wrapper.get('[data-cy="bd-needs-config"]').trigger('click')
+      expect(seen).toEqual([{ actionType: 'steam.server-status', position: 4 }])
+      wrapper.unmount()
+    } finally {
+      window.removeEventListener('bundeck:open-action-settings', onEvent as EventListener)
+    }
+  })
+
+  it('el carrusel del summary rota métricas y respeta carouselMs 0', async () => {
+    vi.useFakeTimers()
+    runAction.mockResolvedValue({
+      cpu: 42, ram: 61, gpu: { usage: 18 }, disk: { value: 70 }, uptime: { human: '2d 3h' }, monitored: true,
+    })
+    const wrapper = mount(StatusCards, { props: props('pc-vitals.summary') })
+    await flushPromises()
+    expect(wrapper.findAll('[data-cy="bd-carousel-dot"]')).toHaveLength(5)
+    const hero = () => wrapper.find('.xs-carousel strong').text()
+    expect(hero()).toContain('42')
+    vi.advanceTimersByTime(4000)
+    await flushPromises()
+    expect(hero()).toContain('61')
+    const off = mount(StatusCards, { props: props('pc-vitals.summary', { carouselMs: 0 }) })
+    await flushPromises()
+    const heroOff = () => off.find('.xs-carousel strong').text()
+    expect(heroOff()).toContain('42')
+    vi.advanceTimersByTime(12000)
+    await flushPromises()
+    expect(heroOff()).toContain('42')
+    wrapper.unmount()
+    off.unmount()
+  })
+
+  it('email.unread muestra la línea compacta con marquee y sin alerta', async () => {
+    runAction.mockResolvedValue({ count: 5 })
+    const wrapper = mount(StatusCards, { props: props('email.unread', { provider: 'gmail' }) })
+    await flushPromises()
+    expect(wrapper.find('.xs-line').text()).toContain('Sin leer · 5')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('el error largo queda accesible con aviso corto neutro', async () => {
+    runAction.mockRejectedValue(new Error('Fallo muy largo de la API que no debe pintar en rojo grande'))
+    const wrapper = mount(StatusCards, { props: props('pc-vitals.summary') })
+    await flushPromises()
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toContain('Fallo muy largo de la API')
+    expect(alert.find('.err-short').text()).toBe('Error')
+    wrapper.unmount()
+  })
 })

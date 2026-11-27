@@ -104,4 +104,69 @@ describe('SmartHomeControl', () => {
     expect(execute).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('shows NeedsConfig without executing when the entity is missing', async () => {
+    const wrapper = mount(SmartHomeControl, {
+      props: {
+        action: { type: 'homeassistant.entity', parameters: { action: 'toggle' } },
+        apiBase: '/api',
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    expect(execute).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('renders the Hue light list as a carousel without leaking credentials', async () => {
+    execute.mockResolvedValue({
+      result: {
+        lights: [
+          { id: '1', name: 'Salón', on: true, brightness: 200, reachable: true },
+          { id: '2', name: 'Cocina', on: false, reachable: true },
+        ],
+      },
+    })
+    const wrapper = mount(SmartHomeControl, {
+      props: {
+        action: { type: 'hue-extra.lights-list', parameters: { bridgeIp: '192.168.1.50', apiKey: 'secret-key' } },
+        apiBase: '',
+      },
+    })
+    await flushPromises()
+    expect(execute).toHaveBeenCalledWith('', 'hue-extra.lights-list', {
+      bridgeIp: '192.168.1.50',
+      apiKey: 'secret-key',
+    })
+    expect(wrapper.find('[data-cy="bd-carousel"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Salón')
+    expect(wrapper.text()).not.toContain('secret-key')
+    wrapper.unmount()
+  })
+
+  it('sends fire-and-forget Govee toggle commands without reporting state', async () => {
+    execute.mockResolvedValue({ result: { success: true } })
+    const wrapper = mount(SmartHomeControl, {
+      props: {
+        action: {
+          type: 'govee.toggle',
+          parameters: { apiKey: 'private-key', device: 'device-id', model: 'H6159', action: 'on' },
+        },
+        apiBase: '',
+      },
+    })
+    await flushPromises()
+    const buttons = wrapper.findAll('.button-row button')
+    expect(buttons).toHaveLength(2)
+    await buttons[0].trigger('click')
+    await flushPromises()
+    expect(execute).toHaveBeenLastCalledWith('', 'govee.toggle', {
+      apiKey: 'private-key',
+      device: 'device-id',
+      model: 'H6159',
+      action: 'on',
+    })
+    expect(wrapper.text()).not.toContain('private-key')
+    wrapper.unmount()
+  })
 })

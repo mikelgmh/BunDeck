@@ -46,7 +46,7 @@ describe('AudioMixerControl', () => {
     expect(wrapper.text()).toContain('Studio speakers')
 
     await wrapper.get('select').setValue('2')
-    await wrapper.get('.apply').trigger('click')
+    await wrapper.get('.m-apply').trigger('click')
     await flushPromises()
     expect(execute).toHaveBeenLastCalledWith('/api', 'audio-mixer.output-switch', { device: '2', extra: 'kept' })
     expect(wrapper.text()).toContain('Output change requested.')
@@ -65,5 +65,40 @@ describe('AudioMixerControl', () => {
     await wrapper.findAll('button')[0].trigger('click')
     expect(execute).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('rotates output devices in the XS hero with the carouselMs contract', async () => {
+    execute.mockResolvedValueOnce({
+      result: { devices: [{ id: '2', name: 'Studio speakers' }, { id: '3', name: 'Headphones' }] },
+    })
+    const wrapper = mount(AudioMixerControl, {
+      props: {
+        action: { type: 'audio-mixer.output-switch', parameters: { carouselMs: 0 } },
+        apiBase: '/api',
+      },
+    })
+    await flushPromises()
+    // Sin container queries en jsdom todo el DOM existe: héroe XS + select M+.
+    expect(wrapper.find('[data-cy="audio-xs-hero"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="audio-xs-hero"]').text()).toContain('Studio speakers')
+    expect(wrapper.find('[data-cy="bd-marquee"]').exists()).toBe(true)
+    // carouselMs <= 0 desactiva la rotación: sigue en el primer dispositivo.
+    expect(wrapper.find('select').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('never shows the needs-config badge (both actions work without parameters)', async () => {
+    execute.mockResolvedValue({ result: { devices: [] } })
+    const mic = mount(AudioMixerControl, {
+      props: { action: { type: 'audio-mixer.mic-mute', parameters: {} }, apiBase: '' },
+    })
+    expect(mic.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    mic.unmount()
+    const out = mount(AudioMixerControl, {
+      props: { action: { type: 'audio-mixer.output-switch', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(out.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    out.unmount()
   })
 })

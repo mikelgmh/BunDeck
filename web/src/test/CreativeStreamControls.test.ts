@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import StreamStudioControl from '../components/bundeck/widgets/StreamStudioControl.vue'
 import CreativeToolsControl from '../components/bundeck/widgets/CreativeToolsControl.vue'
 import { useI18nStore } from '../composables/useI18n'
@@ -7,7 +7,6 @@ import { useI18nStore } from '../composables/useI18n'
 const { executeMock } = vi.hoisted(() => ({ executeMock: vi.fn() }))
 vi.mock('../composables/useWidgetAction', () => ({ executeWidgetAction: executeMock }))
 
-const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 const { setLocale } = useI18nStore()
 
 afterEach(() => {
@@ -16,35 +15,37 @@ afterEach(() => {
 })
 
 describe('StreamStudioControl', () => {
-  it('loads OBS state and executes its corresponding stream action', async () => {
+  it('polls OBS state on mount and executes its corresponding stream action', async () => {
     executeMock
+      .mockResolvedValueOnce({ success: true, result: { streaming: false, recording: false, options: [{ value: 'Main', label: 'Main' }] } })
+      .mockResolvedValueOnce({ success: true, result: { options: [{ value: 'Main', label: 'Main' }], currentProgramSceneName: 'Main' } })
       .mockResolvedValueOnce({ success: true, result: { streaming: false, recording: false, options: [{ value: 'Main', label: 'Main' }] } })
       .mockResolvedValueOnce({ success: true, result: { options: [{ value: 'Main', label: 'Main' }], currentProgramSceneName: 'Main' } })
       .mockResolvedValueOnce({ success: true, result: { requested: 'start' } })
     const wrapper = mount(StreamStudioControl, {
       props: { action: { type: 'obs.status', parameters: { host: 'localhost', password: 'secret' } }, apiBase: '' },
     })
-    expect(executeMock).not.toHaveBeenCalled()
-    await wrapper.get('.stream-icon-btn').trigger('click')
     await flushPromises()
+    // Poll silencioso al montar: status + scene-list.
     expect(executeMock).toHaveBeenCalledWith('', 'obs.status', { host: 'localhost', password: 'secret' })
     expect(executeMock).toHaveBeenCalledWith('', 'obs.scene-list', { host: 'localhost', password: 'secret' })
+    await wrapper.get('.stream-icon-btn').trigger('click')
+    await flushPromises()
+    expect(executeMock).toHaveBeenCalledTimes(4)
     await wrapper.get('.live-btn').trigger('click')
     expect(executeMock).toHaveBeenLastCalledWith('', 'obs.stream', { host: 'localhost', password: 'secret', action: 'start' })
     wrapper.unmount()
   })
 
   it('shows API errors accessibly and keeps controls disabled in readonly mode', async () => {
-    executeMock.mockRejectedValueOnce(new Error('OBS connection failed'))
+    executeMock.mockRejectedValue(new Error('OBS connection failed'))
     const wrapper = mount(StreamStudioControl, {
       props: { action: { type: 'obs.status', parameters: {} }, apiBase: '', readonly: true },
     })
-    expect(executeMock).not.toHaveBeenCalled()
-    await wrapper.get('.stream-icon-btn').trigger('click')
+    // El poll de solo-lectura también falla: el error queda en role="alert".
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('OBS connection failed')
     expect(wrapper.get('.live-btn').attributes('disabled')).toBeDefined()
-    expect(executeMock).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
@@ -54,8 +55,6 @@ describe('StreamStudioControl', () => {
     const wrapper = mount(StreamStudioControl, {
       props: { action: { type: 'youtube.viewer-count', parameters: { videoId: 'video' } }, apiBase: '' },
     })
-    expect(executeMock).not.toHaveBeenCalled()
-    await wrapper.get('.stream-icon-btn').trigger('click')
     await flushPromises()
     expect(executeMock).toHaveBeenCalledTimes(1)
     expect(executeMock).toHaveBeenLastCalledWith('', 'youtube.viewer-count', { videoId: 'video' })
@@ -74,10 +73,58 @@ describe('StreamStudioControl', () => {
     const wrapper = mount(StreamStudioControl, {
       props: { action: { type: 'twitch.viewer-count', parameters: {} }, apiBase: '' },
     })
-    await wrapper.get('.stream-icon-btn').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('viewers')
     expect(wrapper.text()).toContain('Current audience')
+    wrapper.unmount()
+  })
+
+  it('shows NeedsConfig on Twitch without identity params, and hides it once identified', async () => {
+    executeMock.mockResolvedValue({ success: true, result: { viewerCount: 1, live: false } })
+    const bare = mount(StreamStudioControl, {
+      props: { action: { type: 'twitch.viewer-count', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    // Sin credenciales ni carga con éxito: badge visible.
+    executeMock.mockRejectedValueOnce(new Error('Twitch rechazó la petición (401)'))
+    const failing = mount(StreamStudioControl, {
+      props: { action: { type: 'twitch.viewer-count', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(failing.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    failing.unmount()
+    // Con broadcaster en parámetros: configurado aunque falle la red.
+    const identified = mount(StreamStudioControl, {
+      props: { action: { type: 'twitch.viewer-count', parameters: { broadcaster: 'someone' } }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(identified.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    identified.unmount()
+    bare.unmount()
+  })
+
+  it('rotates OBS stream/recording states through the carousel contract', async () => {
+    executeMock
+      .mockResolvedValueOnce({ success: true, result: { streaming: true, recording: false, options: [] } })
+      .mockResolvedValueOnce({ success: true, result: { options: [], currentProgramSceneName: null } })
+    const wrapper = mount(StreamStudioControl, {
+      props: { action: { type: 'obs.status', parameters: { carouselMs: 0 } }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-obs-carousel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cy="bd-obs-carousel"] [data-cy="bd-carousel-dot"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('EN DIRECTO')
+    wrapper.unmount()
+  })
+
+  it('always has OBS configured (localhost defaults) and never shows NeedsConfig', async () => {
+    executeMock.mockRejectedValue(new Error('unreachable'))
+    const wrapper = mount(StreamStudioControl, {
+      props: { action: { type: 'obs.status', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    expect(wrapper.get('[role="alert"]').text()).toContain('unreachable')
     wrapper.unmount()
   })
 })
@@ -113,5 +160,17 @@ describe('CreativeToolsControl', () => {
     expect(wrapper.get('[aria-label="Play or pause"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('MARKS & MARKERS')
     wrapper.unmount()
+  })
+
+  it('renders four essential buttons per editor for 1x1 keys without config badges', async () => {
+    for (const type of ['premiere.transport', 'davinci.transport', 'photoshop.brush-size', 'blender.render'] as const) {
+      const wrapper = mount(CreativeToolsControl, {
+        props: { action: { type, parameters: {} }, apiBase: '' },
+      })
+      expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+      expect(wrapper.find('.xs-essentials').exists()).toBe(true)
+      expect(wrapper.findAll('.xs-essentials .tool-btn')).toHaveLength(4)
+      wrapper.unmount()
+    }
   })
 })

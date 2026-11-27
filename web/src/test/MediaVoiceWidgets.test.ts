@@ -118,9 +118,9 @@ describe('BunDeck media and voice widget surfaces', () => {
     })
     await flushPromises()
     expect(wrapper.find('select').element).toBeTruthy()
-    await wrapper.get('[aria-label="Play selected sound"]').trigger('click')
+    await wrapper.get('.m-actions [aria-label="Play selected sound"]').trigger('click')
     await flushPromises()
-    await wrapper.get('[aria-label="Stop sound"]').trigger('click')
+    await wrapper.get('.m-actions [aria-label="Stop sound"]').trigger('click')
     await flushPromises()
     expect(calls).toContainEqual({
       type: 'soundboard.play',
@@ -175,5 +175,53 @@ describe('BunDeck media and voice widget surfaces', () => {
     await spotify.vm.$nextTick()
     expect(spotify.text()).toContain('Nothing playing')
     spotify.unmount()
+  })
+
+  it('shows NeedsConfig when meetings or soundboard lack required parameters', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({ sounds: [] })))
+    const meetings = mount(VoicePanelControl, {
+      props: { action: { type: 'meetings.control', parameters: {} }, apiBase: '' },
+    })
+    expect(meetings.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    meetings.unmount()
+
+    const bus = mount(VoicePanelControl, {
+      props: { action: { type: 'voicemeeter.bus-mute', parameters: {} }, apiBase: '' },
+    })
+    expect(bus.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    bus.unmount()
+
+    const sound = mount(SoundboardControl, {
+      props: { action: { type: 'soundboard.play', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(sound.find('[data-cy="bd-needs-config"]').exists()).toBe(true)
+    sound.unmount()
+  })
+
+  it('renders the Spotify title with Marquee and meetings XS pages with icon-only buttons', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({
+      state: 'playing',
+      isPlaying: true,
+      track: { id: 'track-7', name: 'Night Drive', artists: 'The Testers' },
+    })))
+    const spotify = mount(SpotifyPlayerControl, {
+      props: { action: { type: 'spotify.now-playing', parameters: {} }, apiBase: '' },
+    })
+    await flushPromises()
+    expect(spotify.find('[data-cy="bd-marquee"]').exists()).toBe(true)
+    expect(spotify.find('[data-cy="bd-marquee"]').text()).toContain('Night Drive')
+    spotify.unmount()
+
+    const voice = mount(VoicePanelControl, {
+      props: {
+        action: { type: 'meetings.control', parameters: { app: 'meet', command: 'mute', carouselMs: 0 } },
+        apiBase: '',
+      },
+    })
+    expect(voice.find('[data-cy="voice-xs-pages"]').exists()).toBe(true)
+    expect(voice.findAll('[data-cy="voice-xs-pages"] button').length).toBe(2)
+    expect(voice.findAll('[data-cy="voice-xs-pages"] button')[0].attributes('aria-label')).toBeTruthy()
+    voice.unmount()
   })
 })

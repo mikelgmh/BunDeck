@@ -51,4 +51,18 @@ describe('MediaTransportControl', () => {
     expect(execute).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('keeps only play and next visible in XS (previous/mute progressive)', () => {
+    const wrapper = mount(MediaTransportControl, {
+      props: { action: { type: 'multimedia.multimedia', parameters: {} }, apiBase: '' },
+    })
+    // Sin container queries en jsdom todo existe; las clases marcan el
+    // progressive disclosure que el CSS aplica en <200px.
+    expect(wrapper.get('[aria-label="Previous track"]').classes()).toContain('xs-hide')
+    expect(wrapper.get('[aria-label="Toggle mute"]').classes()).toContain('xs-hide')
+    expect(wrapper.get('[aria-label="Play or pause"]').classes()).not.toContain('xs-hide')
+    expect(wrapper.get('[aria-label="Next track"]').classes()).not.toContain('xs-hide')
+    expect(wrapper.find('[data-cy="bd-needs-config"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
