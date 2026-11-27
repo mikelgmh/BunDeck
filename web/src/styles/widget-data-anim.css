@@ -1,0 +1,59 @@
+/* Transiciones suaves en cambios de datos de teclas y widgets (polling,
+ * carrusel, marquee): fundido + leve desplazamiento vertical al montar el
+ * nodo. Los templates re-montan el nodo con `:key="<valor>"`, así la entrada
+ * solo se reproduce cuando el dato cambia de verdad (misma key = sin
+ * animación). Sin librerías: solo CSS + reactividad de Vue.
+ *
+ * Convención de `widgets/shared/README.md §4`: toda animación nueva trae su
+ * `@media (prefers-reduced-motion: reduce)` que la desactiva.
+ */
+
+@keyframes bd-data-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Nodo de dato que cambia por polling/carrusel (`:key` + esta clase). */
+.bd-data-swap {
+  animation: bd-data-in 0.28s ease;
+}
+
+/* Vista del carrusel compartido: cada rotación re-monta (`:key="index"`)
+ * y entra con un fundido + deslizamiento lateral leve. */
+.bd-carousel-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  animation: bd-data-in 0.3s ease;
+}
+
+/* Texto del marquee: al cambiar (`:key="text"`) entra fundido sin tocar la
+ * animación de desplazamiento de los grupos (está en los padres). */
+.bd-mq-text {
+  display: inline-block;
+  animation: bd-data-in 0.3s ease;
+}
+
+/* Barras/medidores que cambian por polling: el ancho ya se pinta inline;
+ * la transición lo suaviza en vez de saltar. */
+.bd-meter-fill {
+  transition: width 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-data-swap,
+  .bd-carousel-view,
+  .bd-mq-text {
+    animation: none;
+  }
+  .bd-meter-fill {
+    transition: none;
+  }
+}

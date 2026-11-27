@@ -36,7 +36,7 @@
         />
       </svg>
       <div class="vol-center" aria-hidden="true">
-        <output class="vol-pct" data-cy="vol-pct">{{ shown }}%</output>
+        <output class="vol-pct bd-data-swap" :key="shown" data-cy="vol-pct">{{ shown }}%</output>
       </div>
       <button
         v-if="!readonly"
@@ -51,7 +51,7 @@
         <VolumeX v-if="muted" :size="14" stroke-width="2" aria-hidden="true" />
         <Volume2 v-else :size="14" stroke-width="2" aria-hidden="true" />
       </button>
-      <span v-if="muted" class="vol-muted-tag" data-cy="vol-muted">🔇</span>
+      <span v-if="muted" class="vol-muted-tag" data-cy="vol-muted"><VolumeX :size="12" stroke-width="2" aria-hidden="true" /></span>
     </div>
 
     <!-- Ancha (w > h): slider horizontal -->
@@ -81,7 +81,7 @@
         aria-hidden="true"
         class="vol-ico"
       />
-      <output class="vol-pct vol-pct--side" data-cy="vol-pct">{{ shown }}%</output>
+      <output class="vol-pct vol-pct--side bd-data-swap" :key="shown" data-cy="vol-pct">{{ shown }}%</output>
       <button
         v-if="!readonly"
         type="button"
@@ -92,13 +92,14 @@
         data-cy="vol-mute"
         @click.stop="toggleMute"
       >
-        {{ muted ? '🔇' : '🔈' }}
+        <VolumeX v-if="muted" :size="14" stroke-width="2" aria-hidden="true" />
+        <Volume2 v-else :size="14" stroke-width="2" aria-hidden="true" />
       </button>
     </div>
 
     <!-- Alta (h > w): slider vertical -->
     <div class="vol-v" data-cy="vol-v">
-      <output class="vol-pct" data-cy="vol-pct">{{ shown }}%</output>
+      <output class="vol-pct bd-data-swap" :key="shown" data-cy="vol-pct">{{ shown }}%</output>
       <input
         type="range"
         class="vol-range-v"
@@ -122,7 +123,8 @@
         data-cy="vol-mute"
         @click.stop="toggleMute"
       >
-        {{ muted ? '🔇' : '🔈' }}
+        <VolumeX v-if="muted" :size="14" stroke-width="2" aria-hidden="true" />
+        <Volume2 v-else :size="14" stroke-width="2" aria-hidden="true" />
       </button>
     </div>
   </div>
@@ -358,6 +360,7 @@ onUnmounted(() => {
   min-height: 0;
   display: grid;
   place-items: stretch;
+  position: relative;
   color: inherit;
 }
 
@@ -366,6 +369,7 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   position: relative;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -374,6 +378,8 @@ onUnmounted(() => {
 .vol-h,
 .vol-v {
   display: none;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* Ancha (paisaje): slider horizontal. */
@@ -442,7 +448,7 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   font-size: clamp(14px, 28cqi, 30px);
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.15;
 }
 .vol-pct--side {
   font-size: 13px;
@@ -481,6 +487,7 @@ onUnmounted(() => {
 .vol-h {
   align-items: center;
   gap: 8px;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   padding: 8px 10px;
@@ -501,6 +508,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   padding: 8px 6px;
@@ -515,5 +523,10 @@ onUnmounted(() => {
   writing-mode: vertical-lr;
   direction: rtl;
   width: 28px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vol-fill {
+    transition: none;
+  }
 }
 </style>

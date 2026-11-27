@@ -841,13 +841,38 @@
 .bundeck .bd-gs .bd-key.vol-key { padding: 2px; cursor: default; overflow: hidden; }
 .bundeck .bd-gs .bd-key.vol-key.bd-sel { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 -2px 0 rgba(0, 0, 0, 0.35) inset, 0 8px 8px -4px rgba(0, 0, 0, 0.6), 0 0 0 2px var(--bd-p2), 0 0 0 4px var(--bd-ac); }
 .bundeck .bd-gs .grid-stack-item { min-width: 0; }
-.bundeck .bd-gs-drag-handle { position: absolute; z-index: 102; top: 10px; right: 10px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--bd-kt); background: rgba(0, 0, 0, .45); opacity: 0; cursor: grab; transition: opacity .12s; }
-.bundeck .grid-stack-item:hover .bd-gs-drag-handle, .bundeck .bd-gs-drag-handle:focus-visible { opacity: 1; }
-.bundeck .bd-gs-drag-handle:active { cursor: grabbing; }
+/* En edición toda la tecla es el agarre de GridStack (handle '.bd-key'):
+   el cursor lo indica. En uso GridStack marca los items como
+   .ui-draggable-disabled y la tecla conserva su cursor normal. */
+.bundeck .bd-gs .grid-stack-item:not(.ui-draggable-disabled) .bd-key { cursor: grab; }
+.bundeck .bd-gs .grid-stack-item:not(.ui-draggable-disabled) .bd-key:active { cursor: grabbing; }
+/* Tirador de resize SE (GridStack): cuadrado de bordes redondeados con el
+   icono lucide `move-diagonal-2`. La esquina inferior derecha hereda el
+   radio del botón (--bd-rk) para no desentonar. Visible al hover/foco del
+   widget (y siempre en táctil, sin hover). En uso GridStack desactiva el
+   resize (.ui-resizable-disabled → display:none) y no se muestra. */
+.bundeck .grid-stack-item > .ui-resizable-se {
+  width: 26px;
+  height: 26px;
+  right: var(--gs-item-margin-right);
+  bottom: var(--gs-item-margin-bottom);
+  transform: none;
+  cursor: se-resize;
+  border-radius: 8px 8px var(--bd-rk) 8px;
+  background-color: rgba(0, 0, 0, 0.45);
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23c5c8cc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 13v6h-6"/><path d="M5 11V5h6"/><path d="m5 5 14 14"/></svg>');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px 14px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.bundeck .grid-stack-item:hover > .ui-resizable-se,
+.bundeck .grid-stack-item:focus-within > .ui-resizable-se { opacity: 1; }
 /* Táctil (sin hover): el tirador siempre visible; si no, no se puede
-   descubrir ni agarrar para mover el widget (GridStack arrastra por handle). */
+   descubrir ni agarrar para redimensionar el widget. */
 @media (pointer: coarse) {
-  .bundeck .bd-gs-drag-handle { opacity: 1; }
+  .bundeck .grid-stack-item > .ui-resizable-se { opacity: 1; }
 }
 .bundeck .bd-deck-cell.bd-over { outline: 2px dashed var(--bd-ac); outline-offset: 2px; }
 .bundeck .bd-widget { border: 1px solid var(--bd-ln); border-radius: 10px; background: var(--bd-k1); padding: 8px; display: flex; min-height: 72px; }
@@ -967,9 +992,8 @@
 }
 .bundeck.bd-kiosk .bd-floor {
   padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
-  /* La kiosk-bar es fixed (overlay): reservar su aire abajo o la última
-     fila del grid quedaría detrás de la barra y parecería "cortada". */
-  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  /* La kiosk-bar es overlay (fixed en desktop, absolute en móvil): no
+     reserva espacio. Mismo aire arriba que abajo. */
 }
 .bundeck.bd-kiosk .bd-stack {
   width: 100%;
@@ -1168,7 +1192,6 @@
 @media (max-width: 640px) {
   .bundeck.bd-kiosk .bd-floor {
     padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
-    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
   .bundeck.bd-kiosk .bd-plate {
     gap: 8px;

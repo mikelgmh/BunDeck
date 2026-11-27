@@ -446,14 +446,15 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
   const [idA, idB] = ids;
   await expect(plate.locator('.grid-stack-item')).toHaveCount(2);
 
-  // Arrastra B a la derecha con el asa: en flotación libre debe quedarse
-  // separada (con "gravedad" se juntaban solas).
-  const handle = plate.locator(`[data-gs-id="${idB}"] [data-cy=bd-gs-drag-handle]`);
-  await handle.hover();
+  // Arrastra B a la derecha agarrando la propia tecla (todo el botón es el
+  // handle de GridStack): en flotación libre debe quedarse separada
+  // (con "gravedad" se juntaban solas).
+  const keyB = plate.locator(`[data-gs-id="${idB}"] [data-cy=bd-key]`);
+  await keyB.hover();
   const itemBox = await plate.locator(`[data-gs-id="${idB}"]`).boundingBox();
   expect(itemBox, 'grid item has a box').not.toBeNull();
-  const hb = await handle.boundingBox();
-  expect(hb, 'drag handle has a box').not.toBeNull();
+  const kb = await keyB.boundingBox();
+  expect(kb, 'key has a box to grab').not.toBeNull();
 
   const putPromise = page.waitForResponse(
     // Solo el PUT geométrico del drag (ver comentario del test anterior).
@@ -461,13 +462,13 @@ test('permite separar dos teclas y conserva la separación al recargar', async (
       (res.request().postData()?.includes('"x"') ?? false),
     { timeout: 15000 },
   );
-  await page.mouse.move(hb!.x + hb!.width / 2, hb!.y + hb!.height / 2);
+  await page.mouse.move(kb!.x + kb!.width / 2, kb!.y + kb!.height / 2);
   await page.mouse.down();
   const steps = 12;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(
-      hb!.x + hb!.width / 2 + ((itemBox!.width * 2.5 * i) / steps),
-      hb!.y + hb!.height / 2,
+      kb!.x + kb!.width / 2 + ((itemBox!.width * 2.5 * i) / steps),
+      kb!.y + kb!.height / 2,
       { steps: 2 },
     );
     await page.waitForTimeout(30);

@@ -127,11 +127,12 @@ test('mover y redimensionar persisten por gesto sin tocar al resto', async ({
   const widget = volWidget(page);
   await expect(widget).toBeVisible({ timeout: 10000 });
 
-  // Mover +1 columna con el asa (gesto real de ratón).
-  const moveHandle = widget.locator('[data-cy=bd-gs-drag-handle]');
-  await moveHandle.hover();
-  const moveBox = await moveHandle.boundingBox();
-  expect(moveBox, 'asa de mover medible').not.toBeNull();
+  // Mover +1 columna agarrando la propia tecla (todo el botón es el handle
+  // de GridStack; gesto real de ratón).
+  const moveKey = widget.locator('[data-cy=bd-key-vol]');
+  await moveKey.hover();
+  const moveBox = await moveKey.boundingBox();
+  expect(moveBox, 'tecla movible medible').not.toBeNull();
   const putMove = page.waitForResponse(
     (res: any) =>
       res.url().includes('/api/v1/buttons/') &&

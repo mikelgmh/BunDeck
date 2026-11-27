@@ -105,4 +105,24 @@ describe('StageBoard modo libre: control por acción', () => {
     expect(freeUse.emitted('button-click')).toBeUndefined()
     freeUse.unmount()
   })
+
+  it('el clic dentro del control (elemento interno) selecciona la tecla en edición', async () => {
+    // Regresión fiel al navegador: el clic real cae en elementos INTERNOS de
+    // la superficie. Con el `@click.stop` incondicional nunca burbujeaba a
+    // `.bd-key-vol` y el inspector no se abría ("Elige una tecla"); el test
+    // anterior disparaba el clic sobre el propio wrapper, donde el stop no
+    // interviene, y por eso pasaba en verde con el bug presente.
+    const freeEdit = mount(StageBoard, { props: baseProps({ mode: 'edit' }) as any })
+    await freeEdit.find('[data-cy="vol-range-stub"]').trigger('click')
+    expect(freeEdit.emitted('button-click')).toEqual([[0]])
+    freeEdit.unmount()
+  })
+
+  it('el clic dentro del control no dispara nada en uso', async () => {
+    const freeUse = mount(StageBoard, { props: baseProps({ mode: 'use' }) as any })
+    await freeUse.find('[data-cy="vol-range-stub"]').trigger('click')
+    expect(freeUse.emitted('button-tap')).toBeUndefined()
+    expect(freeUse.emitted('button-click')).toBeUndefined()
+    freeUse.unmount()
+  })
 })

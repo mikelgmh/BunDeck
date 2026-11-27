@@ -3,8 +3,8 @@
     class="bd-control-surface"
     :data-component="componentName"
     :data-cy="`bd-control-${componentName}`"
-    @click.stop
-    @pointerdown.stop
+    @click="onSurfaceEvent"
+    @pointerdown="onSurfaceEvent"
   >
     <VolumeRange
       v-if="componentName === 'volume-range'"
@@ -20,6 +20,7 @@
       :api-base="apiBase"
       :label="label"
       :readonly="readonly"
+      :position="position"
     />
     <span v-else class="bd-control-unknown">{{ label || action.type }}</span>
   </div>
@@ -41,11 +42,14 @@ const props = withDefaults(defineProps<{
   label?: string
   readonly?: boolean
   legacyApp?: string | null
+  /** Posición de la tecla: la reenvía a los widgets (p. ej. NeedsConfig). */
+  position?: number | null
 }>(), {
   apiBase: '',
   label: '',
   readonly: false,
   legacyApp: null,
+  position: null,
 })
 
 const components: Record<string, any> = {
@@ -65,6 +69,18 @@ const components: Record<string, any> = {
 
 const componentName = computed(() => controlComponentOf(props.action?.type ?? '') ?? '')
 const component = computed(() => components[componentName.value] ?? null)
+
+/**
+ * La superficie detiene clic/pointerdown SOLO en uso (`readonly=false`):
+ * interactuar con el control no debe disparar ni seleccionar la tecla
+ * (causa A: superficies que tragaban clicks). En edición (`readonly=true`)
+ * los widgets son inertes (deshabilitados) y los eventos burbujean a la
+ * tecla `.bd-key-vol`: el clic selecciona y abre el inspector, y el
+ * pointerdown llega al handle de GridStack para poder arrastrar.
+ */
+const onSurfaceEvent = (e: Event) => {
+  if (!props.readonly) e.stopPropagation()
+}
 </script>
 
 <style scoped>

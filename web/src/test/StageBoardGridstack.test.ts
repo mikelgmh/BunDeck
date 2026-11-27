@@ -225,6 +225,41 @@ describe('StageBoard GridStack por página', () => {
     wrapper.unmount()
   })
 
+  it('toda la tecla es el agarre: sin asa dedicada ni icono grip', async () => {
+    // En edición el widget se mueve agarrando desde cualquier punto del
+    // botón (handle '.bd-key', como el modo fijo): ya no hay icono
+    // lucide-grip-vertical al hover.
+    const mockedInit = vi.mocked(GridStack.init)
+    mockedInit.mockClear()
+    const wrapper = mount(StageBoard, { props: { ...baseProps, layoutMode: 'gridstack' } })
+    await vi.waitFor(() => {
+      expect(mockedInit).toHaveBeenCalled()
+    })
+    const opts = mockedInit.mock.calls[0]?.[0] as any
+    expect(opts.draggable?.handle).toBe('.bd-key')
+    expect(wrapper.find('[data-cy=bd-gs-drag-handle]').exists()).toBe(false)
+    expect(wrapper.find('.bd-gs-drag-handle').exists()).toBe(false)
+    const component = readFileSync(resolve(process.cwd(), 'src/components/bundeck/StageBoard.vue'), 'utf8')
+    expect(component).not.toContain('bd-gs-drag-handle')
+    expect(component).not.toContain('GripVertical')
+    wrapper.unmount()
+  })
+
+  it('el tirador SE es un cuadrado redondeado con icono lucide', () => {
+    // El handle feo por defecto de GridStack se viste con el icono lucide
+    // `move-diagonal-2` dentro de un cuadrado; su esquina inferior derecha
+    // sigue el border-radius del botón para no desentonar.
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/bundeck.css'), 'utf8')
+    const se = css.match(/\.bundeck\s+\.grid-stack-item\s*>\s*\.ui-resizable-se\s*\{[^}]*\}/s)?.[0] ?? ''
+    expect(se).not.toBe('')
+    expect(se).toContain('border-radius: 8px 8px var(--bd-rk) 8px')
+    // Icono lucide `move-diagonal-2` (paths exactos de lucide-vue-next)
+    // como fondo del cuadrado.
+    expect(se).toContain('M19 13v6h-6')
+    expect(se).toContain('m5 5 14 14')
+    expect(se).toContain('transform: none')
+  })
+
   it('conserva widgets en esquinas opuestas sin juntarlos', () => {
     const corners = [
       { id: 'nw', page_id: 'p', position: 0, x: 0, y: 0, w: 1, h: 1, data: { label: 'NW', actions: [] } },

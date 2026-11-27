@@ -158,7 +158,8 @@
                 <component
                   v-if="keyDyn(index - 1)"
                   :is="'span'"
-                  class="bd-dyn"
+                  class="bd-dyn bd-data-swap"
+                  :key="keyDyn(index - 1)"
                 >{{ keyDyn(index - 1) }}</component>
                 <img
                   v-else-if="keyImage(index - 1)"
@@ -236,7 +237,8 @@
                     :api-base="apiBase ?? ''"
                     :legacy-app="volumeAppOf(b.position)"
                     :label="keyLabel(b.position) || ''"
-                    :readonly="false"
+                    :readonly="mode !== 'use'"
+                    :position="b.position"
                   />
                 </div>
                 <button
@@ -261,7 +263,7 @@
                 >
                   <template v-if="getButton(b.position)">
                     <span v-if="keyTop(b.position)" class="bd-tt" :style="keyFont(b.position)">{{ keyTop(b.position) }}</span>
-                    <component v-if="keyDyn(b.position)" :is="'span'" class="bd-dyn">{{ keyDyn(b.position) }}</component>
+                    <component v-if="keyDyn(b.position)" :is="'span'" class="bd-dyn bd-data-swap" :key="keyDyn(b.position)">{{ keyDyn(b.position) }}</component>
                     <img
                       v-else-if="keyImage(b.position)"
                       :src="keyImage(b.position)"
@@ -285,15 +287,6 @@
                   <Plus v-else-if="mode === 'edit' && !kiosk" :size="16" stroke-width="1.75" aria-hidden="true" />
                 </button>
               </div>
-              <span
-                v-if="mode === 'edit'"
-                class="bd-gs-drag-handle"
-                aria-hidden="true"
-                :title="t('bd.moveWidget')"
-                data-cy="bd-gs-drag-handle"
-              >
-                <GripVertical :size="14" stroke-width="2" />
-              </span>
             </div>
           </div>
         </div>
@@ -384,7 +377,7 @@ import 'gridstack/dist/gridstack.min.css'
 // imports estáticos engordan el chunk inicial y gridstack rompe el SSR
 // de Astro (gridstack-engine sin extensión).
 import {
-  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, GripVertical, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, ScrollText
+  Plus, Pencil, Trash2, Folder, ArrowLeft, RefreshCw, Ellipsis, Play, FileUp, FileDown, Move, Monitor, Smartphone, Tablet, MonitorSmartphone, ScrollText
 } from 'lucide-vue-next'
 import ControlSurface from './ControlSurface.vue'
 import { findControlAction } from '../../composables/useActionPresentation'
@@ -707,9 +700,11 @@ const initGs = async (retries = 2) => {
         maxRow: gsMaxRow.value,
         staticGrid: props.mode !== 'edit',
         resizable: { handles: 'se' },
-        // GridStack ignora mousedown en <button>; el asa hermana permite mover
-        // la tecla sin interferir con su click para seleccionar/ejecutar.
-        draggable: { handle: '.bd-gs-drag-handle' },
+        // El agarre es la propia tecla (.bd-key): GridStack omite el mousedown
+        // en <button>, salvo cuando el botón ES el handle (el handle forma
+        // parte de dragEls, ver DDDraggable #2703). Así todo el botón arrastra
+        // en edición y el clic sin mover sigue seleccionando/ejecutando.
+        draggable: { handle: '.bd-key' },
       } as any,
       gsContainer.value
     )

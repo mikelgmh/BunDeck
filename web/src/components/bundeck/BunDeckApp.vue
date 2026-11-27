@@ -660,6 +660,7 @@ import {
   setActionsForKind,
   type PressKind,
 } from '../../composables/usePressActions'
+import { OPEN_ACTION_SETTINGS_EVENT } from '../../composables/useOpenActionSettings'
 import { vars, onVarChange, getVar, importVar, removeVar } from '../../composables/useVars'
 import { presetOfferFor, mergePresetLooks, cleanLooksList, resolvePresetLooks } from '../../composables/useExposedVariables'
 import {
@@ -2566,6 +2567,23 @@ const onActionTypeLogs = (p: { actionType: string }) => {
   if (!p?.actionType) return
   void pressLogsDialog.value?.show({ actionType: p.actionType })
 }
+// Drawer de ajustes pedido por un widget (NeedsConfig →
+// `bundeck:open-action-settings`): equivale a clicar la tecla (selección) y
+// asegura el drawer derecho abierto. En kiosco no hay drawer: no se cancela
+// el evento y el widget queda como no-gestionado.
+const onOpenActionSettings = (e: Event) => {
+  if (kiosk.value) return
+  const pos = Number((e as CustomEvent<{ position?: unknown }>)?.detail?.position)
+  try {
+    e.preventDefault()
+  } catch {
+    /* evento no cancelable: igual se intenta abrir el drawer */
+  }
+  if (Number.isInteger(pos) && pos >= 0) {
+    void selectButton(pos).catch(() => {})
+  }
+  if (!bdShowRight.value) bdSetPanels(bdShowLeft.value, true)
+}
 
 const onIoText = (txt: string) => {
   ioImportText.value = txt
@@ -3043,6 +3061,13 @@ onMounted(async () => {
   window.addEventListener('libredeck:devices-changed', onDevicesChanged)
   window.addEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   window.addEventListener('libredeck:action-error', onActionErrorMsg as EventListener)
+  // Widgets de superficie (NeedsConfig vía useOpenActionSettings): en modo uso
+  // los clics dentro del widget no seleccionan la tecla (ControlSurface los
+  // detiene), así que piden aquí selección + drawer derecho con los ajustes
+  // de la acción. En edición los clics ya burbujean y seleccionan; el evento
+  // además asegura el drawer abierto.
+  // preventDefault() marca el evento como gestionado (ver el composable).
+  window.addEventListener(OPEN_ACTION_SETTINGS_EVENT, onOpenActionSettings as EventListener)
   loadMarketplace().catch(() => {})
   loadMcpTokens().catch(() => {})
   loadMcpScopes().catch(() => {})
@@ -3139,6 +3164,7 @@ onUnmounted(() => {
   window.removeEventListener('libredeck:devices-changed', onDevicesChanged)
   window.removeEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   window.removeEventListener('libredeck:action-error', onActionErrorMsg as EventListener)
+  window.removeEventListener(OPEN_ACTION_SETTINGS_EVENT, onOpenActionSettings as EventListener)
   if (ruleTimer) {
     clearInterval(ruleTimer)
     ruleTimer = null
