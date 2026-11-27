@@ -167,18 +167,29 @@ export class TypeTextPlugin {
         }
     }
 
+    private escapeAppleScriptString(s: string): string {
+        // Orden: backslash primero, luego delimitador, luego controles.
+        // El orden inverso (" primero) introduce un `\` que el segundo
+        // replace vuelve a escapar (doble-escape) y rompe el literal.
+        return s
+            .replace(/\\/g, '\\\\')
+            .replace(/"/g, '\\"')
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+    }
+
     private async executeMacType(text: string, delay: number): Promise<any> {
         this.context.log('info', 'Executing macOS text typing', { textLength: text.length, delay })
 
         try {
-            // Escapar comillas para AppleScript
-            const escapedText = text.replace(/"/g, '\\"').replace(/\\/g, '\\\\')
+            // Escapar para literal AppleScript entre comillas dobles
+            const escapedText = this.escapeAppleScriptString(text)
 
             if (delay > 0) {
                 // Con delay, escribir carácter por carácter
-                const chars = text.split('')
+                const chars = Array.from(text)
                 for (const char of chars) {
-                    const escapedChar = char.replace(/"/g, '\\"').replace(/\\/g, '\\\\')
+                    const escapedChar = this.escapeAppleScriptString(char)
                     const appleScript = `tell application "System Events" to keystroke "${escapedChar}"`
 
                     const proc = Bun.spawn({ windowsHide: true, 

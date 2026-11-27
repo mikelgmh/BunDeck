@@ -26,9 +26,14 @@ on:
       - 'docs/**'
       - '**/*.md'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
@@ -87,6 +92,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
@@ -176,6 +183,9 @@ jobs:
             ext: ""
             installer: false
     runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code

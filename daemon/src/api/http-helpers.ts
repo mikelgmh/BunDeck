@@ -34,18 +34,22 @@ export function dataTooLarge(data: unknown, limit: number = MAX_PAGE_PROFILE_DAT
 }
 
 export function errorResponse(message: string, error?: any, status: number = 500): Response {
-  const details = error
-    ? {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        type: error?.constructor?.name || 'Unknown',
-      }
-    : undefined;
+  // Stack siempre en log del servidor, nunca al cliente (CodeQL js/stack-trace-exposure).
+  if (error) {
+    console.error('[api]', message, error);
+  }
+  // En DEV_MODE se devuelve el mensaje para depurar; en prod solo el error genérico.
+  const details =
+    error && process.env.DEV_MODE === 'true'
+      ? {
+          message: error instanceof Error ? error.message : String(error),
+        }
+      : undefined;
 
   return jsonResponse(
     {
       error: message,
-      details,
+      ...(details ? { details } : {}),
     },
     status
   );

@@ -854,6 +854,10 @@ export class RelayServer {
     }
     const qs = keep.toString();
     const target = `/s/${encodeURIComponent(sid)}/${qs ? `?${qs}` : ''}`;
+    // JSON.stringify solo no basta en contexto <script>: no escapa `<`
+    // (`</script>` rompería el bloque). OWASP: escapar `<`, U+2028/2029.
+    const jsStr = (s: string): string =>
+      JSON.stringify(s).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
     const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     if ((req.headers.get('accept') ?? '').includes('application/json') && !wantsHtmlPage(req)) {
       return new Response(JSON.stringify({ ok: true, sid }), {
@@ -861,7 +865,7 @@ export class RelayServer {
         headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': cookie },
       });
     }
-    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>BunDeck</title></head><body><script>(function(){var t=${JSON.stringify(target)};try{var h=location.hash||'';location.replace(t+h);}catch(e){location.href=t;}})();</script></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>BunDeck</title></head><body><script>(function(){var t=${jsStr(target)};try{var h=location.hash||'';location.replace(t+h);}catch(e){location.href=t;}})();</script></body></html>`;
     return new Response(html, {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'set-cookie': cookie },
