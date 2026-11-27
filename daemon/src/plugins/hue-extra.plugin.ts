@@ -66,7 +66,7 @@ export class HueExtraPlugin {
         return {
             id: 'hue-extra',
             name: 'Philips Hue Extra',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Controla luces Philips Hue en red local: lista, enciende/apaga, brillo, color y escenas',
             author: 'BunDeck',
             permissions: ['network'],
@@ -97,6 +97,12 @@ export class HueExtraPlugin {
                         type: 'object',
                         properties: {
                             bridgeIp: bridgeProp, apiKey: keyProp,
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            },
                             timeoutMs: { type: 'number', title: 'Tiempo límite (ms)', description: 'Tiempo máximo de espera', default: 10000, minimum: 1000, maximum: 30000, ui: { component: 'hidden' } },
                         },
                         required: [],

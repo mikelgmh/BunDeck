@@ -87,7 +87,19 @@ export class VoicemodPlugin {
                     description: 'Comprueba la conexión y devuelve la voz activa',
                     surface: 'control',
                     component: 'voice-panel',
-                    schema: { type: 'object', properties: { ...conn }, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...conn,
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los controles de voz cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 },
                 {
                     id: 'set-voice', name: 'Cambiar de voz', icon: 'AudioLines',

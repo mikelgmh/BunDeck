@@ -38,7 +38,7 @@ describe('first-party widget surface metadata', () => {
     test('Hue and Govee light actions use the smart-home surface', () => {
         const hue = new HueExtraPlugin(context)
         const govee = new GoveePlugin(context)
-        expect(hue.getManifest().version).toBe('1.0.1')
+        expect(hue.getManifest().version).toBe('1.0.2')
         expect(govee.getManifest().version).toBe('1.0.1')
         for (const plugin of [hue, govee]) {
             for (const id of ['toggle', 'brightness', 'color', 'scene']) {

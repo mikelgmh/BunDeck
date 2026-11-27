@@ -69,7 +69,7 @@ export class MinecraftPlugin {
         return {
             id: 'minecraft',
             name: 'Minecraft',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Consulta si un servidor de Minecraft está en línea (jugadores, versión, latencia) y abre el launcher',
             author: 'BunDeck',
             permissions: ['network', 'process'],
@@ -89,6 +89,12 @@ export class MinecraftPlugin {
                                 type: 'string', title: 'Servidor',
                                 description: 'IP o dominio del servidor (ej. hypixel.net)',
                                 ui: { component: 'input', type: 'text', placeholder: 'hypixel.net' },
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             },
                             apiBase: {
                                 type: 'string', title: 'API de estado',
@@ -120,6 +126,12 @@ export class MinecraftPlugin {
                                 type: 'string', title: 'Servidor',
                                 description: 'IP o dominio del servidor',
                                 ui: { component: 'input', type: 'text', placeholder: 'hypixel.net' },
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             },
                             apiBase: {
                                 type: 'string', title: 'API de estado',

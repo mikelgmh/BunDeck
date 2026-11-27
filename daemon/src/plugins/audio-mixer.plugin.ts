@@ -107,6 +107,13 @@ export class AudioMixerPlugin {
                                 title: 'Dispositivo',
                                 description: 'Nombre o ID del dispositivo a usar. Si se omite, solo se listan los disponibles.',
                                 ui: { component: 'input', type: 'text', placeholder: '(vacío = listar)' }
+                            },
+                            carouselMs: {
+                                type: 'number',
+                                title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los dispositivos cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         }
                     }

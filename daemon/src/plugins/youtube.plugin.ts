@@ -75,7 +75,13 @@ export class YoutubePlugin {
                         type: 'object',
                         properties: {
                             apiKey: { type: 'string', title: 'API key', description: 'Si se omite usa la de los ajustes', ui: { component: 'input', type: 'password', placeholder: 'AIza…' } },
-                            videoId: { type: 'string', title: 'ID del vídeo', description: 'ID del directo (tras watch?v=). Si se omite usa el de los ajustes.', ui: { component: 'input', type: 'text', placeholder: 'ID del directo' } }
+                            videoId: { type: 'string', title: 'ID del vídeo', description: 'ID del directo (tras watch?v=). Si se omite usa el de los ajustes.', ui: { component: 'input', type: 'text', placeholder: 'ID del directo' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuánto rota el dato (espectadores/título) en teclas pequeñas. 0 = sin rotación. Vacío = 4000 ms.',
+                                default: 4000, minimum: 0,
+                                ui: { component: 'input', type: 'number', min: 0, placeholder: '4000' }
+                            }
                         },
                         required: []
                     }

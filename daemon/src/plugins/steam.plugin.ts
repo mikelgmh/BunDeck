@@ -56,7 +56,7 @@ export class SteamPlugin {
         return {
             id: 'steam',
             name: 'Steam',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Lanza juegos de Steam, abre la biblioteca y consulta si un juego/servidor está en línea',
             author: 'BunDeck',
             permissions: ['process', 'network'],
@@ -118,6 +118,12 @@ export class SteamPlugin {
                                 default: 15000, minimum: 1000, maximum: 60000,
                                 ui: { component: 'hidden' },
                             },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            },
                         },
                         required: ['appId'],
                     },
@@ -137,6 +143,12 @@ export class SteamPlugin {
                                 type: 'string', title: 'SteamID64',
                                 description: 'Tu SteamID64 (se usa cuando configures API key)',
                                 ui: { component: 'input', type: 'text', placeholder: '76561198…' },
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             },
                         },
                         required: [],

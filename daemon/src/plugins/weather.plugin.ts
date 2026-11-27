@@ -58,7 +58,7 @@ export class WeatherPlugin {
         return {
             id: 'weather',
             name: 'El tiempo',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Tiempo actual y pronóstico (Open-Meteo, sin API key): temperatura, lluvia y viento',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -115,7 +115,13 @@ export class WeatherPlugin {
                         properties: {
                             latitude: { type: 'number', title: 'Latitud', description: 'Si se omite usa la de ajustes', ui: { component: 'input', type: 'number', placeholder: '(ajustes)' } },
                             longitude: { type: 'number', title: 'Longitud', description: 'Si se omite usa la de ajustes', ui: { component: 'input', type: 'number', placeholder: '(ajustes)' } },
-                            place: { type: 'string', title: 'Lugar', description: 'Nombre de ciudad (se resuelve a coordenadas; tiene prioridad sobre lat/lon)', ui: { component: 'input', type: 'text', placeholder: 'Madrid' } }
+                            place: { type: 'string', title: 'Lugar', description: 'Nombre de ciudad (se resuelve a coordenadas; tiene prioridad sobre lat/lon)', ui: { component: 'input', type: 'text', placeholder: 'Madrid' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }
@@ -135,7 +141,13 @@ export class WeatherPlugin {
                             latitude: { type: 'number', title: 'Latitud', ui: { component: 'input', type: 'number', placeholder: '(ajustes)' } },
                             longitude: { type: 'number', title: 'Longitud', ui: { component: 'input', type: 'number', placeholder: '(ajustes)' } },
                             place: { type: 'string', title: 'Lugar', description: 'Nombre de ciudad (prioridad sobre lat/lon)', ui: { component: 'input', type: 'text', placeholder: 'Madrid' } },
-                            days: { type: 'integer', title: 'Días', description: 'Cuántos días (1-7)', default: 3, minimum: 1, maximum: 7, ui: { component: 'input', type: 'number', placeholder: '3' } }
+                            days: { type: 'integer', title: 'Días', description: 'Cuántos días (1-7)', default: 3, minimum: 1, maximum: 7, ui: { component: 'input', type: 'number', placeholder: '3' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }

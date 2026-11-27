@@ -186,6 +186,13 @@ export class MeetingsPlugin {
                                 title: 'URL de invitación',
                                 description: 'Solo para "join": se abre antes de enviar el hotkey',
                                 ui: { component: 'input', type: 'text', placeholder: 'https://…' }
+                            },
+                            carouselMs: {
+                                type: 'number',
+                                title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los comandos cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: ['app', 'command']

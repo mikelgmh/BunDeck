@@ -75,7 +75,13 @@ export class SoundboardPlugin {
                         properties: {
                             file: { type: 'string', title: 'Archivo', description: 'Nombre (dentro de la carpeta de sonidos) o ruta completa', ui: { component: 'input', type: 'text', placeholder: 'aplausos.wav' } },
                             volume: { type: 'number', title: 'Volumen (%)', description: '0–100 (Linux/macOS; en Windows se ignora)', minimum: 0, maximum: 100, ui: { component: 'input', type: 'number', placeholder: '100' } },
-                            soundsDir: { type: 'string', title: 'Carpeta de sonidos', description: 'Si se omite usa la de los ajustes', ui: { component: 'input', type: 'text', placeholder: '(la de los ajustes)' } }
+                            soundsDir: { type: 'string', title: 'Carpeta de sonidos', description: 'Si se omite usa la de los ajustes', ui: { component: 'input', type: 'text', placeholder: '(la de los ajustes)' } },
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los sonidos cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: ['file']
                     }

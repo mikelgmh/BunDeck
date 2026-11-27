@@ -113,7 +113,13 @@ export class VoicemeeterPlugin {
                         type: 'object',
                         properties: {
                             hotkey: { type: 'string', title: 'Atajo', description: 'Atajo asignado en Macro Buttons (si se omite usa el de los ajustes)', ui: { component: 'input', type: 'text', placeholder: 'ctrl+alt+f13' } },
-                            strip: { type: 'number', title: 'Strip', description: 'Solo informativo: qué strip controla ese botón de Macro Buttons', minimum: 0, maximum: 7, ui: { component: 'input', type: 'number', placeholder: '0' } }
+                            strip: { type: 'number', title: 'Strip', description: 'Solo informativo: qué strip controla ese botón de Macro Buttons', minimum: 0, maximum: 7, ui: { component: 'input', type: 'number', placeholder: '0' } },
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los controles de voz cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }
@@ -127,7 +133,13 @@ export class VoicemeeterPlugin {
                         type: 'object',
                         properties: {
                             hotkey: { type: 'string', title: 'Atajo', description: 'Atajo asignado en Macro Buttons', ui: { component: 'input', type: 'text', placeholder: 'ctrl+alt+f14' } },
-                            bus: { type: 'string', title: 'Bus', description: 'Solo informativo (A1, A2, B1, B2…)', ui: { component: 'input', type: 'text', placeholder: 'A1' } }
+                            bus: { type: 'string', title: 'Bus', description: 'Solo informativo (A1, A2, B1, B2…)', ui: { component: 'input', type: 'text', placeholder: 'A1' } },
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los controles de voz cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: ['hotkey']
                     }

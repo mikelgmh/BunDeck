@@ -54,7 +54,7 @@ describe('PCVitalsPlugin', () => {
         const { plugin } = makePlugin()
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('pc-vitals')
-        expect(manifest.version).toBe('1.4.1')
+        expect(manifest.version).toBe('1.4.2')
         expect(manifest.actions.length).toBeGreaterThanOrEqual(8)
         const byId = Object.fromEntries(manifest.actions.map((a: any) => [a.id, a]))
         expect(byId.monitor).toBeDefined()

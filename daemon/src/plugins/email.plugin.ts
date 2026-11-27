@@ -52,7 +52,7 @@ export class EmailPlugin {
         return {
             id: 'email',
             name: 'Correo',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'No leídos de Gmail/Outlook, abrir bandeja y redactar (mailto:) con tu cliente habitual',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -106,7 +106,13 @@ export class EmailPlugin {
                         properties: {
                             provider: { type: 'string', title: 'Proveedor', enum: ['gmail', 'outlook'], description: 'Si se omite usa el de ajustes', ui: { component: 'select', options: [{ value: 'gmail', label: 'Gmail' }, { value: 'outlook', label: 'Outlook' }] } },
                             token: { type: 'string', title: 'Token OAuth', description: 'Si se omite usa el de ajustes', secret: true, ui: { component: 'input', type: 'password', placeholder: '(ajustes)' } },
-                            label: { type: 'string', title: 'Etiqueta/carpeta', description: 'Gmail: labelIds (INBOX por defecto). Outlook: carpeta (Inbox por defecto)', ui: { component: 'input', type: 'text', placeholder: '(por defecto)' } }
+                            label: { type: 'string', title: 'Etiqueta/carpeta', description: 'Gmail: labelIds (INBOX por defecto). Outlook: carpeta (Inbox por defecto)', ui: { component: 'input', type: 'text', placeholder: '(por defecto)' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }
@@ -123,7 +129,13 @@ export class EmailPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            url: { type: 'string', title: 'URL', description: 'Si se omite usa la de ajustes o la del proveedor', ui: { component: 'input', type: 'text', placeholder: '(por defecto)' } }
+                            url: { type: 'string', title: 'URL', description: 'Si se omite usa la de ajustes o la del proveedor', ui: { component: 'input', type: 'text', placeholder: '(por defecto)' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }

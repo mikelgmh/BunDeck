@@ -501,7 +501,15 @@ export class ObsPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            ...connection
+                            ...connection,
+                            carouselMs: {
+                                type: 'number',
+                                title: 'Rotación (ms)',
+                                description: 'Cada cuánto rota el dato (directo/grabación) en teclas pequeñas. 0 = sin rotación. Vacío = 4000 ms.',
+                                default: 4000,
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', min: 0, placeholder: '4000' }
+                            }
                         },
                         required: []
                     }

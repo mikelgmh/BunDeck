@@ -81,7 +81,7 @@ export class SlackPlugin {
         return {
             id: 'slack',
             name: 'Slack',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Abre canales y DMs, cuenta no leídos y envía mensajes',
             author: 'BunDeck',
             permissions: ['http', 'network'],
@@ -125,6 +125,12 @@ export class SlackPlugin {
                                 title: 'Canal',
                                 description: 'ID del canal (ej. C012345). Con el nombre no siempre redirige: mejor usa el ID.',
                                 ui: { component: 'input', type: 'text', placeholder: 'C012345' }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: ['channel']
@@ -164,6 +170,12 @@ export class SlackPlugin {
                                 title: 'Token OAuth',
                                 description: 'Si se omite se usa el de los ajustes del plugin',
                                 ui: { component: 'input', type: 'password', placeholder: '(usa el de ajustes)' }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         }
                     }

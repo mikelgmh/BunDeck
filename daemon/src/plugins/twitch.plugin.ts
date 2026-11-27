@@ -122,7 +122,19 @@ export class TwitchPlugin {
                         { value: 'live', label: 'En directo', icon: 'Radio' },
                         { value: 'offline', label: 'Fuera de línea', icon: 'RadioTower' }
                     ],
-                    schema: { type: 'object', properties: { ...creds }, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            ...creds,
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuánto rota el dato (espectadores/título) en teclas pequeñas. 0 = sin rotación. Vacío = 4000 ms.',
+                                default: 4000, minimum: 0,
+                                ui: { component: 'input', type: 'number', min: 0, placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 }
             ]
         }

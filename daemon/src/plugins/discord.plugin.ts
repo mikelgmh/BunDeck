@@ -376,6 +376,12 @@ export class DiscordPlugin {
                                 type: 'string', title: 'Atajo (fallback)',
                                 description: 'Atajo global de Silenciar en Discord (si se omite usa el de los ajustes). Solo se usa sin RPC.',
                                 ui: { component: 'input', type: 'text', placeholder: 'ctrl+shift+m' }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los controles de voz cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: []
@@ -469,7 +475,18 @@ export class DiscordPlugin {
                     description: 'Muestra si el RPC está conectado, si falta autorización o si Discord está cerrado (sin lanzar errores)',
                     surface: 'control',
                     component: 'voice-panel',
-                    schema: { type: 'object', properties: {}, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Carrusel (ms)',
+                                description: 'En teclas pequeñas rota los controles de voz cada N ms (>0; ausente = 4000; <=0 = desactivado).',
+                                minimum: 0,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 },
                 {
                     id: 'disconnect', name: 'Desconectar Discord', icon: 'Unlink',

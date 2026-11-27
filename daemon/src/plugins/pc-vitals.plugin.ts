@@ -40,7 +40,7 @@ export class PCVitalsPlugin {
         return {
             id: 'pc-vitals',
             name: 'PC Vitals',
-            version: '1.4.1',
+            version: '1.4.2',
             description: 'Muestra el estado del equipo: CPU, RAM, GPU, temperatura, ventiladores, voltajes, disco, red, uptime y procesos',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -68,7 +68,18 @@ export class PCVitalsPlugin {
                         { value: 'warn', label: 'Carga alta', icon: 'TriangleAlert' },
                         { value: 'crit', label: 'Crítica', icon: 'Siren' }
                     ],
-                    schema: { type: 'object', properties: {}, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 },
                 {
                     id: 'monitor',
@@ -132,6 +143,12 @@ export class PCVitalsPlugin {
                                     max: 10000,
                                     placeholder: '1000'
                                 }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: ['component', 'metric']
@@ -145,7 +162,18 @@ export class PCVitalsPlugin {
                     surface: 'control',
                     component: 'status-cards',
                     freeModeOnly: true,
-                    schema: { type: 'object', properties: {}, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 },
                 {
                     id: 'sensors',
@@ -169,6 +197,12 @@ export class PCVitalsPlugin {
                                 type: 'string', title: 'Ruta o unidad',
                                 description: 'Ruta a medir (ej. / o C:). Vacío = raíz del sistema',
                                 ui: { component: 'input', type: 'text', placeholder: 'Vacío = raíz' }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: []
@@ -190,6 +224,12 @@ export class PCVitalsPlugin {
                                 description: 'Tiempo entre las dos lecturas de contadores',
                                 default: 500, minimum: 200, maximum: 5000,
                                 ui: { component: 'hidden' }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: []
@@ -203,7 +243,18 @@ export class PCVitalsPlugin {
                     surface: 'control',
                     component: 'status-cards',
                     freeModeOnly: true,
-                    schema: { type: 'object', properties: {}, required: [] }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        },
+                        required: []
+                    }
                 },
                 {
                     id: 'process-top',
@@ -228,6 +279,12 @@ export class PCVitalsPlugin {
                                 description: 'Criterio de orden',
                                 enum: ['cpu', 'mem'], default: 'cpu',
                                 ui: { component: 'select', options: [{ value: 'cpu', label: 'CPU' }, { value: 'mem', label: 'Memoria' }] }
+                            },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
                             }
                         },
                         required: []

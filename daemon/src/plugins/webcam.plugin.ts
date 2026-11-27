@@ -37,7 +37,7 @@ export class WebcamPlugin {
         return {
             id: 'webcam',
             name: 'Webcam',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Utilidades de cámara: listar cámaras, foto rápida y ajustes del sistema',
             author: 'BunDeck',
             permissions: ['process', 'filesystem'],
@@ -68,7 +68,13 @@ export class WebcamPlugin {
                         type: 'object',
                         properties: {
                             device: { type: 'string', title: 'Dispositivo', description: 'Nombre/índice de la cámara (si se omite, la predeterminada)', ui: { component: 'input', type: 'text', placeholder: '(predeterminada)' } },
-                            outputPath: { type: 'string', title: 'Guardar en', description: 'Ruta del JPG (si se omite, carpeta de fotos + fecha)', ui: { component: 'input', type: 'text', placeholder: '(automático)' } }
+                            outputPath: { type: 'string', title: 'Guardar en', description: 'Ruta del JPG (si se omite, carpeta de fotos + fecha)', ui: { component: 'input', type: 'text', placeholder: '(automático)' } },
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
                         },
                         required: []
                     }

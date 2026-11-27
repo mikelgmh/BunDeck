@@ -115,7 +115,7 @@ export class ClipboardPlugin {
         return {
             id: 'clipboard',
             name: 'Portapapeles',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Slots de portapapeles: guarda, pega, lista e historial',
             author: 'BunDeck',
             permissions: ['system'],
@@ -177,7 +177,17 @@ export class ClipboardPlugin {
                     surface: 'control',
                     component: 'workflow-control',
                     freeModeOnly: true,
-                    schema: { type: 'object', properties: {} }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        }
+                    }
                 },
                 {
                     id: 'history',
@@ -190,6 +200,12 @@ export class ClipboardPlugin {
                     schema: {
                         type: 'object',
                         properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            },
                             limit: {
                                 type: 'number', title: 'Límite',
                                 default: 10, minimum: 1, maximum: 50,

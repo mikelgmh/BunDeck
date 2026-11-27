@@ -48,7 +48,7 @@ export class WindowManagerPlugin {
         return {
             id: 'window-manager',
             name: 'Gestor de ventanas',
-            version: '1.0.1',
+            version: '1.0.2',
             description: 'Coloca la ventana activa y guarda/restaura layouts de posición',
             author: 'BunDeck',
             permissions: ['system'],
@@ -135,7 +135,17 @@ export class WindowManagerPlugin {
                     surface: 'control',
                     component: 'workflow-control',
                     freeModeOnly: true,
-                    schema: { type: 'object', properties: {} }
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            carouselMs: {
+                                type: 'number', title: 'Rotación (ms)',
+                                description: 'Cada cuántos ms rota el carrusel en teclas pequeñas (0 = desactivado; vacío = 4000)',
+                                minimum: 0, default: 4000,
+                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                            }
+                        }
+                    }
                 }
             ]
         }
