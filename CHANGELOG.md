@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/mikelgmh/BunDeck/compare/v1.25.0...v1.25.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **security:** corrige hallazgos CodeQL security-and-quality ([b6d5d9f](https://github.com/mikelgmh/BunDeck/commit/b6d5d9fe0c93abc86a274a0aab30130fe576fdb9))
+
 # [1.25.0](https://github.com/mikelgmh/BunDeck/compare/v1.24.0...v1.25.0) (2026-11-27)
 
 
