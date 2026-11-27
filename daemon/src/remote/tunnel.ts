@@ -965,6 +965,26 @@ export class TunnelClient {
       case 'ws-close':
         this.onWsClose(msg);
         break;
+      case 'error': {
+        // El relay descarta por rate-limit con `{kind:'error',
+        // error:'rate-limited'}`. Antes se ignoraba en `default:break` y el
+        // único síntoma era una petición colgada hasta el 504. Warning
+        // visible: consola + log + broadcast para la UI.
+        const errCode = String((msg as { error?: unknown }).error ?? '');
+        if (errCode === 'rate-limited') {
+          const detail = `relay rate-limited: el relay descartó tráfico de este daemon (rate-limit WS)`;
+          try {
+            console.warn(`[remote-tunnel] ${detail}`);
+          } catch { /* noop */ }
+          try {
+            this.db.addLog?.({ level: 'warn', message: `[remote-tunnel] ${detail}`, meta: { remote: true, tunnel: true }, ts: this.now() });
+          } catch { /* noop */ }
+          try {
+            this.wsManager?.broadcast?.('tunnel-rate-limited', { ts: this.now() }, 'remote');
+          } catch { /* noop */ }
+        }
+        break;
+      }
       default:
         break; // otros kinds (envelope E2E, presence…): los lleva RelayClient
     }

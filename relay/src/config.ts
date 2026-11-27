@@ -19,6 +19,7 @@ export interface RelayConfig {
   rateLimitT: number;
   rateLimitUi: number;
   rateLimitWs: number;
+  rateLimitWsData: number;
   rateLimitPair: number;
   trustProxy: boolean;
   /** App de Discord del maintainer (cero-config): el secret NUNCA sale del servidor. */
@@ -46,7 +47,11 @@ export const VERSION = '0.2.0';
  * - DATA_DIR / RELAY_DATA_DIR: dónde vive relay.db (def relay/data).
  * - RELAY_RATE_LIMIT_T (def 600): cuota /t/* por token (plano de datos). Antes 60 global.
  * - RELAY_RATE_LIMIT_UI (def 120): cuota /ui/* por IP.
- * - RELAY_RATE_LIMIT_WS (def 120): cuota mensajes WS por IP.
+ * - RELAY_RATE_LIMIT_WS (def 120): cuota mensajes WS de control por IP.
+ * - RELAY_RATE_LIMIT_WS_DATA (def 600): cuota tráfico de datos daemon→relay
+ *   (`http-res`, `ws-msg`, `ws-close`, `tunnel-pong`) por IP. Una carga
+ *   inicial tras aprobar supera 120 msg/min y el limiter único tiraba
+ *   `http-res` a la basura (petición colgada 30 s hasta 504).
  * - RELAY_RATE_LIMIT_PAIR (def 30): cuota POST /pair por IP.
  * - RELAY_PROVISION_TOKEN: secreto de aprovisionamiento para POST
  *   /api/device-claim (auto-provisión de device tokens). Vacío = claim
@@ -78,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     rateLimitT: parseLimit(env.RELAY_RATE_LIMIT_T, 600),
     rateLimitUi: parseLimit(env.RELAY_RATE_LIMIT_UI, 120),
     rateLimitWs: parseLimit(env.RELAY_RATE_LIMIT_WS, 120),
+    rateLimitWsData: parseLimit(env.RELAY_RATE_LIMIT_WS_DATA, 600),
     rateLimitPair: parseLimit(env.RELAY_RATE_LIMIT_PAIR, 30),
     trustProxy,
     discordClientId: (env.DISCORD_CLIENT_ID ?? '').trim(),

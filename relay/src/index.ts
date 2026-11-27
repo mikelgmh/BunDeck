@@ -33,6 +33,7 @@ const relay = new RelayServer({
   rateLimitT: config.rateLimitT,
   rateLimitUi: config.rateLimitUi,
   rateLimitWs: config.rateLimitWs,
+  rateLimitWsData: config.rateLimitWsData,
   rateLimitPair: config.rateLimitPair,
   trustProxy: config.trustProxy,
   store,

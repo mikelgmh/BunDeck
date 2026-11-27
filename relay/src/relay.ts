@@ -40,7 +40,16 @@ export const RATE_LIMIT_PER_MIN = 60;
 export const RATE_LIMIT_T_PER_MIN = 600;
 export const RATE_LIMIT_UI_PER_MIN = 120;
 export const RATE_LIMIT_WS_PER_MIN = 120;
+/** Tráfico de datos daemon→relay (`http-res`, `ws-msg`…): ráfagas de carga
+ * inicial tras aprobar, acotadas por el limiter HTTP /t/* (600/min). */
+export const RATE_LIMIT_WS_DATA_PER_MIN = 600;
 export const RATE_LIMIT_PAIR_PER_MIN = 30;
+
+/** Kinds WS daemon→relay que son tráfico de DATOS (respuestas al plano
+ * HTTP/WS tuneleado). No comparten bucket con el control (`tunnel-register`,
+ * `ui-*`, `tunnel-ping`): una carga inicial de dashboard supera 120 msg/min
+ * y el limiter tiraba `http-res` a la basura, colgando la petición 30 s. */
+const WS_DATA_KINDS = new Set(['http-res', 'ws-msg', 'ws-close', 'tunnel-pong']);
 
 type WsData = {
   ip: string;
@@ -87,6 +96,7 @@ export interface RelayServerOptions {
   rateLimitT?: number;
   rateLimitUi?: number;
   rateLimitWs?: number;
+  rateLimitWsData?: number;
   rateLimitPair?: number;
   /** Cuota POST /api/discord/rpc-token por IP (def 30/min). */
   rateLimitDiscord?: number;
@@ -199,7 +209,11 @@ export class RelayServer {
   private uiLimiter: RateLimiter;
   private tLimiter: RateLimiter;
   private wsLimiter: RateLimiter;
+  private wsDataLimiter: RateLimiter;
   private discordLimiter: RateLimiter;
+  /** Descartes por rate-limit WS (visibles en GET /stats). */
+  private rateLimitedWsControl = 0;
+  private rateLimitedWsData = 0;
   private now: () => number;
   readonly startedAt: number;
   /** Tokens por dispositivo (auto-provisión; JSON persistente en dataDir). */
@@ -220,6 +234,7 @@ export class RelayServer {
     this.uiLimiter = new RateLimiter(opts.rateLimitUi ?? legacy ?? RATE_LIMIT_UI_PER_MIN, 60_000, nowFn);
     this.tLimiter = new RateLimiter(opts.rateLimitT ?? legacy ?? RATE_LIMIT_T_PER_MIN, 60_000, nowFn);
     this.wsLimiter = new RateLimiter(opts.rateLimitWs ?? legacy ?? RATE_LIMIT_WS_PER_MIN, 60_000, nowFn);
+    this.wsDataLimiter = new RateLimiter(opts.rateLimitWsData ?? RATE_LIMIT_WS_DATA_PER_MIN, 60_000, nowFn);
     this.discordLimiter = new RateLimiter(opts.rateLimitDiscord ?? 30, 60_000, nowFn);
     this.now = opts.now ?? Date.now;
     this.claimPerDay = opts.claimPerDay ?? 200;
@@ -409,6 +424,8 @@ export class RelayServer {
         devices: this.opts.store.count(),
         pairingPending: this.opts.pairing.size(),
         uptime: Math.floor((this.now() - this.startedAt) / 1000),
+        rateLimitedWsControl: this.rateLimitedWsControl,
+        rateLimitedWsData: this.rateLimitedWsData,
       });
     }
 
@@ -1061,7 +1078,42 @@ export class RelayServer {
       typeof (parsed as Record<string, unknown>).kind === 'string' &&
       (parsed as Record<string, unknown>).type === undefined
     ) {
+      const kindStr = (parsed as Record<string, unknown>).kind as string;
+      // Plano de DATOS (http-res, ws-msg, ws-close, tunnel-pong): bucket
+      // propio de 600/min por IP. Una carga inicial supera 120 msg/min y el
+      // limiter de control tiraba `http-res` a la basura, colgando la
+      // petición 30 s hasta el 504. El control (register, ui-*, pings…)
+      // sigue con el bucket estricto de 120/min.
+      if (WS_DATA_KINDS.has(kindStr)) {
+        if (!this.wsDataLimiter.allow(`ws-data:${ws.data.ip}`)) {
+          this.rateLimitedWsData++;
+          // Fail-fast: un `http-res` descartado NO puede quedar colgado 30 s
+          // hasta el 504; se resuelve el httpPending con 429 inmediato.
+          if (kindStr === 'http-res') {
+            const id = (parsed as Record<string, unknown>).id;
+            if (typeof id === 'string') {
+              const e = this.tunnel.takeHttp(id);
+              if (e) {
+                try {
+                  e.resolve({
+                    status: 429,
+                    headers: { 'content-type': 'application/json', 'retry-after': '5' },
+                    bodyB64: Buffer.from(JSON.stringify({ error: 'rate-limited' }), 'utf8').toString('base64'),
+                  });
+                } catch {
+                  /* noop */
+                }
+              }
+            }
+          }
+          ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error: 'rate-limited' }));
+          return;
+        }
+        this.onTunnelMessage(ws, parsed as Record<string, unknown>);
+        return;
+      }
       if (!this.wsLimiter.allow(`ws:${ws.data.ip}`)) {
+        this.rateLimitedWsControl++;
         ws.send(JSON.stringify({ v: PROTOCOL_VERSION, kind: 'error', error: 'rate-limited' }));
         return;
       }
@@ -1401,6 +1453,7 @@ export class RelayServer {
     const ip = ws.data.ip;
 
     if (!this.wsLimiter.allow(`ws:${ip}`)) {
+      this.rateLimitedWsControl++;
       ws.send(serverEnvelope(undefined, 'rate-limited', undefined, this.now()));
       return;
     }
