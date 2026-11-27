@@ -1,3 +1,10 @@
+## [1.22.2](https://github.com/mikelgmh/BunDeck/compare/v1.22.1...v1.22.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **launcher:** auto-apply updates, single-instance prompt, tray persistence, tests and CI ([b9e5018](https://github.com/mikelgmh/BunDeck/commit/b9e5018b99795b19e34759519d6f910a3878f5f6))
+
 ## [1.22.1](https://github.com/mikelgmh/BunDeck/compare/v1.22.0...v1.22.1) (2026-11-26)
 
 
