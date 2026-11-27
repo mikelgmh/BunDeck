@@ -42,6 +42,21 @@ import { WebSocketManager } from '../ws';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Espera a que `cond()` sea true (poll 50 ms) con timeout generoso.
+ * Los repaints HW renderizan con canvas y el primer render en CI tarda
+ * ~2 s (carga de fuentes); un `sleep` fijo es racy: si el repaint seguía
+ * en vuelo al asertar, `writes` quedaba corto y el resto de writes
+ * contaminaba el test siguiente (16 en vez de 15).
+ */
+async function waitFor(cond: () => boolean, timeoutMs: number, what: string) {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > timeoutMs) throw new Error(`timeout esperando ${what}`);
+    await sleep(50);
+  }
+}
+
 let db: DatabaseService;
 let profId = '';
 let pageId = '';
@@ -124,11 +139,16 @@ describe('HW repaint anti-bloqueo', () => {
     fake.writes = 0;
     fake.failWith = null;
     for (let i = 0; i < 5; i++) streamDeckDriver.scheduleUpdateFromPage(pageId, 20);
-    await sleep(400);
+    // No usar sleep fijo: el primer render canvas en CI tarda ~2 s.
+    // Esperar a que el repaint complete (15 writes) antes de asertar, o los
+    // writes pendientes contaminarían el test 2. totalRepaints no vale aquí:
+    // se incrementa al EMPEZAR el repaint, no al terminar.
+    await waitFor(() => fake.writes >= 15, 20000, '15 writes del repaint colapsado');
+    await sleep(300); // margen para detectar un 2º repaint espurio
     // 15 teclas × 1 repaint = 15 writes (no 5×15).
     expect(fake.writes).toBe(15);
     expect(streamDeckDriver.getRepaintStats().totalRepaints).toBe(1);
-  });
+  }, 30000);
 
   it('2. applyProfileAssignment no repinta si la página ya es la visible', async () => {
     streamDeckDriver.__resetHwPaintStateForTests();
@@ -142,7 +162,7 @@ describe('HW repaint anti-bloqueo', () => {
     expect(second).toBe(pageId);
     expect(fake.writes).toBe(15); // omitido: misma página ya pintada
     expect(streamDeckDriver.getRepaintStats().skippedSamePage).toBeGreaterThanOrEqual(1);
-  });
+  }, 30000);
 
   it('3. ante "Cannot write to hid device": backoff, aborta pronto y reintenta una vez', async () => {
     streamDeckDriver.__resetHwPaintStateForTests();
