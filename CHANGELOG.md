@@ -1,3 +1,16 @@
+# [1.24.0](https://github.com/mikelgmh/BunDeck/compare/v1.23.0...v1.24.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **relay:** separa rate-limit WS en buckets control/datos con fail-fast 429 ([303627b](https://github.com/mikelgmh/BunDeck/commit/303627b6cbf44ebea03577e32c554caa594208b5))
+* **test:** elimina flake de hw-repaint-coalescing en CI ([433e3fc](https://github.com/mikelgmh/BunDeck/commit/433e3fcb1576799592b8ec5f20efd3ef25c15a59))
+
+
+### Features
+
+* **free:** volumen por gesto, persistencia solo gestual y 404/400 en PUT ([ae9db9d](https://github.com/mikelgmh/BunDeck/commit/ae9db9d145ae724c587e32b0a17f577cdeb77fc8))
+
 # [1.23.0](https://github.com/mikelgmh/BunDeck/compare/v1.22.2...v1.23.0) (2026-11-27)
 
 
