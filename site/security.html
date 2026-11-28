@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BunDeck Security | Encrypted end to end, auditable by design</title>
+  <meta name="description" content="How BunDeck keeps remote control private: always-on end-to-end encryption, what the relay can and cannot see, P2P-first transport, and open source you can audit." />
+  <meta property="og:title" content="BunDeck Security | Encrypted end to end" />
+  <meta property="og:description" content="Remote commands are sealed end to end — over relay and P2P alike. See exactly what the relay knows, and what it never can." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
+  <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/assets/icon-light-32x32.png" />
+  <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href="/assets/icon-dark-32x32.png" />
+  <link rel="apple-touch-icon" href="/assets/apple-icon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="BunDeck home"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a>
+      <nav aria-label="Main navigation"><a href="/features">Features</a><a href="/security" aria-current="page">Security</a><a class="github-nav" href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer" aria-label="BunDeck on GitHub"><img src="/assets/github-mark.svg" alt="" aria-hidden="true" /></a></nav>
+    </header>
+
+    <section class="hero hero-single" id="top">
+      <div class="hero-copy">
+        <h1>Private<br />by design.</h1>
+        <p class="hero-description">Remote commands are sealed end to end — over the relay and over P2P alike, never in cleartext. Here is exactly how, what the relay knows, and what it never can.</p>
+        <div class="hero-actions" id="download">
+          <a class="download-button" id="download-button" href="https://github.com/mikelgmh/BunDeck/releases/latest" target="_blank" rel="noreferrer">
+            <span class="download-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            </span>
+            <span class="download-copy"><strong id="download-title">Download BunDeck</strong><span id="download-sub">View available downloads</span></span>
+          </a>
+          <a class="github-button" href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer">
+            <span class="github-icon" aria-hidden="true"><img src="/assets/github-mark.svg" alt="" width="20" height="20" /></span>
+            <span>GitHub</span>
+          </a>
+        </div>
+        <p class="hero-note">Free and open source. Beta — <a href="https://github.com/mikelgmh/BunDeck/issues" target="_blank" rel="noreferrer">roadmap &amp; issues</a>. <span id="release-note">Latest release — checking…</span> <a id="other-platforms" href="https://github.com/mikelgmh/BunDeck/releases/latest" target="_blank" rel="noreferrer">Other platforms</a></p>
+      </div>
+    </section>
+
+    <section class="features-section" aria-labelledby="security-title">
+      <h2 id="security-title">How it stays private.</h2>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Encryption</span>
+        <h3>End to end, always. No exceptions.</h3>
+        <p>Every remote command between paired devices is sealed with NaCl <code>box</code> (X25519 key agreement + XSalsa20-Poly1305 authenticated encryption) before it leaves the device. This holds on the relay path <em>and</em> on the direct P2P path — there is no mode, fallback, or toggle where commands travel in cleartext. TLS protects the pipe; the end-to-end layer protects the content from everyone in the middle, relay included.</p>
+        <ul class="dense-grid">
+          <li class="dense-item"><strong>Keys never leave the device</strong><span>Each install generates its own keypair plus a separate signing key. Private keys are never sent to the relay, never served by any API, and never written to logs.</span></li>
+          <li class="dense-item"><strong>Triple replay protection</strong><span>Random 24-byte nonce per message, a 5-minute expiry window, and a monotonic counter per peer — a captured message cannot be replayed later.</span></li>
+          <li class="dense-item"><strong>Verified pairing</strong><span>Devices pair with a single-use 6-digit code (10-minute expiry) and you confirm the key fingerprint out of band — e.g. by scanning the on-screen QR. No fingerprint match, no trust.</span></li>
+          <li class="dense-item"><strong>Revocable &amp; rotatable</strong><span>Trusted devices can be revoked and keys rotated from the daemon. Rotation invalidates old counters, so stale peers must re-pair.</span></li>
+        </ul>
+        <p class="callout ok"><strong>What this guarantees</strong>Even if the relay were curious — or fully compromised — it cannot read command contents or parameters. The worst it can do is refuse to route, or observe traffic metadata (see below). Encryption is not a setting; it is the only way devices talk.</p>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">The relay</span>
+        <h3>What the relay knows — and what it never can.</h3>
+        <p>The relay is a postman: it routes opaque envelopes between random device IDs. This is the complete, verifiable list — nothing more is needed for routing, and nothing more is collected.</p>
+        <div class="see-grid">
+          <div class="see-col">
+            <h4>It CAN see (routing metadata)</h4>
+            <ul>
+              <li>Random device IDs (UUIDs) and public keys announced at registration</li>
+              <li>Envelope routing fields: sender, recipient, random nonce, expiry</li>
+              <li>Online / offline presence per device</li>
+              <li>IP addresses, used only for rate limiting</li>
+              <li>Aggregate counters only on <code>/stats</code> and <code>/health</code> — no IDs, no keys</li>
+              <li>Remote-panel bytes it forwards (over TLS, only after you approve the request on the daemon and the browser presents a single-use ticket)</li>
+            </ul>
+          </div>
+          <div class="see-col">
+            <h4>It can NEVER see</h4>
+            <ul>
+              <li>Command contents or parameters — ciphertext only, and it holds no private key</li>
+              <li>Private keys of any kind (encryption or signing)</li>
+              <li>Stored credentials: streaming tokens, API keys, and plugin secrets live in your daemon's local database</li>
+              <li>Pairing codes — typed or scanned locally, single-use, expiring</li>
+              <li>Anything beyond routing: it keeps no message queue and stores no payloads</li>
+            </ul>
+          </div>
+        </div>
+        <p class="callout warn"><strong>Honest limit</strong>Like any relay, it can observe traffic patterns (who talks to whom, when, how much). If that metadata matters to you, stay on your LAN or use a self-hosted relay — the content stays sealed either way.</p>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Transport</span>
+        <h3>Relay vs P2P.</h3>
+        <p>Remote access is P2P-first: when a direct WebRTC DataChannel connects, panel traffic never touches the relay at all. Otherwise it falls back to the relay transport automatically.</p>
+        <div class="compare-wrap">
+          <table class="compare-table">
+            <thead><tr><th scope="col">Aspect</th><th scope="col">P2P path</th><th scope="col">Relay path</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Panel traffic</th><td>Direct device-to-device over WebRTC. A TURN server helps with NAT traversal only if you configure one.</td><td>Forwarded by the relay over TLS — only after explicit approval on the daemon, gated by single-use tickets and session cookies.</td></tr>
+              <tr><th scope="row">Remote commands</th><td colspan="2">Sealed end to end (NaCl box) on both paths. The relay holds no keys and cannot decrypt.</td></tr>
+              <tr><th scope="row">Setup rendezvous</th><td colspan="2">Signalling travels over your existing authenticated session; peers are already paired and verified by fingerprint.</td></tr>
+              <tr><th scope="row">If it fails</th><td>Automatic fallback to the relay transport — still encrypted, still sealed.</td><td>Explicit offline / expired / revoked errors — never a silent downgrade to cleartext.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Open source</span>
+        <h3>Auditable — with one honest caveat.</h3>
+        <p>BunDeck is MIT licensed: daemon, relay, launcher, and panel all live in the same public repository, so anyone can read the encryption, pairing, and routing code and verify the claims above. The relay in this repo is the relay you can run yourself.</p>
+        <p class="callout warn"><strong>The caveat</strong>Open code tells you what the software <em>can</em> do, not with certainty what a given server <em>is running</em> — deployed binaries are harder to verify. That is exactly why everything sensitive is end-to-end encrypted: even a malicious or compromised relay cannot read what it was never given the keys to. Trust the math, verify the code, host it yourself if you want.</p>
+      </div>
+    </section>
+
+    <footer class="site-footer"><a class="wordmark footer-wordmark" href="/"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a><span class="footer-links"><a href="/features">Features</a><a href="/security">Security</a></span><span>Free to use. Free to change.</span><a href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer">GitHub</a></footer>
+  </main>
+</body>
+</html>
