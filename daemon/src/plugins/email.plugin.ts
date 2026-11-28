@@ -95,7 +95,6 @@ export class EmailPlugin {
                     dynamic: true,
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     pollMs: 300000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -126,7 +125,6 @@ export class EmailPlugin {
                     icon: 'Inbox',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',

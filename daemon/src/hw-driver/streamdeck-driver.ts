@@ -1170,6 +1170,45 @@ export class StreamDeckDriver {
       try { ctx.globalAlpha = prevAlpha; } catch { /* noop */ }
     }
 
+    // Badge/contador de modo fijo (p. ej. nº de correos sin leer):
+    // píldora arriba-derecha SOBRE icono/texto, sin reemplazar el centro
+    // (dynamicValue sí ocupa el centro). Admite {{vars}} (ya interpolado).
+    const badge = eff.badge.trim();
+    if (badge !== '') {
+      try {
+        const short = badge.length > 4 ? `${badge.slice(0, 3)}…` : badge;
+        const fs = 12 * U;
+        ctx.font = `bold ${fs}px ${FONT_FAMILY}`;
+        let tw = fs * 0.9;
+        try { tw = ctx.measureText(short).width; } catch { /* estimación */ }
+        const padX = 5 * U;
+        const bw = Math.min(width - 8 * U, tw + padX * 2);
+        const bh = 17 * U;
+        const bx = width - bw - 4 * U;
+        const by = 4 * U;
+        ctx.save();
+        try {
+          ctx.fillStyle = '#d43d3d';
+          ctx.beginPath();
+          if (typeof (ctx as any).roundRect === 'function') {
+            (ctx as any).roundRect(bx, by, bw, bh, bh / 2);
+          } else {
+            ctx.rect(bx, by, bw, bh);
+          }
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(short, bx + bw / 2, by + bh / 2 + 0.5 * U);
+        } finally {
+          ctx.restore();
+        }
+        ctx.fillStyle = fg;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+      } catch { /* best-effort: el badge nunca rompe el render */ }
+    }
+
     // Buffer RGB top-down nativo (lo que fillKeyBuffer espera por defecto).
     return this.canvasToRGBBuffer(canvas);
   }

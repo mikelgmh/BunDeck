@@ -97,9 +97,12 @@ Reglas del contrato (`validator.ts`):
 
 - `surface` solo admite `'control'`.
 - `component` requiere `surface: 'control'` y debe ser no vacío.
-- `freeModeOnly` debe ser booleano. Con `true`, la UI solo representa el
-  control en modo libre; en rejilla fija la tecla se ve normal (pulsar es
-  inocuo: el handler no tiene efectos).
+- `freeModeOnly` (legado, opcional): se acepta y valida como booleano por
+  compatibilidad con manifiestos antiguos, pero el daemon ya no lo emite.
+  Toda acción asignable a un botón funciona en modo fijo (ejecutar al
+  pulsar): en modo LIBRE el control se representa además como widget
+  interactivo propio; en modo FIJO la tecla usa su aspecto normal
+  (icono elegido en "aspecto" + `badge`/contador opcional).
 - Componente desconocido → la UI lo degrada a ejecución (nunca rompe).
 
 Seguridad: el daemon **nunca envía HTML/JS a renderizar**. El componente se

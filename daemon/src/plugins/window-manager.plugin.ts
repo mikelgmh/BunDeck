@@ -138,7 +138,6 @@ export class WindowManagerPlugin {
                     icon: 'List',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

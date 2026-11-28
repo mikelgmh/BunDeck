@@ -20,7 +20,7 @@
         class="refresh only-m-plus"
         type="button"
         :aria-label="copy.refreshState"
-        :disabled="busy"
+        :disabled="readonly || busy"
         @click="readHomeAssistant"
       >
         <RefreshCw :size="16" aria-hidden="true" />

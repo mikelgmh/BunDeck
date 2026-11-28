@@ -84,7 +84,6 @@ export class GoveePlugin {
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -107,7 +106,6 @@ export class GoveePlugin {
                     icon: 'Sun',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -130,7 +128,6 @@ export class GoveePlugin {
                     icon: 'Palette',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -150,7 +147,6 @@ export class GoveePlugin {
                     icon: 'Sparkles',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

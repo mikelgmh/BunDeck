@@ -65,7 +65,6 @@ export class WebcamPlugin {
                     i18n: { es: { name: 'Foto rápida', description: 'Captura un fotograma de la cámara (requiere ffmpeg)' }, en: { name: 'Foto rápida', description: 'Captura un fotograma de la cámara (requiere ffmpeg)' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

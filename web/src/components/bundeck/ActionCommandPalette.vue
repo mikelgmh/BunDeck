@@ -41,18 +41,26 @@
           >
             <component :is="a.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
             <span>{{ a.name }}</span>
-            <span
-              v-if="a.surface === 'control'"
-              class="bd-tag bd-tag-ctl"
-              :title="a.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
-              data-cy="bd-palette-badge-control"
-            >{{ t('bd.actControl') }}</span>
-            <span
-              v-else-if="a.surface === 'data'"
-              class="bd-tag"
-              :title="t('bd.actDataHint')"
-              data-cy="bd-palette-badge-data"
-            >{{ t('bd.actData') }}</span>
+            <span v-if="a.surface === 'control' || a.surface === 'data'" class="bd-icogrp">
+              <span
+                v-if="a.surface === 'control'"
+                class="bd-ico"
+                :title="a.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
+                data-cy="bd-palette-badge-control"
+              ><SlidersHorizontal :size="13" stroke-width="2" aria-hidden="true" /></span>
+              <span
+                v-if="a.surface === 'control' && a.freeModeOnly"
+                class="bd-ico"
+                :title="t('bd.actFreeOnlyHint')"
+                data-cy="bd-palette-badge-free"
+              ><Smartphone :size="13" stroke-width="2" aria-hidden="true" /></span>
+              <span
+                v-else-if="a.surface === 'data'"
+                class="bd-ico"
+                :title="t('bd.actDataHint')"
+                data-cy="bd-palette-badge-data"
+              ><Activity :size="13" stroke-width="2" aria-hidden="true" /></span>
+            </span>
           </button>
         </template>
       </template>
@@ -63,7 +71,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { Search, X, Settings } from 'lucide-vue-next'
+import { Search, X, Settings, SlidersHorizontal, Smartphone, Activity } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { simpleIcon } from '../../composables/useSimpleIcons'
 import { useI18nStore } from '../../composables/useI18n'

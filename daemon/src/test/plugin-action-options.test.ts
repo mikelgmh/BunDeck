@@ -95,10 +95,11 @@ describe('POST /api/v1/plugins/action-options', () => {
             expect(byId['light.comedor'].actions).toEqual(['toggle', 'on', 'off', 'read'])
             expect(byId['cover.salon'].domain).toBe('cover')
             expect(byId['sensor.t'].actions).toEqual(['read'])
-            // forwardParams: solo baseUrl/token llegan a entity-list.
+            // forwardParams: [] — la conexion vive en los ajustes del plugin
+            // (servidor); nada de params viaja a entity-list (ni credenciales ni junk).
             expect(calls).toHaveLength(1)
             expect(calls[0].type).toBe('homeassistant.entity-list')
-            expect(Object.keys(calls[0].parameters).sort()).toEqual(['baseUrl', 'token'])
+            expect(Object.keys(calls[0].parameters).sort()).toEqual([])
         } finally {
             server.stop()
         }

@@ -100,7 +100,6 @@ export class AudioMixerPlugin {
                     icon: 'Speaker',
                     surface: 'control',
                     component: 'audio-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -128,7 +127,6 @@ export class AudioMixerPlugin {
                     icon: 'MicOff',
                     surface: 'control',
                     component: 'audio-control',
-                    freeModeOnly: true,
                     variables: [{ name: 'audioMicMuted', type: 'bool', label: 'Micro silenciado' }],
                     schema: {
                         type: 'object',
@@ -158,7 +156,6 @@ export class AudioMixerPlugin {
                     icon: 'SlidersHorizontal',
                     surface: 'control',
                     component: 'volume-range',
-                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 }
             ]

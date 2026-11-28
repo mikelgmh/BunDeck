@@ -131,7 +131,9 @@ export function createKeyEngine(deps: EngineDeps) {
       pageId: deps.pageId(),
       profileId: '',
       position: pos,
-      pressType: trigger ?? 'press',
+      // pressType canónico para el daemon (`button_press_logs.press_type`):
+      // el trigger legado 'press' equivale a 'short'.
+      pressType: !trigger || trigger === 'press' ? 'short' : trigger,
       deviceId: getOrCreateDeviceId(),
       source: 'web',
     }
@@ -306,7 +308,8 @@ export function createKeyEngine(deps: EngineDeps) {
     }
     parts.push(
       String(raw?.label ?? ''), String(raw?.textTop ?? ''),
-      String(raw?.textBottom ?? ''), String(raw?.title ?? '')
+      String(raw?.textBottom ?? ''), String(raw?.title ?? ''),
+      String(raw?.badge ?? '')
     )
     return parts.join('\n')
   }
@@ -316,7 +319,7 @@ export function createKeyEngine(deps: EngineDeps) {
         raw?.label, raw?.textTop, raw?.textBottom, raw?.title,
         raw?.icon, raw?.iconImage, raw?.emoji, raw?.textColor,
         raw?.backgroundColor, raw?.fontSize, raw?.showTitle,
-        raw?.dynamicValue,
+        raw?.dynamicValue, raw?.badge,
         (Array.isArray(raw?.looks) ? raw.looks : []).map((l: any) => [l?.cond, l?.t, l?.i, l?.c, l?.bg]),
       ])
     } catch {
@@ -356,10 +359,11 @@ export function createKeyEngine(deps: EngineDeps) {
     const looks = Array.isArray(raw.looks) ? raw.looks : []
     const L = looks.find((l: any) => l?.cond && evb(l.cond, E))
     let result: any
+    const badgeText = String(intp(String(raw.badge ?? ''), E) ?? '').trim()
     if (!L) {
-      const hasTpl = /\{\{/.test(String(raw.label ?? '') + String(raw.textTop ?? '') + String(raw.textBottom ?? ''))
+      const hasTpl = /\{\{/.test(String(raw.label ?? '') + String(raw.textTop ?? '') + String(raw.textBottom ?? '') + String(raw.badge ?? ''))
       result = hasTpl || usedVars.length || timeDep
-        ? { ...raw, label: intp(raw.label ?? '', E) }
+        ? { ...raw, label: intp(raw.label ?? '', E), badge: badgeText }
         : { ...raw }
     } else {
       result = {
@@ -367,7 +371,8 @@ export function createKeyEngine(deps: EngineDeps) {
         label: intp(L.t || raw.label || '', E),
         icon: L.i || raw.icon || 'zap',
         textColor: L.c != null ? (hexColor(L.c) ?? COLORS[L.c as number] ?? raw.textColor) : raw.textColor,
-        backgroundColor: L.bg ? (hexColor(L.bg) ?? BGS[L.bg as number] ?? raw.backgroundColor) : raw.backgroundColor
+        backgroundColor: L.bg ? (hexColor(L.bg) ?? BGS[L.bg as number] ?? raw.backgroundColor) : raw.backgroundColor,
+        badge: badgeText
       }
     }
     let envSig = timeDep ? `t${tick}\u0000` : ''

@@ -218,6 +218,10 @@
 .bundeck .bd-key.bd-empty[aria-pressed='true'] { border-color: var(--bd-ac); border-style: solid; box-shadow: 0 0 0 2px var(--bd-p2), 0 0 0 4px var(--bd-ac); }
 .bundeck .bd-key.bd-over { outline: 2px dashed var(--bd-ac); outline-offset: 4px; }
 .bundeck .bd-bdg { position: absolute; top: 4px; right: 4px; font: 500 10px/16px var(--bd-mono); min-width: 16px; height: 16px; border-radius: 8px; background: rgba(255, 255, 255, 0.12); color: var(--bd-kt); text-align: center; padding: 0 4px; }
+/* Contador de modo fijo (aspecto → badge): pildora sobre el icono. Si coincide
+   con el contador de acciones, este se desplaza a la izquierda. */
+.bundeck .bd-cbadge { position: absolute; top: 4px; right: 4px; font: 700 10px/16px var(--bd-mono); min-width: 16px; height: 16px; border-radius: 8px; background: #d43d3d; color: #fff; text-align: center; padding: 0 5px; }
+.bundeck .bd-cbadge ~ .bd-bdg { right: auto; left: 4px; }
 .bundeck.bd-dragging { user-select: none; }
 .bundeck .bd-pages { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
 .bundeck .bd-chip { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--bd-ln); color: var(--bd-mu); font-weight: 500; }
@@ -339,6 +343,11 @@
 /* Etiquetas de presentaciÃ³n en biblioteca y tarjetas (Control / Dato / Solo libre). */
 .bundeck .bd-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--bd-ln); color: var(--bd-mu); background: var(--bd-bg); white-space: nowrap; }
 .bundeck .bd-tag-ctl { color: var(--bd-ac); border-color: color-mix(in srgb, var(--bd-ac) 55%, var(--bd-ln)); }
+/* Iconos compactos de presentacion en biblioteca y paleta (control / dato / solo-libre). */
+.bundeck .bd-ico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--bd-ln); color: var(--bd-mu); background: var(--bd-bg); flex: none; }
+.bundeck .bd-ico[data-cy="bd-action-badge-control"], .bundeck .bd-ico[data-cy="bd-palette-badge-control"] { color: var(--bd-ac); border-color: color-mix(in srgb, var(--bd-ac) 55%, var(--bd-ln)); }
+/* Grupo compacto de iconos de presentación: juntos con gap mínimo. */
+.bundeck .bd-icogrp { display: inline-flex; align-items: center; gap: 2px; }
 .bundeck .bd-ibody { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 16px; overscroll-behavior: contain; }
 .bundeck .bd-ifoot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--bd-ln); flex: none; background: inherit; }
 .bundeck .bd-ifoot .bd-pri { flex: 1; }
@@ -840,6 +849,21 @@
    interactivo rellena toda la superficie para las container queries. */
 .bundeck .bd-gs .bd-key.vol-key { padding: 2px; cursor: default; overflow: hidden; }
 .bundeck .bd-gs .bd-key.vol-key.bd-sel { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 -2px 0 rgba(0, 0, 0, 0.35) inset, 0 8px 8px -4px rgba(0, 0, 0, 0.6), 0 0 0 2px var(--bd-p2), 0 0 0 4px var(--bd-ac); }
+/* Superficie de control inerte en edición: los gestos (mover vía handle
+   '.bd-key', redimensionar vía tirador SE, clic para seleccionar) deben llegar
+   a la tecla. GridStack ignora los mousedown iniciados en
+   button/input/select/textarea salvo que sean el propio handle, así que un
+   widget 1×2 lleno de controles habilitados "tragaba" el agarre y parecía
+   atascado (a 1×1 las container queries ocultan esos controles con
+   .only-m-plus y por eso a veces sí agarraba). En uso
+   (.ui-draggable-disabled) los controles siguen interactivos. El badge de
+   "sin configurar" conserva el puntero para no perder el acceso al drawer. */
+.bundeck .bd-gs .grid-stack-item:not(.ui-draggable-disabled) .bd-control-surface {
+  pointer-events: none;
+}
+.bundeck .bd-gs .grid-stack-item:not(.ui-draggable-disabled) .bd-control-surface .bd-needs-config {
+  pointer-events: auto;
+}
 .bundeck .bd-gs .grid-stack-item { min-width: 0; }
 /* En edición toda la tecla es el agarre de GridStack (handle '.bd-key'):
    el cursor lo indica. En uso GridStack marca los items como
@@ -1238,6 +1262,78 @@
   transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease,
     transform 0.3s ease, translate 0.3s ease;
 }
+/* Segunda barra del kiosco (navegación): vive arriba a la izquierda y
+   comparte el look de .kiosk-bar. Colapsada/expandida independiente. */
+.bundeck .kiosk-bar--top {
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  bottom: auto;
+  border-radius: 20px;
+  max-width: min(1080px, calc(100vw - 32px));
+}
+.bundeck .kiosk-bar--top .kiosk-collapsible {
+  align-items: stretch;
+}
+.bundeck .kiosk-bar--top.is-collapsed {
+  /* Reutiliza el viaje a la izquierda de la inferior (translate). */
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  bottom: auto;
+}
+.bundeck .kiosk-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(720px, calc(100vw - 120px));
+}
+.bundeck .kiosk-nav__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.bundeck .kiosk-nav__caption {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.bundeck .kiosk-nav__chip {
+  flex: none;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--bd-ln);
+  border-radius: 99px;
+  background: var(--bd-bg);
+  color: var(--bd-ink);
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+.bundeck .kiosk-nav__chip:hover,
+.bundeck .kiosk-nav__chip:focus-visible {
+  opacity: 1;
+  border-color: var(--bd-ac);
+}
+.bundeck .kiosk-nav__chip.is-active {
+  opacity: 1;
+  border-color: var(--bd-ac);
+  background: color-mix(in srgb, var(--bd-ac) 18%, var(--bd-bg));
+}
+.bundeck .kiosk-nav__chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bundeck .kiosk-nav__empty {
+  font-size: 12px;
+  opacity: 0.65;
+  font-style: italic;
+  white-space: nowrap;
+}
 /* Contraída: solo queda el icono de colapso, anclado a la izquierda.
    `left` no cambia (50%): el viaje a la esquina lo hace `translate`
    (interpola %↔px; `left` saltaría). En móvil la barra ya vive a la
@@ -1504,3 +1600,12 @@
 .bundeck .bd-remote-qr__content .bd-lan-link-row {
   width: 100%;
 }
+
+/* SchemaForm: lista lazy de opciones dinamicas (selector de entidad HA). */
+.bundeck .bd-dyn-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow-y: auto; border: 1px solid var(--bd-ln); border-radius: 8px; background: var(--bd-sf); }
+.bundeck .bd-dyn-list li { margin: 0; padding: 0; }
+.bundeck .bd-dyn-opt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; width: 100%; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--bd-ln); background: transparent; color: var(--bd-ink); font: inherit; text-align: left; cursor: pointer; }
+.bundeck .bd-dyn-list li:last-child .bd-dyn-opt { border-bottom: 0; }
+.bundeck .bd-dyn-opt:hover { background: var(--bd-bg); }
+.bundeck .bd-dyn-val { font-family: monospace; font-size: 12px; }
+.bundeck .bd-dyn-label, .bundeck .bd-dyn-state { font-size: 11px; color: var(--bd-mu); }

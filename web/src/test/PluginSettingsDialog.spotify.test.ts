@@ -151,4 +151,49 @@ describe('PluginSettingsDialog OAuth (Spotify sin Client ID)', () => {
     await flushPromises()
     expect(wrapper.find('[data-cy="bd-spotify-host-hint"]').exists()).toBe(false)
   })
+
+  it('cancelar aborta el pending y re-habilita el botón', async () => {
+    const deletes: string[] = []
+    globalThis.fetch = vi.fn(async (url: string, init?: any) => {
+      if (init?.method === 'POST' && String(url).includes('login-request')) {
+        return { ok: true, json: async () => ({ success: true }) }
+      }
+      if (init?.method === 'DELETE' && String(url).includes('login-request')) {
+        deletes.push(String(url))
+        return { ok: true, json: async () => ({ success: true }) }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          schema: { properties: {} },
+          values: {},
+          instructions: '',
+          oauth: { provider: 'spotify' },
+          configured: false,
+        }),
+      }
+    }) as any
+    const wrapper = mount(PluginSettingsDialog, { props: { apiBase: 'http://localhost:3001/api/v1' } })
+    stubDialog(wrapper.find('dialog').element as HTMLDialogElement)
+    await (wrapper.vm as any).show('spotify')
+    const p = (wrapper.vm as any).connectOAuth()
+    await vi.advanceTimersByTimeAsync(2100)
+    await flushPromises()
+    const pending = wrapper.find('[data-cy="bd-oauth-pending"]')
+    expect(pending.exists()).toBe(true)
+    expect(pending.element.tagName).toBe('P')
+    const row = wrapper.find('.bd-r2')
+    expect(row.exists()).toBe(true)
+    expect(row.element.contains(pending.element)).toBe(false)
+    const cancel = wrapper.find('[data-cy="bd-oauth-cancel"]')
+    expect(cancel.exists()).toBe(true)
+    await cancel.trigger('click')
+    await flushPromises()
+    expect(deletes.length).toBeGreaterThanOrEqual(1)
+    expect(wrapper.find('[data-cy="bd-oauth-pending"]').exists()).toBe(false)
+    expect((wrapper.find('[data-cy="bd-oauth-connect"]').element as HTMLButtonElement).disabled).toBe(false)
+    const done = p.catch(() => {})
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 5000)
+    await done
+  })
 })

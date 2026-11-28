@@ -358,6 +358,22 @@
         </div>
 
         <div class="bd-fld" style="margin-top: 12px">
+          <label class="bd-lb" for="bd-fbadge">{{ t('bd.keyBadge') }}</label>
+          <input
+            type="text"
+            id="bd-fbadge"
+            class="bd-inp"
+            data-cy="bd-key-badge"
+            :value="buttonConfig.badge ?? ''"
+            maxlength="12"
+            :placeholder="t('bd.keyBadgeHint')"
+            spellcheck="false"
+            autocomplete="off"
+            @input="emit('update-field', 'badge', ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+
+        <div class="bd-fld" style="margin-top: 12px">
           <span class="bd-lb">{{ t('bd.icon') }}</span>
           <button class="bd-icb" @click="emit('open-icon-picker')">
             <img v-if="previewImage" :src="previewImage" class="bd-ics" alt="" aria-hidden="true" />

@@ -34,11 +34,19 @@ describe('Badges de presentación (Control / Dato / Solo libre)', () => {
     const wrapper = mount(ActionsPanel, { props: { plugins } })
     const controls = wrapper.findAll('[data-cy="bd-action-badge-control"]')
     expect(controls).toHaveLength(1)
-    expect(controls[0].text()).toBe('bd.actControl')
+    // Iconos compactos agrupados con tooltip nativo (los globos CSS se
+    // recortarían con el scroll del drawer/diálogo), sin pills de texto.
+    expect(controls[0].attributes('data-tip')).toBeUndefined()
+    expect(controls[0].attributes('title')).toBe('bd.actFreeOnlyHint')
+    expect(controls[0].text()).toBe('')
+    // Los dos iconos van juntos en un grupo compacto.
+    expect(controls[0].element.parentElement?.className).toContain('bd-icogrp')
     const frees = wrapper.findAll('[data-cy="bd-action-badge-free"]')
     expect(frees).toHaveLength(1)
+    expect(frees[0].attributes('title')).toBe('bd.actFreeOnlyHint')
     const datas = wrapper.findAll('[data-cy="bd-action-badge-data"]')
     expect(datas).toHaveLength(1)
+    expect(datas[0].attributes('title')).toBe('bd.actDataHint')
     // La acción de ejecución no lleva badge.
     const items = wrapper.findAll('[data-cy="bd-action-item"]')
     const appVol = items.find((i) => i.text().includes('Volumen de app'))!

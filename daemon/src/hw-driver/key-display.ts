@@ -52,6 +52,13 @@ export interface KeyDisplayInput {
   fontSize?: number;
   showTitle?: boolean;
   dynamicValue?: string | number | null;
+  /**
+   * Contador/insignia opcional para modo fijo (p. ej. nº de correos sin
+   * leer en `email.unread`): se pinta sobre el icono sin reemplazarlo
+   * (a diferencia de `dynamicValue`, que ocupa el centro). Admite
+   * `{{…}}` como el resto de textos.
+   */
+  badge?: string | number | null;
   looks?: KeyLookLike[];
 }
 
@@ -68,6 +75,7 @@ export interface ResolvedKeyDisplay {
   fontSize: number;
   showTitle: boolean;
   dynamicValue: string;
+  badge: string;
 }
 
 /** Incorporadas que cambian con el tiempo: obligan a re-render periódico. */
@@ -121,6 +129,7 @@ export function resolveKeyDisplay(raw: KeyDisplayInput, env: Env): ResolvedKeyDi
   const label = interp(hit?.t || raw.label || '', env);
   const textTop = interp(raw.textTop || '', env);
   const textBottom = interp(raw.textBottom || '', env);
+  const badge = interp(raw.badge ?? '', env).trim();
 
   return {
     label,
@@ -135,6 +144,7 @@ export function resolveKeyDisplay(raw: KeyDisplayInput, env: Env): ResolvedKeyDi
     fontSize: Number.isFinite(Number(raw.fontSize)) && Number(raw.fontSize) > 0 ? Number(raw.fontSize) : 14,
     showTitle: raw.showTitle !== false,
     dynamicValue: raw.dynamicValue == null ? '' : String(raw.dynamicValue),
+    badge,
   };
 }
 
@@ -143,14 +153,14 @@ export function resolvedSignature(eff: ResolvedKeyDisplay): string {
   return JSON.stringify([
     eff.label, eff.textTop, eff.textBottom, eff.icon, eff.iconImage,
     eff.backgroundImage, eff.emoji, eff.textColor, eff.backgroundColor,
-    eff.fontSize, eff.showTitle, eff.dynamicValue,
+    eff.fontSize, eff.showTitle, eff.dynamicValue, eff.badge,
   ]);
 }
 
 function displayTextOf(raw: KeyDisplayInput): string {
   const parts: string[] = [];
   for (const l of raw?.looks ?? []) parts.push(String(l?.cond ?? ''), String(l?.t ?? ''));
-  parts.push(String(raw?.label ?? ''), String(raw?.textTop ?? ''), String(raw?.textBottom ?? ''));
+  parts.push(String(raw?.label ?? ''), String(raw?.textTop ?? ''), String(raw?.textBottom ?? ''), String(raw?.badge ?? ''));
   return parts.join('\n');
 }
 

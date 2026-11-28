@@ -26,12 +26,12 @@ describe('productivity/status widget action metadata', () => {
     it('assigns the calendar agenda and timer controls to their intended surfaces', () => {
         const calendar = manifests.find((manifest) => manifest.id === 'calendar')
         expect(calendar.actions.find((action: any) => action.id === 'next-event')).toMatchObject({
-            surface: 'control', component: 'calendar-agenda', freeModeOnly: true, pollMs: 60000,
+            surface: 'control', component: 'calendar-agenda', pollMs: 60000,
         })
         const timer = manifests.find((manifest) => manifest.id === 'timer')
         for (const id of ['status', 'start', 'stop']) {
             expect(timer.actions.find((action: any) => action.id === id)).toMatchObject({
-                surface: 'control', component: 'pomodoro', freeModeOnly: true,
+                surface: 'control', component: 'pomodoro',
             })
         }
     })
@@ -50,7 +50,7 @@ describe('productivity/status widget action metadata', () => {
             const manifest = manifests.find((item) => item.id === pluginId)!
             for (const id of ids) {
                 expect(manifest.actions.find((action: any) => action.id === id)).toMatchObject({
-                    surface: 'control', component: 'status-cards', freeModeOnly: true,
+                    surface: 'control', component: 'status-cards',
                 })
             }
         }

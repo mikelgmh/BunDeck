@@ -100,7 +100,6 @@ export class SteamPlugin {
                     icon: 'Activity',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -139,7 +138,6 @@ export class SteamPlugin {
                     icon: 'Users',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

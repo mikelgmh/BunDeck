@@ -28,7 +28,7 @@ describe('workflow-control metadata on native plugins', () => {
     new MidiOscPlugin(context).getManifest(),
   ]
 
-  it('marks only the first-party workflow controls for free mode', () => {
+  it('marks the first-party workflow controls (widget en libre, ejecutables en fijo)', () => {
     const controls = manifests.flatMap((manifest: any) =>
       manifest.actions
         .filter((action: any) => action.surface === 'control')
@@ -54,8 +54,8 @@ describe('workflow-control metadata on native plugins', () => {
       for (const action of manifest.actions.filter((a: any) => a.surface === 'control')) {
         expect(action).toMatchObject({
           component: 'workflow-control',
-          freeModeOnly: true,
         })
+        expect(action.freeModeOnly).toBeUndefined()
       }
     }
   })
@@ -67,9 +67,9 @@ describe('workflow-control metadata on native plugins', () => {
     const windows = actionsOf(manifests[4])
     const midi = actionsOf(manifests[5])
 
-    expect(clipboard.get('save-slot')).toMatchObject({ surface: 'control', component: 'workflow-control', freeModeOnly: true })
-    expect(clipboard.get('paste-slot')).toMatchObject({ surface: 'control', component: 'workflow-control', freeModeOnly: true })
-    expect(clipboard.get('history')).toMatchObject({ surface: 'control', component: 'workflow-control', freeModeOnly: true })
+    expect(clipboard.get('save-slot')).toMatchObject({ surface: 'control', component: 'workflow-control' })
+    expect(clipboard.get('paste-slot')).toMatchObject({ surface: 'control', component: 'workflow-control' })
+    expect(clipboard.get('history')).toMatchObject({ surface: 'control', component: 'workflow-control' })
     expect(flow.get('wait').surface).toBeUndefined()
     expect(flow.get('log').surface).toBeUndefined()
     expect(profile.get('remove-rule').surface).toBeUndefined()

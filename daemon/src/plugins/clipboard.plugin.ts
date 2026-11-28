@@ -134,7 +134,6 @@ export class ClipboardPlugin {
                     icon: 'ClipboardCopy',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -159,7 +158,6 @@ export class ClipboardPlugin {
                     icon: 'ClipboardPaste',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -179,7 +177,6 @@ export class ClipboardPlugin {
                     icon: 'List',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -200,7 +197,6 @@ export class ClipboardPlugin {
                     icon: 'History',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

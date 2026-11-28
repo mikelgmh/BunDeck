@@ -6,22 +6,29 @@
       :key="propKey"
       class="bd-fld"
     >
-      <!-- Dynamic options field (optionsFrom): combobox with datalist + refresh.
-           Falls back to plain text input when the list cannot be loaded. -->
+      <!-- Dynamic options field (optionsFrom): buscador con lista lazy.
+           Solo renderiza las primeras N coincidencias (sin re-render completo
+           por tecla). Escribe para filtrar, elige de la lista o escribe a mano. -->
       <template v-if="isDynField(propKey)">
         <label class="bd-lb" :for="`sf-${propKey}`">{{ property.title || propKey }}</label>
         <div class="bd-r2">
           <input
             :id="`sf-${propKey}`"
-            :value="modelValue[propKey] || property.default || ''"
-            @input="updateValue(propKey, ($event.target as HTMLInputElement).value)"
+            :value="dynQuery"
+            @input="onDynInput(propKey, ($event.target as HTMLInputElement).value)"
+            @focus="dynOpen = true"
+            @keydown.escape="dynOpen = false"
             type="text"
             :placeholder="property.ui.placeholder"
-            :list="dynListId"
             class="bd-inp"
             data-swapy-no-drag
+            data-cy="sf-dyn-input"
             autocomplete="off"
             spellcheck="false"
+            role="combobox"
+            :aria-expanded="dynOpen"
+            :aria-controls="dynListId"
+            aria-autocomplete="list"
           />
           <button
             @click="fetchDynamicOptions()"
@@ -34,13 +41,36 @@
             <component :is="RefreshCw" :size="16" stroke-width="1.75" aria-hidden="true" :class="{ 'animate-spin': dynLoading }" />
           </button>
         </div>
-        <datalist :id="dynListId">
-          <option v-for="o in dynOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </datalist>
+        <ul
+          v-if="dynOpen && dynLoaded && !dynError"
+          :id="dynListId"
+          class="bd-dyn-list"
+          role="listbox"
+          data-cy="sf-dyn-list"
+        >
+          <li v-for="o in visibleDynOptions" :key="o.value" role="option" :aria-selected="String(modelValue[propKey] ?? '') === o.value">
+            <button type="button" class="bd-dyn-opt" data-cy="sf-dyn-opt" :data-value="o.value" @click="pickDynOption(propKey, o)">
+              <span class="bd-dyn-val">{{ o.value }}</span>
+              <small v-if="o.label !== o.value" class="bd-dyn-label">{{ o.label }}</small>
+              <small v-if="o.state" class="bd-dyn-state">{{ o.state }}</small>
+            </button>
+          </li>
+        </ul>
+        <button
+          v-if="dynOpen && dynHasMore"
+          type="button"
+          class="bd-btn bd-wide"
+          data-cy="sf-dyn-more"
+          data-swapy-no-drag
+          @click="dynShowMore"
+        >
+          Mostrar más ({{ dynRemaining }} restantes)
+        </button>
         <p v-if="dynLoading" class="bd-hint">Cargando lista…</p>
         <p v-else-if="dynError" class="bd-hint">No se pudo cargar la lista ({{ dynError }}). Puedes escribir el valor a mano.</p>
+        <p v-if="dynNeedsPluginConfig" class="bd-hint" data-cy="sf-dyn-config-hint">Configura la conexión en los ajustes del plugin (menú ⋯) y pulsa Recargar lista.</p>
         <p v-else-if="dynHint" class="bd-hint">{{ dynHint }}</p>
-        <p v-else-if="dynLoaded" class="bd-hint">{{ dynOptions.length }} opciones disponibles — escribe o elige una.</p>
+        <p v-else-if="dynLoaded" class="bd-hint">{{ dynFilteredTotal }} opciones — mostrando {{ visibleDynOptions.length }}. Escribe para filtrar.</p>
       </template>
 
       <!-- String input -->
@@ -202,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { FolderOpen, RefreshCw } from 'lucide-vue-next'
 import { getTunnelToken, tunnelApiBase } from '../composables/useTunnel'
 
@@ -221,6 +251,7 @@ interface SchemaProperty {
     max?: number
     rows?: number
   }
+  visibleWhen?: { field: string; domains?: string[]; values?: string[] }
 }
 
 interface Schema {
@@ -254,10 +285,15 @@ const dynCache = new Map<string, { at: number; options: DynamicOption[] }>()
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
+/** Opciones visibles a la vez en el desplegable (lista lazy). */
+const DYN_PAGE_SIZE = 50
+
 const dynOptions = ref<DynamicOption[]>([])
 const dynLoading = ref(false)
 const dynError = ref('')
 const dynLoaded = ref(false)
+const dynOpen = ref(false)
+const dynLimit = ref(DYN_PAGE_SIZE)
 const dynUid = Math.random().toString(36).slice(2, 8)
 const dynListId = computed(() => `dyn-${props.pluginId ?? 'p'}-${props.actionId ?? 'a'}-${dynUid}`)
 
@@ -273,6 +309,93 @@ const selectedDynOption = computed((): DynamicOption | null => {
   if (v === undefined || v === null || v === '') return null
   return dynOptions.value.find((o) => o.value === String(v)) ?? null
 })
+
+/** Dominio de un entity_id ('' si no hay entidad). */
+function domainOfEntityId(value: unknown): string {
+  return String(value ?? '').split('.')[0]?.trim().toLowerCase() ?? ''
+}
+
+/**
+ * Tabla dominio->campos (fallback para homeassistant cuando el schema no
+ * trae `visibleWhen`). Dominios ausentes o entidad vacia: mostrar todo.
+ */
+const HA_CONDITIONAL_FIELDS = ['brightness', 'colorTemp', 'position', 'hvacMode', 'temperature']
+const HA_DOMAIN_FIELDS: Record<string, string[]> = {
+  light: ['brightness', 'colorTemp'],
+  cover: ['position'],
+  climate: ['hvacMode', 'temperature'],
+  sensor: [],
+  binary_sensor: [],
+  scene: [],
+  script: [],
+  automation: []
+}
+
+/** Texto del buscador (sincronizado con el valor del campo). */
+const dynQuery = ref('')
+watch(() => props.modelValue?.[dynFieldKey.value], (v) => {
+  const s = String(v ?? '')
+  if (s !== dynQuery.value) dynQuery.value = s
+}, { immediate: true })
+
+/** Coincidencias del buscador (bucle unico sobre datos; el DOM queda acotado). */
+const dynFiltered = computed(() => {
+  const q = dynQuery.value.trim().toLowerCase()
+  if (!q) return dynOptions.value
+  const out: DynamicOption[] = []
+  for (const o of dynOptions.value) {
+    if (o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q)) out.push(o)
+  }
+  return out
+})
+
+const dynFilteredTotal = computed(() => dynFiltered.value.length)
+const visibleDynOptions = computed(() => dynFiltered.value.slice(0, dynLimit.value))
+const dynRemaining = computed(() => Math.max(0, dynFilteredTotal.value - visibleDynOptions.value.length))
+const dynHasMore = computed(() => dynRemaining.value > 0)
+
+/** Error por falta de configuracion del plugin (lleva a sus ajustes). */
+const dynNeedsPluginConfig = computed(() => /ajuste.*plugin|URL base|token/i.test(dynError.value))
+
+function onDynInput(fieldKey: string, value: string) {
+  dynQuery.value = value
+  dynLimit.value = DYN_PAGE_SIZE
+  dynOpen.value = true
+  updateValue(fieldKey, value)
+}
+
+function pickDynOption(fieldKey: string, option: DynamicOption) {
+  dynQuery.value = option.value
+  updateValue(fieldKey, option.value)
+  dynOpen.value = false
+}
+
+function dynShowMore() {
+  dynLimit.value += DYN_PAGE_SIZE
+}
+
+/** Visibilidad condicional de un campo (metadata `visibleWhen` del schema
+ *  o tabla dominio->campos para homeassistant). Fallback: mostrar todo. */
+function isPropVisible(propKey: string, property: SchemaProperty): boolean {
+  const vw = property.visibleWhen
+  if (vw && (vw.domains?.length || vw.values?.length)) {
+    const raw = props.modelValue?.[vw.field]
+    if (vw.values?.length) {
+      if (raw === undefined || raw === null || raw === '') return true
+      return vw.values.map(String).includes(String(raw))
+    }
+    const domain = domainOfEntityId(raw)
+    if (!domain) return true
+    if (!(domain in HA_DOMAIN_FIELDS) && !(vw.domains ?? []).includes(domain)) return true
+    return (vw.domains ?? []).includes(domain)
+  }
+  if (props.pluginId === 'homeassistant' && HA_CONDITIONAL_FIELDS.includes(propKey)) {
+    const domain = domainOfEntityId(props.modelValue?.['entityId'])
+    if (!domain || !(domain in HA_DOMAIN_FIELDS)) return true
+    return HA_DOMAIN_FIELDS[domain].includes(propKey)
+  }
+  return true
+}
 
 const actionLabelOf = (value: string): string => {
   const act = props.schema.properties?.['action'] as SchemaProperty | undefined
@@ -330,6 +453,7 @@ const fetchDynamicOptions = async () => {
     if (hit && Date.now() - hit.at < cacheMs) {
       dynOptions.value = hit.options
       dynLoaded.value = true
+      dynLimit.value = DYN_PAGE_SIZE
       return
     }
     const res = await fetch(`${apiBase}/plugins/action-options`, {
@@ -357,6 +481,7 @@ const fetchDynamicOptions = async () => {
       }))
     dynOptions.value = list
     dynLoaded.value = true
+    dynLimit.value = DYN_PAGE_SIZE
     dynCache.set(key, { at: Date.now(), options: list })
   } catch (e) {
     dynError.value = e instanceof Error ? e.message : String(e)
@@ -378,7 +503,7 @@ const schemaProperties = computed(() => {
   const properties: Record<string, SchemaProperty> = {}
 
   for (const [key, property] of Object.entries(props.schema.properties)) {
-    if (property.ui?.component !== 'hidden') {
+    if (property.ui?.component !== 'hidden' && isPropVisible(key, property)) {
       properties[key] = property
     }
   }

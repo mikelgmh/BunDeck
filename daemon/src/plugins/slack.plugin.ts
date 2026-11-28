@@ -117,7 +117,6 @@ export class SlackPlugin {
                     icon: 'Hash',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -164,7 +163,6 @@ export class SlackPlugin {
                     icon: 'Bell',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

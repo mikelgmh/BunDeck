@@ -67,23 +67,26 @@
         >
           <component :is="action.icon" :size="18" stroke-width="1.75" aria-hidden="true" />
           <span>{{ action.name }}</span>
-          <span
-            v-if="action.surface === 'control'"
-            class="bd-tag bd-tag-ctl"
-            :title="action.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
-            data-cy="bd-action-badge-control"
-          >{{ t('bd.actControl') }}</span>
-          <span
-            v-else-if="action.surface === 'data'"
-            class="bd-tag"
-            :title="t('bd.actDataHint')"
-            data-cy="bd-action-badge-data"
-          >{{ t('bd.actData') }}</span>
-          <span
-            v-if="action.surface === 'control' && action.freeModeOnly"
-            class="bd-tag"
-            data-cy="bd-action-badge-free"
-          >{{ t('bd.actFreeOnly') }}</span>
+          <span v-if="action.surface === 'control' || action.surface === 'data'" class="bd-icogrp">
+            <span
+              v-if="action.surface === 'control'"
+              class="bd-ico"
+              :title="action.freeModeOnly ? t('bd.actFreeOnlyHint') : t('bd.actControlHint')"
+              data-cy="bd-action-badge-control"
+            ><SlidersHorizontal :size="13" stroke-width="2" aria-hidden="true" /></span>
+            <span
+              v-if="action.surface === 'control' && action.freeModeOnly"
+              class="bd-ico"
+              :title="t('bd.actFreeOnlyHint')"
+              data-cy="bd-action-badge-free"
+            ><Smartphone :size="13" stroke-width="2" aria-hidden="true" /></span>
+            <span
+              v-else-if="action.surface === 'data'"
+              class="bd-ico"
+              :title="t('bd.actDataHint')"
+              data-cy="bd-action-badge-data"
+            ><Activity :size="13" stroke-width="2" aria-hidden="true" /></span>
+          </span>
         </button>
       </template>
       <p v-if="!flat.length" class="bd-hint">{{ t('bd.noActionMatch') }}</p>
@@ -101,7 +104,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare, ScrollText } from 'lucide-vue-next'
+import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLeft, MessageSquare, ScrollText, SlidersHorizontal, Smartphone, Activity } from 'lucide-vue-next'
 import ContextMenu from '../ContextMenu.vue'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import { useI18nStore } from '../../composables/useI18n'

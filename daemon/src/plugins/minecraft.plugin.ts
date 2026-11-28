@@ -82,7 +82,6 @@ export class MinecraftPlugin {
                     icon: 'Server',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -120,7 +119,6 @@ export class MinecraftPlugin {
                     icon: 'Gauge',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

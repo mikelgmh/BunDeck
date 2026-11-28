@@ -92,7 +92,6 @@ export class TimerPlugin {
                     icon: 'Play',
                     surface: 'control',
                     component: 'pomodoro',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -142,7 +141,6 @@ export class TimerPlugin {
                     icon: 'Square',
                     surface: 'control',
                     component: 'pomodoro',
-                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 },
                 {
@@ -153,7 +151,6 @@ export class TimerPlugin {
                     icon: 'Hourglass',
                     surface: 'control',
                     component: 'pomodoro',
-                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 }
             ]

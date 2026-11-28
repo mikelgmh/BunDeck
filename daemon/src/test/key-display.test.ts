@@ -93,13 +93,40 @@ describe('resolveKeyDisplay ({{vars}})', () => {
   });
 });
 
+describe('resolveKeyDisplay (badge)', () => {
+  it('ausente o vacío → ""', () => {
+    expect(resolveKeyDisplay({}, env()).badge).toBe('');
+    expect(resolveKeyDisplay({ badge: '   ' }, env()).badge).toBe('');
+  });
+
+  it('literal y número (incluido 0)', () => {
+    expect(resolveKeyDisplay({ badge: '5' }, env()).badge).toBe('5');
+    expect(resolveKeyDisplay({ badge: 12 }, env()).badge).toBe('12');
+    expect(resolveKeyDisplay({ badge: 0 }, env()).badge).toBe('0');
+  });
+
+  it('interpola {{vars}} igual que el resto de textos', () => {
+    const eff = resolveKeyDisplay({ badge: '{{sinleer}}' }, env([{ n: 'sinleer', v: 7 }]));
+    expect(eff.badge).toBe('7');
+  });
+
+  it('la firma cambia con el badge (evita repintados rancios)', () => {
+    const a = resolveKeyDisplay({ badge: '1' }, env());
+    const b = resolveKeyDisplay({ badge: '2' }, env());
+    expect(resolvedSignature(a)).not.toBe(resolvedSignature(b));
+    expect(resolvedSignature(a)).toBe(resolvedSignature(resolveKeyDisplay({ badge: '1' }, env())));
+  });
+});
+
 describe('displayNeedsLiveUpdate', () => {
   it('true con {{hora}} o looks con cond', () => {
     expect(displayNeedsLiveUpdate({ label: '{{hora}}:{{minuto}}' })).toBe(true);
     expect(displayNeedsLiveUpdate({ label: 'X', looks: [{ cond: 'a == 1', t: 'Y' }] })).toBe(true);
+    expect(displayNeedsLiveUpdate({ label: 'X', badge: '{{hora}}' })).toBe(true);
   });
   it('false en estático', () => {
     expect(displayNeedsLiveUpdate({ label: 'Fija', icon: 'Mic' })).toBe(false);
+    expect(displayNeedsLiveUpdate({ badge: '5' })).toBe(false);
     expect(displayNeedsLiveUpdate({})).toBe(false);
   });
 });

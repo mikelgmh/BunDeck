@@ -800,7 +800,7 @@ export class ActionRunner {
         catch { /* sin página: null */ }
       }
       const ts = Date.now();
-      const pressType = (ctx as any)?.pressType ?? 'short';
+      const pressType = DatabaseService.normalizePressType((ctx as any)?.pressType);
       const source = (ctx as any)?.source ?? 'button';
       const buttonId = String(button?.id ?? (ctx as any)?.buttonId ?? '');
       if (!buttonId) return;

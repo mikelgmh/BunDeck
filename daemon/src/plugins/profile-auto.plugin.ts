@@ -130,7 +130,6 @@ export class ProfileAutoPlugin {
                     icon: 'Info',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: { type: 'object', properties: {} }
                 },
                 {
@@ -141,7 +140,6 @@ export class ProfileAutoPlugin {
                     icon: 'UserCheck',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

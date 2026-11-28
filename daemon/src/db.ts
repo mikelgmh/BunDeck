@@ -2582,6 +2582,21 @@ export class DatabaseService {
   // Una fila por acción ejecutada en cada press. NUNCA se persisten
   // `parameters` (pueden contener secretos): solo tipo/resultado.
 
+  /**
+   * pressType canónico (`short|long|double|triple|touch-start|touch-end`).
+   * El cliente web histórico envía `press`/`click` (legado de useKeyEngine):
+   * se normalizan a `short` en el borde de escritura para que los filtros
+   * del diálogo de Registros (que solo ofrecen canónicos) siempre casen.
+   */
+  static normalizePressType(v: unknown): string {
+    if (v === 'press' || v === 'click') return 'short';
+    if (
+      v === 'short' || v === 'long' || v === 'double' ||
+      v === 'triple' || v === 'touch-start' || v === 'touch-end'
+    ) return v;
+    return 'short';
+  }
+
   private pressRowToLog(r: any): PressLog {
     let meta: any = undefined;
     if (r.meta !== null && r.meta !== undefined) {
@@ -2603,6 +2618,7 @@ export class DatabaseService {
   addPressLog(e: Omit<PressLog, 'id' | 'ts' | 'success'> & { id?: string; ts?: number; success?: boolean }): void {
     if (!e.buttonId || typeof e.buttonId !== 'string') throw new Error('buttonId requerido');
     if (!e.actionType || typeof e.actionType !== 'string') throw new Error('actionType requerido');
+    const pressType = DatabaseService.normalizePressType((e as any)?.pressType);
     this.db.prepare(`INSERT INTO button_press_logs
       (id, ts, button_id, page_id, profile_id, position, press_type,
        device_id, device_name, source, action_type, action_index, action_id,
@@ -2610,7 +2626,7 @@ export class DatabaseService {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       e.id ?? uuidv4(), e.ts ?? Date.now(), e.buttonId,
       e.pageId ?? null, e.profileId ?? null, e.position ?? null,
-      e.pressType ?? 'short', e.deviceId ?? null, e.deviceName ?? null,
+      pressType, e.deviceId ?? null, e.deviceName ?? null,
       e.source ?? null, e.actionType, e.actionIndex ?? null, e.actionId ?? null,
       e.runId ?? null, e.success === false ? 0 : 1,
       typeof e.error === 'string' ? e.error.slice(0, 500) : (e.error ?? null),

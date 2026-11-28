@@ -100,7 +100,6 @@ export class WeatherPlugin {
                     dynamic: true,
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     pollMs: 600000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -135,7 +134,6 @@ export class WeatherPlugin {
                     icon: 'CalendarCloud',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
                         type: 'object',

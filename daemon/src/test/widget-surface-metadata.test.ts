@@ -7,7 +7,7 @@ import { MultimediaPlugin } from '../plugins/multimedia.plugin'
 
 const context = { log: () => {} } as any
 const actionFor = (plugin: any, id: string) => plugin.getManifest().actions.find((action: any) => action.id === id)
-const surface = (component: string) => ({ surface: 'control', component, freeModeOnly: true })
+const surface = (component: string) => ({ surface: 'control', component })
 
 describe('first-party widget surface metadata', () => {
     test('audio mixer exposes only mic mute and output switch as audio controls', () => {
@@ -27,7 +27,7 @@ describe('first-party widget surface metadata', () => {
 
     test('Home Assistant surfaces entity and supported light, cover, climate, and sensor aliases', () => {
         const plugin = new HomeAssistantPlugin(context)
-        expect(plugin.getManifest().version).toBe('2.1.1')
+        expect(plugin.getManifest().version).toBe('2.2.0')
         for (const id of ['entity', 'light', 'switch', 'cover-control', 'climate-set', 'sensor-value', 'get-state']) {
             expect(actionFor(plugin, id)).toMatchObject(surface('smart-home'))
         }

@@ -145,7 +145,7 @@ describe('PressLogsDialog', () => {
     expect(wrapper.text()).toContain('shell.exec')
 
     getPayload = { items: [LOG_C], total: 3 }
-    await wrapper.find('button.bd-btn:not(.bd-dng)').trigger('click')
+    await wrapper.find('[data-cy="bd-press-logs-more"]').trigger('click')
     await flushPromises()
 
     expect(lastUrls[lastUrls.length - 1]).toContain('offset=2')
@@ -197,6 +197,43 @@ describe('PressLogsDialog', () => {
     await flushPromises()
 
     expect(wrapper.find('.bd-err').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('opciones de tipo canónicas (sin «click» legado) y botón Actualizar', async () => {
+    const wrapper = mountDialog({ buttonId: 'b1' })
+    await (wrapper.vm as any).show()
+    await flushPromises()
+
+    const typeSel = wrapper.find('[data-cy="bd-press-logs-filter-type"]')
+    const values = typeSel.findAll('option').map((o) => (o.element as HTMLOptionElement).value)
+    expect(values).toContain('short')
+    expect(values).toContain('long')
+    expect(values).not.toContain('click')
+    // Sin duplicados en valores.
+    expect(new Set(values).size).toBe(values.length)
+
+    const calls = fetchMock.mock.calls.length
+    await wrapper.find('[data-cy="bd-press-logs-refresh"]').trigger('click')
+    await flushPromises()
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(calls)
+    wrapper.unmount()
+  })
+
+  it('limpiar solo envía el ámbito (sin limit/offset/filtros de vista)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountDialog({ buttonId: 'b1' })
+    await (wrapper.vm as any).show()
+    await flushPromises()
+
+    getPayload = { items: [], total: 0 }
+    await wrapper.findAll('button.bd-dng').at(-1)!.trigger('click')
+    await flushPromises()
+
+    const dels = lastUrls.filter((u, i) => lastInits[i]?.method === 'DELETE')
+    expect(dels).toHaveLength(1)
+    expect(dels[0]).toContain('/buttons/b1/logs')
+    expect(dels[0]).not.toMatch(/[?&](limit|offset|success|pressType|deviceId)=/)
     wrapper.unmount()
   })
 })

@@ -119,6 +119,30 @@ describe('button_press_logs: add/list con filtros', () => {
   });
 });
 
+describe('button_press_logs: normalización de pressType', () => {
+  it('DatabaseService.normalizePressType canoniza legados', () => {
+    expect(DatabaseService.normalizePressType('press')).toBe('short');
+    expect(DatabaseService.normalizePressType('click')).toBe('short');
+    expect(DatabaseService.normalizePressType('short')).toBe('short');
+    expect(DatabaseService.normalizePressType('long')).toBe('long');
+    expect(DatabaseService.normalizePressType('double')).toBe('double');
+    expect(DatabaseService.normalizePressType('triple')).toBe('triple');
+    expect(DatabaseService.normalizePressType(undefined)).toBe('short');
+    expect(DatabaseService.normalizePressType('raro')).toBe('short');
+  });
+
+  it('addPressLog guarda press_type canónico aunque llegue legado', () => {
+    db.clearPressLogs();
+    seedRow({ buttonId: 'n1', pressType: 'press' } as any);
+    seedRow({ buttonId: 'n1', pressType: 'click' } as any);
+    const all = db.listPressLogs({ buttonId: 'n1' });
+    expect(all.total).toBe(2);
+    expect(all.items.every((r) => r.pressType === 'short')).toBe(true);
+    // El filtro legado también casa (tolerante en parseListQuery).
+    expect(db.listPressLogs({ buttonId: 'n1', pressType: DatabaseService.normalizePressType('press') }).total).toBe(2);
+  });
+});
+
 describe('button_press_logs: clear y prune', () => {
   it('clear por buttonId/actionType/before', () => {
     db.clearPressLogs();

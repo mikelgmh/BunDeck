@@ -179,6 +179,7 @@
                 <span v-else-if="keyEmoji(index - 1)" style="font-size: 24px" aria-hidden="true">{{ keyEmoji(index - 1) }}</span>
                 <span v-if="keyBottom(index - 1)" class="bd-tb" :style="keyFont(index - 1)">{{ keyBottom(index - 1) }}</span>
                 <small v-else-if="labelMode !== 'n' && showTitleOf(index - 1) && keyLabel(index - 1)">{{ keyLabel(index - 1) }}</small>
+                <span v-if="keyBadge(index - 1)" class="bd-cbadge">{{ keyBadge(index - 1) }}</span>
                 <span v-if="actionCount(index - 1) > 1" class="bd-bdg">
                   {{ actionCount(index - 1) }}
                 </span>
@@ -282,6 +283,7 @@
                     <span v-else-if="keyEmoji(b.position)" style="font-size: 24px" aria-hidden="true">{{ keyEmoji(b.position) }}</span>
                     <span v-if="keyBottom(b.position)" class="bd-tb" :style="keyFont(b.position)">{{ keyBottom(b.position) }}</span>
                     <small v-else-if="labelMode !== 'n' && showTitleOf(b.position) && keyLabel(b.position)">{{ keyLabel(b.position) }}</small>
+                    <span v-if="keyBadge(b.position)" class="bd-cbadge">{{ keyBadge(b.position) }}</span>
                     <span v-if="actionCount(b.position) > 1" class="bd-bdg">{{ actionCount(b.position) }}</span>
                   </template>
                   <Plus v-else-if="mode === 'edit' && !kiosk" :size="16" stroke-width="1.75" aria-hidden="true" />
@@ -784,6 +786,25 @@ const adoptGsWidgets = () => {
         if (!(item as any).gridstackNode) gs.makeWidget(item)
       }
     }
+    refreshGsHandles()
+  } catch { /* noop */ }
+}
+
+/** Re-atar los handles de arrastre tras un patch de Vue.
+ *  GridStack resuelve `draggable.handle` ('.bd-key') UNA vez al crear cada
+ *  draggable; cuando Vue sustituye ese nodo (p. ej. al soltar la acción HA
+ *  "entidad" la tecla pasa de <button> a <div class="vol-key"> de superficie
+ *  de control, o al revés al vaciarla) el listener `mousedown` queda atado al
+ *  nodo destruido y el widget deja de moverse hasta recargar la página.
+ *  `refreshDragHandles` es la API pública de GridStack para contenido
+ *  renderizado por frameworks (mismo caso que portales de React). */
+const refreshGsHandles = () => {
+  if (!gs || !gsContainer.value || !isGsMode.value) return
+  try {
+    if (typeof gs.refreshDragHandles !== 'function') return
+    for (const item of gsContainer.value.querySelectorAll<HTMLElement>(':scope > .grid-stack-item')) {
+      if ((item as any).gridstackNode) gs.refreshDragHandles(item)
+    }
   } catch { /* noop */ }
 }
 
@@ -1220,6 +1241,12 @@ const keyEmoji = (position: number) => disp(position)?.emoji ?? ''
 const keyTop = (position: number) => disp(position)?.textTop ?? ''
 const keyBottom = (position: number) => disp(position)?.textBottom ?? ''
 const keyDyn = (position: number) => disp(position)?.dynamicValue ?? bdata(position)?.dynamicValue ?? ''
+/** Contador/insignia de modo fijo (aspecto → `badge`): sobre el icono, sin reemplazarlo. */
+const keyBadge = (position: number) => {
+  const b = disp(position)?.badge ?? bdata(position)?.badge ?? ''
+  const s = String(b ?? '').trim()
+  return s === '' ? '' : (s.length > 4 ? `${s.slice(0, 3)}…` : s)
+}
 const keyFont = (position: number) => {
   const fs = disp(position)?.fontSize
   return fs ? { fontSize: `${fs}px` } : undefined
@@ -1382,6 +1409,17 @@ const controlActionOf = (position: number): any | undefined => {
   return undefined
 }
 const isControlSurface = (position: number) => isGsMode.value && !!controlActionOf(position)
+/** Firma plain↔control por widget: cambiar la superficie sustituye el NODO
+ *  handle '.bd-key' (<button> ↔ <div>), así que hay que re-atar el drag de
+ *  GridStack aunque la geometría (gsItems) no cambie (p. ej. el borrador ya
+ *  muestra la superficie antes de resolverse el guardado). */
+const gsSurfaceSig = computed(() =>
+  gsItems.value.map((b) => `${b.id}:${isControlSurface(b.position) ? 1 : 0}`).join('|')
+)
+watch(gsSurfaceSig, () => {
+  if (!isGsMode.value || !gs) return
+  void nextTick().then(adoptGsWidgets)
+})
 /** App objetivo del control de volumen (vacío = maestro). */
 const volumeAppOf = (position: number): string | null => {
   const params = controlActionOf(position)?.parameters as any

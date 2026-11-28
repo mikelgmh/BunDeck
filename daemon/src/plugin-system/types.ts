@@ -58,7 +58,11 @@ export interface PluginActionV2 {
    * Valores conocidos: 'volume-range'.
    */
   component?: string;
-  /** El control solo se representa en modo libre; en rejilla fija la tecla se ve normal. */
+  /** El control se representa como widget interactivo en modo libre; en
+   *  rejilla fija la tecla usa su aspecto normal (icono + badge opcional).
+   *  Legado: `freeModeOnly` se acepta y valida por compatibilidad con
+   *  manifiestos antiguos, pero el daemon ya no lo emite: toda acción
+   *  asignable a un botón funciona en modo fijo (ejecutar al pulsar). */
   freeModeOnly?: boolean;
   /** Intervalo de polling sugerido para botones dinámicos (ms). */
   pollMs?: number;

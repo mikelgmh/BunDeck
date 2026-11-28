@@ -117,7 +117,6 @@ export class HueExtraPlugin {
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -146,7 +145,6 @@ export class HueExtraPlugin {
                     icon: 'Sun',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -175,7 +173,6 @@ export class HueExtraPlugin {
                     icon: 'Palette',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -210,7 +207,6 @@ export class HueExtraPlugin {
                     icon: 'Sparkles',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

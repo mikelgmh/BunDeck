@@ -2,7 +2,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
-import type { DatabaseService } from '../db';
+import { DatabaseService } from '../db';
 import { resolveNavTargets } from '../sessions';
 
 const EXECUTE_MANY_MAX_ITEMS = 32;
@@ -64,7 +64,7 @@ async function execOne(
             pageId: (context as any)?.pageId ?? null,
             profileId: (context as any)?.profileId ?? null,
             position: (context as any)?.position ?? null,
-            pressType: (context as any)?.pressType ?? 'short',
+            pressType: DatabaseService.normalizePressType((context as any)?.pressType),
             deviceId, deviceName,
             source: (context as any)?.source ?? 'api',
             actionType: String((action as any)?.type ?? 'unknown'),

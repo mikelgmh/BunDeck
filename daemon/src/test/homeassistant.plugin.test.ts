@@ -52,7 +52,7 @@ describe('HomeAssistantPlugin manifest', () => {
         const manifest = plugin.getManifest()
         expect(manifest.id).toBe('homeassistant')
         expect(manifest.name).toBe('Home Assistant')
-        expect(manifest.version).toBe('2.1.1')
+        expect(manifest.version).toBe('2.2.0')
         expect(manifest.author).toBe('BunDeck')
         expect(manifest.permissions).toContain('http')
         expect(manifest.permissions).toContain('network')
@@ -125,6 +125,78 @@ describe('HomeAssistantPlugin manifest', () => {
         const result = validateManifest(plugin.getManifest())
         expect(result.valid).toBe(true)
         expect(result.errors).toEqual([])
+    })
+
+    test('ninguna accion expone baseUrl/token: la conexion es SOLO del plugin', () => {
+        const { plugin } = makePlugin()
+        const manifest = plugin.getManifest()
+        for (const action of manifest.actions) {
+            expect(Object.keys(action.schema.properties)).not.toContain('baseUrl')
+            expect(Object.keys(action.schema.properties)).not.toContain('token')
+        }
+        // Los ajustes del plugin conservan ambos como obligatorios.
+        expect(manifest.settingsSchema.required).toEqual(
+            expect.arrayContaining(['baseUrl', 'token'])
+        )
+        // entity-list se alimenta de los ajustes del servidor: nada que reenviar.
+        const entity = manifest.actions.find((a: any) => a.id === 'entity')
+        expect(entity.optionsFrom.forwardParams ?? []).toEqual([])
+    })
+
+    test('tabla dominio→campos y visibleWhen del schema (fallback: desconocido = todo)', async () => {
+        const { HA_DOMAIN_FIELDS, visibleFieldsForDomain } = await import('../plugins/homeassistant.plugin')
+        expect(HA_DOMAIN_FIELDS).toMatchObject({
+            light: ['brightness', 'colorTemp'],
+            cover: ['position'],
+            climate: ['hvacMode', 'temperature']
+        })
+        expect(HA_DOMAIN_FIELDS.sensor).toEqual([])
+        expect(visibleFieldsForDomain('light.salon')).toEqual(['brightness', 'colorTemp'])
+        expect(visibleFieldsForDomain('cover')).toEqual(['position'])
+        expect(visibleFieldsForDomain('climate.salon')).toEqual(['hvacMode', 'temperature'])
+        expect(visibleFieldsForDomain('sensor.t')).toEqual([])
+        // Fallback sensato: dominios desconocidos o sin entidad muestran todo.
+        expect(visibleFieldsForDomain('fan.techo')).toBeNull()
+        expect(visibleFieldsForDomain('')).toBeNull()
+        const { plugin } = makePlugin()
+        const props = plugin.getManifest().actions.find((a: any) => a.id === 'entity').schema.properties
+        expect(props.brightness.visibleWhen).toEqual({ field: 'entityId', domains: ['light'] })
+        expect(props.colorTemp.visibleWhen).toEqual({ field: 'entityId', domains: ['light'] })
+        expect(props.position.visibleWhen).toEqual({ field: 'entityId', domains: ['cover'] })
+        expect(props.hvacMode.visibleWhen).toEqual({ field: 'entityId', domains: ['climate'] })
+        expect(props.temperature.visibleWhen).toEqual({ field: 'entityId', domains: ['climate'] })
+        expect(props.entityId.visibleWhen).toBeUndefined()
+        expect(props.action.visibleWhen).toBeUndefined()
+    })
+
+    test('la accion usa la configuracion del plugin cuando no trae credenciales', async () => {
+        const { server, requests, baseUrl } = startFakeHA(async (req) => {
+            const url = new URL(req.url)
+            if (url.pathname === '/api/states/light.salon') {
+                return Response.json({ entity_id: 'light.salon', state: 'on' })
+            }
+            return Response.json([])
+        })
+        try {
+            const plugin = new HomeAssistantPlugin({
+                log: () => {},
+                getSetting: (k: string) => (k === 'baseUrl' ? baseUrl : k === 'token' ? 'tok-settings' : null)
+            })
+            const result = await plugin.getActionHandlers().get('entity')!(
+                { entityId: 'light.salon', action: 'toggle' },
+                {}
+            )
+            expect(result.success).toBe(true)
+            const call = requests.find((r) => r.path === '/api/services/light/toggle')
+            expect(call?.auth).toBe('Bearer tok-settings')
+            // Sin credenciales en ningun sitio: error que lleva a ajustes del plugin.
+            const bare = makePlugin().plugin
+            await expect(
+                bare.getActionHandlers().get('entity')!({ entityId: 'light.salon' }, {})
+            ).rejects.toThrow(/ajustes del plugin/)
+        } finally {
+            server.stop()
+        }
     })
 })
 

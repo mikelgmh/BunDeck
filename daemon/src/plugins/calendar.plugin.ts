@@ -180,7 +180,6 @@ export class CalendarPlugin {
                     dynamic: true,
                     surface: 'control',
                     component: 'calendar-agenda',
-                    freeModeOnly: true,
                     pollMs: 60000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {

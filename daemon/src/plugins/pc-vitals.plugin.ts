@@ -61,7 +61,6 @@ export class PCVitalsPlugin {
                     dynamic: true,
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     pollMs: 5000,
                     timeoutMs: 15000,
                     states: [
@@ -91,7 +90,6 @@ export class PCVitalsPlugin {
                     dynamic: true,
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     pollMs: 2000,
                     timeoutMs: 10000,
                     states: [
@@ -164,7 +162,6 @@ export class PCVitalsPlugin {
                     icon: 'Fan',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -194,7 +191,6 @@ export class PCVitalsPlugin {
                     icon: 'HardDrive',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -221,7 +217,6 @@ export class PCVitalsPlugin {
                     icon: 'Wifi',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -249,7 +244,6 @@ export class PCVitalsPlugin {
                     icon: 'Clock',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {
@@ -271,7 +265,6 @@ export class PCVitalsPlugin {
                     icon: 'ListOrdered',
                     surface: 'control',
                     component: 'status-cards',
-                    freeModeOnly: true,
                     timeoutMs: 15000,
                     schema: {
                         type: 'object',

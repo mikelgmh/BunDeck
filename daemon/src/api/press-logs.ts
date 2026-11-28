@@ -14,7 +14,7 @@
  */
 import { jsonResponse } from './http-helpers';
 import type { ApiHandler } from './types';
-import type { PressLogFilters } from '../db';
+import { DatabaseService, type PressLogFilters } from '../db';
 
 const BUTTON_LOGS_RE = /^\/api\/v1\/buttons\/([^/]+)\/logs$/;
 
@@ -57,7 +57,9 @@ function parseListQuery(url: URL): { filters: PressLogFilters } | { error: strin
   const deviceId = url.searchParams.get('deviceId');
   if (deviceId !== null && deviceId !== '') filters.deviceId = deviceId;
   const pressType = url.searchParams.get('pressType');
-  if (pressType !== null && pressType !== '') filters.pressType = pressType;
+  // Tolerante con valores legado (`press`/`click` → `short`): el diálogo
+  // antiguo los enviaba y las filas ya están normalizadas en escritura.
+  if (pressType !== null && pressType !== '') filters.pressType = DatabaseService.normalizePressType(pressType);
   const successRaw = url.searchParams.get('success');
   if (successRaw === 'true' || successRaw === '1') filters.success = true;
   else if (successRaw === 'false' || successRaw === '0') filters.success = false;

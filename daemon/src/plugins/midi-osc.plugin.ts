@@ -99,7 +99,6 @@ export class MidiOscPlugin {
                     icon: 'Radio',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Native Home Assistant Plugin
  * Una sola acción «Entidad»: el dominio se deduce del entity_id
  * (light.salon, switch.cafetera, cover.salon, climate.salon, scene.x,
@@ -22,6 +22,33 @@ const REQUEST_TIMEOUT_MS = 15000
 
 /** Dominios de solo lectura: cualquier acción de escritura se rechaza. */
 const READ_ONLY_DOMAINS = new Set(['sensor', 'binary_sensor'])
+
+/**
+ * Visibilidad condicional de campos por dominio de entidad (la UI solo
+ * muestra los campos con sentido para el dominio seleccionado).
+ * Dominios ausentes en la tabla o entidad vacia -> fallback: mostrar todo.
+ */
+export const HA_DOMAIN_FIELDS: Record<string, string[]> = {
+    light: ['brightness', 'colorTemp'],
+    cover: ['position'],
+    climate: ['hvacMode', 'temperature'],
+    sensor: [],
+    binary_sensor: [],
+    scene: [],
+    script: [],
+    automation: []
+}
+
+/**
+ * Campos visibles para un dominio; `null` = todos (fallback para dominios
+ * desconocidos o entidad vacia). Acepta dominio o entity_id completo.
+ */
+export function visibleFieldsForDomain(domainOrEntityId: string): string[] | null {
+    const d = String(domainOrEntityId ?? '').split('.')[0]?.trim().toLowerCase() ?? ''
+    if (!d) return null
+    if (d in HA_DOMAIN_FIELDS) return HA_DOMAIN_FIELDS[d]
+    return null
+}
 
 function normalizeBaseUrl(baseUrl: string): string {
     return (baseUrl || '').trim().replace(/\/+$/, '')
@@ -63,32 +90,14 @@ export class HomeAssistantPlugin {
     }
 
     public getManifest() {
-        const baseUrlProp = {
-            type: 'string',
-            format: 'uri',
-            title: 'URL base',
-            description: 'URL base de Home Assistant',
-            examples: ['http://homeassistant.local:8123'],
-            ui: {
-                component: 'input',
-                type: 'url',
-                placeholder: 'http://homeassistant.local:8123'
-            }
-        }
-        const tokenProp = {
-            type: 'string',
-            title: 'Token de acceso',
-            description: 'Token de acceso de larga duración (long-lived access token)',
-            ui: {
-                component: 'input',
-                type: 'password',
-                placeholder: 'Pega aquí tu token de larga duración'
-            }
-        }
-        const entityIdProp = {
+        // NOTA: la conexion (URL base + token) vive SOLO en settingsSchema
+        // (ajustes del plugin, menu ⋯). Las acciones la heredan via
+        // requireConnection(); los params baseUrl/token antiguos se siguen
+        // aceptando por compatibilidad pero ya no se muestran por accion.
+                const entityIdProp = {
             type: 'string',
             title: 'Entidad',
-            description: 'Cualquier entidad: light.salon, switch.cafetera, cover.salon, climate.salon, scene.pelicula, automation.buenos_dias, sensor.temperatura…',
+            description: 'Cualquier entidad: light.salon, switch.cafetera, cover.salon, climate.salon, scene.pelicula, automation.buenos_dias, sensor.temperatura… (conexion: ajustes del plugin, menu ⋯).',
             examples: ['light.salon'],
             ui: {
                 component: 'input',
@@ -100,7 +109,7 @@ export class HomeAssistantPlugin {
         return {
             id: 'homeassistant',
             name: 'Home Assistant',
-            version: '2.1.1',
+            version: '2.2.0',
             description: 'Controla cualquier entidad de Home Assistant con una sola acción; la lista de entidades se obtiene de tu instancia',
             author: 'BunDeck',
             apiVersion: CONTRACT_API_VERSION,
@@ -114,7 +123,7 @@ export class HomeAssistantPlugin {
                         type: 'string',
                         format: 'uri',
                         title: 'URL base',
-                        description: 'URL base de Home Assistant. Los parámetros de cada acción tienen prioridad sobre estos valores.',
+                        description: 'URL base de Home Assistant. Vale para todas las acciones (los botones antiguos con URL propia la conservan).',
                         examples: ['http://homeassistant.local:8123'],
                         ui: { component: 'input', type: 'url', placeholder: 'http://homeassistant.local:8123' }
                     },
@@ -137,7 +146,6 @@ export class HomeAssistantPlugin {
                     icon: 'House',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     dynamic: true,
                     pollMs: 15000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -145,12 +153,10 @@ export class HomeAssistantPlugin {
                         { value: 'on', label: 'Encendido', icon: 'ToggleRight' },
                         { value: 'off', label: 'Apagado', icon: 'ToggleLeft' }
                     ],
-                    optionsFrom: { field: 'entityId', sourceAction: 'entity-list', cacheMs: 30000, forwardParams: ['baseUrl', 'token'] },
+                    optionsFrom: { field: 'entityId', sourceAction: 'entity-list', cacheMs: 30000, forwardParams: [] },
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: entityIdProp,
                             action: {
                                 type: 'string',
@@ -181,7 +187,8 @@ export class HomeAssistantPlugin {
                                 description: 'Brillo 0-255. Solo luces al encender.',
                                 minimum: 0,
                                 maximum: 255,
-                                ui: { component: 'input', type: 'number', placeholder: '255' }
+                                ui: { component: 'input', type: 'number', placeholder: '255' },
+                                visibleWhen: { field: 'entityId', domains: ['light'] }
                             },
                             colorTemp: {
                                 type: 'integer',
@@ -189,7 +196,8 @@ export class HomeAssistantPlugin {
                                 description: 'Kelvin 1000-10000. Solo luces al encender.',
                                 minimum: 1000,
                                 maximum: 10000,
-                                ui: { component: 'input', type: 'number', placeholder: '4000' }
+                                ui: { component: 'input', type: 'number', placeholder: '4000' },
+                                visibleWhen: { field: 'entityId', domains: ['light'] }
                             },
                             position: {
                                 type: 'integer',
@@ -197,13 +205,15 @@ export class HomeAssistantPlugin {
                                 description: 'Posición 0-100. Solo persianas con «Ir a posición».',
                                 minimum: 0,
                                 maximum: 100,
-                                ui: { component: 'input', type: 'number', placeholder: '50' }
+                                ui: { component: 'input', type: 'number', placeholder: '50' },
+                                visibleWhen: { field: 'entityId', domains: ['cover'] }
                             },
                             hvacMode: {
                                 type: 'string',
                                 title: 'Modo',
                                 description: 'Modo HVAC. Solo clima con «Ajustar clima».',
                                 enum: ['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'],
+                                visibleWhen: { field: 'entityId', domains: ['climate'] },
                                 ui: {
                                     component: 'select',
                                     options: [
@@ -222,7 +232,8 @@ export class HomeAssistantPlugin {
                                 description: 'Temperatura objetivo en °C. Solo clima con «Ajustar clima».',
                                 minimum: 5,
                                 maximum: 35,
-                                ui: { component: 'input', type: 'number', placeholder: '21' }
+                                ui: { component: 'input', type: 'number', placeholder: '21' },
+                                visibleWhen: { field: 'entityId', domains: ['climate'] }
                             }
                         },
                         required: ['entityId']
@@ -240,8 +251,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp
                         },
                         required: []
                     }
@@ -256,7 +265,6 @@ export class HomeAssistantPlugin {
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     ...hiddenAlias,
                     states: [
@@ -266,8 +274,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',
@@ -320,8 +326,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Escena',
@@ -341,7 +345,6 @@ export class HomeAssistantPlugin {
                     icon: 'Plug',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     ...hiddenAlias,
                     states: [
@@ -351,8 +354,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',
@@ -389,8 +390,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Escena',
@@ -412,8 +411,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Automatización',
@@ -433,13 +430,10 @@ export class HomeAssistantPlugin {
                     icon: 'Blinds',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     ...hiddenAlias,
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',
@@ -483,13 +477,10 @@ export class HomeAssistantPlugin {
                     icon: 'Thermometer',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     ...hiddenAlias,
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',
@@ -534,7 +525,6 @@ export class HomeAssistantPlugin {
                     icon: 'Gauge',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     dynamic: true,
                     pollMs: 30000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -542,8 +532,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',
@@ -563,7 +551,6 @@ export class HomeAssistantPlugin {
                     icon: 'Activity',
                     surface: 'control',
                     component: 'smart-home',
-                    freeModeOnly: true,
                     dynamic: true,
                     pollMs: 15000,
                     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -575,8 +562,6 @@ export class HomeAssistantPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            baseUrl: baseUrlProp,
-                            token: tokenProp,
                             entityId: {
                                 type: 'string',
                                 title: 'Entidad',

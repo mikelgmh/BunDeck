@@ -11,18 +11,19 @@
       <div class="bd-pl-filters" role="group" :aria-label="title">
         <label class="bd-fld">
           <span class="bd-lb">{{ t('bd.pressLogsPressType') }}</span>
-          <select class="bd-inp" :value="pressType" @change="pressType = ($event.target as HTMLSelectElement).value; reload()">
+          <select class="bd-inp" :value="pressType" data-cy="bd-press-logs-filter-type" @change="pressType = ($event.target as HTMLSelectElement).value; reload()">
             <option value="">{{ t('bd.pressLogsAll') }}</option>
-            <option value="short">short</option>
-            <option value="click">click</option>
-            <option value="double">double</option>
-            <option value="triple">triple</option>
-            <option value="long">long</option>
+            <option value="short">{{ t('bd.pressLogsPtShort') }}</option>
+            <option value="double">{{ t('bd.pressLogsPtDouble') }}</option>
+            <option value="triple">{{ t('bd.pressLogsPtTriple') }}</option>
+            <option value="long">{{ t('bd.pressLogsPtLong') }}</option>
+            <option value="touch-start">{{ t('bd.pressLogsPtTouchStart') }}</option>
+            <option value="touch-end">{{ t('bd.pressLogsPtTouchEnd') }}</option>
           </select>
         </label>
         <label class="bd-fld">
           <span class="bd-lb">{{ t('bd.pressLogsSuccess') }}</span>
-          <select class="bd-inp" :value="success" @change="success = ($event.target as HTMLSelectElement).value; reload()">
+          <select class="bd-inp" :value="success" data-cy="bd-press-logs-filter-status" @change="success = ($event.target as HTMLSelectElement).value; reload()">
             <option value="">{{ t('bd.pressLogsAll') }}</option>
             <option value="true">OK</option>
             <option value="false">{{ t('bd.pressLogsResultFail') }}</option>
@@ -34,7 +35,8 @@
             type="text"
             class="bd-inp bd-mono"
             :value="deviceId"
-            :placeholder="t('bd.pressLogsDevice')"
+            :placeholder="t('bd.pressLogsDevicePh')"
+            :aria-label="t('bd.pressLogsDevice')"
             @input="deviceId = ($event.target as HTMLInputElement).value"
             @change="reload()"
           />
@@ -47,6 +49,12 @@
             <option value="100">100</option>
           </select>
         </label>
+        <div class="bd-fld bd-fld-actions">
+          <span class="bd-lb" aria-hidden="true">&nbsp;</span>
+          <button class="bd-btn" :disabled="loading" data-cy="bd-press-logs-refresh" @click="reload">
+            {{ t('bd.pressLogsRefresh') }}
+          </button>
+        </div>
       </div>
 
       <p v-if="error" class="bd-err" role="alert">{{ error }}</p>
@@ -80,7 +88,7 @@
       </table>
 
       <div class="bd-r2" style="justify-content: center">
-        <button v-if="hasMore" class="bd-btn" :disabled="loading" @click="loadMore">
+        <button v-if="hasMore" class="bd-btn" :disabled="loading" data-cy="bd-press-logs-more" @click="loadMore">
           {{ t('bd.pressLogsMore') }}
         </button>
         <button class="bd-btn bd-dng" :disabled="loading || !items.length" @click="clearLogs">
@@ -92,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { X } from 'lucide-vue-next'
 import { useI18nStore } from '../../composables/useI18n'
 
@@ -257,8 +265,17 @@ const clearLogs = async () => {
   loading.value = true
   error.value = ''
   try {
-    // El DELETE tolera los mismos filtros en query; sin filtros borra el ámbito.
-    const res = await fetch(`${basePath()}${buildQuery(0)}`, {
+    // El DELETE solo acepta filtros de ámbito (buttonId/actionType/before):
+    // enviar limit/offset/success/pressType/deviceId los ignoraría el
+    // daemon y borraría MÁS de lo visible. Aquí solo va el ámbito.
+    const q = new URLSearchParams()
+    const base = basePath()
+    if (base.endsWith('/press-logs')) {
+      if (effButtonId.value) q.set('buttonId', effButtonId.value)
+      if (effActionType.value) q.set('actionType', effActionType.value)
+    }
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    const res = await fetch(`${base}${suffix}`, {
       method: 'DELETE',
       signal: AbortSignal.timeout(30000),
     })
@@ -287,6 +304,35 @@ const show = async (overrides?: {
 const close = () => {
   dialog.value?.close()
 }
+
+// En vivo: el resumen por pulsación que escribe el daemon en `logs`
+// (meta.buttonId) llega por `libredeck:log-created`; si casa con el ámbito
+// abierto se recarga con debounce para no tormentear la API.
+let liveTimer: ReturnType<typeof setTimeout> | null = null
+const onLiveLog = (e: Event) => {
+  if (!dialog.value?.open) return
+  const meta = (e as CustomEvent).detail?.meta ?? {}
+  const id = typeof meta?.buttonId === 'string' ? meta.buttonId : null
+  if (effButtonId.value && id !== effButtonId.value) return
+  if (liveTimer) return
+  liveTimer = setTimeout(() => {
+    liveTimer = null
+    void reload()
+  }, 600)
+}
+
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('libredeck:log-created', onLiveLog as EventListener)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('libredeck:log-created', onLiveLog as EventListener)
+  }
+  if (liveTimer) clearTimeout(liveTimer)
+})
 
 defineExpose({ show, close })
 </script>

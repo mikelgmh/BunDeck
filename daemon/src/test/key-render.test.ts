@@ -119,4 +119,37 @@ describe('generateButtonImage', () => {
     );
     expect(countNonBg(buf, 72, 72, [16, 16, 16])).toBe(0);
   });
+
+  it('badge: píldora roja arriba-derecha sobre el icono (no lo reemplaza)', async () => {
+    const d = new StreamDeckDriver();
+    const buf = await d.generateButtonImage(
+      { label: 'Correo', icon: 'Mail', badge: '5', backgroundColor: '#101010', textColor: '#ffffff' },
+      72,
+    );
+    // #d43d3d = (212, 61, 61): píxeles rojizos solo en la esquina superior derecha.
+    const redIn = (x0: number, y0: number, x1: number, y1: number): number => {
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const [r, g, b] = px(buf, 72, x, y);
+          if (r > 150 && g < 110 && b < 110) n++;
+        }
+      }
+      return n;
+    };
+    expect(redIn(44, 2, 70, 26)).toBeGreaterThan(10);
+    // Sin badge no hay tinta roja en esa esquina.
+    const plain = await d.generateButtonImage(
+      { label: 'Correo', icon: 'Mail', backgroundColor: '#101010', textColor: '#ffffff' },
+      72,
+    );
+    let n = 0;
+    for (let y = 2; y < 26; y++) {
+      for (let x = 44; x < 70; x++) {
+        const o = (y * 72 + x) * 3;
+        if (plain[o] > 150 && plain[o + 1] < 110 && plain[o + 2] < 110) n++;
+      }
+    }
+    expect(n).toBe(0);
+  });
 });

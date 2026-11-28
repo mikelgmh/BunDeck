@@ -35,7 +35,6 @@ export class PagePlugin {
                     icon: 'FileText',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         properties: {

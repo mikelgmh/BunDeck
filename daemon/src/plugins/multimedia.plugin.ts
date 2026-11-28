@@ -45,7 +45,6 @@ export class MultimediaPlugin {
                     icon: 'Volume2',
                     surface: 'control',
                     component: 'media-transport',
-                    freeModeOnly: true,
                     timeoutMs: 15000,
                     variables: [
                         { name: 'multimediaMuted', type: 'bool', label: 'Silenciado' },

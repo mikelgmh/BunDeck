@@ -55,11 +55,12 @@ describe('audio-mixer get-levels', () => {    test('devuelve forma {master, mute
         expect(out.master).toBe(50)
     })
 
-    test('volume-control: declara superficie y no tiene efectos al pulsar', async () => {
+    test('volume-control: declara superficie e informa niveles al pulsar', async () => {
         const plugin = new FakeMixer(() => ({ stdout: '61', stderr: '', exitCode: 0 }))
         const manifest = plugin.getManifest()
         const def = (manifest.actions as any[]).find((a) => a.id === 'volume-control')
-        expect(def).toMatchObject({ surface: 'control', component: 'volume-range', freeModeOnly: true })
+        expect(def).toMatchObject({ surface: 'control', component: 'volume-range' })
+        expect(def.freeModeOnly).toBeUndefined()
         const h = plugin.getActionHandlers()
         expect(h.has('volume-control')).toBe(true)
         const out = (await h.get('volume-control')!({}, {})) as any

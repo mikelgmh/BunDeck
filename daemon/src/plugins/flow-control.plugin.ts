@@ -83,7 +83,6 @@ export class FlowControlPlugin {
                     icon: 'Variable',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],
@@ -105,7 +104,6 @@ export class FlowControlPlugin {
                     icon: 'ToggleLeft',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],
@@ -122,7 +120,6 @@ export class FlowControlPlugin {
                     icon: 'Eye',
                     surface: 'control',
                     component: 'workflow-control',
-                    freeModeOnly: true,
                     schema: {
                         type: 'object',
                         required: ['name'],

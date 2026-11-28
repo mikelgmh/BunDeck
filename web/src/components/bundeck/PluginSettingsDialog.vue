@@ -63,6 +63,14 @@
               {{ discordNeedsAuth ? oauthConnect : oauthReconnect }}
             </button>
             <button
+              v-if="loginBusy"
+              class="bd-btn"
+              data-cy="bd-oauth-cancel"
+              @click="cancelLogin"
+            >
+              {{ t('bd.cancel') }}
+            </button>
+            <button
               v-if="isDiscordOauth && !discordNeedsAuth"
               class="bd-btn"
               :disabled="discordDisconnecting || discordChecking"
@@ -71,8 +79,8 @@
             >
               {{ discordDisconnecting ? t('bd.discordDisconnecting') : t('bd.discordDisconnect') }}
             </button>
-            <span v-if="loginBusy" class="bd-hint" role="status">{{ oauthWaiting }}</span>
           </div>
+          <p v-if="loginBusy && !isDiscordOauth" class="bd-hint" data-cy="bd-oauth-pending" role="status">{{ oauthWaiting }}</p>
           <div v-if="loginBusy && isDiscordOauth" class="bd-hint" data-cy="bd-discord-auth-hint" role="status">
             <p>{{ t('bd.discordAuthorizeHint') }}</p>
             <p v-if="loginAuthorizeUrl">
@@ -251,6 +259,10 @@ const loginBusy = ref(false)
 const loginError = ref('')
 const loginAuthorizeUrl = ref('')
 let loginTimer: ReturnType<typeof setInterval> | null = null
+/** Generación del login en curso: cancelar/errar la invalida para que el poll huérfano no resuelva tarde. */
+let loginGen = 0
+/** Resolver del poll en curso (para liquidarlo al cancelar/cerrar). */
+let loginResolve: (() => void) | null = null
 const form = ref<Record<string, any>>({})
 const revealed = ref<Record<string, boolean>>({})
 /** Campos secretos según el daemon (contrato v2.2); [] si el daemon es antiguo. */
@@ -322,6 +334,9 @@ const show = async (pid: string, initialTab: 'settings' | 'instructions' = 'sett
   loginError.value = ''
   loginBusy.value = false
   loginAuthorizeUrl.value = ''
+  loginGen += 1
+  loginResolve?.()
+  loginResolve = null
   stopLoginPoll()
   schema.value = null
   instructions.value = ''
@@ -470,10 +485,26 @@ const disconnectDiscord = async () => {
   }
 }
 const close = () => {
+  const wasLoggingIn = loginTimer !== null
+  const pid = pluginId.value
+  loginGen += 1
+  loginResolve?.()
+  loginResolve = null
   stopLoginPoll()
   stopDiscordAutoRetry()
   loginBusy.value = false
   isOpen.value = false
+  // Si se cierra en mitad de un login, descartar el pending para que ni el
+  // host ni el launcher abran ventanas a posteriori.
+  if (wasLoggingIn && pid) {
+    try {
+      void fetch(`${props.apiBase}/plugins/${encodeURIComponent(pid)}/login-request`, {
+        method: 'DELETE',
+      })
+    } catch {
+      /* best-effort */
+    }
+  }
   dialog.value?.close()
 }
 
@@ -485,10 +516,28 @@ const stopLoginPoll = () => {
   }
 }
 
+/** Cancela un login pendiente: para el poll, avisa al daemon y re-habilita el botón. */
+const cancelLogin = async () => {
+  loginGen += 1
+  stopLoginPoll()
+  loginResolve?.()
+  loginResolve = null
+  loginBusy.value = false
+  loginError.value = ''
+  try {
+    await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/login-request`, {
+      method: 'DELETE',
+    })
+  } catch {
+    /* best-effort: el pending caduca solo por TTL */
+  }
+}
+
 const connectOAuth = async () => {
   loginError.value = ''
   loginBusy.value = true
   loginAuthorizeUrl.value = ''
+  loginGen += 1
   try {
     const req = await fetch(`${props.apiBase}/plugins/${encodeURIComponent(pluginId.value)}/login-request`, {
       method: 'POST',
@@ -511,13 +560,33 @@ const connectOAuth = async () => {
     } catch {
       /* sin authorizeUrl (Spotify): el host abre el Web Player */
     }
+    // Sin Electrobun en prod no hay BrowserWindow del host: abrir el Web
+    // Player en una pestaña como respaldo (el launcher también lo abre en
+    // el host cuando no hay host vivo; duplicar la apertura es inofensivo
+    // frente a no abrir nada). Si el popup se bloquea, queda el enlace.
+    if (!isDiscordOauth.value && !loginAuthorizeUrl.value) {
+      try {
+        window.open('https://open.spotify.com', '_blank', 'noopener')
+      } catch {
+        /* popup bloqueado: queda el enlace visible */
+      }
+    }
     // Poll: el host abre la ventana y el sniffer POSTea token-capture.
     const started = Date.now()
+    const gen = loginGen
     await new Promise<void>((resolve, reject) => {
       stopLoginPoll()
+      loginResolve = resolve
       loginTimer = setInterval(async () => {
+        if (gen !== loginGen) {
+          stopLoginPoll()
+          loginResolve = null
+          resolve()
+          return
+        }
         if (Date.now() - started > 5 * 60_000) {
           stopLoginPoll()
+          loginResolve = null
           reject(new Error('timeout'))
           return
         }
@@ -527,6 +596,7 @@ const connectOAuth = async () => {
           const data = await res.json()
           if (data?.configured) {
             stopLoginPoll()
+            loginResolve = null
             // Refrescar el formulario con los valores capturados.
             schema.value = data.schema ?? schema.value
             instructions.value = data.instructions ?? instructions.value
@@ -547,6 +617,7 @@ const connectOAuth = async () => {
         }
       }, 2000)
     })
+    if (gen !== loginGen) return
     emit('saved', pluginId.value)
     emit('notify', t('bd.pluginSettingsSaved'))
   } catch (e) {

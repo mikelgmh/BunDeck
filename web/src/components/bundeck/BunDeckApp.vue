@@ -369,19 +369,39 @@
         aria-hidden="true"
         @click="onKioskCornerTap"
       ></div>
-      <div id="kbar" class="kiosk-bar" :class="{ 'is-collapsed': kioskBarCollapsed }" role="toolbar" :aria-label="t('bd.kioskExit')">
-        <button
-          class="kiosk-btn kiosk-collapse"
-          data-cy="bd-kiosk-barcollapse"
-          :aria-expanded="!kioskBarCollapsed"
-          :aria-label="kioskBarCollapsed ? t('bd.kioskBarExpand') : t('bd.kioskBarCollapse')"
-          :title="kioskBarCollapsed ? t('bd.kioskBarExpand') : t('bd.kioskBarCollapse')"
-          @click="kioskBarCollapsed = !kioskBarCollapsed"
-        >
-          <ChevronRight v-if="kioskBarCollapsed" :size="16" stroke-width="1.75" aria-hidden="true" />
-          <ChevronLeft v-else :size="16" stroke-width="1.75" aria-hidden="true" />
-        </button>
-        <div class="kiosk-collapsible">
+      <KioskBarShell
+        bar-id="kbartop"
+        position="top-left"
+        :collapsed="kioskTopCollapsed"
+        collapse-cy="bd-kiosk-topcollapse"
+        :collapse-label="t('bd.kioskBarCollapse')"
+        :expand-label="t('bd.kioskBarExpand')"
+        :aria-label="t('bd.kioskNavBar')"
+        @toggle="kioskTopCollapsed = !kioskTopCollapsed"
+      >
+        <KioskNavBar
+          :profiles="profiles"
+          :pages="availablePages"
+          :selected-profile-id="selectedProfile"
+          :selected-page-id="currentPage?.id ?? null"
+          :profiles-label="t('bd.kioskProfiles')"
+          :pages-label="t('bd.kioskPages')"
+          :no-profiles-label="t('bd.kioskNoProfiles')"
+          :no-pages-label="t('bd.kioskNoPages')"
+          @select-profile="(id) => selectProfile(id)"
+          @select-page="(id) => selectPage(id)"
+        />
+      </KioskBarShell>
+      <KioskBarShell
+        bar-id="kbar"
+        position="bottom"
+        :collapsed="kioskBarCollapsed"
+        collapse-cy="bd-kiosk-barcollapse"
+        :collapse-label="t('bd.kioskBarCollapse')"
+        :expand-label="t('bd.kioskBarExpand')"
+        :aria-label="t('bd.kioskExit')"
+        @toggle="kioskBarCollapsed = !kioskBarCollapsed"
+      >
         <button
           type="button"
           class="kconn"
@@ -438,8 +458,7 @@
           <LogOut :size="16" stroke-width="1.75" aria-hidden="true" />
           <span>{{ t('bd.kioskExit') }}</span>
         </button>
-        </div>
-      </div>
+      </KioskBarShell>
       <KioskConnDialog
         v-if="kioskConnOpen"
         :entries="kioskConnEntries"
@@ -672,6 +691,8 @@ import TitleBar from './TitleBar.vue'
 import TunnelTransportBanner from './TunnelTransportBanner.vue'
 import TunnelConnectDialog from './TunnelConnectDialog.vue'
 import KioskConnDialog from './KioskConnDialog.vue'
+import KioskBarShell from './KioskBarShell.vue'
+import KioskNavBar from './KioskNavBar.vue'
 import KeyInspector from './KeyInspector.vue'
 import ActionsPanel from './ActionsPanel.vue'
 import IosWarningDialog from './IosWarningDialog.vue'
@@ -1277,6 +1298,7 @@ const kioskMarqueeScroll = ref(false)
 // Barra colapsable en todos los viewports: contraída queda el icono.
 // En móvil además flota sobre el grid (ver CSS) para no restar espacio.
 const kioskBarCollapsed = ref(false)
+const kioskTopCollapsed = ref(false)
 let marqueeRO: ResizeObserver | null = null
 const measureMarquee = () => {
   const el = kmarqRef.value
@@ -1860,7 +1882,7 @@ const engine = createKeyEngine({
   execRemote: (action: any, ctx: Record<string, any>) =>
     executeSingleAction(action, {
       deviceId: deviceId.value,
-      pressType: 'press',
+      pressType: 'short',
       source: 'web',
       ...ctx,
       profileId: currentProfile.value?.id,
