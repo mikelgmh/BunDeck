@@ -1,3 +1,11 @@
+# [1.27.0](https://github.com/mikelgmh/BunDeck/compare/v1.26.0...v1.27.0) (2026-11-28)
+
+
+### Features
+
+* **actions,ha,logs,kiosk:** racionalizacion solo-libre + fixes UX ([de860aa](https://github.com/mikelgmh/BunDeck/commit/de860aa8454036ea707aa46c48a811328f32b4e6))
+* **spotify,launcher:** ventana propia de login via webview + Electrobun queda dev ([c6778ec](https://github.com/mikelgmh/BunDeck/commit/c6778ec75e1047b26855d924c85938587a28622d))
+
 # [1.26.0](https://github.com/mikelgmh/BunDeck/compare/v1.25.2...v1.26.0) (2026-11-28)
 
 
