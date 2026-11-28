@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/mikelgmh/BunDeck/compare/v1.28.0...v1.29.0) (2026-11-28)
+
+
+### Features
+
+* **site:** pagina Security (E2E, relay, auditabilidad) + Features compacta con catalogo completo ([d0c40cc](https://github.com/mikelgmh/BunDeck/commit/d0c40cc2422f01b4a95866a8907f006e9df0bdc4))
+
 # [1.28.0](https://github.com/mikelgmh/BunDeck/compare/v1.27.0...v1.28.0) (2026-11-28)
 
 
