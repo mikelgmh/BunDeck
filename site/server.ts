@@ -51,6 +51,10 @@ Bun.serve({
       const res = await serveFile('features.html');
       if (res) return res;
     }
+    if (clean === 'security') {
+      const res = await serveFile('security.html');
+      if (res) return res;
+    }
     if (clean === '' || clean.endsWith('/')) {
       const res = await serveFile('index.html');
       if (res) return res;

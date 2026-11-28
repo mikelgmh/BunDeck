@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BunDeck Features | Everything in the box</title>
-  <meta name="description" content="BunDeck features: action buttons, profiles and pages, Stream Deck hardware, phone remote, local-first and open source." />
+  <meta name="description" content="BunDeck features: 42 built-in integrations, fixed / free-form / kiosk layouts, Stream Deck hardware, phone remote, automation, MCP, backups and open source." />
   <meta property="og:title" content="BunDeck Features | Everything in the box" />
-  <meta property="og:description" content="Action buttons, decks that fit you, hardware support, phone remote, local-first and open source." />
+  <meta property="og:description" content="42 built-in integrations, three layouts, hardware support, phone remote, automation, MCP, backups — local-first and open source." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
   <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/assets/icon-light-32x32.png" />
@@ -19,13 +19,13 @@
   <main>
     <header class="site-header">
       <a class="wordmark" href="/" aria-label="BunDeck home"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a>
-      <nav aria-label="Main navigation"><a href="/features" aria-current="page">Features</a><a class="github-nav" href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer" aria-label="BunDeck on GitHub"><img src="/assets/github-mark.svg" alt="" aria-hidden="true" /></a></nav>
+      <nav aria-label="Main navigation"><a href="/features" aria-current="page">Features</a><a href="/security">Security</a><a class="github-nav" href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer" aria-label="BunDeck on GitHub"><img src="/assets/github-mark.svg" alt="" aria-hidden="true" /></a></nav>
     </header>
 
     <section class="hero hero-single" id="top">
       <div class="hero-copy">
         <h1>Everything<br />in the box.</h1>
-        <p class="hero-description">One install: buttons, decks, hardware support and remote access. No cloud account, no heavy runtime.</p>
+        <p class="hero-description">One install: 42 built-in integrations, three layouts, hardware support and remote access. No cloud account, no heavy runtime.</p>
         <div class="hero-actions" id="download">
           <a class="download-button" id="download-button" href="https://github.com/mikelgmh/BunDeck/releases/latest" target="_blank" rel="noreferrer">
             <span class="download-icon" aria-hidden="true">
@@ -44,41 +44,81 @@
 
     <section class="features-section" aria-labelledby="features-title">
       <h2 id="features-title">What you get.</h2>
-      <ol class="feature-list">
-        <li class="feature-row">
-          <span class="feature-num">01</span>
-          <h3>A button for every repeat task</h3>
-          <p>Launch apps, run scripts, drive OBS, Spotify, Home Assistant, media keys and more — one tap each.</p>
-        </li>
-        <li class="feature-row">
-          <span class="feature-num">02</span>
-          <h3>Decks that fit the way you work</h3>
-          <p>Profiles and pages, drag to reorder, custom icons, text and colors. From idea to key in seconds.</p>
-        </li>
-        <li class="feature-row">
-          <span class="feature-num">03</span>
-          <h3>Works with your Stream Deck</h3>
-          <p>Plug in Elgato hardware and the daemon picks it up. Or go fully virtual in the browser panel.</p>
-        </li>
-        <li class="feature-row">
-          <span class="feature-num">04</span>
-          <h3>Your phone is a remote</h3>
-          <p>Open the panel from mobile on your LAN — or from anywhere through the private relay, P2P first.</p>
-        </li>
-        <li class="feature-row">
-          <span class="feature-num">05</span>
-          <h3>Local-first, light footprint</h3>
-          <p>No cloud account. A Bun + SQLite daemon idling around 100 MB — no resident Chromium in sight.</p>
-        </li>
-        <li class="feature-row">
-          <span class="feature-num">06</span>
-          <h3>Free, open, self-updating</h3>
-          <p>MIT licensed. Managed installs update from the launcher with backup and rollback — and a CLI for scripting.</p>
-        </li>
-      </ol>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Layouts</span>
+        <h3>Three ways to lay out a deck.</h3>
+        <p>Every profile can mix pages; each device (hardware key, browser, phone) can show its own page.</p>
+        <div class="compare-wrap">
+          <table class="compare-table">
+            <thead><tr><th scope="col">Mode</th><th scope="col">How it looks</th><th scope="col">Best for</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Fixed grid</th><td>Uniform keys, drag to reorder, custom icons, text and colors.</td><td>Elgato hardware and mirroring a physical layout 1:1.</td></tr>
+              <tr><th scope="row">Free-form</th><td>Resizable widgets — a volume key can grow into live sliders; keys can show arcs, meters and rich state.</td><td>Touchscreens and dashboards that need more than square buttons.</td></tr>
+              <tr><th scope="row">Kiosk</th><td>Chromeless fullscreen with large touch targets and a collapsible nav bar; corner gesture exits.</td><td>Shared tablets, stream PCs, and dedicated control screens.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Integrations</span>
+        <h3>42 built-ins. No plugins to hunt down.</h3>
+        <p>Media, streaming, smart home, system control, creative apps and deck logic — installed with the daemon, updated with it. Community plugins add more via a sandboxed loader with one-click rollback.</p>
+        <ul class="dense-grid">
+          <li class="dense-item"><strong>Media &amp; audio (7)</strong><span>Multimedia keys, per-app audio mixer, Spotify, soundboard, Voicemod, Voicemeeter, instant-replay capture.</span></li>
+          <li class="dense-item"><strong>Streaming &amp; creation (8)</strong><span>OBS Studio, Twitch, YouTube, webcam, Photoshop, Premiere Pro, DaVinci Resolve, Blender.</span></li>
+          <li class="dense-item"><strong>Smart home &amp; comms (9)</strong><span>Home Assistant, Philips Hue, Govee, weather, email, calendar, meeting mute status, Slack, Discord.</span></li>
+          <li class="dense-item"><strong>System &amp; productivity (9)</strong><span>Launch apps, shell scripts, hotkeys, type text, window manager, PC vitals, clipboard, browser control, timers.</span></li>
+          <li class="dense-item"><strong>Gaming &amp; music (3)</strong><span>Steam, Minecraft, MIDI / OSC for DAWs and stage gear.</span></li>
+          <li class="dense-item"><strong>Deck logic (6)</strong><span>Page &amp; profile navigation, auto-switch profiles, conditionals, multiaction macros, HTTP &amp; webhooks, utilities.</span></li>
+        </ul>
+        <details class="more">
+          <summary>Show all 42 integrations</summary>
+          <ul class="chips">
+            <li>Multimedia keys</li><li>Audio mixer</li><li>Spotify</li><li>Soundboard</li><li>Voicemod</li><li>Voicemeeter</li><li>Shadowplay</li><li>OBS Studio</li><li>Twitch</li><li>YouTube</li><li>Webcam</li><li>Photoshop</li><li>Premiere Pro</li><li>DaVinci Resolve</li><li>Blender</li><li>Home Assistant</li><li>Philips Hue</li><li>Govee</li><li>Weather</li><li>Email</li><li>Calendar</li><li>Meetings</li><li>Slack</li><li>Discord</li><li>Open apps</li><li>Shell scripts</li><li>Hotkeys</li><li>Type text</li><li>Window manager</li><li>PC vitals</li><li>Clipboard</li><li>Browser control</li><li>Timer</li><li>Steam</li><li>Minecraft</li><li>MIDI / OSC</li><li>Pages</li><li>Auto profiles</li><li>Flow control</li><li>Multiaction</li><li>HTTP / webhooks</li><li>Utility</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Control surfaces</span>
+        <h3>Hardware, browser, phone — pick any.</h3>
+        <ul class="dense-grid">
+          <li class="dense-item"><strong>Elgato Stream Deck</strong><span>Plug it in and the daemon picks it up, with per-device page assignment and live key images.</span></li>
+          <li class="dense-item"><strong>Browser panel</strong><span>The full deck in any browser on your LAN — same state, live updates over WebSocket.</span></li>
+          <li class="dense-item"><strong>Phone as a remote</strong><span>Pair over LAN with a QR code, or from anywhere through the private relay — P2P first, relay fallback. Sealed end to end; <a href="/security">see Security</a>.</span></li>
+          <li class="dense-item"><strong>Per-device display</strong><span>Brightness, auto-dim after idle seconds, and idle actions (off, dim, clock) — per device, applied live.</span></li>
+        </ul>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Automation</span>
+        <h3>Buttons that think a little.</h3>
+        <ul class="dense-grid">
+          <li class="dense-item"><strong>Variables</strong><span>Global <code>{{vars.x}}</code> store shared by actions, the API and flows — set them from any button.</span></li>
+          <li class="dense-item"><strong>Event flows</strong><span>Trigger on variable changes, timers, calendar, media and integration events, or client connect.</span></li>
+          <li class="dense-item"><strong>Macros &amp; conditionals</strong><span>Multiaction sequences plus flow-control branching, all runnable from one press.</span></li>
+          <li class="dense-item"><strong>Webhooks both ways</strong><span>Fire HTTP requests out, or let the outside world trigger your deck in.</span></li>
+          <li class="dense-item"><strong>MCP server</strong><span>Let AI assistants drive your deck: scoped tokens (<code>ldmcp_…</code>, shown once, hashed at rest) over Streamable HTTP.</span></li>
+        </ul>
+      </div>
+
+      <div class="cat-block">
+        <span class="cat-kicker">Ownership</span>
+        <h3>Run it your way. Keep it safe.</h3>
+        <ul class="dense-grid">
+          <li class="dense-item"><strong>Local-first core</strong><span>Bun + SQLite daemon idling around 100 MB. No cloud account, no resident Chromium.</span></li>
+          <li class="dense-item"><strong>Profiles &amp; pages</strong><span>Named decks per context, unique page names per profile, drag to reorder.</span></li>
+          <li class="dense-item"><strong>Versioned backups</strong><span>Export everything (or single sections), validate before restore, watch progress live — per-profile export too.</span></li>
+          <li class="dense-item"><strong>Managed updates</strong><span>The Rust launcher updates daemon + panel with backup and rollback; <code>sdctl</code> CLI scripts the rest.</span></li>
+          <li class="dense-item"><strong>Autostart everywhere</strong><span>One setting; the launcher wires Windows Run, Linux autostart and macOS LaunchAgents.</span></li>
+          <li class="dense-item"><strong>Open &amp; legible</strong><span>MIT licensed, English + Spanish UI, and a live log stream for everything the deck does.</span></li>
+        </ul>
+      </div>
     </section>
 
-    <footer class="site-footer"><a class="wordmark footer-wordmark" href="/"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a><span>Free to use. Free to change.</span><a href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer">GitHub</a></footer>
+    <footer class="site-footer"><a class="wordmark footer-wordmark" href="/"><span class="brand-mark"><img src="/assets/bundeck-mark.svg" alt="" aria-hidden="true" /></span><span>BunDeck</span></a><span class="footer-links"><a href="/features" aria-current="page">Features</a><a href="/security">Security</a></span><span>Free to use. Free to change.</span><a href="https://github.com/mikelgmh/BunDeck" target="_blank" rel="noreferrer">GitHub</a></footer>
   </main>
 </body>
 </html>
