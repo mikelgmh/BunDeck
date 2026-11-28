@@ -112,13 +112,15 @@ pub fn fetch_enabled_hotkeys() -> HashMap<String, Hotkey> {
         "http://127.0.0.1:{}/api/v1/settings?key=shortcuts.config",
         super::monitor::api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     let body: serde_json::Value = match agent.get(&url).call() {
-        Ok(res) => match res.into_json() {
+        Ok(mut res) => match res.body_mut().read_json() {
             Ok(v) => v,
             Err(_) => return out,
         },
@@ -157,11 +159,13 @@ pub fn post_trigger(id: &str) -> bool {
         "http://127.0.0.1:{}/api/v1/shortcuts/trigger",
         super::monitor::api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     agent
         .post(&url)
         .send_json(serde_json::json!({ "id": id, "source": "launcher" }))

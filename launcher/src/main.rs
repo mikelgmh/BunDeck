@@ -114,11 +114,13 @@ struct RemoteSettings {
 }
 
 fn settings_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build()
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    )
 }
 
 fn get_daemon_setting(agent: &ureq::Agent, key: &str) -> Option<String> {
@@ -126,8 +128,8 @@ fn get_daemon_setting(agent: &ureq::Agent, key: &str) -> Option<String> {
         "http://127.0.0.1:{}/api/v1/settings?key={key}",
         monitor::api_port()
     );
-    let body = agent.get(&url).call().ok()?;
-    let v: serde_json::Value = body.into_json().ok()?;
+    let mut body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.body_mut().read_json().ok()?;
     v.get("value")?.as_str().map(str::to_string)
 }
 
@@ -150,13 +152,13 @@ fn post_daemon_setting(key: &str, value: &str) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{}/api/v1/settings", monitor::api_port());
     let body = settings_agent()
         .post(&url)
-        .set("Content-Type", "application/json")
+        .header("Content-Type", "application/json")
         .send_json(serde_json::json!({ "key": key, "value": value }))
         .map_err(|e| e.to_string())?;
-    if (200..300).contains(&body.status()) {
+    if body.status().is_success() {
         Ok(())
     } else {
-        Err(format!("HTTP {}", body.status()))
+        Err(format!("HTTP {}", body.status().as_u16()))
     }
 }
 
