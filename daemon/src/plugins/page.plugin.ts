@@ -31,6 +31,7 @@ export class PagePlugin {
                     id: 'page',
                     name: 'Navigate to Page',
                     description: 'Switch to a different page',
+                    i18n: { es: { name: 'Navigate to Page', description: 'Switch to a different page' }, en: { name: 'Navigate to Page', description: 'Switch to a different page' } }, // TODO i18n: EN temporal = ES
                     icon: 'FileText',
                     surface: 'control',
                     component: 'workflow-control',

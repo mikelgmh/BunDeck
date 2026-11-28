@@ -85,6 +85,7 @@ export class VoicemodPlugin {
                 {
                     id: 'get-status', name: 'Estado de Voicemod', icon: 'Activity',
                     description: 'Comprueba la conexión y devuelve la voz activa',
+                    i18n: { es: { name: 'Estado de Voicemod', description: 'Comprueba la conexión y devuelve la voz activa' }, en: { name: 'Estado de Voicemod', description: 'Comprueba la conexión y devuelve la voz activa' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'voice-panel',
                     schema: {
@@ -104,6 +105,7 @@ export class VoicemodPlugin {
                 {
                     id: 'set-voice', name: 'Cambiar de voz', icon: 'AudioLines',
                     description: 'Activa una voz por su ID',
+                    i18n: { es: { name: 'Cambiar de voz', description: 'Activa una voz por su ID' }, en: { name: 'Cambiar de voz', description: 'Activa una voz por su ID' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -116,6 +118,7 @@ export class VoicemodPlugin {
                 {
                     id: 'toggle-effect', name: 'Alternar efecto/voz', icon: 'Sparkles',
                     description: 'Activa o desactiva el cambiador de voz (o una voz concreta)',
+                    i18n: { es: { name: 'Alternar efecto/voz', description: 'Activa o desactiva el cambiador de voz (o una voz concreta)' }, en: { name: 'Alternar efecto/voz', description: 'Activa o desactiva el cambiador de voz (o una voz concreta)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -129,6 +132,7 @@ export class VoicemodPlugin {
                 {
                     id: 'mute', name: 'Silenciar Voicemod', icon: 'MicOff',
                     description: 'Silencia o reactiva la salida de Voicemod',
+                    i18n: { es: { name: 'Silenciar Voicemod', description: 'Silencia o reactiva la salida de Voicemod' }, en: { name: 'Silenciar Voicemod', description: 'Silencia o reactiva la salida de Voicemod' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {

@@ -113,6 +113,7 @@ export class SlackPlugin {
                     id: 'open-channel',
                     name: 'Abrir canal',
                     description: 'Abre un canal de Slack en el navegador/app (sin token)',
+                    i18n: { es: { name: 'Abrir canal', description: 'Abre un canal de Slack en el navegador/app (sin token)' }, en: { name: 'Abrir canal', description: 'Abre un canal de Slack en el navegador/app (sin token)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Hash',
                     surface: 'control',
                     component: 'status-cards',
@@ -140,6 +141,7 @@ export class SlackPlugin {
                     id: 'open-dm',
                     name: 'Abrir DM',
                     description: 'Abre un mensaje directo con un usuario (sin token)',
+                    i18n: { es: { name: 'Abrir DM', description: 'Abre un mensaje directo con un usuario (sin token)' }, en: { name: 'Abrir DM', description: 'Abre un mensaje directo con un usuario (sin token)' } }, // TODO i18n: EN temporal = ES
                     icon: 'User',
                     schema: {
                         type: 'object',
@@ -158,6 +160,7 @@ export class SlackPlugin {
                     id: 'unread-count',
                     name: 'Contar no leídos',
                     description: 'Suma los mensajes no leídos de canales y DMs (requiere token)',
+                    i18n: { es: { name: 'Contar no leídos', description: 'Suma los mensajes no leídos de canales y DMs (requiere token)' }, en: { name: 'Contar no leídos', description: 'Suma los mensajes no leídos de canales y DMs (requiere token)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Bell',
                     surface: 'control',
                     component: 'status-cards',
@@ -184,6 +187,7 @@ export class SlackPlugin {
                     id: 'send-message',
                     name: 'Enviar mensaje',
                     description: 'Publica un mensaje en un canal (requiere token)',
+                    i18n: { es: { name: 'Enviar mensaje', description: 'Publica un mensaje en un canal (requiere token)' }, en: { name: 'Enviar mensaje', description: 'Publica un mensaje en un canal (requiere token)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Send',
                     schema: {
                         type: 'object',

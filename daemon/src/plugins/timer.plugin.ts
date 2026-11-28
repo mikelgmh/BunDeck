@@ -88,6 +88,7 @@ export class TimerPlugin {
                     id: 'start',
                     name: 'Iniciar',
                     description: 'Inicia el temporizador (trabajo, descanso o personalizado)',
+                    i18n: { es: { name: 'Iniciar', description: 'Inicia el temporizador (trabajo, descanso o personalizado)' }, en: { name: 'Iniciar', description: 'Inicia el temporizador (trabajo, descanso o personalizado)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Play',
                     surface: 'control',
                     component: 'pomodoro',
@@ -137,6 +138,7 @@ export class TimerPlugin {
                     id: 'stop',
                     name: 'Detener',
                     description: 'Detiene el temporizador (guarda lo restante)',
+                    i18n: { es: { name: 'Detener', description: 'Detiene el temporizador (guarda lo restante)' }, en: { name: 'Detener', description: 'Detiene el temporizador (guarda lo restante)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Square',
                     surface: 'control',
                     component: 'pomodoro',
@@ -147,6 +149,7 @@ export class TimerPlugin {
                     id: 'status',
                     name: 'Estado',
                     description: 'Devuelve el estado y el tiempo restante',
+                    i18n: { es: { name: 'Estado', description: 'Devuelve el estado y el tiempo restante' }, en: { name: 'Estado', description: 'Devuelve el estado y el tiempo restante' } }, // TODO i18n: EN temporal = ES
                     icon: 'Hourglass',
                     surface: 'control',
                     component: 'pomodoro',

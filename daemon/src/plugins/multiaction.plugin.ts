@@ -60,6 +60,7 @@ export class MultiactionPlugin {
                     id: 'run-sequence',
                     name: 'Ejecutar secuencia',
                     description: 'Secuencia de acciones de cualquier plugin con pausas entre pasos',
+                    i18n: { es: { name: 'Ejecutar secuencia', description: 'Secuencia de acciones de cualquier plugin con pausas entre pasos' }, en: { name: 'Ejecutar secuencia', description: 'Secuencia de acciones de cualquier plugin con pausas entre pasos' } }, // TODO i18n: EN temporal = ES
                     icon: 'Layers',
                     schema: {
                         type: 'object',

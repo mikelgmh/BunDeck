@@ -105,10 +105,12 @@ import { Search, Settings, Ellipsis, BookOpen, TriangleAlert, Variable, ToggleLe
 import ContextMenu from '../ContextMenu.vue'
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import { useI18nStore } from '../../composables/useI18n'
+import { usePluginLocale } from '../../composables/usePluginLocale'
 import { actionSurfaceKind, matchesActionQuery } from '../../composables/useActionPresentation'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
 const { t } = useI18nStore()
+const { currentLocale, localizeActionField } = usePluginLocale()
 
 interface Props {
   plugins: any[]
@@ -187,7 +189,7 @@ const flat = computed(() => {
       if ((adata as any)?.hidden === true) continue
       list.push({
         type: `${pid}.${aid}`,
-        name: adata?.name ?? aid,
+        name: localizeActionField(adata, 'name', currentLocale.value, aid),
         group,
         pid,
         icon: resolveIcon(adata?.icon),

@@ -135,4 +135,17 @@ describe('pantalla por dispositivo (web)', () => {
     expect(wrapper.find('[data-cy="bd-idle-veil"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('9. virgen: dim/idle desactivados por defecto (0/0)', () => {
+    expect(DEVICE_DISPLAY_DEFAULTS).toMatchObject({
+      brightness: 100,
+      dimAfterSec: 0,
+      idleMinutes: 0,
+      idleAction: 'off',
+    })
+    // beforeEach lo deja en el default → el velo web arranca desactivado.
+    expect(webIdleMinutes.value).toBe(0)
+    expect(normalizeDeviceDisplay({})).toMatchObject({ dimAfterSec: 0, idleMinutes: 0 })
+    expect(normalizeDeviceDisplay(null)).toMatchObject({ dimAfterSec: 0, idleMinutes: 0 })
+  })
 })

@@ -86,36 +86,43 @@ export class TwitchPlugin {
                 {
                     id: 'set-title', name: 'Cambiar título del directo', icon: 'Type',
                     description: 'Actualiza el título de tu canal',
+                    i18n: { es: { name: 'Cambiar título del directo', description: 'Actualiza el título de tu canal' }, en: { name: 'Cambiar título del directo', description: 'Actualiza el título de tu canal' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, title: { type: 'string', title: 'Título', description: 'Nuevo título del directo', ui: { component: 'input', type: 'text', placeholder: 'Jugando ranked con viewers' } } }, required: ['title'] }
                 },
                 {
                     id: 'set-category', name: 'Cambiar categoría/juego', icon: 'Gamepad2',
                     description: 'Cambia la categoría buscando por nombre o por ID de juego',
+                    i18n: { es: { name: 'Cambiar categoría/juego', description: 'Cambia la categoría buscando por nombre o por ID de juego' }, en: { name: 'Cambiar categoría/juego', description: 'Cambia la categoría buscando por nombre o por ID de juego' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, gameName: { type: 'string', title: 'Nombre del juego', description: 'Nombre de la categoría (se resuelve a game_id automáticamente)', ui: { component: 'input', type: 'text', placeholder: 'Just Chatting' } }, gameId: { type: 'string', title: 'ID del juego', description: 'ID numérico de la categoría (alternativa a gameName)', ui: { component: 'input', type: 'text', placeholder: '509658' } } }, required: [] }
                 },
                 {
                     id: 'create-clip', name: 'Crear clip', icon: 'Scissors',
                     description: 'Crea un clip de los últimos momentos del directo',
+                    i18n: { es: { name: 'Crear clip', description: 'Crea un clip de los últimos momentos del directo' }, en: { name: 'Crear clip', description: 'Crea un clip de los últimos momentos del directo' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, hasDelay: { type: 'boolean', title: 'Con retraso', description: 'true añade el retraso habitual del directo al clip', ui: { component: 'switch' } } }, required: [] }
                 },
                 {
                     id: 'create-marker', name: 'Crear marcador', icon: 'Flag',
                     description: 'Marca un momento del directo para encontrarlo luego en el VOD',
+                    i18n: { es: { name: 'Crear marcador', description: 'Marca un momento del directo para encontrarlo luego en el VOD' }, en: { name: 'Crear marcador', description: 'Marca un momento del directo para encontrarlo luego en el VOD' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, description: { type: 'string', title: 'Descripción', description: 'Texto del marcador (máx. 140 caracteres)', ui: { component: 'input', type: 'text', placeholder: 'Momento épico' } } }, required: [] }
                 },
                 {
                     id: 'chat-message', name: 'Enviar mensaje al chat', icon: 'MessageSquare',
                     description: 'Envía un mensaje al chat de tu canal',
+                    i18n: { es: { name: 'Enviar mensaje al chat', description: 'Envía un mensaje al chat de tu canal' }, en: { name: 'Enviar mensaje al chat', description: 'Envía un mensaje al chat de tu canal' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, message: { type: 'string', title: 'Mensaje', description: 'Texto a enviar (máx. 500 caracteres)', ui: { component: 'input', type: 'text', placeholder: '¡Hola a todos!' } } }, required: ['message'] }
                 },
                 {
                     id: 'ad-break', name: 'Poner anuncio', icon: 'Megaphone',
                     description: 'Inicia una pausa publicitaria en tu canal',
+                    i18n: { es: { name: 'Poner anuncio', description: 'Inicia una pausa publicitaria en tu canal' }, en: { name: 'Poner anuncio', description: 'Inicia una pausa publicitaria en tu canal' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: { ...creds, length: { type: 'number', title: 'Duración (s)', description: '30, 60, 90, 120, 150 o 180 segundos', default: 30, enum: [30, 60, 90, 120, 150, 180], ui: { component: 'select', options: [{ value: 30, label: '30 s' }, { value: 60, label: '60 s' }, { value: 90, label: '90 s' }, { value: 120, label: '120 s' }, { value: 150, label: '150 s' }, { value: 180, label: '180 s' }] } } }, required: [] }
                 },
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve cuántos espectadores tienes ahora (0 si no estás en directo)',
+                    i18n: { es: { name: 'Ver espectadores', description: 'Devuelve cuántos espectadores tienes ahora (0 si no estás en directo)' }, en: { name: 'Ver espectadores', description: 'Devuelve cuántos espectadores tienes ahora (0 si no estás en directo)' } }, // TODO i18n: EN temporal = ES
                     dynamic: true, surface: 'control', component: 'stream-studio',
                     pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [

@@ -34,18 +34,23 @@ test.describe('Pantalla por dispositivo (brillo + dim + idle)', () => {
     expect(get.ok()).toBe(true);
     expect(await get.json()).toMatchObject({ brightness: 61, idleAction: 'dim' });
 
-    // Otro dispositivo no se pisa: mantiene defaults.
+    // Otro dispositivo no se pisa: virgen → dim/idle desactivados (0/0).
     const other = await request.get(`${API_BASE}/devices/streamdeck/display?device=e2e-dd-2`);
     expect(other.ok()).toBe(true);
-    expect(await other.json()).toMatchObject({ brightness: 100, idleAction: 'off' });
+    expect(await other.json()).toMatchObject({
+      brightness: 100,
+      dimAfterSec: 0,
+      idleMinutes: 0,
+      idleAction: 'off',
+    });
 
     // Validación: acción desconocida → 400.
     const bad = await put('e2e-dd-1', { idleAction: 'fiesta' });
     expect(bad.status()).toBe(400);
 
-    // Limpieza: devolver defaults para no contaminar el daemon compartido.
-    await put('e2e-dd-1', { brightness: 100, dimAfterSec: 300, idleMinutes: 15, idleAction: 'off' });
-    await put('e2e-dd-2', { brightness: 100, dimAfterSec: 300, idleMinutes: 15, idleAction: 'off' });
+    // Limpieza: devolver defaults (dim/idle off) para no contaminar el daemon compartido.
+    await put('e2e-dd-1', { brightness: 100, dimAfterSec: 0, idleMinutes: 0, idleAction: 'off' });
+    await put('e2e-dd-2', { brightness: 100, dimAfterSec: 0, idleMinutes: 0, idleAction: 'off' });
   });
 
   test('Ajustes: sin orientación, brillo HW por dispositivo y brillo de interfaz', async ({

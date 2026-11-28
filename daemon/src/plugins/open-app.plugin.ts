@@ -31,6 +31,7 @@ export class OpenAppPlugin {
                     id: 'open-app',
                     name: 'Abrir Aplicación/Archivo',
                     description: 'Abre una aplicación o archivo seleccionado',
+                    i18n: { es: { name: 'Abrir Aplicación/Archivo', description: 'Abre una aplicación o archivo seleccionado' }, en: { name: 'Abrir Aplicación/Archivo', description: 'Abre una aplicación o archivo seleccionado' } }, // TODO i18n: EN temporal = ES
                     icon: 'AppWindow',
                     schema: {
                         type: 'object',

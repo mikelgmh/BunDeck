@@ -9,6 +9,7 @@ import { LIBREDECK_ENGINE_VERSION, secretFieldsOf } from './plugin-system/types'
 import { ExternalPluginWorker } from './plugin-system/plugin-worker';
 import type { PluginManifestV2, PluginActionV2, LoadedPluginV2 } from './plugin-system/types';
 import { getNativeManifests } from './plugins/index';
+import { ensureActionI18n } from './plugins/plugin-i18n';
 import { isVersionRangeRef, pickBestTag, invalidateCatalog } from './catalog';
 import { getPluginConfiguredStatus } from './plugins/connection-status';
 import { isDiscordTokenExpired, resolveDiscordClientId } from './plugins/discord-rpc';
@@ -385,7 +386,7 @@ export class PluginLoader {
     }
     manifest.actions.forEach((action: PluginAction) => {
       const fullActionId = `${pluginRecord.id}.${action.id}`;
-      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+      this.pluginActions.set(fullActionId, ensureActionI18n({ ...action, id: fullActionId }) as any);
     });
 
     this.loadedPlugins.set(pluginRecord.id, loadedPlugin as any);
@@ -493,7 +494,7 @@ export class PluginLoader {
     }
     manifest.actions.forEach((action: PluginAction) => {
       const fullActionId = `${manifest.id}.${action.id}`;
-      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+      this.pluginActions.set(fullActionId, ensureActionI18n({ ...action, id: fullActionId }) as any);
     });
 
     // Handlers: cada acción delega al worker (permisos/cooldown/timeout en el padre).
@@ -616,7 +617,7 @@ export class PluginLoader {
     }
     manifest.actions.forEach((action: PluginAction) => {
       const fullActionId = `${id}.${action.id}`;
-      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+      this.pluginActions.set(fullActionId, ensureActionI18n({ ...action, id: fullActionId }) as any);
     });
     this.registerLazyHandlers(id, manifest);
     this.elgatoLazy.add(id);
@@ -861,7 +862,7 @@ export class PluginLoader {
     };
     manifest.actions.forEach((action: PluginAction) => {
       const fullActionId = `${id}.${action.id}`;
-      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+      this.pluginActions.set(fullActionId, ensureActionI18n({ ...action, id: fullActionId }) as any);
       if (this.externalHandlers.has(fullActionId)) {
         this.externalHandlers.delete(fullActionId);
         this.onExternalActionUnregistered?.(fullActionId);
@@ -1027,7 +1028,7 @@ export class PluginLoader {
   private registerErrorHandlers(pluginId: string, manifest: PluginManifestV2, errMsg: string): void {
     manifest.actions.forEach((action: PluginAction) => {
       const fullActionId = `${pluginId}.${action.id}`;
-      this.pluginActions.set(fullActionId, { ...action, id: fullActionId } as any);
+      this.pluginActions.set(fullActionId, ensureActionI18n({ ...action, id: fullActionId }) as any);
       const handler = async () => { throw new Error(`Plugin ${pluginId} en error: ${errMsg}`); };
       if (this.externalHandlers.has(fullActionId)) this.onExternalActionUnregistered?.(fullActionId);
       this.externalHandlers.set(fullActionId, handler);

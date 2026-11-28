@@ -5,7 +5,7 @@
       <button
         data-swapy-handle
         class="btn btn-ghost btn-xs px-1 cursor-grab active:cursor-grabbing hover:bg-base-content/10"
-        title="Arrastrar para reordenar"
+        :title="t('bd.actionReorder')"
       >
         <GripVertical :size="16" class="text-base-content/50" />
       </button>
@@ -16,7 +16,7 @@
         @click="$emit('remove')"
         class="btn btn-ghost btn-xs hover:btn-error ml-auto"
         data-swapy-no-drag
-        title="Eliminar acción"
+        :title="t('bd.actionRemove')"
       >
         <Trash2 :size="14" />
       </button>
@@ -37,7 +37,7 @@
 
     <!-- Fallback for actions without schema -->
     <div v-else class="text-xs text-base-content/60" data-swapy-no-drag>
-      Configuración no disponible para esta acción
+      {{ t('bd.actionNoConfig') }}
     </div>
   </div>
 </template>
@@ -46,6 +46,11 @@
 import { computed } from 'vue'
 import { GripVertical, Trash2 } from 'lucide-vue-next'
 import SchemaForm from './SchemaForm.vue'
+import { useI18nStore } from '../composables/useI18n'
+import { usePluginLocale } from '../composables/usePluginLocale'
+
+const { t } = useI18nStore()
+const { currentLocale, localizeActionField } = usePluginLocale()
 
 interface ActionData {
   id?: string
@@ -160,7 +165,7 @@ const getActionDisplayName = (type: string): string => {
           const fullActionType = `${pluginId}.${actionId}`
 
           if (fullActionType === type) {
-            return actionData.name || actionId
+            return localizeActionField(actionData, 'name', currentLocale.value, actionId)
           }
         }
       }
@@ -171,15 +176,15 @@ const getActionDisplayName = (type: string): string => {
   const baseType = getActionBaseType(type)
 
   const displayNames: Record<string, string> = {
-    'shell': 'Comando Shell',
-    'http': 'Petición HTTP',
-    'hotkey': 'Atajo de Teclado',
-    'type': 'Escribir Texto',
-    'multimedia': 'Multimedia',
-    'page': 'Cambiar Página',
-    'open-app': 'Abrir Aplicación',
-    'open-url': 'Abrir URL',
-    'delay': 'Retraso'
+    'shell': t('bd.actionFallback.shell'),
+    'http': t('bd.actionFallback.http'),
+    'hotkey': t('bd.actionFallback.hotkey'),
+    'type': t('bd.actionFallback.type'),
+    'multimedia': t('bd.actionFallback.multimedia'),
+    'page': t('bd.actionFallback.page'),
+    'open-app': t('bd.actionFallback.openApp'),
+    'open-url': t('bd.actionFallback.openUrl'),
+    'delay': t('bd.actionFallback.delay')
   }
 
   return displayNames[baseType] || baseType.toUpperCase()

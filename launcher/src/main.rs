@@ -32,6 +32,7 @@ mod monitor;
 mod autostart;
 mod instance;
 mod shortcuts;
+mod strings;
 mod theme;
 mod tray;
 pub mod updater;
@@ -107,13 +108,13 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
     let lock = match instance::InstanceLock::acquire() {
         Ok(lock) => lock,
         Err(error) => {
-            let text = format!("No se pudo comprobar si BunDeck ya está abierto:\n\n{error}");
-            let text_wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+            let text_wide = strings::wide_format("dlg.check_fail", &[("error", &error.to_string())]);
+            let caption = strings::wide("dlg.app_title");
             unsafe {
                 let _ = MessageBoxW(
                     None,
                     windows::core::PCWSTR(text_wide.as_ptr()),
-                    windows::core::w!("BunDeck"),
+                    windows::core::PCWSTR(caption.as_ptr()),
                     windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR
                         | MB_SETFOREGROUND,
                 );
@@ -140,11 +141,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
                 Err(_) => {}
             }
         }
-        show_instance_message(
-            "Ya hay otra instancia de BunDeck abierta, pero no pude leer sus datos. \
-             Espera unos segundos e inténtalo de nuevo.",
-            false,
-        );
+        show_instance_message(strings::get("dlg.meta_unreadable"), false);
         return None;
     };
     // La metadata puede ser stale (PID muerto o reutilizado por otro
@@ -163,11 +160,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
                 Err(_) => {}
             }
         }
-        show_instance_message(
-            "BunDeck parecía abierto pero su proceso ya no existe. \
-             Si persiste, espera unos segundos e inténtalo de nuevo.",
-            false,
-        );
+        show_instance_message(strings::get("dlg.meta_stale"), false);
         return None;
     }
     if existing.pid == std::process::id() || !is_launcher_process(existing.pid) {
@@ -175,19 +168,15 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
             "Rechazado reemplazar PID {}: no parece launcher BunDeck.",
             existing.pid
         ));
-        show_instance_message(
-            "Ya hay BunDeck abierto, pero no pude confirmar que el proceso sea el panel. \
-             No lo cerraré por seguridad; ciérralo desde el tray (Salir) e inténtalo de nuevo.",
-            false,
-        );
+        show_instance_message(strings::get("dlg.not_launcher"), false);
         return None;
     }
-    let question = format!(
-        "Ya hay BunDeck abierto en modo {} (PID {}).\n\n\
-         ¿Quieres cerrarlo y arrancar esta instancia?\n\
-         No: cancelar; la instancia anterior seguirá ejecutándose.",
-        existing.mode.as_str(),
-        existing.pid
+    let question = strings::format(
+        "dlg.replace_ask",
+        &[
+            ("mode", existing.mode.as_str()),
+            ("pid", &existing.pid.to_string()),
+        ],
     );
     if !show_instance_message(&question, true) {
         return None;
@@ -204,10 +193,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
     // actualizado (el Restart del update lo quiere conservar).
     let _ = monitor::shutdown_daemon();
     if !terminate_existing_instance(existing.pid, false) {
-        show_instance_message(
-            "No se pudo cerrar la instancia anterior. BunDeck seguirá abierto en su lugar.",
-            false,
-        );
+        show_instance_message(strings::get("dlg.could_not_close"), false);
         return None;
     }
     drop(lock);
@@ -220,25 +206,24 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    show_instance_message(
-        "La instancia anterior no liberó el control a tiempo. No se inició una segunda copia.",
-        false,
-    );
+    show_instance_message(strings::get("dlg.lock_timeout"), false);
     None
 }
 
 #[cfg(windows)]
 fn show_instance_message(text: &str, ask_yes_no: bool) -> bool {
     let text_wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    let caption_yes_no = strings::wide("dlg.already_open");
+    let caption_info = strings::wide("dlg.app_title");
     let (style, caption) = if ask_yes_no {
         (
             MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
-            windows::core::w!("BunDeck ya está abierto"),
+            windows::core::PCWSTR(caption_yes_no.as_ptr()),
         )
     } else {
         (
             windows::Win32::UI::WindowsAndMessaging::MB_ICONWARNING | MB_SETFOREGROUND,
-            windows::core::w!("BunDeck"),
+            windows::core::PCWSTR(caption_info.as_ptr()),
         )
     };
     let result = unsafe {
@@ -302,20 +287,28 @@ fn prepare_existing_server() {
         return;
     }
 
-    let version = monitor::installed_version().unwrap_or_else(|| "API no disponible".to_string());
+    let version = monitor::installed_version()
+        .unwrap_or_else(|| strings::get("dlg.server_unavailable").to_string());
     let mode = if is_dev {
-        "desarrollo (Astro en :4321)"
+        strings::get("dlg.server_dev_mode")
     } else {
-        "producción / servidor BunDeck"
+        strings::get("dlg.server_prod_mode")
     };
-    let question = format!(
-        "Ya hay un servicio BunDeck activo{} (v{version}, {mode}).\n\n\
-         Sí: cerrarlo y arrancar uno nuevo.\nNo: conservarlo y abrir el panel con ese servidor.",
-        if api_up {
-            format!(" en :{}", monitor::api_port())
-        } else {
-            String::new()
-        }
+    let port_suffix = if api_up {
+        strings::format(
+            "dlg.server_active_port",
+            &[("port", &monitor::api_port().to_string())],
+        )
+    } else {
+        String::new()
+    };
+    let question = strings::format(
+        "dlg.server_active",
+        &[
+            ("port", &port_suffix),
+            ("version", &version),
+            ("mode", mode),
+        ],
     );
     if !show_instance_message(&question, true) {
         return;
@@ -323,45 +316,27 @@ fn prepare_existing_server() {
 
     if api_up {
         if !monitor::shutdown_daemon() {
-            show_instance_message(
-                "El servidor activo no aceptó la orden de cierre. Se conservará y BunDeck no iniciará una copia duplicada.",
-                false,
-            );
+            show_instance_message(strings::get("dlg.server_keep"), false);
             return;
         }
         monitor::wait_for_api_down();
         if monitor::snapshot(false).api.state == State::Ok {
-            show_instance_message(
-                "El servidor BunDeck sigue respondiendo. Se abrirá el panel conectado al servidor existente.",
-                false,
-            );
+            show_instance_message(strings::get("dlg.server_still_up"), false);
             return;
         }
     }
 
     if is_dev {
         let Some(pid) = process_listening_on(4321) else {
-            show_instance_message(
-                "Se detuvo el daemon, pero no pude identificar el proceso de Astro en :4321. \
-                 No lo cerraré; el panel seguirá disponible.",
-                false,
-            );
+            show_instance_message(strings::get("dlg.dev_no_astro"), false);
             return;
         };
         if !is_bundeck_dev_process(pid) {
-            show_instance_message(
-                "Hay un proceso escuchando en :4321, pero no pude confirmar que sea BunDeck/Astro. \
-                 No lo cerraré; el panel seguirá disponible.",
-                false,
-            );
+            show_instance_message(strings::get("dlg.dev_not_bundeck"), false);
             return;
         }
         if pid != std::process::id() && !terminate_existing_instance(pid, true) {
-            show_instance_message(
-                "Se detuvo el daemon, pero no se pudo cerrar el servidor de desarrollo en :4321. \
-                 El panel seguirá disponible y usará los servicios que respondan.",
-                false,
-            );
+            show_instance_message(strings::get("dlg.dev_no_close"), false);
             return;
         }
     }
@@ -514,6 +489,9 @@ impl LauncherView {
     /// headless UI tests deterministic and isolated from local services.
     #[cfg(test)]
     fn new_for_test() -> Self {
+        // Tests de UI herméticos: español fijo para no depender del
+        // idioma efectivo del entorno (daemon/fichero/SO).
+        strings::set_override(strings::Lang::Es);
         let (background_tx, background_rx) = mpsc::channel();
         let (monitor_tx, _monitor_rx) = mpsc::channel();
 
@@ -1429,7 +1407,7 @@ impl Render for LauncherView {
         let log_text: SharedString = self.recent_log(30).into();
         let installed_label = match &self.installed {
             Some(v) => format!("v{v}"),
-            None => "desconocida".to_string(),
+            None => strings::get("common.unknown").to_string(),
         };
         let latest_label = match &self.latest {
             Some(r) => r.tag.clone(),
@@ -1456,7 +1434,7 @@ impl Render for LauncherView {
         let launcher_pending_restart = self.launcher_pending_restart;
         let update_ready = launcher_pending_restart;
         let update_btn_label = if launcher_pending_restart {
-            "Reiniciar launcher"
+            strings::get("btn.restart_launcher")
         } else {
             ""
         };
@@ -1529,7 +1507,7 @@ impl Render for LauncherView {
                                         div()
                                             .text_sm()
                                             .text_color(theme::secondary_text())
-                                            .child("Panel de control".to_string()),
+                                            .child(strings::get("ui.subtitle").to_string()),
                                     ),
                             ),
                     ),
@@ -1564,7 +1542,7 @@ impl Render for LauncherView {
                                 view.tab = Tab::Status;
                                 cx.notify();
                             }))
-                            .child("Estado".to_string()),
+                            .child(strings::get("tab.status").to_string()),
                     )
                     .child(
                         div()
@@ -1591,31 +1569,31 @@ impl Render for LauncherView {
                                 view.tab = Tab::Log;
                                 cx.notify();
                             }))
-                            .child("Registro".to_string()),
+                            .child(strings::get("tab.log").to_string()),
                     ),
             )
             .child(if tab == Tab::Status {
-                section_label("SERVICIOS").into_any_element()
+                section_label(strings::get("sec.services")).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                service_row("API", &self.snapshot.api).into_any_element()
+                service_row(strings::get("svc.api"), &self.snapshot.api).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                service_row("WebSocket", &self.snapshot.ws).into_any_element()
+                service_row(strings::get("svc.ws"), &self.snapshot.ws).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                service_row("Frontend", &self.snapshot.frontend).into_any_element()
+                service_row(strings::get("svc.frontend"), &self.snapshot.frontend).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                section_label("DAEMON").into_any_element()
+                section_label(strings::get("sec.daemon")).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
@@ -1648,7 +1626,7 @@ impl Render for LauncherView {
                                 view.start_daemon();
                                 cx.notify();
                             }))
-                            .child("Iniciar".to_string()),
+                            .child(strings::get("btn.start").to_string()),
                     )
                     .child(
                         div()
@@ -1673,7 +1651,7 @@ impl Render for LauncherView {
                                 view.stop_daemon();
                                 cx.notify();
                             }))
-                            .child("Detener".to_string()),
+                            .child(strings::get("btn.stop").to_string()),
                     )
                     .child(
                         div()
@@ -1694,14 +1672,14 @@ impl Render for LauncherView {
                                 view.restart_daemon();
                                 cx.notify();
                             }))
-                            .child("Reiniciar".to_string()),
+                            .child(strings::get("btn.restart").to_string()),
                     )
                     .into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                section_label("ACTUALIZACIÓN").into_any_element()
+                section_label(strings::get("sec.updates")).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
@@ -1719,7 +1697,10 @@ impl Render for LauncherView {
                         div()
                             .text_sm()
                             .text_color(theme::primary_text())
-                            .child(format!("Instalada {installed_label} · Última {latest_label}")),
+                            .child(strings::format(
+                                "update.installed",
+                                &[("installed", &installed_label), ("latest", &latest_label)],
+                            )),
                     )
                     .child(
                         div()
@@ -1730,21 +1711,21 @@ impl Render for LauncherView {
                                 theme::secondary_text()
                             })
                             .child(if launcher_pending_restart {
-                                "Actualización aplicada; reinicia el launcher para cargar los cambios.".to_string()
+                                strings::get("update.applied_restart").to_string()
                             } else if update_applying {
-                                "Aplicando la actualización; el panel volverá a abrirse al terminar.".to_string()
+                                strings::get("update.applying").to_string()
                             } else if let Some(version) = staged_ver.as_deref() {
-                                format!("v{version} descargada y verificada; iniciando instalación…")
+                                strings::format("update.downloaded", &[("version", version)])
                             } else if update_busy {
-                                "Descargando la actualización en segundo plano…".to_string()
+                                strings::get("update.downloading_bg").to_string()
                             } else if update_checking {
-                                "Comprobando actualizaciones automáticamente…".to_string()
+                                strings::get("update.checking_auto").to_string()
                             } else if update_err.is_some() {
                                 update_err.clone().unwrap_or_default()
                             } else if update_available {
-                                "Nueva versión detectada; descarga automática en curso.".to_string()
+                                strings::get("update.new_detected").to_string()
                             } else {
-                                "Las actualizaciones se buscan automáticamente.".to_string()
+                                strings::get("update.auto").to_string()
                             })
                             .into_any_element(),
                     )
@@ -1832,7 +1813,7 @@ impl Render for LauncherView {
                             div()
                                 .text_sm()
                                 .text_color(theme::primary_text())
-                                .child("Spotify necesita conexión: se abrió el navegador en este equipo; inicia sesión y el acceso se completará solo.".to_string()),
+                                .child(strings::get("spotify.notice").to_string()),
                         )
                         .child(
                             div()
@@ -1858,7 +1839,7 @@ impl Render for LauncherView {
                                             view.reopen_spotify();
                                             cx.notify();
                                         }))
-                                        .child("Reabrir Spotify".to_string()),
+                                        .child(strings::get("btn.reopen_spotify").to_string()),
                                 )
                                 .child(
                                     div()
@@ -1879,7 +1860,7 @@ impl Render for LauncherView {
                                             view.dismiss_spotify();
                                             cx.notify();
                                         }))
-                                        .child("Descartar".to_string()),
+                                        .child(strings::get("btn.dismiss").to_string()),
                                 )
                                 .into_any_element(),
                         )
@@ -1889,7 +1870,7 @@ impl Render for LauncherView {
                 div().hidden().into_any_element()
             })
             .child(if tab == Tab::Status {
-                section_label("ABRIR").into_any_element()
+                section_label(strings::get("sec.open")).into_any_element()
             } else {
                 div().hidden().into_any_element()
             })
@@ -1919,8 +1900,7 @@ impl Render for LauncherView {
                                         window.remove_window();
                                     } else {
                                         view.log.push(
-                                            "Servicios aún arrancando: dejo la ventana abierta."
-                                                .to_string(),
+                                            strings::get("dash.still_starting").to_string(),
                                         );
                                         view.truncate_log();
                                         cx.notify();
@@ -1929,7 +1909,7 @@ impl Render for LauncherView {
                                     cx.notify();
                                 }
                             }))
-                            .child("Panel web".to_string()),
+                            .child(strings::get("btn.dashboard").to_string()),
                     )
                     .into_any_element()
             } else {
@@ -1940,9 +1920,9 @@ impl Render for LauncherView {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(section_label(&format!(
-                        "REGISTRO · SONDEO #{}",
-                        self.polls
+                    .child(section_label(&strings::format(
+                        "update.log_section",
+                        &[("n", &self.polls.to_string())],
                     )))
                     .child(
                         div()
@@ -1982,7 +1962,7 @@ impl Render for LauncherView {
                     .on_click(cx.listener(|_, _, window, _| {
                         window.remove_window();
                     }))
-                    .child("Ocultar al tray".to_string())
+                    .child(strings::get("btn.hide_tray").to_string())
                     .into_any_element()
             } else {
                 div().hidden().into_any_element()
@@ -2012,7 +1992,7 @@ impl Render for LauncherView {
                                 view.clear_log();
                                 cx.notify();
                             }))
-                            .child("Limpiar".to_string()),
+                            .child(strings::get("btn.clear").to_string()),
                     )
                     .child(
                         div()
@@ -2030,7 +2010,7 @@ impl Render for LauncherView {
                             .on_click(|_, _, cx: &mut App| {
                                 quit_app(cx);
                             })
-                            .child("Salir".to_string()),
+                            .child(strings::get("btn.quit").to_string()),
                     )
                     .into_any_element()
             } else {
@@ -2041,7 +2021,7 @@ impl Render for LauncherView {
                     .text_xs()
                     .text_center()
                     .text_color(theme::muted_text())
-                    .child(format!("Panel: {dashboard_url}")),
+                    .child(strings::format("panel.url", &[("url", &dashboard_url)])),
             )
             )
     }
@@ -2078,7 +2058,7 @@ fn main_window_options(cx: &mut App) -> WindowOptions {
         ))),
         window_min_size: Some(size(px(400.0), px(600.0))),
         titlebar: Some(gpui::TitlebarOptions {
-            title: Some("BunDeck — Panel de control".into()),
+            title: Some(strings::get("ui.window_title").into()),
             // Sin marco nativo: la barra de título la dibuja la app
             // (ver `title_chrome`). El título sigue en la barra de tareas.
             appears_transparent: true,
@@ -2652,7 +2632,7 @@ fn main() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(400.0), px(600.0))),
                     titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("BunDeck — Panel de control".into()),
+                        title: Some(strings::get("ui.window_title").into()),
                         ..Default::default()
                     }),
                     ..Default::default()

@@ -65,6 +65,7 @@ export class SteamPlugin {
                     id: 'launch-game',
                     name: 'Lanzar juego',
                     description: 'Abre un juego por su AppID (steam://rungameid/)',
+                    i18n: { es: { name: 'Lanzar juego', description: 'Abre un juego por su AppID (steam://rungameid/)' }, en: { name: 'Lanzar juego', description: 'Abre un juego por su AppID (steam://rungameid/)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Gamepad2',
                     schema: {
                         type: 'object',
@@ -87,6 +88,7 @@ export class SteamPlugin {
                     id: 'open-library',
                     name: 'Abrir biblioteca',
                     description: 'Abre el cliente de Steam (biblioteca)',
+                    i18n: { es: { name: 'Abrir biblioteca', description: 'Abre el cliente de Steam (biblioteca)' }, en: { name: 'Abrir biblioteca', description: 'Abre el cliente de Steam (biblioteca)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Library',
                     schema: { type: 'object', properties: {}, required: [] },
                 },
@@ -94,6 +96,7 @@ export class SteamPlugin {
                     id: 'server-status',
                     name: 'Estado del juego',
                     description: 'Consulta el nombre, precio y estado de un juego vía la tienda pública de Steam',
+                    i18n: { es: { name: 'Estado del juego', description: 'Consulta el nombre, precio y estado de un juego vía la tienda pública de Steam' }, en: { name: 'Estado del juego', description: 'Consulta el nombre, precio y estado de un juego vía la tienda pública de Steam' } }, // TODO i18n: EN temporal = ES
                     icon: 'Activity',
                     surface: 'control',
                     component: 'status-cards',
@@ -132,6 +135,7 @@ export class SteamPlugin {
                     id: 'presence',
                     name: 'Presencia (próximamente)',
                     description: 'Placeholder: Steam no expone presencia de amigos sin API key; devuelve cómo activarla',
+                    i18n: { es: { name: 'Presencia (próximamente)', description: 'Placeholder: Steam no expone presencia de amigos sin API key; devuelve cómo activarla' }, en: { name: 'Presencia (próximamente)', description: 'Placeholder: Steam no expone presencia de amigos sin API key; devuelve cómo activarla' } }, // TODO i18n: EN temporal = ES
                     icon: 'Users',
                     surface: 'control',
                     component: 'status-cards',

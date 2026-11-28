@@ -108,6 +108,7 @@ export class DavinciPlugin {
                     id: 'transport',
                     name: 'Transporte',
                     description: 'Reproduce, pausa, detiene y navega (Espacio, JKL, flechas, Inicio/Fin)',
+                    i18n: { es: { name: 'Transporte', description: 'Reproduce, pausa, detiene y navega (Espacio, JKL, flechas, Inicio/Fin)' }, en: { name: 'Transporte', description: 'Reproduce, pausa, detiene y navega (Espacio, JKL, flechas, Inicio/Fin)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Play',
                     surface: 'control',
                     component: 'creative-tools',
@@ -141,6 +142,7 @@ export class DavinciPlugin {
                     id: 'edit',
                     name: 'Cortar / Copiar / Pegar',
                     description: 'Edita clips en la línea de tiempo (cortar, copiar, pegar, eliminar, cuchilla)',
+                    i18n: { es: { name: 'Cortar / Copiar / Pegar', description: 'Edita clips en la línea de tiempo (cortar, copiar, pegar, eliminar, cuchilla)' }, en: { name: 'Cortar / Copiar / Pegar', description: 'Edita clips en la línea de tiempo (cortar, copiar, pegar, eliminar, cuchilla)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Scissors',
                     schema: {
                         type: 'object',
@@ -171,6 +173,7 @@ export class DavinciPlugin {
                     id: 'marker',
                     name: 'Marcador',
                     description: 'Añade un marcador en el cabezal (M)',
+                    i18n: { es: { name: 'Marcador', description: 'Añade un marcador en el cabezal (M)' }, en: { name: 'Marcador', description: 'Añade un marcador en el cabezal (M)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Flag',
                     schema: {
                         type: 'object',
@@ -190,6 +193,7 @@ export class DavinciPlugin {
                     id: 'render-start',
                     name: 'Iniciar render',
                     description: 'Inicia la cola de render en la página Deliver (requiere configurar el atajo en DaVinci si no usa el indicado)',
+                    i18n: { es: { name: 'Iniciar render', description: 'Inicia la cola de render en la página Deliver (requiere configurar el atajo en DaVinci si no usa el indicado)' }, en: { name: 'Iniciar render', description: 'Inicia la cola de render en la página Deliver (requiere configurar el atajo en DaVinci si no usa el indicado)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Clapperboard',
                     schema: {
                         type: 'object',
@@ -207,6 +211,7 @@ export class DavinciPlugin {
                     id: 'save-project',
                     name: 'Guardar proyecto',
                     description: 'Guarda el proyecto actual (Ctrl+S)',
+                    i18n: { es: { name: 'Guardar proyecto', description: 'Guarda el proyecto actual (Ctrl+S)' }, en: { name: 'Guardar proyecto', description: 'Guarda el proyecto actual (Ctrl+S)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Save',
                     schema: {
                         type: 'object',
@@ -218,6 +223,7 @@ export class DavinciPlugin {
                     id: 'switch-page',
                     name: 'Cambiar de página',
                     description: 'Salta a Media, Edit, Fusion, Color, Fairlight o Deliver',
+                    i18n: { es: { name: 'Cambiar de página', description: 'Salta a Media, Edit, Fusion, Color, Fairlight o Deliver' }, en: { name: 'Cambiar de página', description: 'Salta a Media, Edit, Fusion, Color, Fairlight o Deliver' } }, // TODO i18n: EN temporal = ES
                     icon: 'LayoutGrid',
                     schema: {
                         type: 'object',

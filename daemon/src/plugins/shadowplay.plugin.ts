@@ -98,6 +98,7 @@ export class ShadowplayPlugin {
                 {
                     id: 'instant-replay-save', name: 'Guardar repetición', icon: 'History',
                     description: 'Guarda los últimos minutos (repetición instantánea)',
+                    i18n: { es: { name: 'Guardar repetición', description: 'Guarda los últimos minutos (repetición instantánea)' }, en: { name: 'Guardar repetición', description: 'Guarda los últimos minutos (repetición instantánea)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -109,6 +110,7 @@ export class ShadowplayPlugin {
                 {
                     id: 'toggle-record', name: 'Iniciar / detener grabación', icon: 'CircleDot',
                     description: 'Alterna la grabación de NVIDIA Share',
+                    i18n: { es: { name: 'Iniciar / detener grabación', description: 'Alterna la grabación de NVIDIA Share' }, en: { name: 'Iniciar / detener grabación', description: 'Alterna la grabación de NVIDIA Share' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -120,6 +122,7 @@ export class ShadowplayPlugin {
                 {
                     id: 'toggle-overlay', name: 'Abrir overlay', icon: 'Layers',
                     description: 'Abre el overlay de NVIDIA Share',
+                    i18n: { es: { name: 'Abrir overlay', description: 'Abre el overlay de NVIDIA Share' }, en: { name: 'Abrir overlay', description: 'Abre el overlay de NVIDIA Share' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -131,6 +134,7 @@ export class ShadowplayPlugin {
                 {
                     id: 'check-status', name: 'Comprobar NVIDIA Share', icon: 'Activity',
                     description: 'Comprueba si NVIDIA Share está en ejecución',
+                    i18n: { es: { name: 'Comprobar NVIDIA Share', description: 'Comprueba si NVIDIA Share está en ejecución' }, en: { name: 'Comprobar NVIDIA Share', description: 'Comprueba si NVIDIA Share está en ejecución' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'stream-studio',
                     schema: { type: 'object', properties: {}, required: [] }

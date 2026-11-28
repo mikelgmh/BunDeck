@@ -41,6 +41,7 @@ export class HttpPlugin {
                     id: 'http',
                     name: 'HTTP Request',
                     description: 'Make an HTTP request',
+                    i18n: { es: { name: 'HTTP Request', description: 'Make an HTTP request' }, en: { name: 'HTTP Request', description: 'Make an HTTP request' } }, // TODO i18n: EN temporal = ES
                     icon: 'Globe',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {

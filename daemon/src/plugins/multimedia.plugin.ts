@@ -41,6 +41,7 @@ export class MultimediaPlugin {
                     id: 'multimedia',
                     name: 'Multimedia Control',
                     description: 'Control media playback (play, pause, volume, etc.)',
+                    i18n: { es: { name: 'Multimedia Control', description: 'Control media playback (play, pause, volume, etc.)' }, en: { name: 'Multimedia Control', description: 'Control media playback (play, pause, volume, etc.)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Volume2',
                     surface: 'control',
                     component: 'media-transport',

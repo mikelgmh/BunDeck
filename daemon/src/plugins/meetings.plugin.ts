@@ -137,6 +137,7 @@ export class MeetingsPlugin {
                     id: 'control',
                     name: 'Control de reunión',
                     description: 'Envía un hotkey a Zoom/Teams/Meet (micro, cámara, compartir, salir…)',
+                    i18n: { es: { name: 'Control de reunión', description: 'Envía un hotkey a Zoom/Teams/Meet (micro, cámara, compartir, salir…)' }, en: { name: 'Control de reunión', description: 'Envía un hotkey a Zoom/Teams/Meet (micro, cámara, compartir, salir…)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Video',
                     surface: 'control',
                     component: 'voice-panel',
@@ -202,6 +203,7 @@ export class MeetingsPlugin {
                     id: 'join',
                     name: 'Unirse a reunión',
                     description: 'Abre la URL de invitación en el navegador o la app',
+                    i18n: { es: { name: 'Unirse a reunión', description: 'Abre la URL de invitación en el navegador o la app' }, en: { name: 'Unirse a reunión', description: 'Abre la URL de invitación en el navegador o la app' } }, // TODO i18n: EN temporal = ES
                     icon: 'PhoneIncoming',
                     schema: {
                         type: 'object',

@@ -1141,6 +1141,26 @@
         "deckPairedOpen": "Abrir en el móvil",
         "pause": "Pausar",
         "start": "Iniciar",
-        "reset": "Reiniciar"
+        "reset": "Reiniciar",
+        "opContains": "Contiene",
+        "opExact": "Coincide exactamente",
+        "opStarts": "Empieza por",
+        "opRegex": "Expresión regular",
+        "settingsReset": "Atajos restablecidos",
+        "actionFallback": {
+            "shell": "Comando Shell",
+            "http": "Petición HTTP",
+            "hotkey": "Atajo de Teclado",
+            "type": "Escribir Texto",
+            "multimedia": "Multimedia",
+            "page": "Cambiar Página",
+            "openApp": "Abrir Aplicación",
+            "openUrl": "Abrir URL",
+            "delay": "Retraso",
+            "toastPlaceholder": "Texto con {vars}"
+        },
+        "actionRemove": "Eliminar acción",
+        "actionReorder": "Arrastrar para reordenar",
+        "actionNoConfig": "Configuración no disponible para esta acción"
     }
 }

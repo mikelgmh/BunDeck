@@ -80,6 +80,7 @@ export class GoveePlugin {
                     id: 'toggle',
                     name: 'Encender / Apagar',
                     description: 'Enciende o apaga un dispositivo Govee',
+                    i18n: { es: { name: 'Encender / Apagar', description: 'Enciende o apaga un dispositivo Govee' }, en: { name: 'Encender / Apagar', description: 'Enciende o apaga un dispositivo Govee' } }, // TODO i18n: EN temporal = ES
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
@@ -102,6 +103,7 @@ export class GoveePlugin {
                     id: 'brightness',
                     name: 'Brillo',
                     description: 'Ajusta el brillo (0-100)',
+                    i18n: { es: { name: 'Brillo', description: 'Ajusta el brillo (0-100)' }, en: { name: 'Brillo', description: 'Ajusta el brillo (0-100)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sun',
                     surface: 'control',
                     component: 'smart-home',
@@ -124,6 +126,7 @@ export class GoveePlugin {
                     id: 'color',
                     name: 'Color',
                     description: 'Cambia el color (RGB 0-255)',
+                    i18n: { es: { name: 'Color', description: 'Cambia el color (RGB 0-255)' }, en: { name: 'Color', description: 'Cambia el color (RGB 0-255)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Palette',
                     surface: 'control',
                     component: 'smart-home',
@@ -143,6 +146,7 @@ export class GoveePlugin {
                     id: 'scene',
                     name: 'Escena / Modo',
                     description: 'Activa un modo de escena del dispositivo (requiere que el modelo lo soporte)',
+                    i18n: { es: { name: 'Escena / Modo', description: 'Activa un modo de escena del dispositivo (requiere que el modelo lo soporte)' }, en: { name: 'Escena / Modo', description: 'Activa un modo de escena del dispositivo (requiere que el modelo lo soporte)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sparkles',
                     surface: 'control',
                     component: 'smart-home',

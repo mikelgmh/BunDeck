@@ -102,11 +102,13 @@ export class VoicemeeterPlugin {
                 {
                     id: 'device-info', name: 'Estado de VoiceMeeter', icon: 'Activity',
                     description: 'Comprueba si VoiceMeeter está instalado (y en ejecución)',
+                    i18n: { es: { name: 'Estado de VoiceMeeter', description: 'Comprueba si VoiceMeeter está instalado (y en ejecución)' }, en: { name: 'Estado de VoiceMeeter', description: 'Comprueba si VoiceMeeter está instalado (y en ejecución)' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
                     id: 'strip-mute', name: 'Mutear strip (micro/línea)', icon: 'MicOff',
                     description: 'Envía el atajo de Macro Buttons que mutea un strip',
+                    i18n: { es: { name: 'Mutear strip (micro/línea)', description: 'Envía el atajo de Macro Buttons que mutea un strip' }, en: { name: 'Mutear strip (micro/línea)', description: 'Envía el atajo de Macro Buttons que mutea un strip' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'voice-panel',
                     schema: {
@@ -127,6 +129,7 @@ export class VoicemeeterPlugin {
                 {
                     id: 'bus-mute', name: 'Mutear bus (salida A/B)', icon: 'VolumeX',
                     description: 'Envía el atajo de Macro Buttons que mutea un bus de salida',
+                    i18n: { es: { name: 'Mutear bus (salida A/B)', description: 'Envía el atajo de Macro Buttons que mutea un bus de salida' }, en: { name: 'Mutear bus (salida A/B)', description: 'Envía el atajo de Macro Buttons que mutea un bus de salida' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'voice-panel',
                     schema: {
@@ -147,6 +150,7 @@ export class VoicemeeterPlugin {
                 {
                     id: 'open-voicemeeter', name: 'Abrir VoiceMeeter', icon: 'AppWindow',
                     description: 'Abre la ventana de VoiceMeeter',
+                    i18n: { es: { name: 'Abrir VoiceMeeter', description: 'Abre la ventana de VoiceMeeter' }, en: { name: 'Abrir VoiceMeeter', description: 'Abre la ventana de VoiceMeeter' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 }
             ]

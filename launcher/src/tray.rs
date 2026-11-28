@@ -71,6 +71,7 @@ impl TrayCtl {
 #[cfg(windows)]
 mod imp {
     use super::TrayEvent;
+    use crate::strings;
     use std::ptr::null_mut;
     use std::sync::mpsc::Sender;
     use windows::core::{w, PCWSTR};
@@ -147,7 +148,7 @@ mod imp {
                 uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
                 uCallbackMessage: WM_TRAYICON,
                 hIcon: hicon,
-                szTip: wide_tip("BunDeck"),
+                szTip: wide_tip(strings::get("tray.tip")),
                 ..Default::default()
             };
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
@@ -172,10 +173,15 @@ mod imp {
                 Ok(m) => m,
                 Err(_) => return,
             };
-            let _ = AppendMenuW(menu, MF_STRING, super::MENU_OPEN, w!("Abrir panel"));
-            let _ = AppendMenuW(menu, MF_STRING, super::MENU_WEB, w!("Abrir en la web"));
+            // Textos localizados: el `w!` estático no sirve para tablas
+            // dinámicas; el Vec vive hasta el fin de la llamada.
+            let open_label = strings::wide("tray.open_panel");
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_OPEN, PCWSTR(open_label.as_ptr()));
+            let web_label = strings::wide("tray.open_web");
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_WEB, PCWSTR(web_label.as_ptr()));
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-            let _ = AppendMenuW(menu, MF_STRING, super::MENU_QUIT, w!("Salir"));
+            let quit_label = strings::wide("tray.quit");
+            let _ = AppendMenuW(menu, MF_STRING, super::MENU_QUIT, PCWSTR(quit_label.as_ptr()));
             let mut pt = POINT { x: 0, y: 0 };
             if GetCursorPos(&mut pt).is_err() {
                 let _ = DestroyMenu(menu);

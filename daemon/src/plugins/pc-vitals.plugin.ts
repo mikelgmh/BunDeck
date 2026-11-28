@@ -56,6 +56,7 @@ export class PCVitalsPlugin {
                     id: 'summary',
                     name: 'Resumen del sistema',
                     description: 'CPU/RAM/GPU/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)',
+                    i18n: { es: { name: 'Resumen del sistema', description: 'CPU/RAM/GPU/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)' }, en: { name: 'Resumen del sistema', description: 'CPU/RAM/GPU/disco/uptime en una sola llamada (widgets gauge + iconos por umbral)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Gauge',
                     dynamic: true,
                     surface: 'control',
@@ -85,6 +86,7 @@ export class PCVitalsPlugin {
                     id: 'monitor',
                     name: 'Monitor PC Metric',
                     description: 'Métrica CPU/RAM/GPU en botón (uso % o temperatura; cubre lo que antes eran acciones separadas de temperatura/uso)',
+                    i18n: { es: { name: 'Monitor PC Metric', description: 'Métrica CPU/RAM/GPU en botón (uso % o temperatura; cubre lo que antes eran acciones separadas de temperatura/uso)' }, en: { name: 'Monitor PC Metric', description: 'Métrica CPU/RAM/GPU en botón (uso % o temperatura; cubre lo que antes eran acciones separadas de temperatura/uso)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Activity',
                     dynamic: true,
                     surface: 'control',
@@ -158,6 +160,7 @@ export class PCVitalsPlugin {
                     id: 'fan-speed',
                     name: 'Ventiladores',
                     description: 'RPM de ventiladores (requiere LHM/OHM con driver+admin en Windows, hwmon/sensors en Linux; degradado si no hay sensor)',
+                    i18n: { es: { name: 'Ventiladores', description: 'RPM de ventiladores (requiere LHM/OHM con driver+admin en Windows, hwmon/sensors en Linux; degradado si no hay sensor)' }, en: { name: 'Ventiladores', description: 'RPM de ventiladores (requiere LHM/OHM con driver+admin en Windows, hwmon/sensors en Linux; degradado si no hay sensor)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Fan',
                     surface: 'control',
                     component: 'status-cards',
@@ -179,6 +182,7 @@ export class PCVitalsPlugin {
                     id: 'sensors',
                     name: 'Todos los sensores',
                     description: 'Catálogo de sensores disponibles (CPU/GPU/RAM/fans/voltajes + fuentes), como el catalog del plugin LHM de Macro-Deck',
+                    i18n: { es: { name: 'Todos los sensores', description: 'Catálogo de sensores disponibles (CPU/GPU/RAM/fans/voltajes + fuentes), como el catalog del plugin LHM de Macro-Deck' }, en: { name: 'Todos los sensores', description: 'Catálogo de sensores disponibles (CPU/GPU/RAM/fans/voltajes + fuentes), como el catalog del plugin LHM de Macro-Deck' } }, // TODO i18n: EN temporal = ES
                     icon: 'ListOrdered',
                     schema: { type: 'object', properties: {}, required: [] }
                 },
@@ -186,6 +190,7 @@ export class PCVitalsPlugin {
                     id: 'disk-usage',
                     name: 'Uso de disco',
                     description: 'Espacio usado/libre del disco (df en Linux/macOS, CIM/wmic en Windows)',
+                    i18n: { es: { name: 'Uso de disco', description: 'Espacio usado/libre del disco (df en Linux/macOS, CIM/wmic en Windows)' }, en: { name: 'Uso de disco', description: 'Espacio usado/libre del disco (df en Linux/macOS, CIM/wmic en Windows)' } }, // TODO i18n: EN temporal = ES
                     icon: 'HardDrive',
                     surface: 'control',
                     component: 'status-cards',
@@ -212,6 +217,7 @@ export class PCVitalsPlugin {
                     id: 'net-speed',
                     name: 'Velocidad de red',
                     description: 'KB/s enviados+recibidos (dos muestras de contadores del SO separadas 500 ms)',
+                    i18n: { es: { name: 'Velocidad de red', description: 'KB/s enviados+recibidos (dos muestras de contadores del SO separadas 500 ms)' }, en: { name: 'Velocidad de red', description: 'KB/s enviados+recibidos (dos muestras de contadores del SO separadas 500 ms)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Wifi',
                     surface: 'control',
                     component: 'status-cards',
@@ -239,6 +245,7 @@ export class PCVitalsPlugin {
                     id: 'uptime',
                     name: 'Tiempo encendido',
                     description: 'Segundos desde el arranque (siempre disponible, vía node:os)',
+                    i18n: { es: { name: 'Tiempo encendido', description: 'Segundos desde el arranque (siempre disponible, vía node:os)' }, en: { name: 'Tiempo encendido', description: 'Segundos desde el arranque (siempre disponible, vía node:os)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Clock',
                     surface: 'control',
                     component: 'status-cards',
@@ -260,6 +267,7 @@ export class PCVitalsPlugin {
                     id: 'process-top',
                     name: 'Procesos top',
                     description: 'Procesos con más CPU/memoria (ps en Linux/macOS, tasklist en Windows)',
+                    i18n: { es: { name: 'Procesos top', description: 'Procesos con más CPU/memoria (ps en Linux/macOS, tasklist en Windows)' }, en: { name: 'Procesos top', description: 'Procesos con más CPU/memoria (ps en Linux/macOS, tasklist en Windows)' } }, // TODO i18n: EN temporal = ES
                     icon: 'ListOrdered',
                     surface: 'control',
                     component: 'status-cards',

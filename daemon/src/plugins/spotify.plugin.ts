@@ -145,6 +145,7 @@ export class SpotifyPlugin {
                     id: 'playback',
                     name: 'Reproducir / Pausar / Siguiente / Anterior',
                     description: 'Controla la reproducción de Spotify (play, pause, next, previous)',
+                    i18n: { es: { name: 'Reproducir / Pausar / Siguiente / Anterior', description: 'Controla la reproducción de Spotify (play, pause, next, previous)' }, en: { name: 'Reproducir / Pausar / Siguiente / Anterior', description: 'Controla la reproducción de Spotify (play, pause, next, previous)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Play',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -200,6 +201,7 @@ export class SpotifyPlugin {
                     id: 'like',
                     name: 'Me gusta',
                     description: 'Guarda la pista actual (o una indicada) en "Tus Me gusta" de Spotify',
+                    i18n: { es: { name: 'Me gusta', description: 'Guarda la pista actual (o una indicada) en "Tus Me gusta" de Spotify' }, en: { name: 'Me gusta', description: 'Guarda la pista actual (o una indicada) en "Tus Me gusta" de Spotify' } }, // TODO i18n: EN temporal = ES
                     icon: 'Heart',
                     schema: {
                         type: 'object',
@@ -234,6 +236,7 @@ export class SpotifyPlugin {
                     id: 'shuffle',
                     name: 'Aleatorio',
                     description: 'Activa o desactiva el modo aleatorio de Spotify',
+                    i18n: { es: { name: 'Aleatorio', description: 'Activa o desactiva el modo aleatorio de Spotify' }, en: { name: 'Aleatorio', description: 'Activa o desactiva el modo aleatorio de Spotify' } }, // TODO i18n: EN temporal = ES
                     icon: 'Shuffle',
                     schema: {
                         type: 'object',
@@ -278,6 +281,7 @@ export class SpotifyPlugin {
                     id: 'playlist',
                     name: 'Abrir lista',
                     description: 'Reproduce una playlist de Spotify (por ID o URI de contexto)',
+                    i18n: { es: { name: 'Abrir lista', description: 'Reproduce una playlist de Spotify (por ID o URI de contexto)' }, en: { name: 'Abrir lista', description: 'Reproduce una playlist de Spotify (por ID o URI de contexto)' } }, // TODO i18n: EN temporal = ES
                     icon: 'ListMusic',
                     schema: {
                         type: 'object',
@@ -334,6 +338,7 @@ export class SpotifyPlugin {
                     id: 'now-playing',
                     name: 'Lo que suena',
                     description: 'Pista actual e is_playing para iconos dinámicos (states: playing/paused/stopped)',
+                    i18n: { es: { name: 'Lo que suena', description: 'Pista actual e is_playing para iconos dinámicos (states: playing/paused/stopped)' }, en: { name: 'Lo que suena', description: 'Pista actual e is_playing para iconos dinámicos (states: playing/paused/stopped)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Music',
                     surface: 'control',
                     component: 'spotify-player',

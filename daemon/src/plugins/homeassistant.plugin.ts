@@ -133,6 +133,7 @@ export class HomeAssistantPlugin {
                     id: 'entity',
                     name: 'Entidad',
                     description: 'Controla o lee cualquier entidad: el dominio se deduce del entity_id (luz, interruptor, persiana, clima, escena, automatización, sensor…)',
+                    i18n: { es: { name: 'Entidad', description: 'Controla o lee cualquier entidad: el dominio se deduce del entity_id (luz, interruptor, persiana, clima, escena, automatización, sensor…)' }, en: { name: 'Entidad', description: 'Controla o lee cualquier entidad: el dominio se deduce del entity_id (luz, interruptor, persiana, clima, escena, automatización, sensor…)' } }, // TODO i18n: EN temporal = ES
                     icon: 'House',
                     surface: 'control',
                     component: 'smart-home',
@@ -232,6 +233,7 @@ export class HomeAssistantPlugin {
                     id: 'entity-list',
                     name: 'Listar entidades',
                     description: 'Devuelve las entidades de Home Assistant con sus acciones compatibles',
+                    i18n: { es: { name: 'Listar entidades', description: 'Devuelve las entidades de Home Assistant con sus acciones compatibles' }, en: { name: 'Listar entidades', description: 'Devuelve las entidades de Home Assistant con sus acciones compatibles' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     ...hiddenAlias,
@@ -250,6 +252,7 @@ export class HomeAssistantPlugin {
                     id: 'light',
                     name: 'Luz (clásico)',
                     description: 'Alias de «Entidad» para light.*',
+                    i18n: { es: { name: 'Luz (clásico)', description: 'Alias de «Entidad» para light.*' }, en: { name: 'Luz (clásico)', description: 'Alias de «Entidad» para light.*' } }, // TODO i18n: EN temporal = ES
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
@@ -311,6 +314,7 @@ export class HomeAssistantPlugin {
                     id: 'scene',
                     name: 'Ambiente (clásico)',
                     description: 'Alias de «Entidad» → Activar para scene.*',
+                    i18n: { es: { name: 'Ambiente (clásico)', description: 'Alias de «Entidad» → Activar para scene.*' }, en: { name: 'Ambiente (clásico)', description: 'Alias de «Entidad» → Activar para scene.*' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sparkles',
                     ...hiddenAlias,
                     schema: {
@@ -333,6 +337,7 @@ export class HomeAssistantPlugin {
                     id: 'switch',
                     name: 'Interruptor (clásico)',
                     description: 'Alias de «Entidad» para switch.*',
+                    i18n: { es: { name: 'Interruptor (clásico)', description: 'Alias de «Entidad» para switch.*' }, en: { name: 'Interruptor (clásico)', description: 'Alias de «Entidad» para switch.*' } }, // TODO i18n: EN temporal = ES
                     icon: 'Plug',
                     surface: 'control',
                     component: 'smart-home',
@@ -378,6 +383,7 @@ export class HomeAssistantPlugin {
                     id: 'scene-activate',
                     name: 'Activar escena (clásico)',
                     description: 'Alias de «Entidad» → Activar',
+                    i18n: { es: { name: 'Activar escena (clásico)', description: 'Alias de «Entidad» → Activar' }, en: { name: 'Activar escena (clásico)', description: 'Alias de «Entidad» → Activar' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sparkles',
                     ...hiddenAlias,
                     schema: {
@@ -400,6 +406,7 @@ export class HomeAssistantPlugin {
                     id: 'automation-trigger',
                     name: 'Disparar automatización (clásico)',
                     description: 'Alias de «Entidad» → Disparar',
+                    i18n: { es: { name: 'Disparar automatización (clásico)', description: 'Alias de «Entidad» → Disparar' }, en: { name: 'Disparar automatización (clásico)', description: 'Alias de «Entidad» → Disparar' } }, // TODO i18n: EN temporal = ES
                     icon: 'Zap',
                     ...hiddenAlias,
                     schema: {
@@ -422,6 +429,7 @@ export class HomeAssistantPlugin {
                     id: 'cover-control',
                     name: 'Persiana / Toldo (clásico)',
                     description: 'Alias de «Entidad» para cover.*',
+                    i18n: { es: { name: 'Persiana / Toldo (clásico)', description: 'Alias de «Entidad» para cover.*' }, en: { name: 'Persiana / Toldo (clásico)', description: 'Alias de «Entidad» para cover.*' } }, // TODO i18n: EN temporal = ES
                     icon: 'Blinds',
                     surface: 'control',
                     component: 'smart-home',
@@ -471,6 +479,7 @@ export class HomeAssistantPlugin {
                     id: 'climate-set',
                     name: 'Climatización (clásico)',
                     description: 'Alias de «Entidad» → Ajustar clima',
+                    i18n: { es: { name: 'Climatización (clásico)', description: 'Alias de «Entidad» → Ajustar clima' }, en: { name: 'Climatización (clásico)', description: 'Alias de «Entidad» → Ajustar clima' } }, // TODO i18n: EN temporal = ES
                     icon: 'Thermometer',
                     surface: 'control',
                     component: 'smart-home',
@@ -521,6 +530,7 @@ export class HomeAssistantPlugin {
                     id: 'sensor-value',
                     name: 'Leer sensor (clásico)',
                     description: 'Alias de «Entidad» → Leer estado',
+                    i18n: { es: { name: 'Leer sensor (clásico)', description: 'Alias de «Entidad» → Leer estado' }, en: { name: 'Leer sensor (clásico)', description: 'Alias de «Entidad» → Leer estado' } }, // TODO i18n: EN temporal = ES
                     icon: 'Gauge',
                     surface: 'control',
                     component: 'smart-home',
@@ -549,6 +559,7 @@ export class HomeAssistantPlugin {
                     id: 'get-state',
                     name: 'Estado de entidad (clásico)',
                     description: 'Alias de «Entidad» → Leer estado',
+                    i18n: { es: { name: 'Estado de entidad (clásico)', description: 'Alias de «Entidad» → Leer estado' }, en: { name: 'Estado de entidad (clásico)', description: 'Alias de «Entidad» → Leer estado' } }, // TODO i18n: EN temporal = ES
                     icon: 'Activity',
                     surface: 'control',
                     component: 'smart-home',

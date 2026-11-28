@@ -67,10 +67,12 @@ import { Search, X, Settings } from 'lucide-vue-next'
 import * as LucideIcons from 'lucide-vue-next'
 import { simpleIcon } from '../../composables/useSimpleIcons'
 import { useI18nStore } from '../../composables/useI18n'
+import { usePluginLocale } from '../../composables/usePluginLocale'
 import { actionSurfaceKind, matchesActionQuery } from '../../composables/useActionPresentation'
 import { LOCAL_ACTIONS } from '../../composables/useKeyEngine'
 
 const { t } = useI18nStore()
+const { currentLocale, localizeActionField } = usePluginLocale()
 
 interface Props {
   plugins: any[]
@@ -121,7 +123,7 @@ const flat = computed(() => {
     for (const [aid, adata] of pdata?.actions ?? []) {
       list.push({
         type: `${pid}.${aid}`,
-        name: adata?.name ?? aid,
+        name: localizeActionField(adata, 'name', currentLocale.value, aid),
         group,
         pid,
         icon: icons[adata?.icon] ?? simpleIcon(adata?.icon) ?? Settings,

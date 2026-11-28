@@ -112,6 +112,7 @@ export class PhotoshopPlugin {
                     id: 'tool-select',
                     name: 'Seleccionar herramienta',
                     description: 'Activa una herramienta de Photoshop (mover, marco, lazo, pincel, texto, mano, zoom…)',
+                    i18n: { es: { name: 'Seleccionar herramienta', description: 'Activa una herramienta de Photoshop (mover, marco, lazo, pincel, texto, mano, zoom…)' }, en: { name: 'Seleccionar herramienta', description: 'Activa una herramienta de Photoshop (mover, marco, lazo, pincel, texto, mano, zoom…)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Brush',
                     schema: {
                         type: 'object',
@@ -148,6 +149,7 @@ export class PhotoshopPlugin {
                     id: 'layer-ops',
                     name: 'Operación de capa',
                     description: 'Crea, duplica, combina o agrupa capas',
+                    i18n: { es: { name: 'Operación de capa', description: 'Crea, duplica, combina o agrupa capas' }, en: { name: 'Operación de capa', description: 'Crea, duplica, combina o agrupa capas' } }, // TODO i18n: EN temporal = ES
                     icon: 'Layers',
                     schema: {
                         type: 'object',
@@ -178,6 +180,7 @@ export class PhotoshopPlugin {
                     id: 'brush-size',
                     name: 'Tamaño de pincel',
                     description: 'Aumenta o reduce el tamaño del pincel',
+                    i18n: { es: { name: 'Tamaño de pincel', description: 'Aumenta o reduce el tamaño del pincel' }, en: { name: 'Tamaño de pincel', description: 'Aumenta o reduce el tamaño del pincel' } }, // TODO i18n: EN temporal = ES
                     icon: 'Circle',
                     surface: 'control',
                     component: 'creative-tools',
@@ -205,6 +208,7 @@ export class PhotoshopPlugin {
                     id: 'run-action',
                     name: 'Ejecutar acción',
                     description: 'Dispara una acción del panel Acciones mediante su atajo de teclado (las acciones de Photoshop se lanzan con la tecla asignada en el panel)',
+                    i18n: { es: { name: 'Ejecutar acción', description: 'Dispara una acción del panel Acciones mediante su atajo de teclado (las acciones de Photoshop se lanzan con la tecla asignada en el panel)' }, en: { name: 'Ejecutar acción', description: 'Dispara una acción del panel Acciones mediante su atajo de teclado (las acciones de Photoshop se lanzan con la tecla asignada en el panel)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Play',
                     schema: {
                         type: 'object',
@@ -227,6 +231,7 @@ export class PhotoshopPlugin {
                     id: 'history',
                     name: 'Deshacer / Rehacer',
                     description: 'Deshace o rehace cambios en Photoshop',
+                    i18n: { es: { name: 'Deshacer / Rehacer', description: 'Deshace o rehace cambios en Photoshop' }, en: { name: 'Deshacer / Rehacer', description: 'Deshace o rehace cambios en Photoshop' } }, // TODO i18n: EN temporal = ES
                     icon: 'Undo',
                     schema: {
                         type: 'object',
@@ -254,6 +259,7 @@ export class PhotoshopPlugin {
                     id: 'save-export',
                     name: 'Guardar / Exportar',
                     description: 'Guarda el documento o lo exporta para web',
+                    i18n: { es: { name: 'Guardar / Exportar', description: 'Guarda el documento o lo exporta para web' }, en: { name: 'Guardar / Exportar', description: 'Guarda el documento o lo exporta para web' } }, // TODO i18n: EN temporal = ES
                     icon: 'Save',
                     schema: {
                         type: 'object',

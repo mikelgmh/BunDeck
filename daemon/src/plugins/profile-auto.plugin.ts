@@ -48,6 +48,7 @@ export class ProfileAutoPlugin {
                     id: 'add-rule',
                     name: 'Añadir regla',
                     description: 'Asocia una app con un perfil (cambio automático)',
+                    i18n: { es: { name: 'Añadir regla', description: 'Asocia una app con un perfil (cambio automático)' }, en: { name: 'Añadir regla', description: 'Asocia una app con un perfil (cambio automático)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Plus',
                     schema: {
                         type: 'object',
@@ -83,6 +84,7 @@ export class ProfileAutoPlugin {
                     id: 'remove-rule',
                     name: 'Quitar regla',
                     description: 'Elimina la regla de una app',
+                    i18n: { es: { name: 'Quitar regla', description: 'Elimina la regla de una app' }, en: { name: 'Quitar regla', description: 'Elimina la regla de una app' } }, // TODO i18n: EN temporal = ES
                     icon: 'Trash2',
                     schema: {
                         type: 'object',
@@ -99,6 +101,7 @@ export class ProfileAutoPlugin {
                     id: 'list-rules',
                     name: 'Listar reglas',
                     description: 'Muestra las reglas app → perfil',
+                    i18n: { es: { name: 'Listar reglas', description: 'Muestra las reglas app → perfil' }, en: { name: 'Listar reglas', description: 'Muestra las reglas app → perfil' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     schema: { type: 'object', properties: {} }
                 },
@@ -106,6 +109,7 @@ export class ProfileAutoPlugin {
                     id: 'set-enabled',
                     name: 'Activar / desactivar',
                     description: 'Activa o desactiva la vigilancia de la ventana activa',
+                    i18n: { es: { name: 'Activar / desactivar', description: 'Activa o desactiva la vigilancia de la ventana activa' }, en: { name: 'Activar / desactivar', description: 'Activa o desactiva la vigilancia de la ventana activa' } }, // TODO i18n: EN temporal = ES
                     icon: 'ToggleRight',
                     schema: {
                         type: 'object',
@@ -122,6 +126,7 @@ export class ProfileAutoPlugin {
                     id: 'status',
                     name: 'Estado',
                     description: 'Indica si la vigilancia está activa y cuántas reglas hay',
+                    i18n: { es: { name: 'Estado', description: 'Indica si la vigilancia está activa y cuántas reglas hay' }, en: { name: 'Estado', description: 'Indica si la vigilancia está activa y cuántas reglas hay' } }, // TODO i18n: EN temporal = ES
                     icon: 'Info',
                     surface: 'control',
                     component: 'workflow-control',
@@ -132,6 +137,7 @@ export class ProfileAutoPlugin {
                     id: 'switch-profile',
                     name: 'Cambiar de perfil',
                     description: 'Cambia manualmente al perfil indicado',
+                    i18n: { es: { name: 'Cambiar de perfil', description: 'Cambia manualmente al perfil indicado' }, en: { name: 'Cambiar de perfil', description: 'Cambia manualmente al perfil indicado' } }, // TODO i18n: EN temporal = ES
                     icon: 'UserCheck',
                     surface: 'control',
                     component: 'workflow-control',
@@ -152,6 +158,7 @@ export class ProfileAutoPlugin {
                     id: 'restore',
                     name: 'Restaurar perfil',
                     description: 'Vuelve al perfil anterior al último cambio automático',
+                    i18n: { es: { name: 'Restaurar perfil', description: 'Vuelve al perfil anterior al último cambio automático' }, en: { name: 'Restaurar perfil', description: 'Vuelve al perfil anterior al último cambio automático' } }, // TODO i18n: EN temporal = ES
                     icon: 'Undo2',
                     schema: { type: 'object', properties: {} }
                 }

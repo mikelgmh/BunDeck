@@ -95,6 +95,7 @@ export class MidiOscPlugin {
                     id: 'send-osc',
                     name: 'Enviar OSC',
                     description: 'Envía un mensaje OSC (dirección + argumentos) por UDP',
+                    i18n: { es: { name: 'Enviar OSC', description: 'Envía un mensaje OSC (dirección + argumentos) por UDP' }, en: { name: 'Enviar OSC', description: 'Envía un mensaje OSC (dirección + argumentos) por UDP' } }, // TODO i18n: EN temporal = ES
                     icon: 'Radio',
                     surface: 'control',
                     component: 'workflow-control',
@@ -138,6 +139,7 @@ export class MidiOscPlugin {
                     id: 'send-midi',
                     name: 'Enviar MIDI (próximamente)',
                     description: 'Placeholder: BunDeck aún no incluye salida MIDI nativa; devuelve cómo hacerlo hoy',
+                    i18n: { es: { name: 'Enviar MIDI (próximamente)', description: 'Placeholder: BunDeck aún no incluye salida MIDI nativa; devuelve cómo hacerlo hoy' }, en: { name: 'Enviar MIDI (próximamente)', description: 'Placeholder: BunDeck aún no incluye salida MIDI nativa; devuelve cómo hacerlo hoy' } }, // TODO i18n: EN temporal = ES
                     icon: 'Music',
                     schema: {
                         type: 'object',
@@ -168,6 +170,7 @@ export class MidiOscPlugin {
                     id: 'list-ports',
                     name: 'Puertos disponibles',
                     description: 'Informa de las capacidades MIDI/OSC de este equipo',
+                    i18n: { es: { name: 'Puertos disponibles', description: 'Informa de las capacidades MIDI/OSC de este equipo' }, en: { name: 'Puertos disponibles', description: 'Informa de las capacidades MIDI/OSC de este equipo' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     schema: { type: 'object', properties: {}, required: [] },
                 },

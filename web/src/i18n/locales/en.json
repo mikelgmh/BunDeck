@@ -1052,7 +1052,7 @@
         "remoteUiRevoke": "Revoke",
         "remoteUiRename": "Rename",
         "remoteUiRevoked": "Revoked",
-        "remoteUiOff": "UI remota desactivada",
+        "remoteUiOff": "Remote UI disabled",
         "remoteUiEmptyUa": "unknown browser",
         "deckLayouts": "Layouts",
         "deckLegacy": "Classic grid",
@@ -1141,6 +1141,26 @@
         "deckPairedOpen": "Open on phone",
         "pause": "Pause",
         "start": "Start",
-        "reset": "Reset"
+        "reset": "Reset",
+        "opContains": "Contains",
+        "opExact": "Exactly matches",
+        "opStarts": "Starts with",
+        "opRegex": "Regular expression",
+        "settingsReset": "Shortcuts reset",
+        "actionFallback": {
+            "shell": "Shell command",
+            "http": "HTTP request",
+            "hotkey": "Keyboard shortcut",
+            "type": "Type text",
+            "multimedia": "Multimedia",
+            "page": "Change page",
+            "openApp": "Open application",
+            "openUrl": "Open URL",
+            "delay": "Delay",
+            "toastPlaceholder": "Text with {vars}"
+        },
+        "actionRemove": "Remove action",
+        "actionReorder": "Drag to reorder",
+        "actionNoConfig": "No configuration available for this action"
     }
 }

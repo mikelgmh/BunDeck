@@ -1,15 +1,7 @@
-import { createI18n } from 'vue-i18n'
-import en from './locales/en.json'
-import es from './locales/es.json'
+// Fuente única de i18n: el singleton vive en useI18n.ts.
+// Este módulo solo lo re-exporta para no mantener dos instancias.
+import { getI18n } from '../composables/useI18n'
 
-const i18n = createI18n({
-  legacy: false,
-  locale: 'es', // default locale
-  fallbackLocale: 'en',
-  messages: {
-    en,
-    es
-  }
-})
+const i18n = getI18n()
 
 export default i18n

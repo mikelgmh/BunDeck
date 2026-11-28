@@ -145,7 +145,8 @@ describe('LAN con invite caducado + relayFallback: escape sin bucle', () => {
     await btn.trigger('click')
     await nextTick()
     expect(writeText).toHaveBeenCalledWith('AbC123xYz')
-    expect(btn.text()).toBe('Código copiado')
+    // Idioma por defecto inglés (sin guardado ni PC en español).
+    expect(btn.text()).toBe('Code copied')
 
     wrapper.unmount()
   })

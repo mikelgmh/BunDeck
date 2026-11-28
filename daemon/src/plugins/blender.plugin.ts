@@ -102,6 +102,7 @@ export class BlenderPlugin {
                     id: 'viewport',
                     name: 'Vista del viewport',
                     description: 'Cambia la vista 3D (frontal, cenital, cámara, sombreado…)',
+                    i18n: { es: { name: 'Vista del viewport', description: 'Cambia la vista 3D (frontal, cenital, cámara, sombreado…)' }, en: { name: 'Vista del viewport', description: 'Cambia la vista 3D (frontal, cenital, cámara, sombreado…)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Box',
                     surface: 'control',
                     component: 'creative-tools',
@@ -137,6 +138,7 @@ export class BlenderPlugin {
                     id: 'render',
                     name: 'Renderizar',
                     description: 'Lanza o cancela un render (F12, Ctrl+F12)',
+                    i18n: { es: { name: 'Renderizar', description: 'Lanza o cancela un render (F12, Ctrl+F12)' }, en: { name: 'Renderizar', description: 'Lanza o cancela un render (F12, Ctrl+F12)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Image',
                     schema: {
                         type: 'object',
@@ -163,6 +165,7 @@ export class BlenderPlugin {
                     id: 'save',
                     name: 'Guardar',
                     description: 'Guarda el blend actual (Ctrl+S, incremental…)',
+                    i18n: { es: { name: 'Guardar', description: 'Guarda el blend actual (Ctrl+S, incremental…)' }, en: { name: 'Guardar', description: 'Guarda el blend actual (Ctrl+S, incremental…)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Save',
                     schema: {
                         type: 'object',
@@ -189,6 +192,7 @@ export class BlenderPlugin {
                     id: 'custom',
                     name: 'Atajo libre',
                     description: 'Envía cualquier atajo a Blender (para tus keymaps personalizados)',
+                    i18n: { es: { name: 'Atajo libre', description: 'Envía cualquier atajo a Blender (para tus keymaps personalizados)' }, en: { name: 'Atajo libre', description: 'Envía cualquier atajo a Blender (para tus keymaps personalizados)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Keyboard',
                     schema: {
                         type: 'object',

@@ -98,6 +98,7 @@ export class PremierePlugin {
                     id: 'transport',
                     name: 'Transporte',
                     description: 'Reproduce, pausa y navega por la línea de tiempo (JKL, Espacio, flechas, Inicio/Fin)',
+                    i18n: { es: { name: 'Transporte', description: 'Reproduce, pausa y navega por la línea de tiempo (JKL, Espacio, flechas, Inicio/Fin)' }, en: { name: 'Transporte', description: 'Reproduce, pausa y navega por la línea de tiempo (JKL, Espacio, flechas, Inicio/Fin)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Play',
                     surface: 'control',
                     component: 'creative-tools',
@@ -131,6 +132,7 @@ export class PremierePlugin {
                     id: 'mark',
                     name: 'Marca entrada/salida',
                     description: 'Marca puntos de entrada (I) y salida (O) o los limpia',
+                    i18n: { es: { name: 'Marca entrada/salida', description: 'Marca puntos de entrada (I) y salida (O) o los limpia' }, en: { name: 'Marca entrada/salida', description: 'Marca puntos de entrada (I) y salida (O) o los limpia' } }, // TODO i18n: EN temporal = ES
                     icon: 'Scissors',
                     schema: {
                         type: 'object',
@@ -157,6 +159,7 @@ export class PremierePlugin {
                     id: 'marker',
                     name: 'Marcador',
                     description: 'Añade marcadores y salta entre ellos',
+                    i18n: { es: { name: 'Marcador', description: 'Añade marcadores y salta entre ellos' }, en: { name: 'Marcador', description: 'Añade marcadores y salta entre ellos' } }, // TODO i18n: EN temporal = ES
                     icon: 'Flag',
                     schema: {
                         type: 'object',
@@ -183,6 +186,7 @@ export class PremierePlugin {
                     id: 'history',
                     name: 'Deshacer / Rehacer',
                     description: 'Deshace o rehace cambios',
+                    i18n: { es: { name: 'Deshacer / Rehacer', description: 'Deshace o rehace cambios' }, en: { name: 'Deshacer / Rehacer', description: 'Deshace o rehace cambios' } }, // TODO i18n: EN temporal = ES
                     icon: 'Undo',
                     schema: {
                         type: 'object',
@@ -208,6 +212,7 @@ export class PremierePlugin {
                     id: 'save',
                     name: 'Guardar proyecto',
                     description: 'Guarda el proyecto actual (Ctrl+S)',
+                    i18n: { es: { name: 'Guardar proyecto', description: 'Guarda el proyecto actual (Ctrl+S)' }, en: { name: 'Guardar proyecto', description: 'Guarda el proyecto actual (Ctrl+S)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Save',
                     schema: {
                         type: 'object',
@@ -221,6 +226,7 @@ export class PremierePlugin {
                     id: 'export',
                     name: 'Exportar',
                     description: 'Abre el diálogo de exportación (Ctrl+M) con preset opcional',
+                    i18n: { es: { name: 'Exportar', description: 'Abre el diálogo de exportación (Ctrl+M) con preset opcional' }, en: { name: 'Exportar', description: 'Abre el diálogo de exportación (Ctrl+M) con preset opcional' } }, // TODO i18n: EN temporal = ES
                     icon: 'Share',
                     schema: {
                         type: 'object',
@@ -243,6 +249,7 @@ export class PremierePlugin {
                     id: 'jog-shuttle',
                     name: 'Jog / Shuttle',
                     description: 'Control jog/shuttle experimental: envía J, K o L (sin rueda física; el giro lo simula con pulsaciones)',
+                    i18n: { es: { name: 'Jog / Shuttle', description: 'Control jog/shuttle experimental: envía J, K o L (sin rueda física; el giro lo simula con pulsaciones)' }, en: { name: 'Jog / Shuttle', description: 'Control jog/shuttle experimental: envía J, K o L (sin rueda física; el giro lo simula con pulsaciones)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Disc',
                     schema: {
                         type: 'object',

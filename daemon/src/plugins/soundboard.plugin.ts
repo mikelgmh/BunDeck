@@ -68,6 +68,7 @@ export class SoundboardPlugin {
                 {
                     id: 'play', name: 'Reproducir sonido', icon: 'Play',
                     description: 'Reproduce un archivo de audio local',
+                    i18n: { es: { name: 'Reproducir sonido', description: 'Reproduce un archivo de audio local' }, en: { name: 'Reproducir sonido', description: 'Reproduce un archivo de audio local' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'soundboard',
                     schema: {
@@ -89,16 +90,19 @@ export class SoundboardPlugin {
                 {
                     id: 'stop', name: 'Detener sonido', icon: 'Square',
                     description: 'Detiene la reproducción iniciada por este plugin',
+                    i18n: { es: { name: 'Detener sonido', description: 'Detiene la reproducción iniciada por este plugin' }, en: { name: 'Detener sonido', description: 'Detiene la reproducción iniciada por este plugin' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
                     id: 'set-output', name: 'Ver salida de audio', icon: 'Speaker',
                     description: 'Muestra qué salida de audio usa el sistema (informativo)',
+                    i18n: { es: { name: 'Ver salida de audio', description: 'Muestra qué salida de audio usa el sistema (informativo)' }, en: { name: 'Ver salida de audio', description: 'Muestra qué salida de audio usa el sistema (informativo)' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
                     id: 'list-sounds', name: 'Listar sonidos', icon: 'ListMusic',
                     description: 'Lista los audios disponibles en la carpeta de sonidos',
+                    i18n: { es: { name: 'Listar sonidos', description: 'Lista los audios disponibles en la carpeta de sonidos' }, en: { name: 'Listar sonidos', description: 'Lista los audios disponibles en la carpeta de sonidos' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {

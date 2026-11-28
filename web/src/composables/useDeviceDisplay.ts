@@ -29,8 +29,8 @@ export interface DeviceDisplay {
 
 export const DEVICE_DISPLAY_DEFAULTS: DeviceDisplay = {
   brightness: 100,
-  dimAfterSec: 300,
-  idleMinutes: 15,
+  dimAfterSec: 0,
+  idleMinutes: 0,
   idleAction: 'off',
 }
 
@@ -107,7 +107,7 @@ export async function saveDeviceDisplay(
 /**
  * Minutos de idle que sigue el velo de ESTA pantalla. Lo sincroniza el
  * diálogo de ajustes al cargar/guardar la pantalla del dispositivo; por
- * defecto 15 (igual que el daemon).
+ * defecto 0 (desactivado, igual que el daemon).
  */
 export const webIdleMinutes = ref<number>(DEVICE_DISPLAY_DEFAULTS.idleMinutes)
 

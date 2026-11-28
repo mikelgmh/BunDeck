@@ -25,9 +25,9 @@ pub enum State {
 impl State {
     pub fn label(self) -> &'static str {
         match self {
-            State::Ok => "en línea",
-            State::Starting => "arrancando…",
-            State::Down => "detenido",
+            State::Ok => crate::strings::get("state.ok"),
+            State::Starting => crate::strings::get("state.starting"),
+            State::Down => crate::strings::get("state.down"),
         }
     }
 }
@@ -50,18 +50,19 @@ impl Snapshot {
     /// Estado inmediato sin I/O para pintar la ventana mientras se sondea
     /// el daemon en segundo plano.
     pub fn initial() -> Self {
+        let checking = crate::strings::get("state.checking").to_string();
         Self {
             api: ServiceSnapshot {
                 state: State::Starting,
-                detail: "consultando…".to_string(),
+                detail: checking.clone(),
             },
             ws: ServiceSnapshot {
                 state: State::Starting,
-                detail: "consultando…".to_string(),
+                detail: checking.clone(),
             },
             frontend: ServiceSnapshot {
                 state: State::Starting,
-                detail: "consultando…".to_string(),
+                detail: checking,
             },
             dashboard_url: format!("http://localhost:{}", frontend_port()),
         }

@@ -29,8 +29,8 @@ export interface DeviceDisplaySettings {
 
 export const DEFAULT_DISPLAY_SETTINGS: DeviceDisplaySettings = {
   brightness: 100,
-  dimAfterSec: 300,
-  idleMinutes: 15,
+  dimAfterSec: 0,
+  idleMinutes: 0,
   idleAction: 'off',
 };
 
@@ -102,6 +102,41 @@ export function parseDisplaySettings(
     idleMinutes: normalizeIdleMinutes(raw('idleMinutes')),
     idleAction: normalizeIdleAction(raw('idleAction')),
   };
+}
+
+/**
+ * ¿Tiene el dispositivo alguna clave de pantalla guardada (`devices.<id>.*`)?
+ * Distingue "virgen" (nunca configurado → dim/idle desactivados) de
+ * "configurado" (aunque sea parcial: se respeta lo guardado + defaults).
+ */
+export function hasDisplaySettings(
+  get: (key: string) => string | null | undefined,
+  deviceId: string,
+): boolean {
+  if (!deviceId) return false;
+  return DISPLAY_SETTING_FIELDS.some((f) => {
+    try {
+      const v = get(displaySettingKey(deviceId, f));
+      return v !== null && v !== undefined;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Ruta efectiva de ajustes: sin ninguna clave guardada → brillo 100 con
+ * dim/idle desactivados (0/0); con ≥1 clave → `parseDisplaySettings` actual.
+ * El POST persiste explícito, así que una vez guardado algo el dispositivo
+ * deja de considerarse virgen.
+ */
+export function resolveEffectiveDisplaySettings(
+  get: (key: string) => string | null | undefined,
+  deviceId: string,
+): DeviceDisplaySettings {
+  if (!deviceId) return { ...DEFAULT_DISPLAY_SETTINGS };
+  if (!hasDisplaySettings(get, deviceId)) return { ...DEFAULT_DISPLAY_SETTINGS };
+  return parseDisplaySettings(get, deviceId);
 }
 
 /** Valida un patch parcial (del POST del API). Lanza Error con mensaje claro si inválido. */

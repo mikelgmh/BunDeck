@@ -150,6 +150,7 @@ export class ObsPlugin {
                     id: 'scene',
                     name: 'Cambiar de escena',
                     description: 'Cambia la escena actual del programa en OBS',
+                    i18n: { es: { name: 'Cambiar de escena', description: 'Cambia la escena actual del programa en OBS' }, en: { name: 'Cambiar de escena', description: 'Cambia la escena actual del programa en OBS' } }, // TODO i18n: EN temporal = ES
                     icon: 'Layers',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
                     optionsFrom: { field: 'scene', sourceAction: 'scene-list', cacheMs: 30000 },
@@ -175,6 +176,7 @@ export class ObsPlugin {
                     id: 'source',
                     name: 'Alternar fuente',
                     description: 'Muestra, oculta o alterna la visibilidad de una fuente en una escena',
+                    i18n: { es: { name: 'Alternar fuente', description: 'Muestra, oculta o alterna la visibilidad de una fuente en una escena' }, en: { name: 'Alternar fuente', description: 'Muestra, oculta o alterna la visibilidad de una fuente en una escena' } }, // TODO i18n: EN temporal = ES
                     icon: 'Eye',
                     schema: {
                         type: 'object',
@@ -216,6 +218,7 @@ export class ObsPlugin {
                     id: 'stream',
                     name: 'Iniciar / detener directo',
                     description: 'Inicia, detiene o alterna la emisión en directo',
+                    i18n: { es: { name: 'Iniciar / detener directo', description: 'Inicia, detiene o alterna la emisión en directo' }, en: { name: 'Iniciar / detener directo', description: 'Inicia, detiene o alterna la emisión en directo' } }, // TODO i18n: EN temporal = ES
                     icon: 'Radio',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
                     variables: [{ name: 'obsStreaming', type: 'bool', label: 'En directo' }],
@@ -250,6 +253,7 @@ export class ObsPlugin {
                     id: 'record',
                     name: 'Grabar',
                     description: 'Inicia, detiene o alterna la grabación',
+                    i18n: { es: { name: 'Grabar', description: 'Inicia, detiene o alterna la grabación' }, en: { name: 'Grabar', description: 'Inicia, detiene o alterna la grabación' } }, // TODO i18n: EN temporal = ES
                     icon: 'Video',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
                     variables: [{ name: 'obsRecording', type: 'bool', label: 'Grabando' }],
@@ -284,6 +288,7 @@ export class ObsPlugin {
                     id: 'replay',
                     name: 'Guardar repetición',
                     description: 'Guarda el búfer de repetición (replay buffer) en disco',
+                    i18n: { es: { name: 'Guardar repetición', description: 'Guarda el búfer de repetición (replay buffer) en disco' }, en: { name: 'Guardar repetición', description: 'Guarda el búfer de repetición (replay buffer) en disco' } }, // TODO i18n: EN temporal = ES
                     icon: 'History',
                     schema: {
                         type: 'object',
@@ -297,6 +302,7 @@ export class ObsPlugin {
                     id: 'mute',
                     name: 'Micrófono (mutear)',
                     description: 'Silencia, reactiva o alterna el audio de una fuente de entrada',
+                    i18n: { es: { name: 'Micrófono (mutear)', description: 'Silencia, reactiva o alterna el audio de una fuente de entrada' }, en: { name: 'Micrófono (mutear)', description: 'Silencia, reactiva o alterna el audio de una fuente de entrada' } }, // TODO i18n: EN temporal = ES
                     icon: 'MicOff',
                     variables: [{ name: 'obsMuted', type: 'bool', label: 'Fuente silenciada' }],
                     schema: {
@@ -329,6 +335,7 @@ export class ObsPlugin {
                     id: 'studio-mode',
                     name: 'Modo estudio',
                     description: 'Activa, desactiva o alterna el modo estudio (preview + programa)',
+                    i18n: { es: { name: 'Modo estudio', description: 'Activa, desactiva o alterna el modo estudio (preview + programa)' }, en: { name: 'Modo estudio', description: 'Activa, desactiva o alterna el modo estudio (preview + programa)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Columns2',
                     schema: {
                         type: 'object',
@@ -360,6 +367,7 @@ export class ObsPlugin {
                     id: 'filter-toggle',
                     name: 'Alternar filtro de fuente',
                     description: 'Activa, desactiva o alterna un filtro de una fuente',
+                    i18n: { es: { name: 'Alternar filtro de fuente', description: 'Activa, desactiva o alterna un filtro de una fuente' }, en: { name: 'Alternar filtro de fuente', description: 'Activa, desactiva o alterna un filtro de una fuente' } }, // TODO i18n: EN temporal = ES
                     icon: 'SlidersHorizontal',
                     schema: {
                         type: 'object',
@@ -401,6 +409,7 @@ export class ObsPlugin {
                     id: 'transition',
                     name: 'Transición',
                     description: 'Cambia la transición activa y/o su duración',
+                    i18n: { es: { name: 'Transición', description: 'Cambia la transición activa y/o su duración' }, en: { name: 'Transición', description: 'Cambia la transición activa y/o su duración' } }, // TODO i18n: EN temporal = ES
                     icon: 'ArrowRightLeft',
                     schema: {
                         type: 'object',
@@ -436,6 +445,7 @@ export class ObsPlugin {
                     id: 'screenshot',
                     name: 'Foto de fuente/escena',
                     description: 'Captura una imagen de una fuente o escena (GetSourceScreenshot)',
+                    i18n: { es: { name: 'Foto de fuente/escena', description: 'Captura una imagen de una fuente o escena (GetSourceScreenshot)' }, en: { name: 'Foto de fuente/escena', description: 'Captura una imagen de una fuente o escena (GetSourceScreenshot)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Camera',
                     schema: {
                         type: 'object',
@@ -474,6 +484,7 @@ export class ObsPlugin {
                     id: 'scene-list',
                     name: 'Listar escenas',
                     description: 'Devuelve las escenas disponibles y cuál está en programa',
+                    i18n: { es: { name: 'Listar escenas', description: 'Devuelve las escenas disponibles y cuál está en programa' }, en: { name: 'Listar escenas', description: 'Devuelve las escenas disponibles y cuál está en programa' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     timeoutMs: OBS_DEFAULT_TIMEOUT_MS,
                     schema: {
@@ -488,6 +499,7 @@ export class ObsPlugin {
                     id: 'status',
                     name: 'Estado de OBS',
                     description: 'Directo/grabación actuales para iconos dinámicos (states: live/offline, recording/stopped)',
+                    i18n: { es: { name: 'Estado de OBS', description: 'Directo/grabación actuales para iconos dinámicos (states: live/offline, recording/stopped)' }, en: { name: 'Estado de OBS', description: 'Directo/grabación actuales para iconos dinámicos (states: live/offline, recording/stopped)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Activity',
                     dynamic: true,
                     surface: 'control',

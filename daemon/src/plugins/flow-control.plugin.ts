@@ -61,6 +61,7 @@ export class FlowControlPlugin {
                     id: 'wait',
                     name: 'Esperar',
                     description: 'Pausa la ejecución durante N milisegundos',
+                    i18n: { es: { name: 'Esperar', description: 'Pausa la ejecución durante N milisegundos' }, en: { name: 'Esperar', description: 'Pausa la ejecución durante N milisegundos' } }, // TODO i18n: EN temporal = ES
                     icon: 'Timer',
                     schema: {
                         type: 'object',
@@ -78,6 +79,7 @@ export class FlowControlPlugin {
                     id: 'set-var',
                     name: 'Fijar variable',
                     description: 'Asigna un valor a una variable global del motor de flujos',
+                    i18n: { es: { name: 'Fijar variable', description: 'Asigna un valor a una variable global del motor de flujos' }, en: { name: 'Fijar variable', description: 'Asigna un valor a una variable global del motor de flujos' } }, // TODO i18n: EN temporal = ES
                     icon: 'Variable',
                     surface: 'control',
                     component: 'workflow-control',
@@ -99,6 +101,7 @@ export class FlowControlPlugin {
                     id: 'toggle-var',
                     name: 'Alternar variable',
                     description: 'Alterna una variable booleana (o 0/1, o vacío/«sí»)',
+                    i18n: { es: { name: 'Alternar variable', description: 'Alterna una variable booleana (o 0/1, o vacío/«sí»)' }, en: { name: 'Alternar variable', description: 'Alterna una variable booleana (o 0/1, o vacío/«sí»)' } }, // TODO i18n: EN temporal = ES
                     icon: 'ToggleLeft',
                     surface: 'control',
                     component: 'workflow-control',
@@ -115,6 +118,7 @@ export class FlowControlPlugin {
                     id: 'get-var',
                     name: 'Leer variable',
                     description: 'Devuelve el valor actual de una variable global',
+                    i18n: { es: { name: 'Leer variable', description: 'Devuelve el valor actual de una variable global' }, en: { name: 'Leer variable', description: 'Devuelve el valor actual de una variable global' } }, // TODO i18n: EN temporal = ES
                     icon: 'Eye',
                     surface: 'control',
                     component: 'workflow-control',
@@ -131,6 +135,7 @@ export class FlowControlPlugin {
                     id: 'log',
                     name: 'Registrar',
                     description: 'Escribe una entrada en el registro del daemon',
+                    i18n: { es: { name: 'Registrar', description: 'Escribe una entrada en el registro del daemon' }, en: { name: 'Registrar', description: 'Escribe una entrada en el registro del daemon' } }, // TODO i18n: EN temporal = ES
                     icon: 'ScrollText',
                     schema: {
                         type: 'object',

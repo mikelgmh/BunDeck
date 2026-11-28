@@ -31,6 +31,7 @@ export class BrowserPlugin {
                     id: 'open-url',
                     name: 'Open URL',
                     description: 'Open a URL in the default browser',
+                    i18n: { es: { name: 'Open URL', description: 'Open a URL in the default browser' }, en: { name: 'Open URL', description: 'Open a URL in the default browser' } }, // TODO i18n: EN temporal = ES
                     icon: 'Globe',
                     schema: {
                         type: 'object',

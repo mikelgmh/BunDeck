@@ -130,6 +130,7 @@ export class ClipboardPlugin {
                     id: 'save-slot',
                     name: 'Guardar slot',
                     description: 'Guarda texto en un slot (o captura el portapapeles actual)',
+                    i18n: { es: { name: 'Guardar slot', description: 'Guarda texto en un slot (o captura el portapapeles actual)' }, en: { name: 'Guardar slot', description: 'Guarda texto en un slot (o captura el portapapeles actual)' } }, // TODO i18n: EN temporal = ES
                     icon: 'ClipboardCopy',
                     surface: 'control',
                     component: 'workflow-control',
@@ -154,6 +155,7 @@ export class ClipboardPlugin {
                     id: 'paste-slot',
                     name: 'Pegar slot',
                     description: 'Copia el slot al portapapeles del sistema',
+                    i18n: { es: { name: 'Pegar slot', description: 'Copia el slot al portapapeles del sistema' }, en: { name: 'Pegar slot', description: 'Copia el slot al portapapeles del sistema' } }, // TODO i18n: EN temporal = ES
                     icon: 'ClipboardPaste',
                     surface: 'control',
                     component: 'workflow-control',
@@ -173,6 +175,7 @@ export class ClipboardPlugin {
                     id: 'list-slots',
                     name: 'Listar slots',
                     description: 'Muestra los slots guardados (vista previa)',
+                    i18n: { es: { name: 'Listar slots', description: 'Muestra los slots guardados (vista previa)' }, en: { name: 'Listar slots', description: 'Muestra los slots guardados (vista previa)' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     surface: 'control',
                     component: 'workflow-control',
@@ -193,6 +196,7 @@ export class ClipboardPlugin {
                     id: 'history',
                     name: 'Historial',
                     description: 'Últimos textos guardados o pegados',
+                    i18n: { es: { name: 'Historial', description: 'Últimos textos guardados o pegados' }, en: { name: 'Historial', description: 'Últimos textos guardados o pegados' } }, // TODO i18n: EN temporal = ES
                     icon: 'History',
                     surface: 'control',
                     component: 'workflow-control',

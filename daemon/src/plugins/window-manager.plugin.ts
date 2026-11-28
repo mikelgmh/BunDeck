@@ -63,6 +63,7 @@ export class WindowManagerPlugin {
                     id: 'window-action',
                     name: 'Acción de ventana',
                     description: 'Maximiza, minimiza, acopla o mueve la ventana activa',
+                    i18n: { es: { name: 'Acción de ventana', description: 'Maximiza, minimiza, acopla o mueve la ventana activa' }, en: { name: 'Acción de ventana', description: 'Maximiza, minimiza, acopla o mueve la ventana activa' } }, // TODO i18n: EN temporal = ES
                     icon: 'AppWindow',
                     schema: {
                         type: 'object',
@@ -88,6 +89,7 @@ export class WindowManagerPlugin {
                     id: 'layout-save',
                     name: 'Guardar layout',
                     description: 'Guarda un layout con nombre (geometría opcional)',
+                    i18n: { es: { name: 'Guardar layout', description: 'Guarda un layout con nombre (geometría opcional)' }, en: { name: 'Guardar layout', description: 'Guarda un layout con nombre (geometría opcional)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Save',
                     schema: {
                         type: 'object',
@@ -114,6 +116,7 @@ export class WindowManagerPlugin {
                     id: 'layout-restore',
                     name: 'Restaurar layout',
                     description: 'Aplica la geometría guardada de un layout a la ventana activa',
+                    i18n: { es: { name: 'Restaurar layout', description: 'Aplica la geometría guardada de un layout a la ventana activa' }, en: { name: 'Restaurar layout', description: 'Aplica la geometría guardada de un layout a la ventana activa' } }, // TODO i18n: EN temporal = ES
                     icon: 'FolderOpen',
                     schema: {
                         type: 'object',
@@ -131,6 +134,7 @@ export class WindowManagerPlugin {
                     id: 'layout-list',
                     name: 'Listar layouts',
                     description: 'Muestra los layouts guardados',
+                    i18n: { es: { name: 'Listar layouts', description: 'Muestra los layouts guardados' }, en: { name: 'Listar layouts', description: 'Muestra los layouts guardados' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     surface: 'control',
                     component: 'workflow-control',

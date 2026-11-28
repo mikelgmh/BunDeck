@@ -95,6 +95,7 @@ export class WeatherPlugin {
                     id: 'now',
                     name: 'Tiempo ahora',
                     description: 'Temperatura, condición, lluvia y viento actuales',
+                    i18n: { es: { name: 'Tiempo ahora', description: 'Temperatura, condición, lluvia y viento actuales' }, en: { name: 'Tiempo ahora', description: 'Temperatura, condición, lluvia y viento actuales' } }, // TODO i18n: EN temporal = ES
                     icon: 'CloudSun',
                     dynamic: true,
                     surface: 'control',
@@ -130,6 +131,7 @@ export class WeatherPlugin {
                     id: 'forecast',
                     name: 'Pronóstico',
                     description: 'Máximas/mínimas y lluvia de los próximos días (1-7)',
+                    i18n: { es: { name: 'Pronóstico', description: 'Máximas/mínimas y lluvia de los próximos días (1-7)' }, en: { name: 'Pronóstico', description: 'Máximas/mínimas y lluvia de los próximos días (1-7)' } }, // TODO i18n: EN temporal = ES
                     icon: 'CalendarCloud',
                     surface: 'control',
                     component: 'status-cards',
@@ -156,6 +158,7 @@ export class WeatherPlugin {
                     id: 'search-place',
                     name: 'Buscar lugar',
                     description: 'Resuelve un nombre de ciudad a latitud/longitud (para rellenar los ajustes)',
+                    i18n: { es: { name: 'Buscar lugar', description: 'Resuelve un nombre de ciudad a latitud/longitud (para rellenar los ajustes)' }, en: { name: 'Buscar lugar', description: 'Resuelve un nombre de ciudad a latitud/longitud (para rellenar los ajustes)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Search',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {

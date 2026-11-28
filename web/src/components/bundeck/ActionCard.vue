@@ -68,7 +68,7 @@
         type="text"
         class="bd-inp"
         :value="action.parameters?.text ?? ''"
-        placeholder="Texto con {{variables}}"
+        :placeholder="t('bd.actionFallback.toastPlaceholder', { vars: '{{variables}}' })"
         @input="emit('update-param', index, 'text', ($event.target as HTMLInputElement).value)"
       />
     </div>
@@ -194,10 +194,12 @@ import { X, Settings, Variable, ToggleLeft, MessageSquare } from 'lucide-vue-nex
 import { dynamicIcon } from '../../composables/useDynamicIcon'
 import SchemaForm from '../SchemaForm.vue'
 import { useI18nStore } from '../../composables/useI18n'
+import { usePluginLocale } from '../../composables/usePluginLocale'
 import { actionSurfaceKind } from '../../composables/useActionPresentation'
 import { vars } from '../../composables/useVars'
 
 const { t } = useI18nStore()
+const { currentLocale, localizeActionField } = usePluginLocale()
 
 interface Props {
   action: any
@@ -239,18 +241,18 @@ const actionName = (type: string) => {
   if (type === 'local.toggle-var') return t('bd.varToggle')
   if (type === 'local.toast') return t('bd.varToast')
   const found = findPluginAction(type)
-  if (found?.name) return found.name
+  if (found) return localizeActionField(found, 'name', currentLocale.value, type)
   const base = type.includes('.') ? type.split('.')[1] : type
   const names: Record<string, string> = {
-    shell: 'Comando Shell',
-    http: 'Petición HTTP',
-    hotkey: 'Atajo de Teclado',
-    type: 'Escribir Texto',
-    multimedia: 'Multimedia',
-    page: 'Cambiar Página',
-    'open-app': 'Abrir Aplicación',
-    'open-url': 'Abrir URL',
-    delay: 'Retraso'
+    shell: t('bd.actionFallback.shell'),
+    http: t('bd.actionFallback.http'),
+    hotkey: t('bd.actionFallback.hotkey'),
+    type: t('bd.actionFallback.type'),
+    multimedia: t('bd.actionFallback.multimedia'),
+    page: t('bd.actionFallback.page'),
+    'open-app': t('bd.actionFallback.openApp'),
+    'open-url': t('bd.actionFallback.openUrl'),
+    delay: t('bd.actionFallback.delay')
   }
   return names[base] ?? base.toUpperCase()
 }
@@ -281,7 +283,7 @@ const actionMeta = (type: string) => {
     dynamicOptions: found?.optionsFrom ?? null,
     pluginName: pluginData?.manifest?.name ?? pluginData?.name ?? pid,
     hasPluginSettings: !!settingsProperties && Object.keys(settingsProperties).length > 0,
-    description: typeof found?.description === 'string' ? found.description : '',
+    description: found ? localizeActionField(found, 'description', currentLocale.value, '') : '',
   }
 }
 const hasSchemaFields = computed(() => {

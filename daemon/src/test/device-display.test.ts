@@ -25,11 +25,13 @@ import {
   DeviceIdleTracker,
   dimLevelFor,
   displaySettingKey,
+  hasDisplaySettings,
   normalizeBrightness,
   normalizeDimAfterSec,
   normalizeIdleAction,
   normalizeIdleMinutes,
   parseDisplaySettings,
+  resolveEffectiveDisplaySettings,
   resolvePhase,
   validateDisplayPatch,
 } from '../hw-driver/device-display';
@@ -70,6 +72,40 @@ describe('claves por dispositivo', () => {
     expect(a.dimAfterSec).toBe(DEFAULT_DISPLAY_SETTINGS.dimAfterSec);
     const b = parseDisplaySettings(store.getSetting, 'deck-B');
     expect(b).toEqual(DEFAULT_DISPLAY_SETTINGS);
+  });
+});
+
+describe('virgen vs configurado (dim automático desactivado por defecto)', () => {
+  it('14. virgen (sin claves) → efectivo 100/0/0/off', () => {
+    const store = memStore();
+    expect(hasDisplaySettings(store.getSetting, 'deck-new')).toBe(false);
+    expect(hasDisplaySettings(store.getSetting, '')).toBe(false);
+    expect(resolveEffectiveDisplaySettings(store.getSetting, 'deck-new')).toEqual({
+      brightness: 100,
+      dimAfterSec: 0,
+      idleMinutes: 0,
+      idleAction: 'off',
+    });
+  });
+
+  it('15. con ≥1 clave → parse actual (parcial respeta lo guardado, resto 0/0)', () => {
+    const store = memStore({ [displaySettingKey('deck-A', 'brightness')]: '70' });
+    expect(hasDisplaySettings(store.getSetting, 'deck-A')).toBe(true);
+    expect(hasDisplaySettings(store.getSetting, 'deck-B')).toBe(false);
+    expect(resolveEffectiveDisplaySettings(store.getSetting, 'deck-A')).toEqual({
+      brightness: 70,
+      dimAfterSec: 0,
+      idleMinutes: 0,
+      idleAction: 'off',
+    });
+  });
+
+  it('16. tracker virgen (todo 0) nunca atenúa ni reposa', () => {
+    const tr = new DeviceIdleTracker();
+    expect(tr.getSettings()).toMatchObject({ brightness: 100, dimAfterSec: 0, idleMinutes: 0 });
+    tr.noteActivity(0);
+    expect(tr.poll(10_000_000_000)).toBeNull();
+    expect(tr.currentPhase()).toBe('active');
   });
 });
 

@@ -56,6 +56,7 @@ export class AudioMixerPlugin {
                     id: 'app-volume',
                     name: 'Volumen de app',
                     description: 'Fija el volumen (0-100) o el silencio de una aplicación (o del maestro si se omite)',
+                    i18n: { es: { name: 'Volumen de app', description: 'Fija el volumen (0-100) o el silencio de una aplicación (o del maestro si se omite)' }, en: { name: 'Volumen de app', description: 'Fija el volumen (0-100) o el silencio de una aplicación (o del maestro si se omite)' } }, // TODO i18n: EN temporal = ES
                     icon: 'SlidersHorizontal',
                     schema: {
                         type: 'object',
@@ -95,6 +96,7 @@ export class AudioMixerPlugin {
                     id: 'output-switch',
                     name: 'Cambiar salida',
                     description: 'Lista los dispositivos de salida o fija el predeterminado',
+                    i18n: { es: { name: 'Cambiar salida', description: 'Lista los dispositivos de salida o fija el predeterminado' }, en: { name: 'Cambiar salida', description: 'Lista los dispositivos de salida o fija el predeterminado' } }, // TODO i18n: EN temporal = ES
                     icon: 'Speaker',
                     surface: 'control',
                     component: 'audio-control',
@@ -122,6 +124,7 @@ export class AudioMixerPlugin {
                     id: 'mic-mute',
                     name: 'Silenciar micro',
                     description: 'Silencia, reactiva o alterna el micrófono predeterminado',
+                    i18n: { es: { name: 'Silenciar micro', description: 'Silencia, reactiva o alterna el micrófono predeterminado' }, en: { name: 'Silenciar micro', description: 'Silencia, reactiva o alterna el micrófono predeterminado' } }, // TODO i18n: EN temporal = ES
                     icon: 'MicOff',
                     surface: 'control',
                     component: 'audio-control',
@@ -143,6 +146,7 @@ export class AudioMixerPlugin {
                     id: 'get-levels',
                     name: 'Ver niveles',
                     description: 'Devuelve los niveles actuales (reales si el sistema lo permite)',
+                    i18n: { es: { name: 'Ver niveles', description: 'Devuelve los niveles actuales (reales si el sistema lo permite)' }, en: { name: 'Ver niveles', description: 'Devuelve los niveles actuales (reales si el sistema lo permite)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Activity',
                     schema: { type: 'object', properties: {} }
                 },
@@ -150,6 +154,7 @@ export class AudioMixerPlugin {
                     id: 'volume-control',
                     name: 'Control de volumen',
                     description: 'Muestra un control de volumen en la tecla (arco en 1×1, sliders al redimensionar). Solo se representa en modo libre; en modo Fija la tecla se ve normal.',
+                    i18n: { es: { name: 'Control de volumen', description: 'Muestra un control de volumen en la tecla (arco en 1×1, sliders al redimensionar). Solo se representa en modo libre; en modo Fija la tecla se ve normal.' }, en: { name: 'Control de volumen', description: 'Muestra un control de volumen en la tecla (arco en 1×1, sliders al redimensionar). Solo se representa en modo libre; en modo Fija la tecla se ve normal.' } }, // TODO i18n: EN temporal = ES
                     icon: 'SlidersHorizontal',
                     surface: 'control',
                     component: 'volume-range',

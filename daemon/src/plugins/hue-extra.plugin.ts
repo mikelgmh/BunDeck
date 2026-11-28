@@ -92,6 +92,7 @@ export class HueExtraPlugin {
                     id: 'lights-list',
                     name: 'Listar luces',
                     description: 'Devuelve las luces del puente con su estado',
+                    i18n: { es: { name: 'Listar luces', description: 'Devuelve las luces del puente con su estado' }, en: { name: 'Listar luces', description: 'Devuelve las luces del puente con su estado' } }, // TODO i18n: EN temporal = ES
                     icon: 'List',
                     schema: {
                         type: 'object',
@@ -112,6 +113,7 @@ export class HueExtraPlugin {
                     id: 'toggle',
                     name: 'Encender / Apagar',
                     description: 'Enciende, apaga o alterna una luz Hue',
+                    i18n: { es: { name: 'Encender / Apagar', description: 'Enciende, apaga o alterna una luz Hue' }, en: { name: 'Encender / Apagar', description: 'Enciende, apaga o alterna una luz Hue' } }, // TODO i18n: EN temporal = ES
                     icon: 'Lightbulb',
                     surface: 'control',
                     component: 'smart-home',
@@ -140,6 +142,7 @@ export class HueExtraPlugin {
                     id: 'brightness',
                     name: 'Brillo',
                     description: 'Ajusta el brillo de una luz (1-254)',
+                    i18n: { es: { name: 'Brillo', description: 'Ajusta el brillo de una luz (1-254)' }, en: { name: 'Brillo', description: 'Ajusta el brillo de una luz (1-254)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sun',
                     surface: 'control',
                     component: 'smart-home',
@@ -168,6 +171,7 @@ export class HueExtraPlugin {
                     id: 'color',
                     name: 'Color',
                     description: 'Cambia el color de una luz (matiz 0-65535, saturación 0-254)',
+                    i18n: { es: { name: 'Color', description: 'Cambia el color de una luz (matiz 0-65535, saturación 0-254)' }, en: { name: 'Color', description: 'Cambia el color de una luz (matiz 0-65535, saturación 0-254)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Palette',
                     surface: 'control',
                     component: 'smart-home',
@@ -202,6 +206,7 @@ export class HueExtraPlugin {
                     id: 'scene',
                     name: 'Activar escena',
                     description: 'Recupera una escena Hue por su ID',
+                    i18n: { es: { name: 'Activar escena', description: 'Recupera una escena Hue por su ID' }, en: { name: 'Activar escena', description: 'Recupera una escena Hue por su ID' } }, // TODO i18n: EN temporal = ES
                     icon: 'Sparkles',
                     surface: 'control',
                     component: 'smart-home',

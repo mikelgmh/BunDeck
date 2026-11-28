@@ -31,6 +31,7 @@ export class HotkeyPlugin {
                     id: 'hotkey',
                     name: 'Hotkey',
                     description: 'Simulate a keyboard shortcut',
+                    i18n: { es: { name: 'Hotkey', description: 'Simulate a keyboard shortcut' }, en: { name: 'Hotkey', description: 'Simulate a keyboard shortcut' } }, // TODO i18n: EN temporal = ES
                     icon: 'Keyboard',
                     schema: {
                         type: 'object',

@@ -690,10 +690,10 @@ const WelcomeDialog = defineAsyncComponent(() => import('./WelcomeDialog.vue'))
 const UpdateModal = defineAsyncComponent(() => import('../UpdateModal.vue'))
 import type { PageData } from '../../types/streamdeck'
 
-const { t, currentLocale, setLocale, loadSavedLocale } = useI18nStore()
+const { t, currentLocale, setLocale, loadSavedLocale, syncLocaleFromDaemon } = useI18nStore()
 loadSavedLocale()
 
-const switchLanguage = (newLocale: string) => setLocale(newLocale)
+const switchLanguage = (newLocale: string) => setLocale(newLocale, API_BASE.value)
 
 const mode = ref<'edit' | 'use'>('edit')
 // Modo kiosco: entra por URL (?kiosk=1 / ?mode=kiosk / #kiosk). Mientras dura,
@@ -3049,6 +3049,10 @@ onMounted(async () => {
   // Apariencia compartida host ↔ remotos: adoptar el tema del servidor
   // (el remoto sigue al host, incluido el `auto` resuelto por el host).
   initAppearanceSync().catch(() => {})
+  // Idioma guardado en el daemon (ui.language): completa la prioridad
+  // guardado > detectado > inglés cuando este navegador no guardó nada.
+  // (nunca rechaza; el `?.` cubre los tests que mockean el store).
+  void syncLocaleFromDaemon?.(API_BASE.value)
   loadProfiles().then(async () => {    // Reglas «load» de la página inicial.
     try { engine.runLoad(allPositions) } catch { /* noop */ }
     // Asignaciones del perfil inicial (el GET repara incompatibles).

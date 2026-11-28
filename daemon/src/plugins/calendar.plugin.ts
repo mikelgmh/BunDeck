@@ -175,6 +175,7 @@ export class CalendarPlugin {
                     id: 'next-event',
                     name: 'Próximo evento',
                     description: 'Devuelve el próximo evento del calendario',
+                    i18n: { es: { name: 'Próximo evento', description: 'Devuelve el próximo evento del calendario' }, en: { name: 'Próximo evento', description: 'Devuelve el próximo evento del calendario' } }, // TODO i18n: EN temporal = ES
                     icon: 'CalendarClock',
                     dynamic: true,
                     surface: 'control',
@@ -198,6 +199,7 @@ export class CalendarPlugin {
                     id: 'countdown',
                     name: 'Cuenta atrás',
                     description: 'Tiempo restante hasta el próximo evento (o el N-ésimo)',
+                    i18n: { es: { name: 'Cuenta atrás', description: 'Tiempo restante hasta el próximo evento (o el N-ésimo)' }, en: { name: 'Cuenta atrás', description: 'Tiempo restante hasta el próximo evento (o el N-ésimo)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Hourglass',
                     dynamic: true,
                     pollMs: 60000,
@@ -225,6 +227,7 @@ export class CalendarPlugin {
                     id: 'open-event',
                     name: 'Abrir evento',
                     description: 'Abre el enlace del próximo evento (o la URL indicada)',
+                    i18n: { es: { name: 'Abrir evento', description: 'Abre el enlace del próximo evento (o la URL indicada)' }, en: { name: 'Abrir evento', description: 'Abre el enlace del próximo evento (o la URL indicada)' } }, // TODO i18n: EN temporal = ES
                     icon: 'ExternalLink',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {
@@ -243,6 +246,7 @@ export class CalendarPlugin {
                     id: 'today-count',
                     name: 'Eventos de hoy',
                     description: 'Cuántos eventos hay hoy (widget/contador, sin abrir nada)',
+                    i18n: { es: { name: 'Eventos de hoy', description: 'Cuántos eventos hay hoy (widget/contador, sin abrir nada)' }, en: { name: 'Eventos de hoy', description: 'Cuántos eventos hay hoy (widget/contador, sin abrir nada)' } }, // TODO i18n: EN temporal = ES
                     icon: 'CalendarDays',
                     dynamic: true,
                     pollMs: 300000,

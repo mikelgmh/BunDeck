@@ -56,11 +56,13 @@ export class WebcamPlugin {
                 {
                     id: 'list-cameras', name: 'Listar cámaras', icon: 'Camera',
                     description: 'Muestra las cámaras detectadas por el sistema',
+                    i18n: { es: { name: 'Listar cámaras', description: 'Muestra las cámaras detectadas por el sistema' }, en: { name: 'Listar cámaras', description: 'Muestra las cámaras detectadas por el sistema' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 },
                 {
                     id: 'snapshot', name: 'Foto rápida', icon: 'ImagePlus',
                     description: 'Captura un fotograma de la cámara (requiere ffmpeg)',
+                    i18n: { es: { name: 'Foto rápida', description: 'Captura un fotograma de la cámara (requiere ffmpeg)' }, en: { name: 'Foto rápida', description: 'Captura un fotograma de la cámara (requiere ffmpeg)' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'status-cards',
                     freeModeOnly: true,
@@ -82,6 +84,7 @@ export class WebcamPlugin {
                 {
                     id: 'open-settings', name: 'Abrir ajustes de cámara', icon: 'Settings',
                     description: 'Abre los ajustes de cámara/privacidad del sistema',
+                    i18n: { es: { name: 'Abrir ajustes de cámara', description: 'Abre los ajustes de cámara/privacidad del sistema' }, en: { name: 'Abrir ajustes de cámara', description: 'Abre los ajustes de cámara/privacidad del sistema' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 }
             ]

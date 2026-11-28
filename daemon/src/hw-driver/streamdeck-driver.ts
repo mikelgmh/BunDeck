@@ -17,7 +17,7 @@ import {
   dimLevelFor,
   displaySettingKey,
   normalizeBrightness,
-  parseDisplaySettings,
+  resolveEffectiveDisplaySettings,
   validateDisplayPatch,
   type DeviceDisplaySettings,
 } from './device-display';
@@ -644,16 +644,16 @@ export class StreamDeckDriver {
     return this.connectedDevice ?? 'streamdeck-local';
   }
 
-  /** Ajustes de pantalla del dispositivo (los suyos, no globales). */
+  /** Ajustes de pantalla del dispositivo (ruta efectiva: virgen → dim/idle off). */
   getDisplaySettings(
     deviceId: string = this.getDisplayDeviceId(),
     store?: { getSetting(k: string): string | null },
   ): DeviceDisplaySettings {
     const db = store ?? new DatabaseService();
-    return parseDisplaySettings((k) => db.getSetting(k), deviceId);
+    return resolveEffectiveDisplaySettings((k) => db.getSetting(k), deviceId);
   }
 
-  /** Recarga los ajustes del deck conectado en el tracker (tras conectar o POST). */
+  /** Recarga los ajustes efectivos del deck conectado en el tracker (tras conectar o POST). */
   refreshDisplaySettings(
     deviceId: string = this.getDisplayDeviceId(),
     store?: { getSetting(k: string): string | null },

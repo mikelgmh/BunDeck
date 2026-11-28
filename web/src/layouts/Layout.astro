@@ -7,7 +7,7 @@ const { title = 'BunDeck' } = Astro.props;
 ---
 
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -25,6 +25,19 @@ const { title = 'BunDeck' } = Astro.props;
       href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
     />
     <title>{title}</title>
+    <script is:inline>
+      // Corrige <html lang> al idioma efectivo antes de hidratar:
+      // guardado > detectado-soportado > inglés.
+      try {
+        var saved = localStorage.getItem('locale');
+        var nav = (navigator.languages && navigator.languages[0]) || navigator.language || 'en';
+        var base = String(nav).split('-')[0].toLowerCase();
+        var lang = saved || (base === 'es' || base === 'en' ? base : 'en');
+        document.documentElement.lang = lang;
+      } catch (e) {
+        document.documentElement.lang = 'en';
+      }
+    </script>
   </head>
   <body>
     <slot />

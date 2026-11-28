@@ -31,6 +31,7 @@ export class ShellPlugin {
                     id: 'shell',
                     name: 'Shell Command',
                     description: 'Execute a shell command',
+                    i18n: { es: { name: 'Shell Command', description: 'Execute a shell command' }, en: { name: 'Shell Command', description: 'Execute a shell command' } }, // TODO i18n: EN temporal = ES
                     icon: 'Terminal',
                     schema: {
                         type: 'object',

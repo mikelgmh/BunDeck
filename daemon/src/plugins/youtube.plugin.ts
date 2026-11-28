@@ -65,6 +65,7 @@ export class YoutubePlugin {
                 {
                     id: 'viewer-count', name: 'Ver espectadores', icon: 'Users',
                     description: 'Devuelve espectadores actuales del directo y si sigue en vivo',
+                    i18n: { es: { name: 'Ver espectadores', description: 'Devuelve espectadores actuales del directo y si sigue en vivo' }, en: { name: 'Ver espectadores', description: 'Devuelve espectadores actuales del directo y si sigue en vivo' } }, // TODO i18n: EN temporal = ES
                     dynamic: true, surface: 'control', component: 'stream-studio',
                     pollMs: 60000, timeoutMs: REQUEST_TIMEOUT_MS,
                     states: [
@@ -89,6 +90,7 @@ export class YoutubePlugin {
                 {
                     id: 'post-chat', name: 'Enviar mensaje al chat', icon: 'MessageSquare',
                     description: 'Envía un mensaje al chat en vivo (requiere token OAuth)',
+                    i18n: { es: { name: 'Enviar mensaje al chat', description: 'Envía un mensaje al chat en vivo (requiere token OAuth)' }, en: { name: 'Enviar mensaje al chat', description: 'Envía un mensaje al chat en vivo (requiere token OAuth)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -104,6 +106,7 @@ export class YoutubePlugin {
                 {
                     id: 'start-broadcast', name: 'Pasar emisión a directo', icon: 'Radio',
                     description: 'Transiciona una emisión a "live" (requiere token OAuth + ID de emisión)',
+                    i18n: { es: { name: 'Pasar emisión a directo', description: 'Transiciona una emisión a "live" (requiere token OAuth + ID de emisión)' }, en: { name: 'Pasar emisión a directo', description: 'Transiciona una emisión a "live" (requiere token OAuth + ID de emisión)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -116,6 +119,7 @@ export class YoutubePlugin {
                 {
                     id: 'stop-broadcast', name: 'Terminar emisión', icon: 'Square',
                     description: 'Transiciona una emisión a "complete" (requiere token OAuth + ID de emisión)',
+                    i18n: { es: { name: 'Terminar emisión', description: 'Transiciona una emisión a "complete" (requiere token OAuth + ID de emisión)' }, en: { name: 'Terminar emisión', description: 'Transiciona una emisión a "complete" (requiere token OAuth + ID de emisión)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -128,6 +132,7 @@ export class YoutubePlugin {
                 {
                     id: 'open-dashboard', name: 'Abrir panel de YouTube Studio', icon: 'LayoutDashboard',
                     description: 'Abre el panel de control del directo en el navegador',
+                    i18n: { es: { name: 'Abrir panel de YouTube Studio', description: 'Abre el panel de control del directo en el navegador' }, en: { name: 'Abrir panel de YouTube Studio', description: 'Abre el panel de control del directo en el navegador' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {

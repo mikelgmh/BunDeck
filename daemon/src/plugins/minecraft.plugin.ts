@@ -78,6 +78,7 @@ export class MinecraftPlugin {
                     id: 'server-status',
                     name: 'Estado del servidor',
                     description: 'Pregunta a mcsrvstat.us si el servidor está en línea, su versión y jugadores',
+                    i18n: { es: { name: 'Estado del servidor', description: 'Pregunta a mcsrvstat.us si el servidor está en línea, su versión y jugadores' }, en: { name: 'Estado del servidor', description: 'Pregunta a mcsrvstat.us si el servidor está en línea, su versión y jugadores' } }, // TODO i18n: EN temporal = ES
                     icon: 'Server',
                     surface: 'control',
                     component: 'status-cards',
@@ -115,6 +116,7 @@ export class MinecraftPlugin {
                     id: 'query-latency',
                     name: 'Latencia del servidor',
                     description: 'Mide el tiempo de respuesta al consultar el estado (ms)',
+                    i18n: { es: { name: 'Latencia del servidor', description: 'Mide el tiempo de respuesta al consultar el estado (ms)' }, en: { name: 'Latencia del servidor', description: 'Mide el tiempo de respuesta al consultar el estado (ms)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Gauge',
                     surface: 'control',
                     component: 'status-cards',
@@ -152,6 +154,7 @@ export class MinecraftPlugin {
                     id: 'open-launcher',
                     name: 'Abrir launcher',
                     description: 'Abre el launcher de Minecraft (protocolo minecraft:// o ruta personalizada)',
+                    i18n: { es: { name: 'Abrir launcher', description: 'Abre el launcher de Minecraft (protocolo minecraft:// o ruta personalizada)' }, en: { name: 'Abrir launcher', description: 'Abre el launcher de Minecraft (protocolo minecraft:// o ruta personalizada)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Rocket',
                     schema: {
                         type: 'object',

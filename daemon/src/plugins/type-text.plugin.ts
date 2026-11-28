@@ -31,6 +31,7 @@ export class TypeTextPlugin {
                     id: 'type',
                     name: 'Type Text',
                     description: 'Simulate typing text character by character',
+                    i18n: { es: { name: 'Type Text', description: 'Simulate typing text character by character' }, en: { name: 'Type Text', description: 'Simulate typing text character by character' } }, // TODO i18n: EN temporal = ES
                     icon: 'Type',
                     schema: {
                         type: 'object',

@@ -36,6 +36,7 @@ export class UtilityPlugin {
                     id: 'delay',
                     name: 'Delay',
                     description: 'Wait for a specified duration',
+                    i18n: { es: { name: 'Delay', description: 'Wait for a specified duration' }, en: { name: 'Delay', description: 'Wait for a specified duration' } }, // TODO i18n: EN temporal = ES
                     icon: 'Clock',
                     schema: {
                         type: 'object',
@@ -62,6 +63,7 @@ export class UtilityPlugin {
                     id: 'macro',
                         name: 'Macro rápida',
                         description: 'Ejecuta una secuencia de acciones en orden',
+                    i18n: { es: { name: 'Macro rápida', description: 'Ejecuta una secuencia de acciones en orden' }, en: { name: 'Macro rápida', description: 'Ejecuta una secuencia de acciones en orden' } }, // TODO i18n: EN temporal = ES
                         icon: 'ListOrdered',
                         schema: {
                             type: 'object',

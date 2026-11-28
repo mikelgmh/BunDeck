@@ -90,6 +90,7 @@ export class EmailPlugin {
                     id: 'unread',
                     name: 'Sin leer',
                     description: 'Cuenta correos sin leer (requiere token OAuth del proveedor)',
+                    i18n: { es: { name: 'Sin leer', description: 'Cuenta correos sin leer (requiere token OAuth del proveedor)' }, en: { name: 'Sin leer', description: 'Cuenta correos sin leer (requiere token OAuth del proveedor)' } }, // TODO i18n: EN temporal = ES
                     icon: 'Mail',
                     dynamic: true,
                     surface: 'control',
@@ -121,6 +122,7 @@ export class EmailPlugin {
                     id: 'open-inbox',
                     name: 'Abrir bandeja',
                     description: 'Abre tu bandeja en el navegador',
+                    i18n: { es: { name: 'Abrir bandeja', description: 'Abre tu bandeja en el navegador' }, en: { name: 'Abrir bandeja', description: 'Abre tu bandeja en el navegador' } }, // TODO i18n: EN temporal = ES
                     icon: 'Inbox',
                     surface: 'control',
                     component: 'status-cards',
@@ -144,6 +146,7 @@ export class EmailPlugin {
                     id: 'compose',
                     name: 'Redactar',
                     description: 'Abre tu cliente de correo con destinatario/asunto/cuerpo (mailto:)',
+                    i18n: { es: { name: 'Redactar', description: 'Abre tu cliente de correo con destinatario/asunto/cuerpo (mailto:)' }, en: { name: 'Redactar', description: 'Abre tu cliente de correo con destinatario/asunto/cuerpo (mailto:)' } }, // TODO i18n: EN temporal = ES
                     icon: 'PenLine',
                     timeoutMs: REQUEST_TIMEOUT_MS,
                     schema: {

@@ -366,6 +366,7 @@ export class DiscordPlugin {
                 {
                     id: 'toggle-mute', name: 'Silenciar / reactivar micro', icon: 'MicOff',
                     description: 'Alterna el micrófono en Discord (RPC en background si hay autorización; si no, tu atajo global)',
+                    i18n: { es: { name: 'Silenciar / reactivar micro', description: 'Alterna el micrófono en Discord (RPC en background si hay autorización; si no, tu atajo global)' }, en: { name: 'Silenciar / reactivar micro', description: 'Alterna el micrófono en Discord (RPC en background si hay autorización; si no, tu atajo global)' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'voice-panel',
                     variables: [{ name: 'discordMuted', type: 'bool', label: 'Micro silenciado' }],
@@ -390,6 +391,7 @@ export class DiscordPlugin {
                 {
                     id: 'toggle-deafen', name: 'Ensordecerse / volver', icon: 'Headphones',
                     description: 'Alterna ensordecer en Discord (RPC en background si hay autorización; si no, tu atajo global)',
+                    i18n: { es: { name: 'Ensordecerse / volver', description: 'Alterna ensordecer en Discord (RPC en background si hay autorización; si no, tu atajo global)' }, en: { name: 'Ensordecerse / volver', description: 'Alterna ensordecer en Discord (RPC en background si hay autorización; si no, tu atajo global)' } }, // TODO i18n: EN temporal = ES
                     variables: [{ name: 'discordDeafened', type: 'bool', label: 'Ensordecido' }],
                     schema: {
                         type: 'object',
@@ -406,6 +408,7 @@ export class DiscordPlugin {
                 {
                     id: 'push-to-talk', name: 'Pulsar para hablar', icon: 'Radio',
                     description: 'Abre el micro mientras se mantiene (RPC en background si hay autorización; si no, tu atajo global durante holdMs)',
+                    i18n: { es: { name: 'Pulsar para hablar', description: 'Abre el micro mientras se mantiene (RPC en background si hay autorización; si no, tu atajo global durante holdMs)' }, en: { name: 'Pulsar para hablar', description: 'Abre el micro mientras se mantiene (RPC en background si hay autorización; si no, tu atajo global durante holdMs)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -433,6 +436,7 @@ export class DiscordPlugin {
                 {
                     id: 'open-channel', name: 'Abrir canal de Discord', icon: 'MessageCircle',
                     description: 'Abre un canal, mensaje o invitación de Discord en el navegador/app (o salta a un canal de voz por RPC)',
+                    i18n: { es: { name: 'Abrir canal de Discord', description: 'Abre un canal, mensaje o invitación de Discord en el navegador/app (o salta a un canal de voz por RPC)' }, en: { name: 'Abrir canal de Discord', description: 'Abre un canal, mensaje o invitación de Discord en el navegador/app (o salta a un canal de voz por RPC)' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -458,6 +462,7 @@ export class DiscordPlugin {
                 {
                     id: 'connect', name: 'Autorizar con Discord (1 clic)', icon: 'Link',
                     description: 'Abre el navegador con el permiso explícito (cero-config) o canjea el code por el token vía relay',
+                    i18n: { es: { name: 'Autorizar con Discord (1 clic)', description: 'Abre el navegador con el permiso explícito (cero-config) o canjea el code por el token vía relay' }, en: { name: 'Autorizar con Discord (1 clic)', description: 'Abre el navegador con el permiso explícito (cero-config) o canjea el code por el token vía relay' } }, // TODO i18n: EN temporal = ES
                     schema: {
                         type: 'object',
                         properties: {
@@ -473,6 +478,7 @@ export class DiscordPlugin {
                 {
                     id: 'status', name: 'Estado de conexión Discord', icon: 'Activity',
                     description: 'Muestra si el RPC está conectado, si falta autorización o si Discord está cerrado (sin lanzar errores)',
+                    i18n: { es: { name: 'Estado de conexión Discord', description: 'Muestra si el RPC está conectado, si falta autorización o si Discord está cerrado (sin lanzar errores)' }, en: { name: 'Estado de conexión Discord', description: 'Muestra si el RPC está conectado, si falta autorización o si Discord está cerrado (sin lanzar errores)' } }, // TODO i18n: EN temporal = ES
                     surface: 'control',
                     component: 'voice-panel',
                     schema: {
@@ -491,6 +497,7 @@ export class DiscordPlugin {
                 {
                     id: 'disconnect', name: 'Desconectar Discord', icon: 'Unlink',
                     description: 'Borra el token guardado y cierra la conexión RPC (revoca el acceso local)',
+                    i18n: { es: { name: 'Desconectar Discord', description: 'Borra el token guardado y cierra la conexión RPC (revoca el acceso local)' }, en: { name: 'Desconectar Discord', description: 'Borra el token guardado y cierra la conexión RPC (revoca el acceso local)' } }, // TODO i18n: EN temporal = ES
                     schema: { type: 'object', properties: {}, required: [] }
                 }
             ]

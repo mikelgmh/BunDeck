@@ -64,6 +64,9 @@
 import { computed } from 'vue'
 import * as LucideIcons from 'lucide-vue-next'
 import { simpleIcon } from '../composables/useSimpleIcons'
+import { usePluginLocale } from '../composables/usePluginLocale'
+
+const { currentLocale, localizeActionField } = usePluginLocale()
 
 interface Props {
   plugins: any[]
@@ -102,8 +105,8 @@ const availableActions = computed(() => {
 
         actions.push({
           type: `${pluginId}.${actionId}`,
-          name: actionData.name || actionId,
-          description: actionData.description || `Acción ${actionId}`,
+          name: localizeActionField(actionData, 'name', currentLocale.value, actionId),
+          description: localizeActionField(actionData, 'description', currentLocale.value, `Acción ${actionId}`),
           icon
         })
       })
