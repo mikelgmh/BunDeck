@@ -297,6 +297,15 @@ export function applyRemoteAppearance(raw: unknown): boolean {
 }
 
 let syncStarted = false
+let refreshInFlight: Promise<void> | null = null
+let lastRefreshAt = 0
+const RESYNC_MIN_INTERVAL_MS = 2000
+
+/** Solo tests: reinicia el throttle/dedupe del re-sync de apariencia. */
+export function __resetAppearanceResyncForTests(): void {
+  refreshInFlight = null
+  lastRefreshAt = 0
+}
 
 /**
  * Sincronización inicial con el daemon: si el servidor ya tiene apariencia
@@ -314,6 +323,7 @@ export async function initAppearanceSync(): Promise<void> {
     }).catch(() => null)
     if (!res || !res.ok) return
     const data = await res.json().catch(() => null)
+    lastRefreshAt = Date.now()
     const applied = applyRemoteAppearance(data?.value)
     if (!applied && (data?.value == null || data?.value === '')) {
       // Servidor virgen: sembrar con lo local (normalmente el host).
@@ -334,6 +344,54 @@ export async function initAppearanceSync(): Promise<void> {
     }
   } catch {
     /* sin daemon: tema local */
+  }
+}
+
+/**
+ * Relee el snapshot `ui.appearance` del daemon y lo aplica si es más nuevo.
+ * Pensado para reconexión WS y vuelta de foco/visibilidad: los broadcasts
+ * `settings.changed` perdidos durante el corte no se repiten, así que sin
+ * este re-sync el tema se queda obsoleto hasta recargar la página.
+ * Solo LEE (nunca emite): no puede formar bucles con schedulePush.
+ */
+export async function refreshAppearanceFromServer(): Promise<void> {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return
+  const now = Date.now()
+  if (now - lastRefreshAt < RESYNC_MIN_INTERVAL_MS) return
+  if (refreshInFlight) {
+    try {
+      await refreshInFlight
+    } catch {
+      /* noop */
+    }
+    return
+  }
+  lastRefreshAt = now
+  // Un push local encolado lleva la foto anterior al corte: tras reconectar
+  // el servidor manda y ese push obsoleto debe descartarse para no pisar
+  // el tema del host con un updatedAt más nuevo pero contenido viejo.
+  if (pushTimer) {
+    clearTimeout(pushTimer)
+    pushTimer = null
+  }
+  refreshInFlight = (async () => {
+    try {
+      const base = await appearanceApiBase()
+      const res = await fetch(`${base}/settings?key=${encodeURIComponent(UI_APPEARANCE_KEY)}`, {
+        headers: appearanceHeaders(),
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => null)
+      if (!res || !res.ok) return
+      const data = await res.json().catch(() => null)
+      applyRemoteAppearance(data?.value)
+    } catch {
+      /* best-effort: el tema local sigue funcionando */
+    }
+  })()
+  try {
+    await refreshInFlight
+  } finally {
+    refreshInFlight = null
   }
 }
 
@@ -376,7 +434,10 @@ export function bdSetLongPressMs(v: number) {
 export function bdSetPanels(l: boolean, r: boolean) {
   bdShowLeft.value = l
   bdShowRight.value = r
-  persist()
+  // Layout local de cada pantalla: NO se sincroniza ni debe empujar la
+  // apariencia al servidor (ese push con foto vieja pisaba el tema del host
+  // tras una reconexión). Solo persiste en localStorage.
+  persistLocal()
 }
 
 // Toast con Deshacer opcional

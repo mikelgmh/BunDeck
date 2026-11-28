@@ -650,7 +650,8 @@ import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDec
 import { useI18nStore } from '../../composables/useI18n'
 import {
   bdResolvedPalette, bdLabelMode, bdKeySize, bdRadius, bdBrightness, bdAnimations, bdLongPressMs,
-  bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast, initAppearanceSync
+  bdShowLeft, bdShowRight, bdSetPanels, bdToast, bdShowToast, bdHideToast, initAppearanceSync,
+  refreshAppearanceFromServer
 } from '../../composables/useBunDeckUi'
 import { cleanKey, collectPageIds, parseSharedDoc, firstFreePosition, type SharedDoc } from '../../composables/useKeyShare'
 import {
@@ -861,6 +862,14 @@ const showTransportModal = computed(() =>
 )
 let transportBannerTimer: ReturnType<typeof setTimeout> | null = null
 let transportConnectTimer: ReturnType<typeof setTimeout> | null = null
+// Re-sync de apariencia al recuperar foco/visibilidad/red (ver onMounted):
+// a nivel de setup para que onUnmounted pueda retirar los listeners.
+const resyncAppearance = () => {
+  refreshAppearanceFromServer().catch(() => {})
+}
+const onAppearanceVisibility = () => {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') resyncAppearance()
+}
 watch(rtcStatus, (s) => {
   if (s === 'signaling') transportModalDismissed.value = false
   if (transportBannerTimer !== null) {
@@ -1892,6 +1901,26 @@ const engine = createKeyEngine({
     }),
   toast: (msg: string) => bdShowToast(msg),
   noActionsToast: () => bdShowToast(t('bd.noActionsToast')),
+  // Las acciones `local.*` se ejecutan en el cliente: se reportan al daemon
+  // (POST /press-logs, best-effort) para que Registros también las muestre.
+  reportPress: (info) => {
+    void apiPost('/press-logs', {
+      buttonId: info.ctx?.buttonId ?? null,
+      pageId: info.ctx?.pageId ?? currentPage.value?.id ?? null,
+      profileId: currentProfile.value?.id ?? null,
+      position: Number.isInteger(info.ctx?.position) ? info.ctx.position : null,
+      pressType: info.ctx?.pressType ?? 'short',
+      deviceId: deviceId.value ?? info.ctx?.deviceId ?? null,
+      deviceName: null,
+      source: 'web',
+      actionType: info.actionType,
+      actionIndex: 0,
+      actionId: null,
+      success: info.success,
+      error: info.error ?? null,
+      durationMs: info.durationMs ?? null,
+    }).catch(() => {})
+  },
   profileName: () => currentProfile.value?.name ?? '',
   pageName: () => currentPage.value?.name ?? '',
   pageId: () => currentPage.value?.id ?? '',
@@ -3078,6 +3107,13 @@ onMounted(async () => {
   // guardado > detectado > inglés cuando este navegador no guardó nada.
   // (nunca rechaza; el `?.` cubre los tests que mockean el store).
   void syncLocaleFromDaemon?.(API_BASE.value)
+  // Re-sync de apariencia al recuperar foco/visibilidad/red: cubre el caso
+  // en que el WS no llegó a caer pero se perdieron broadcasts (suspensión,
+  // pestaña congelada). El throttle interno (2 s) y el solo-avance por
+  // updatedAt evitan bucles y pisados.
+  document.addEventListener('visibilitychange', onAppearanceVisibility)
+  window.addEventListener('focus', resyncAppearance)
+  window.addEventListener('online', resyncAppearance)
   loadProfiles().then(async () => {    // Reglas «load» de la página inicial.
     try { engine.runLoad(allPositions) } catch { /* noop */ }
     // Asignaciones del perfil inicial (el GET repara incompatibles).
@@ -3194,6 +3230,9 @@ onUnmounted(() => {
   window.removeEventListener('libredeck:page-blocked', onPageBlockedMsg as EventListener)
   window.removeEventListener('libredeck:action-error', onActionErrorMsg as EventListener)
   window.removeEventListener(OPEN_ACTION_SETTINGS_EVENT, onOpenActionSettings as EventListener)
+  document.removeEventListener('visibilitychange', onAppearanceVisibility)
+  window.removeEventListener('focus', resyncAppearance)
+  window.removeEventListener('online', resyncAppearance)
   if (ruleTimer) {
     clearInterval(ruleTimer)
     ruleTimer = null

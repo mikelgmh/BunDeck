@@ -839,6 +839,15 @@ export function useStreamDeck() {
         // Fuente de la verdad de variables: hidrata tipos+valores del daemon
         // (p. ej. discordMuted ya a true antes de abrir la página).
         void hydrateVarsFromDaemon()
+        // Apariencia: al (re)conectar pueden haberse perdido broadcasts
+        // `settings.changed` (p. ej. el host cambió el tema durante el corte).
+        // Relee el snapshot (solo avanza si es más nuevo: sin bucles).
+        try {
+          const { refreshAppearanceFromServer } = await import('./useBunDeckUi')
+          void refreshAppearanceFromServer()
+        } catch {
+          /* best-effort */
+        }
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('libredeck:devices-changed'))
         }
