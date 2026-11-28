@@ -38,7 +38,7 @@ gpui = { version = "0.2", features = ["test-support"] }
 # Tray icon nativo en Windows (Shell_NotifyIconW). El `windows` ya es
 # dependencia transitiva de gpui 0.2 (misma versión: sin duplicados).
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_System_LibraryLoader",

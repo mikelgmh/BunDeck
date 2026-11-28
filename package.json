@@ -46,10 +46,10 @@
   "devDependencies": {
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
-    "@semantic-release/github": "^12.0.9",
-    "concurrently": "^10.0.5",
+    "@semantic-release/github": "^12.0.11",
+    "concurrently": "^10.0.7",
     "semantic-release": "^25.0.9",
-    "start-server-and-test": "^3.0.12"
+    "start-server-and-test": "^3.0.13"
   },
   "keywords": [
     "streamdeck",
@@ -64,7 +64,7 @@
   "author": "Mikel Granero",
   "license": "MIT",
   "dependencies": {
-    "daisyui": "^5.7.34",
+    "daisyui": "^5.8.3",
     "electrobun": "^1.18.1"
   }
 }
