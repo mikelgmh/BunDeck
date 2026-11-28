@@ -27,6 +27,7 @@ import { handleBackups } from './backups';
 import { handleStreamDeck } from './streamdeck';
 import { handleSessions } from './sessions';
 import { handleShortcuts } from './shortcuts';
+import { handleWebhooks } from './webhooks';
 import { handleJobs } from './jobs';
 import { handleAdmin } from './admin';
 import { handleRemote } from './remote';
@@ -53,6 +54,7 @@ const HANDLERS: ApiHandler[] = [
   handleStreamDeck, // /api/v1/streamdeck/* (detect/validate/import + progreso WS)
   handleSessions, // /api/v1/sessions/* + /api/v1/navigate (vistas por dispositivo)
   handleShortcuts, // /api/v1/shortcuts/* (atajos globales: trigger + lista)
+  handleWebhooks, // /api/v1/webhooks/* (CRUD local + disparo por token, SOLO LAN: relay→403)
   handleJobs,
   handleAdmin, // /admin/shutdown + /admin/reset + /update (501)
   handleRemote, // /api/v1/remote/* (E2E relay client)

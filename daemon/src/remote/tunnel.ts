@@ -172,6 +172,10 @@ function sanitizeResponseHeaders(headers: Headers): Record<string, string> {
 export function isAllowedTunnelPath(path: string): boolean {
   if (typeof path !== 'string' || !path.startsWith('/')) return false;
   if (path.includes('..') || path.includes('\0')) return false;
+  // Webhooks LAN: NUNCA por relay/túnel (viven solo en red local; el
+  // handler api/webhooks.ts también los rechaza con 403 si llegan por
+  // aquí: doble veto, documentado en ese módulo).
+  if (path === '/api/v1/webhooks' || path.startsWith('/api/v1/webhooks/')) return false;
   // Decodifica %2e para pillar `/%2e%2e/` y variantes.
   try {
     const decoded = decodeURIComponent(path);

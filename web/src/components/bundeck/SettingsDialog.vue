@@ -477,6 +477,18 @@
         />
       </template>
 
+      <!-- Webhooks (solo LAN) -->
+      <template v-else-if="section === 'webhooks'">
+        <h2>{{ t('bd.secWebhooks') }}</h2>
+        <p class="bd-sub">{{ t('bd.webhooksSub') }}</p>
+        <WebhooksPane
+          :api-base="apiBase()"
+          :plugins="props.plugins"
+          :detailed="props.detailed"
+          @notify="(msg) => emit('notify', msg)"
+        />
+      </template>
+
       <!-- Acceso remoto E2E -->
       <template v-else-if="section === 'remote'">
         <RemotePane />
@@ -578,13 +590,14 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import {
-  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, Upload, Import, ShieldAlert, Sparkles, ScrollText, Search, X
+  SlidersHorizontal, Users, Paintbrush, Puzzle, Network, Command, Wrench, Info, Plus, Palette, AppWindow, Variable, Trash2, Smartphone, MonitorSmartphone, Database, Download, Upload, Import, ShieldAlert, Sparkles, ScrollText, Search, X, Webhook
 } from 'lucide-vue-next'
 import PluginsPane, { type PluginsTab } from './PluginsPane.vue'
 import FactoryResetSection from './FactoryResetSection.vue'
 // Paneles secundarios: chunks diferidos. PluginsPane queda estático porque
 // show('plugins') necesita setTab de forma síncrona tras nextTick.
 const McpPane = defineAsyncComponent(() => import('./McpPane.vue'))
+const WebhooksPane = defineAsyncComponent(() => import('./WebhooksPane.vue'))
 const RemotePane = defineAsyncComponent(() => import('./RemotePane.vue'))
 const DiagnosticsPane = defineAsyncComponent(() => import('./DiagnosticsPane.vue'))
 const AutoProfileDialog = defineAsyncComponent(() => import('./AutoProfileDialog.vue'))
@@ -624,7 +637,7 @@ import type { ProfileData } from '../../types/streamdeck'
 
 const { t } = useI18nStore()
 
-type Section = 'general' | 'devices' | 'profiles' | 'backup' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'remote' | 'shortcuts' | 'advanced' | 'logs' | 'about'
+type Section = 'general' | 'devices' | 'profiles' | 'backup' | 'appearance' | 'vars' | 'plugins' | 'mcp' | 'webhooks' | 'remote' | 'shortcuts' | 'advanced' | 'logs' | 'about'
 
 interface Props {
   currentLocale: string
@@ -688,6 +701,7 @@ const navItems = computed(() => [
   { id: 'vars' as const, label: t('bd.secVars'), icon: Variable },
   { id: 'plugins' as const, label: t('bd.secPlugins'), icon: Puzzle },
   { id: 'mcp' as const, label: t('bd.secMcp'), icon: Network },
+  { id: 'webhooks' as const, label: t('bd.secWebhooks'), icon: Webhook },
   { id: 'remote' as const, label: t('bd.secRemote'), icon: Smartphone },
   { id: 'shortcuts' as const, label: t('bd.secShortcuts'), icon: Command },
   { id: 'advanced' as const, label: t('bd.secAdvanced'), icon: Wrench },
@@ -747,10 +761,13 @@ const searchIndex = computed<SearchEntry[]>(() => {
     L('appearance', 'animations', t('bd.animations'), t('bd.animationsHint')),
     // Atajos
     L('shortcuts', 'shortcut-toggle-panels', t('bd.showHideWindow'), t('bd.shortcutGlobalHint')),
-    L('shortcuts', 'shortcut-next-profile', t('bd.nextProfile')) ,
+    L('shortcuts', 'shortcut-next-profile', t('bd.nextProfile')),
     L('shortcuts', 'shortcut-prev-profile', t('bd.prevProfile')),
     L('shortcuts', 'shortcut-mute-all', t('bd.muteAll')),
     L('shortcuts', 'shortcut-toggle-kiosk', t('bd.toggleKiosk')),
+    // Webhooks
+    L('webhooks', 'webhook-new', t('bd.webhookNew'), t('bd.webhooksSub')),
+    L('webhooks', 'webhook-list', t('bd.secWebhooks'), t('bd.webhooksLocalOnly')),
     // Avanzado
     L('advanced', 'reset', t('bd.resetSettings'), t('bd.resetSettingsHint')),
   ]

@@ -157,6 +157,21 @@ export interface Automation {
   updated_at?: number | null;
 }
 
+export interface Webhook {
+  id: string;
+  name: string;
+  /** Secreto de 256 bits en hex (64 chars). NUNCA se loguea. */
+  token: string;
+  /** Método HTTP que dispara el webhook (GET|POST|PUT|PATCH|DELETE). */
+  method: string;
+  enabled: number; // 1 = enabled, 0 = disabled
+  actions: any[]; // JSON: ActionDescriptor[] ejecutados en orden
+  trigger_count: number;
+  last_triggered_at: number | null;
+  created_at: number;
+  updated_at?: number | null;
+}
+
 export interface Widget {
   id: string;
   name: string;
@@ -508,6 +523,21 @@ const SQL_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_assignments_profile ON profile_assignments(profile_id);
   CREATE INDEX IF NOT EXISTS idx_assignments_device ON profile_assignments(device_id);
+  -- Webhooks LAN (solo red local, nunca relay/túnel): endpoints HTTP con
+  -- token aleatorio que ejecutan una lista de acciones vía ActionRunner.
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    method TEXT NOT NULL DEFAULT 'POST',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    actions TEXT NOT NULL DEFAULT '[]',
+    trigger_count INTEGER NOT NULL DEFAULT 0,
+    last_triggered_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_webhooks_token ON webhooks(token);
   -- NOTA Fase C+D: los índices extra (pages.parent_id, variables.scope,
   -- flow_runs.started_at...) NO van aquí sino en la migración 8, uno por uno
   -- con try/catch: en DBs antiguas la tabla puede existir sin esa columna
@@ -1027,6 +1057,36 @@ function runMigrations(db: Database) {
     console.error('❌ Migration 10 failed (settings):', error);
   }
 
+  // Migration 11: webhooks LAN (endpoints HTTP con token que ejecutan
+  // acciones). En DBs nuevas ya lo crea el schema base; aquí solo faltantes.
+  // Idempotente.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS webhooks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      method TEXT NOT NULL DEFAULT 'POST',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      actions TEXT NOT NULL DEFAULT '[]',
+      trigger_count INTEGER NOT NULL DEFAULT 0,
+      last_triggered_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER
+    )`);
+    console.log('✅ Migration 11: webhooks table');
+  } catch (error) {
+    console.error('❌ Migration 11 failed (table):', error);
+  }
+  try {
+    for (const ddl of ['CREATE INDEX IF NOT EXISTS idx_webhooks_token ON webhooks(token)']) {
+      try { db.exec(ddl); }
+      catch (e) { console.warn(`⚠️ Migration 11: omitido (${ddl}):`, (e as Error)?.message ?? e); }
+    }
+    console.log('✅ Migration 11 completed: índices de webhooks');
+  } catch (error) {
+    console.error('❌ Migration 11 failed (indexes):', error);
+  }
+
   console.log('✅ Database migrations completed');
 }
 
@@ -1191,6 +1251,7 @@ export async function resetDatabaseToDefaults(): Promise<FactoryResetResult> {
       'DELETE FROM assets',
       'DELETE FROM logs',
       'DELETE FROM button_press_logs',
+      'DELETE FROM webhooks',
       'DELETE FROM plugins',
       'DELETE FROM devices',
       'DELETE FROM settings',
@@ -1332,6 +1393,26 @@ function normalizeWidgetRow(r: any): Widget {
     name: r.name,
     kind: r.kind ?? null,
     data: parseJsonSafe(r.data),
+    created_at: r.created_at,
+    updated_at: r.updated_at ?? null,
+  };
+}
+
+function normalizeWebhookRow(r: any): Webhook {
+  let actions: any[] = [];
+  try {
+    const parsed = typeof r.actions === 'string' ? JSON.parse(r.actions) : r.actions;
+    if (Array.isArray(parsed)) actions = parsed;
+  } catch { actions = []; }
+  return {
+    id: r.id,
+    name: r.name,
+    token: r.token,
+    method: String(r.method ?? 'POST').toUpperCase(),
+    enabled: Number(r.enabled ?? 1),
+    actions,
+    trigger_count: Number(r.trigger_count ?? 0),
+    last_triggered_at: r.last_triggered_at ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at ?? null,
   };
@@ -2897,6 +2978,65 @@ export class DatabaseService {
     const now = Date.now();
     this.db.prepare('INSERT OR REPLACE INTO automations (id, name, enabled, trigger, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(a.id, a.name, a.enabled ?? existing?.enabled ?? 1, JSON.stringify(a.trigger ?? {}), JSON.stringify(a.data ?? { actions: [] }), a.created_at ?? existing?.created_at ?? now, a.updated_at ?? now);
+  }
+
+  // ---- Webhooks LAN (endpoints HTTP con token → lista de acciones) ----
+  listWebhooks(): Webhook[] {
+    const rows = this.db.prepare('SELECT * FROM webhooks ORDER BY name').all() as any[];
+    return rows.map(normalizeWebhookRow);
+  }
+
+  getWebhook(id: string): Webhook | null {
+    const r = this.db.prepare('SELECT * FROM webhooks WHERE id = ?').get(id) as any;
+    return r ? normalizeWebhookRow(r) : null;
+  }
+
+  getWebhookByToken(token: string): Webhook | null {
+    if (!token || typeof token !== 'string') return null;
+    const r = this.db.prepare('SELECT * FROM webhooks WHERE token = ?').get(token) as any;
+    return r ? normalizeWebhookRow(r) : null;
+  }
+
+  createWebhook(w: { id: string; name: string; token: string; method?: string; enabled?: number; actions?: any[] }): Webhook {
+    if (!w.id || typeof w.id !== 'string') throw new Error('id requerido (string)');
+    if (!w.name || typeof w.name !== 'string') throw new Error('name requerido (string)');
+    if (!w.token || typeof w.token !== 'string') throw new Error('token requerido (string)');
+    const now = Date.now();
+    this.db.prepare('INSERT INTO webhooks (id, name, token, method, enabled, actions, trigger_count, last_triggered_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)')
+      .run(w.id, w.name, w.token, String(w.method ?? 'POST').toUpperCase(), w.enabled ?? 1, JSON.stringify(w.actions ?? []), now, now);
+    return this.getWebhook(w.id)!;
+  }
+
+  updateWebhook(id: string, updates: { name?: string; method?: string; enabled?: number; actions?: any[] }): Webhook {
+    const existing = this.getWebhook(id);
+    if (!existing) throw new Error(`Webhook no encontrado: ${id}`);
+    const name = updates.name !== undefined ? updates.name : existing.name;
+    if (!name || typeof name !== 'string') throw new Error('name inválido');
+    const method = updates.method !== undefined ? String(updates.method).toUpperCase() : existing.method;
+    const enabled = updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : existing.enabled;
+    const actions = updates.actions !== undefined ? updates.actions : existing.actions;
+    this.db.prepare('UPDATE webhooks SET name = ?, method = ?, enabled = ?, actions = ?, updated_at = ? WHERE id = ?')
+      .run(name, method, enabled, JSON.stringify(actions ?? []), Date.now(), id);
+    return this.getWebhook(id)!;
+  }
+
+  regenerateWebhookToken(id: string, token: string): Webhook {
+    const existing = this.getWebhook(id);
+    if (!existing) throw new Error(`Webhook no encontrado: ${id}`);
+    if (!token || typeof token !== 'string') throw new Error('token requerido (string)');
+    this.db.prepare('UPDATE webhooks SET token = ?, updated_at = ? WHERE id = ?')
+      .run(token, Date.now(), id);
+    return this.getWebhook(id)!;
+  }
+
+  recordWebhookTrigger(id: string): void {
+    this.db.prepare('UPDATE webhooks SET trigger_count = trigger_count + 1, last_triggered_at = ? WHERE id = ?')
+      .run(Date.now(), id);
+  }
+
+  deleteWebhook(id: string): boolean {
+    const r = this.db.prepare('DELETE FROM webhooks WHERE id = ?').run(id);
+    return Number((r as any)?.changes ?? 0) > 0;
   }
 
   // Current profile and page management

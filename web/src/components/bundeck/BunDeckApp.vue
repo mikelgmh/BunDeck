@@ -161,6 +161,9 @@
       <button class="bd-ibtn" :title="t('bd.plugins')" :aria-label="t('bd.plugins')" @click="settingsDialog?.show('plugins')" data-cy="bd-open-plugins">
         <Puzzle :size="20" stroke-width="1.75" aria-hidden="true" />
       </button>
+      <button class="bd-ibtn" :title="t('bd.secWebhooks')" :aria-label="t('bd.secWebhooks')" @click="settingsDialog?.show('webhooks')" data-cy="bd-open-webhooks">
+        <Webhook :size="20" stroke-width="1.75" aria-hidden="true" />
+      </button>
       <button
         class="bd-ibtn"
         :title="t('bd.secDevices')"
@@ -642,7 +645,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
-import { Plus, Puzzle, Maximize2, Minimize2, ChevronLeft, ChevronRight, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2, Download, Upload, LogOut } from 'lucide-vue-next'
+import { Plus, Puzzle, Webhook, Maximize2, Minimize2, ChevronLeft, ChevronRight, QrCode, Settings, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ellipsis, FileUp, FileDown, Pencil, Copy, Trash2, Download, Upload, LogOut } from 'lucide-vue-next'
 import { useStreamDeck, ensureDefaultIcon } from '../../composables/useStreamDeck'
 import { useI18nStore } from '../../composables/useI18n'
 import {

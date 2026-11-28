@@ -336,7 +336,12 @@ export class RtcManager {
       return;
     }
     // Reutiliza el allowlist del túnel HTTP (sin importar tunnel.ts para evitar ciclo).
+    // Webhooks LAN: NUNCA por relay/RTC (ver api/webhooks.ts: doble veto).
     if (path.includes('..') || !path.startsWith('/')) {
+      this.sendDc(entry, { t: 'api-res', id, status: 403, headers: {}, bodyB64: b64encodeText('forbidden') });
+      return;
+    }
+    if (path === '/api/v1/webhooks' || path.startsWith('/api/v1/webhooks/')) {
       this.sendDc(entry, { t: 'api-res', id, status: 403, headers: {}, bodyB64: b64encodeText('forbidden') });
       return;
     }
