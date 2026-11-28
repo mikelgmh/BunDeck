@@ -157,17 +157,22 @@ pub fn post_token_capture_to(url: &str, token: &SpotifyToken) -> Result<String, 
         "expiresIn": token.expires_in,
         "tokenType": token.token_type,
     });
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(8))
-        .timeout_read(std::time::Duration::from_secs(10))
-        .timeout_write(std::time::Duration::from_secs(8))
-        .build();
-    let resp = agent
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(std::time::Duration::from_secs(8)))
+            .timeout_per_read(Some(std::time::Duration::from_secs(10)))
+            .timeout_per_write(Some(std::time::Duration::from_secs(8)))
+            .build(),
+    );
+    let mut resp = agent
         .post(url)
-        .set("Content-Type", "application/json")
+        .header("Content-Type", "application/json")
         .send_json(body)
         .map_err(|e| format!("POST {url}: {e}"))?;
-    let text = resp.into_string().map_err(|e| format!("leer respuesta: {e}"))?;
+    let text = resp
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("leer respuesta: {e}"))?;
     // Éxito robusto: JSON con `success:true`, no substring (el daemon puede
     // reordenar claves o añadir envoltorios).
     let ok = serde_json::from_str::<serde_json::Value>(&text)

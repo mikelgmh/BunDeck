@@ -131,11 +131,13 @@ pub fn is_newer(installed: &str, latest_tag: &str) -> bool {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(8))
-        .timeout_read(Duration::from_secs(MANIFEST_TIMEOUT_SECS))
-        .timeout_write(Duration::from_secs(8))
-        .build()
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(8)))
+            .timeout_per_read(Some(Duration::from_secs(MANIFEST_TIMEOUT_SECS)))
+            .timeout_per_write(Some(Duration::from_secs(8)))
+            .build(),
+    )
 }
 
 pub fn fetch_manifest() -> Result<(UpdateManifest, Vec<u8>), String> {
@@ -144,12 +146,14 @@ pub fn fetch_manifest() -> Result<(UpdateManifest, Vec<u8>), String> {
     //    (releases antiguas sin este sistema).
     match agent()
         .get(MANIFEST_URL)
-        .set("User-Agent", "bundeck-launcher")
+        .header("User-Agent", "bundeck-launcher")
         .call()
     {
         Ok(res) => {
+            let mut res = res;
             let mut bytes = Vec::new();
-            res.into_reader()
+            res.body_mut()
+                .as_reader()
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("leer manifiesto: {e}"))?;
             let m: UpdateManifest =
@@ -593,13 +597,15 @@ fn download_and_stage_at(
     ));
 
     let result = (|| {
-        let res = agent()
+        let mut res = agent()
             .get(&check.asset.url)
-            .set("User-Agent", "bundeck-launcher")
+            .header("User-Agent", "bundeck-launcher")
             .call()
             .map_err(|e| format!("descarga fallida: {e}"))?;
         let total: Option<u64> = res
-            .header("Content-Length")
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok())
             .filter(|t: &u64| *t > 0)
             .or(if check.asset.size > 0 {
@@ -612,7 +618,7 @@ fn download_and_stage_at(
             p.downloaded = 0;
         });
 
-        let mut reader = res.into_reader();
+        let mut reader = res.body_mut().as_reader();
         let mut out = std::fs::File::create(&tmp_file).map_err(|e| {
             format!("crear temporal en {}: {e}", std::env::temp_dir().display())
         })?;
@@ -1280,7 +1286,7 @@ mod tests {
         {
             let file = std::fs::File::create(&zip_path).unwrap();
             let mut writer = zip::ZipWriter::new(file);
-            let options: zip::write::FileOptions<'_, ()> =
+            let options: zip::write::FileOptions<'_, '_, ()> =
                 zip::write::FileOptions::default();
             writer.start_file("../escaped.txt", options).unwrap();
             writer.write_all(b"outside").unwrap();
@@ -1398,7 +1404,7 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut zip = zip::ZipWriter::new(&mut cursor);
-            let options: zip::write::FileOptions<'_, ()> =
+            let options: zip::write::FileOptions<'_, '_, ()> =
                 zip::write::FileOptions::default()
                     .compression_method(zip::CompressionMethod::Stored);
             for (name, contents) in [
@@ -1548,6 +1554,20 @@ mod tests {
     }
 
     #[test]
+    fn signature_verifies_nodejs_signed_vector() {
+        // Vector generado con node:crypto (el firmante real de
+        // scripts/build-update-manifest.mjs): la firma ed25519 es estándar
+        // (RFC 8032), así que dalek 3 debe verificarla sin doble formato.
+        // seed aleatoria -> pubkey derivada con createPublicKey.
+        let pub_hex = "0d83ccf6c6ec10c1ff1887a0b32b7d68149c626e47eb70ff3c23aa0264f8af24";
+        let sha = "ab".repeat(32);
+        let sig_hex = "70bf14ff0325800359fbb4bcde91ba0ebaea62d2fb91ca119249171c769d71351b7db050d0a2d34bb9a57a6eda7568fe36fd8e7c225242e49379178051f11308";
+        assert!(verify_signature_with_pubkey("1.99.0", "windows-x64", &sha, sig_hex, pub_hex).is_ok());
+        // Mensaje manipulado: debe rechazar.
+        assert!(verify_signature_with_pubkey("1.99.1", "windows-x64", &sha, sig_hex, pub_hex).is_err());
+    }
+
+    #[test]
     fn extract_bundle_roundtrip() {
         let dir = std::env::temp_dir().join(format!("bundeck-zip-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -1555,7 +1575,7 @@ mod tests {
         {
             let f = std::fs::File::create(&zip_path).unwrap();
             let mut w = zip::ZipWriter::new(f);
-            let opts: zip::write::FileOptions<'_, ()> =
+            let opts: zip::write::FileOptions<'_, '_, ()> =
                 zip::write::FileOptions::default();
             w.start_file("bundeck-daemon", opts).unwrap();
             use std::io::Write;
@@ -1629,7 +1649,7 @@ mod tests {
         {
             let file = std::fs::File::create(&zip_path).expect("create ZIP fixture");
             let mut writer = zip::ZipWriter::new(file);
-            let options: zip::write::FileOptions<'_, ()> =
+            let options: zip::write::FileOptions<'_, '_, ()> =
                 zip::write::FileOptions::default()
                     .compression_method(zip::CompressionMethod::Stored);
             for index in 0..FILE_COUNT {

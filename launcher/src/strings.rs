@@ -86,13 +86,15 @@ fn daemon_language() -> Option<Lang> {
         "http://127.0.0.1:{}/api/v1/settings?key=ui.language",
         api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_millis(900))
-        .timeout_read(std::time::Duration::from_millis(900))
-        .timeout_write(std::time::Duration::from_millis(900))
-        .build();
-    let body = agent.get(&url).call().ok()?;
-    let v: serde_json::Value = body.into_json().ok()?;
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(std::time::Duration::from_millis(900)))
+            .timeout_per_read(Some(std::time::Duration::from_millis(900)))
+            .timeout_per_write(Some(std::time::Duration::from_millis(900)))
+            .build(),
+    );
+    let mut body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.body_mut().read_json().ok()?;
     Lang::from_code(v.get("value")?.as_str()?)
 }
 

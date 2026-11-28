@@ -93,13 +93,15 @@ fn read_raw_setting(key: &str) -> Option<String> {
         "http://127.0.0.1:{}/api/v1/settings?key={key}",
         super::monitor::api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1200))
-        .timeout_read(Duration::from_millis(1200))
-        .timeout_write(Duration::from_millis(1200))
-        .build();
-    let body = agent.get(&url).call().ok()?;
-    let v: serde_json::Value = body.into_json().ok()?;
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1200)))
+            .timeout_per_read(Some(Duration::from_millis(1200)))
+            .timeout_per_write(Some(Duration::from_millis(1200)))
+            .build(),
+    );
+    let mut body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.body_mut().read_json().ok()?;
     let raw = v.get("value")?.as_str()?;
     Some(raw.to_string())
 }

@@ -88,18 +88,20 @@ pub fn frontend_port() -> u16 {
 
 fn http_ok_with_agent(agent: &ureq::Agent, url: &str) -> Option<String> {
     match agent.get(url).call() {
-        Ok(res) => res.into_string().ok(),
+        Ok(mut res) => res.body_mut().read_to_string().ok(),
         Err(_) => None,
     }
 }
 
 fn check_api(port: u16) -> ServiceSnapshot {
     let url = format!("http://127.0.0.1:{port}/health");
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(900))
-        .timeout_read(Duration::from_millis(900))
-        .timeout_write(Duration::from_millis(900))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(900)))
+            .timeout_per_read(Some(Duration::from_millis(900)))
+            .timeout_per_write(Some(Duration::from_millis(900)))
+            .build(),
+    );
     check_api_with_agent(port, &url, &agent)
 }
 
@@ -143,11 +145,13 @@ fn check_frontend(port: u16) -> (ServiceSnapshot, bool) {
     if port != 4321 {
         candidates.insert(0, 4321);
     }
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(800))
-        .timeout_read(Duration::from_millis(800))
-        .timeout_write(Duration::from_millis(800))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(800)))
+            .timeout_per_read(Some(Duration::from_millis(800)))
+            .timeout_per_write(Some(Duration::from_millis(800)))
+            .build(),
+    );
     for p in candidates {
         let url = format!("http://127.0.0.1:{p}/");
         if agent.head(&url).call().is_ok() || agent.get(&url).call().is_ok() {
@@ -324,11 +328,13 @@ pub fn prepare_update() -> bool {
         "http://127.0.0.1:{}/api/v1/admin/prepare-update",
         api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     post_ok_with_agent(&agent, &url)
 }
 
@@ -336,16 +342,18 @@ pub fn prepare_update() -> bool {
 /// instante y el proceso muere en ~2s). true si el daemon aceptó la orden.
 pub fn shutdown_daemon() -> bool {
     let url = format!("http://127.0.0.1:{}/api/v1/admin/shutdown", api_port());
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     post_ok_with_agent(&agent, &url)
 }
 
 fn post_ok_with_agent(agent: &ureq::Agent, url: &str) -> bool {
-    agent.post(url).call().is_ok()
+    agent.post(url).send_empty().is_ok()
 }
 
 /// Espera a que termine el daemon tras aceptar el apagado.
@@ -357,11 +365,13 @@ pub fn wait_for_api_down() {
 
 fn wait_for_api_down_secs(secs: u64) {
     let url = format!("http://127.0.0.1:{}/health", api_port());
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(500))
-        .timeout_read(Duration::from_millis(500))
-        .timeout_write(Duration::from_millis(500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(500)))
+            .timeout_per_read(Some(Duration::from_millis(500)))
+            .timeout_per_write(Some(Duration::from_millis(500)))
+            .build(),
+    );
     let tries = secs.saturating_mul(10).max(10);
     for _ in 0..tries {
         if agent.get(&url).call().is_err() {
@@ -394,17 +404,19 @@ pub fn wait_for_stack_down() {
 /// Versión instalada según el daemon (GET /api/v1/version -> {version}).
 pub fn installed_version() -> Option<String> {
     let url = format!("http://127.0.0.1:{}/api/v1/version", api_port());
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     installed_version_with_agent(&agent, &url)
 }
 
 fn installed_version_with_agent(agent: &ureq::Agent, url: &str) -> Option<String> {
-    let body = agent.get(url).call().ok()?;
-    let v: serde_json::Value = body.into_json().ok()?;
+    let mut body = agent.get(url).call().ok()?;
+    let v: serde_json::Value = body.body_mut().read_json().ok()?;
     v.get("version")?.as_str().map(|s| s.to_string())
 }
 
@@ -418,19 +430,21 @@ pub struct LatestRelease {
 }
 
 pub fn latest_release() -> Option<LatestRelease> {
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(3500))
-        .timeout_read(Duration::from_millis(3500))
-        .timeout_write(Duration::from_millis(3500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(3500)))
+            .timeout_per_read(Some(Duration::from_millis(3500)))
+            .timeout_per_write(Some(Duration::from_millis(3500)))
+            .build(),
+    );
     // La API de GitHub exige User-Agent.
-    let res = agent
+    let mut res = agent
         .get("https://api.github.com/repos/mikelgmh/BunDeck/releases/latest")
-        .set("User-Agent", "bundeck-launcher")
-        .set("Accept", "application/vnd.github+json")
+        .header("User-Agent", "bundeck-launcher")
+        .header("Accept", "application/vnd.github+json")
         .call()
         .ok()?;
-    let v: serde_json::Value = res.into_json().ok()?;
+    let v: serde_json::Value = res.body_mut().read_json().ok()?;
     Some(LatestRelease {
         tag: v.get("tag_name")?.as_str()?.to_string(),
         url: v
@@ -506,16 +520,18 @@ fn host_url(path: &str) -> String {
 /// Solo se usa para NO duplicar su flujo dev de Spotify: con host vivo el
 /// host abre su propia ventana y el launcher no abre el navegador.
 pub fn host_alive() -> bool {
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1000))
-        .timeout_read(Duration::from_millis(1000))
-        .timeout_write(Duration::from_millis(1000))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1000)))
+            .timeout_per_read(Some(Duration::from_millis(1000)))
+            .timeout_per_write(Some(Duration::from_millis(1000)))
+            .build(),
+    );
     agent
         .get(&host_url("ping"))
         .call()
         .ok()
-        .and_then(|r| r.into_string().ok())
+        .and_then(|mut r| r.body_mut().read_to_string().ok())
         .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
         .and_then(|v| v.get("ok")?.as_bool())
         .unwrap_or(false)
@@ -530,13 +546,15 @@ pub fn spotify_login_pending() -> Option<String> {
         "http://127.0.0.1:{}/api/v1/plugins/spotify/login-request",
         api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1000))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1000))
-        .build();
-    let body = agent.get(&url).call().ok()?;
-    let v: serde_json::Value = body.into_json().ok()?;
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1000)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1000)))
+            .build(),
+    );
+    let mut body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.body_mut().read_json().ok()?;
     if v.get("pending")?.as_bool() != Some(true) {
         return None;
     }
@@ -555,11 +573,13 @@ pub fn spotify_dismiss_login() -> bool {
         "http://127.0.0.1:{}/api/v1/plugins/spotify/login-request",
         api_port()
     );
-    let agent: ureq::Agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout_read(Duration::from_millis(1500))
-        .timeout_write(Duration::from_millis(1500))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_millis(1500)))
+            .timeout_per_read(Some(Duration::from_millis(1500)))
+            .timeout_per_write(Some(Duration::from_millis(1500)))
+            .build(),
+    );
     agent.delete(&url).call().is_ok()
 }
 
@@ -672,11 +692,13 @@ mod tests {
     use std::thread::JoinHandle;
 
     fn test_agent(timeout: Duration) -> ureq::Agent {
-        ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
-            .timeout_write(timeout)
-            .build()
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_connect(Some(timeout))
+                .timeout_per_read(Some(timeout))
+                .timeout_per_write(Some(timeout))
+                .build(),
+        )
     }
 
     fn fake_daemon(
