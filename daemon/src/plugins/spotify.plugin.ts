@@ -156,17 +156,6 @@ export class SpotifyPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            token: {
-                                type: 'string',
-                                title: 'Token OAuth',
-                                description:
-                                    'Token OAuth de Spotify con scopes de control de reproducción (user-modify-playback-state, user-read-playback-state)',
-                                ui: {
-                                    component: 'input',
-                                    type: 'password',
-                                    placeholder: 'Pega aquí tu token OAuth de Spotify'
-                                }
-                            },
                             action: {
                                 type: 'string',
                                 title: 'Acción de reproducción',
@@ -206,17 +195,6 @@ export class SpotifyPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            token: {
-                                type: 'string',
-                                title: 'Token OAuth',
-                                description:
-                                    'Token OAuth de Spotify con scope user-library-modify (y user-read-playback-state si no indicas pista)',
-                                ui: {
-                                    component: 'input',
-                                    type: 'password',
-                                    placeholder: 'Pega aquí tu token OAuth de Spotify'
-                                }
-                            },
                             trackId: {
                                 type: 'string',
                                 title: 'ID de pista',
@@ -241,17 +219,6 @@ export class SpotifyPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            token: {
-                                type: 'string',
-                                title: 'Token OAuth',
-                                description:
-                                    'Token OAuth de Spotify con scope de control de reproducción (user-modify-playback-state)',
-                                ui: {
-                                    component: 'input',
-                                    type: 'password',
-                                    placeholder: 'Pega aquí tu token OAuth de Spotify'
-                                }
-                            },
                             state: {
                                 type: 'boolean',
                                 title: 'Aleatorio',
@@ -286,17 +253,6 @@ export class SpotifyPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            token: {
-                                type: 'string',
-                                title: 'Token OAuth',
-                                description:
-                                    'Token OAuth de Spotify con scope de control de reproducción (user-modify-playback-state)',
-                                ui: {
-                                    component: 'input',
-                                    type: 'password',
-                                    placeholder: 'Pega aquí tu token OAuth de Spotify'
-                                }
-                            },
                             playlistId: {
                                 type: 'string',
                                 title: 'ID de playlist',
@@ -353,12 +309,9 @@ export class SpotifyPlugin {
                     schema: {
                         type: 'object',
                         properties: {
-                            token: {
-                                type: 'string',
-                                title: 'Token OAuth',
-                                description: 'Si se omite usa el de los ajustes',
-                                ui: { component: 'input', type: 'password', placeholder: 'Usa el de ajustes' }
-                            }
+                            // Sin parámetros: el token sale de los ajustes del
+                            // plugin (botones antiguos con token propio lo
+                            // conservan vía fallback en requireToken).
                         },
                         required: []
                     }
@@ -378,10 +331,13 @@ export class SpotifyPlugin {
     }
 
     private requireToken(params: any): string {
-        // El parámetro tiene prioridad; si falta, se usa el ajuste del plugin.
+        // El token vive en los ajustes del plugin (⋯ → "Conectar con
+        // Spotify"). Los botones antiguos con token propio lo conservan por
+        // compatibilidad (fallback), pero los schemas de acción ya no exponen
+        // el campo (igual que Home Assistant con baseUrl/token).
         // El token explícito por parámetro no caduca desde nuestro punto de
-        // vista (lo acaba de pegar el usuario): el chequeo de caducidad solo
-        // aplica al token guardado de la captura automática.
+        // vista (lo pegó el usuario): el chequeo de caducidad solo aplica al
+        // token guardado de la captura automática.
         const fromParams = params?.token
         if (typeof fromParams === 'string' && fromParams.trim().length > 0) return fromParams
         try {
@@ -399,7 +355,7 @@ export class SpotifyPlugin {
             if (e instanceof Error && e.message.includes('caducado')) throw e
             /* sin ajustes: cae al error de falta de token */
         }
-        throw new Error('Falta el token OAuth: ponlo en los ajustes del plugin (⋯) o en el parámetro "token"')
+        throw new Error('Spotify sin conectar: abre los ajustes del plugin (⋯) y pulsa "Conectar con Spotify"')
     }
 
     /**

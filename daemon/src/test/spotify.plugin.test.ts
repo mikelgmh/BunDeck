@@ -236,10 +236,35 @@ describe('SpotifyPlugin', () => {
         stubFetch(() => jsonResponse(204))
         const handlers = plugin.getActionHandlers()
 
-        await expect(handlers.get('playback')!({ action: 'play' }, {})).rejects.toThrow('token')
+        await expect(handlers.get('playback')!({ action: 'play' }, {})).rejects.toThrow('sin conectar')
         await expect(handlers.get('playback')!({ token: 't', action: 'bogus' }, {})).rejects.toThrow('action')
         await expect(handlers.get('shuffle')!({ token: 't' }, {})).rejects.toThrow('state')
         await expect(handlers.get('playlist')!({ token: 't' }, {})).rejects.toThrow('playlistId')
+    })
+
+    it('ninguna acción expone campo token: el token vive en ajustes del plugin', () => {
+        const { plugin } = makePlugin()
+        for (const action of plugin.getManifest().actions) {
+            expect(Object.keys((action as any).schema.properties ?? {})).not.toContain('token')
+        }
+    })
+
+    it('sin token en ajustes el error pide conectar el plugin (no un token por acción)', async () => {
+        const { plugin } = makePlugin()
+        const handlers = plugin.getActionHandlers()
+        const err = await handlers.get('like')!({}, {}).catch((e: any) => e)
+        expect(err.message).toMatch(/sin conectar/i)
+        expect(err.message).toMatch(/Conectar con Spotify/)
+        expect(err.message).not.toMatch(/parámetro/)
+    })
+
+    it('botones antiguos con token propio siguen funcionando (fallback a params)', async () => {
+        const { plugin } = makePlugin()
+        const calls = stubFetch(() => jsonResponse(204))
+        const handlers = plugin.getActionHandlers()
+        const result = await handlers.get('playback')!({ token: 'legacy-tok', action: 'play' }, {})
+        expect(result.executed).toBe(true)
+        expect(String(calls[0].headers.Authorization)).toBe('Bearer legacy-tok')
     })
 
     it('dispose no falla', () => {
