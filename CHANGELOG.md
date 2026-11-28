@@ -1,3 +1,11 @@
+## [1.25.2](https://github.com/mikelgmh/BunDeck/compare/v1.25.1...v1.25.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **launcher-tests:** CI verde en ubuntu y windows ([f973f9c](https://github.com/mikelgmh/BunDeck/commit/f973f9c554dfe92f398f6af5cdd6927331958fb3))
+* **launcher:** self-update sin falsa doble instancia y cierre completo del stack ([a14c333](https://github.com/mikelgmh/BunDeck/commit/a14c333dd3407238ad6b053a4f04626511a9dd9b))
+
 ## [1.25.1](https://github.com/mikelgmh/BunDeck/compare/v1.25.0...v1.25.1) (2026-11-27)
 
 
