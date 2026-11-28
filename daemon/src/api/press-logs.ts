@@ -111,6 +111,48 @@ export const handlePressLogs: ApiHandler = async (_req, { url, method, path, db 
 
   // ---- /api/v1/press-logs (genérico) ----
   if (path === '/api/v1/press-logs') {
+    // POST /api/v1/press-logs (baliza del cliente): las acciones `local.*`
+    // se ejecutan en el cliente (nunca llegan al daemon) pero también son
+    // actividad de la tecla: el front las reporta aquí best-effort tras
+    // ejecutarlas para que Registros no tenga agujeros. Solo
+    // tipo/resultado/timestamps: nunca `parameters` (secretos).
+    if (method === 'POST') {
+      let body: any = null;
+      try {
+        body = await _req.json();
+      } catch {
+        return badRequest('cuerpo JSON inválido');
+      }
+      const buttonId = typeof body?.buttonId === 'string' && body.buttonId ? body.buttonId : null;
+      const actionType = typeof body?.actionType === 'string' && body.actionType ? body.actionType : null;
+      if (!buttonId) return badRequest('buttonId requerido');
+      if (!actionType) return badRequest('actionType requerido');
+      const success = body?.success === false ? false : true;
+      const err = typeof body?.error === 'string' ? body.error.slice(0, 500) : null;
+      const deviceId = body?.deviceId === null || body?.deviceId === undefined ? null : String(body.deviceId);
+      try {
+        db.addPressLog({
+          buttonId,
+          pageId: typeof body?.pageId === 'string' ? body.pageId : null,
+          profileId: typeof body?.profileId === 'string' ? body.profileId : null,
+          position: Number.isInteger(body?.position) ? body.position : null,
+          pressType: DatabaseService.normalizePressType(body?.pressType),
+          deviceId,
+          deviceName: typeof body?.deviceName === 'string' ? body.deviceName : null,
+          source: typeof body?.source === 'string' ? body.source : 'web',
+          actionType,
+          actionIndex: Number.isInteger(body?.actionIndex) ? body.actionIndex : 0,
+          actionId: typeof body?.actionId === 'string' ? body.actionId : null,
+          runId: null,
+          success,
+          error: success ? null : err,
+          durationMs: Number.isFinite(body?.durationMs) ? Math.max(0, Math.floor(body.durationMs)) : null,
+        });
+      } catch (e) {
+        return badRequest(e instanceof Error ? e.message : String(e));
+      }
+      return jsonResponse({ ok: true });
+    }
     if (method === 'GET') {
       const parsed = parseListQuery(url);
       if ('error' in parsed) return badRequest(parsed.error);

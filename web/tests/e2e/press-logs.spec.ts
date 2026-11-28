@@ -77,6 +77,29 @@ async function setup(request: APIRequestContext, tag: string): Promise<Ctx> {
   return { tag, pageId: created.id, buttonId: btn.id, origPage, origProfile };
 }
 
+async function setupLocalOnly(request: APIRequestContext, tag: string): Promise<Ctx> {
+  const profile = await getRunnerProfile(request);
+  const origPage = (await apiJson(request, 'GET', '/settings?key=current.page_id'))?.value ?? '';
+  const origProfile = (await apiJson(request, 'GET', '/settings?key=current.profile_id'))?.value ?? '';
+  const created = await apiJson(request, 'POST', '/pages', {
+    profile_id: profile.id, name: `${tag}-local`, order_idx: 141, is_folder: 0, data: {},
+  });
+  const btn = await apiJson(request, 'POST', '/buttons', {
+    page_id: created.id, position: 0,
+    data: {
+      label: `${tag}-localkey`,
+      backgroundColor: '#374151',
+      textColor: '#f1f5f9',
+      // Solo acción local: se ejecuta en el cliente; el front la reporta
+      // vía POST /press-logs (baliza) para que también quede registrada.
+      pressActions: { click: [TOAST(`${tag}-LOCAL`)] },
+    },
+  });
+  await apiJson(request, 'POST', '/settings', { key: 'current.profile_id', value: profile.id });
+  await setCurrentPage(request, created.id);
+  return { tag, pageId: created.id, buttonId: btn.id, origPage, origProfile };
+}
+
 async function teardown(request: APIRequestContext, ctx: Ctx) {
   // Sin rastro: ni logs de prueba, ni botones, ni página.
   await request.delete(`${API}/press-logs?buttonId=${ctx.buttonId}`, { failOnStatusCode: false }).catch(() => {});
@@ -164,6 +187,85 @@ test.describe('Registros por pulsación', () => {
       await expect(page.locator('[data-cy=bd-press-logs-dialog]')).toBeVisible({ timeout: 10000 });
       await expect(page.locator('[data-cy=bd-press-log-item]').first()).toBeVisible({ timeout: 10000 });
       await expect(page.locator('[data-cy=bd-press-logs-dialog]')).toContainText('flow.log');
+    } finally {
+      await teardown(request, ctx);
+    }
+  });
+
+  test('tecla solo-local → Probar deja fila (baliza) y el diálogo la muestra', async ({ page, request }) => {
+    const tag = `LO-${Date.now().toString(36)}`;
+    const ctx = await setupLocalOnly(request, tag);
+    try {
+      await gotoBoard(page);
+      await dismissWelcome(page);
+      await collapseLeftPanel(page);
+      await page.locator(`.bd-page .bd-chip`, { hasText: `${tag}-local` }).first().click({ timeout: 15000 });
+      await expect(page.locator(`[data-cy=bd-key]`, { hasText: `${tag}-localkey` }).first()).toBeVisible({ timeout: 15000 });
+      await page.locator(`[data-cy=bd-key]`, { hasText: `${tag}-localkey` }).first().click({ timeout: 15000 });
+      await expect(page.locator('[data-cy=bd-key-title]')).toBeVisible({ timeout: 5000 });
+
+      await expect(page.locator('[data-cy=bd-test-key]')).toBeEnabled({ timeout: 5000 });
+      await page.locator('[data-cy=bd-test-key]').click();
+      await expect(page.locator('.bd-toast', { hasText: `${tag}-LOCAL` })).toBeVisible({ timeout: 10000 });
+
+      // La baliza del cliente registra la acción local en el daemon.
+      const logs = await waitLogs(request, `/buttons/${ctx.buttonId}/logs?limit=10`, 1);
+      expect(logs.total).toBeGreaterThanOrEqual(1);
+      const row = logs.items.find((r: any) => r.actionType === 'local.toast');
+      expect(row).toBeTruthy();
+      expect(row.buttonId).toBe(ctx.buttonId);
+      expect(row.success).toBe(true);
+
+      // El diálogo de la tecla la muestra.
+      await page.locator(`[data-swapy-slot="slot-0"] [data-cy=bd-key]`).click({ button: 'right', timeout: 15000 });
+      await page.locator('[data-cy=bd-ctx-logs]').click({ timeout: 5000 });
+      await expect(page.locator('[data-cy=bd-press-logs-dialog]')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('[data-cy=bd-press-log-item]').first()).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('[data-cy=bd-press-logs-dialog]')).toContainText('local.toast');
+    } finally {
+      await teardown(request, ctx);
+    }
+  });
+
+  test('diálogo pagina con anterior/siguiente (límite como tamaño de página)', async ({ page, request }) => {
+    const tag = `PG-${Date.now().toString(36)}`;
+    const ctx = await setup(request, tag);
+    try {
+      // Semilla: 55 filas vía baliza para forzar 2 páginas con límite 50.
+      for (let i = 0; i < 55; i++) {
+        await request.post(`${API}/press-logs`, {
+          data: { buttonId: ctx.buttonId, pageId: ctx.pageId, pressType: 'short', source: 'web', actionType: 'flow.log', success: true },
+        });
+      }
+      const seeded = await waitLogs(request, `/buttons/${ctx.buttonId}/logs?limit=1`, 55);
+      expect(seeded.total).toBeGreaterThanOrEqual(55);
+
+      await gotoBoard(page);
+      await dismissWelcome(page);
+      await collapseLeftPanel(page);
+      await page.locator(`.bd-page .bd-chip`, { hasText: `${tag}-logs` }).first().click({ timeout: 15000 });
+      await expect(page.locator(`[data-cy=bd-key]`, { hasText: `${tag}-key` }).first()).toBeVisible({ timeout: 15000 });
+      await page.locator(`[data-cy=bd-key]`, { hasText: `${tag}-key` }).first().click({ timeout: 15000 });
+      await expect(page.locator('[data-cy=bd-key-title]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator(`[data-swapy-slot="slot-0"] [data-cy=bd-key]`).click({ button: 'right', timeout: 15000 });
+      await page.locator('[data-cy=bd-ctx-logs]').click({ timeout: 5000 });
+      const dlg = page.locator('[data-cy=bd-press-logs-dialog]');
+      await expect(dlg).toBeVisible({ timeout: 10000 });
+      // Indicador de paginación con el total.
+      await expect(page.locator('[data-cy=bd-press-logs-page]')).toContainText('55', { timeout: 10000 });
+      const itemsPage1 = await page.locator('[data-cy=bd-press-log-item]').count();
+      expect(itemsPage1).toBe(50);
+
+      // Siguiente → segunda página con el resto.
+      await page.locator('[data-cy=bd-press-logs-next]').click();
+      await expect(page.locator('[data-cy=bd-press-logs-page]')).toContainText('2 de 2', { timeout: 10000 });
+      expect(await page.locator('[data-cy=bd-press-log-item]').count()).toBeGreaterThanOrEqual(5);
+
+      // Anterior → vuelve a la primera.
+      await page.locator('[data-cy=bd-press-logs-prev]').click();
+      await expect(page.locator('[data-cy=bd-press-logs-page]')).toContainText('1 de 2', { timeout: 10000 });
+      expect(await page.locator('[data-cy=bd-press-log-item]').count()).toBe(50);
     } finally {
       await teardown(request, ctx);
     }

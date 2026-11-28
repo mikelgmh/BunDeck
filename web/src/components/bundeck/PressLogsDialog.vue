@@ -11,7 +11,7 @@
       <div class="bd-pl-filters" role="group" :aria-label="title">
         <label class="bd-fld">
           <span class="bd-lb">{{ t('bd.pressLogsPressType') }}</span>
-          <select class="bd-inp" :value="pressType" data-cy="bd-press-logs-filter-type" @change="pressType = ($event.target as HTMLSelectElement).value; reload()">
+          <select class="bd-inp" :value="pressType" data-cy="bd-press-logs-filter-type" @change="pressType = ($event.target as HTMLSelectElement).value; gotoPage(0)">
             <option value="">{{ t('bd.pressLogsAll') }}</option>
             <option value="short">{{ t('bd.pressLogsPtShort') }}</option>
             <option value="double">{{ t('bd.pressLogsPtDouble') }}</option>
@@ -23,7 +23,7 @@
         </label>
         <label class="bd-fld">
           <span class="bd-lb">{{ t('bd.pressLogsSuccess') }}</span>
-          <select class="bd-inp" :value="success" data-cy="bd-press-logs-filter-status" @change="success = ($event.target as HTMLSelectElement).value; reload()">
+          <select class="bd-inp" :value="success" data-cy="bd-press-logs-filter-status" @change="success = ($event.target as HTMLSelectElement).value; gotoPage(0)">
             <option value="">{{ t('bd.pressLogsAll') }}</option>
             <option value="true">OK</option>
             <option value="false">{{ t('bd.pressLogsResultFail') }}</option>
@@ -38,19 +38,18 @@
             :placeholder="t('bd.pressLogsDevicePh')"
             :aria-label="t('bd.pressLogsDevice')"
             @input="deviceId = ($event.target as HTMLInputElement).value"
-            @change="reload()"
+            @change="gotoPage(0)"
           />
         </label>
         <label class="bd-fld">
           <span class="bd-lb">{{ t('bd.pressLogsLimit') }}</span>
-          <select class="bd-inp" :value="String(limit)" @change="limit = +($event.target as HTMLSelectElement).value; reload()">
+          <select class="bd-inp" :value="String(limit)" data-cy="bd-press-logs-limit" @change="limit = +($event.target as HTMLSelectElement).value; gotoPage(0)">
             <option value="20">20</option>
             <option value="50">50</option>
             <option value="100">100</option>
           </select>
         </label>
-        <div class="bd-fld bd-fld-actions">
-          <span class="bd-lb" aria-hidden="true">&nbsp;</span>
+        <div class="bd-pl-actions">
           <button class="bd-btn" :disabled="loading" data-cy="bd-press-logs-refresh" @click="reload">
             {{ t('bd.pressLogsRefresh') }}
           </button>
@@ -87,11 +86,18 @@
         </tbody>
       </table>
 
-      <div class="bd-r2" style="justify-content: center">
-        <button v-if="hasMore" class="bd-btn" :disabled="loading" data-cy="bd-press-logs-more" @click="loadMore">
-          {{ t('bd.pressLogsMore') }}
+      <div class="bd-pl-pager" data-cy="bd-press-logs-pager">
+        <button class="bd-btn" :disabled="loading || page <= 0" data-cy="bd-press-logs-prev" @click="gotoPage(page - 1)">
+          {{ t('bd.pressLogsPrev') }}
         </button>
-        <button class="bd-btn bd-dng" :disabled="loading || !items.length" @click="clearLogs">
+        <span class="bd-pl-page" data-cy="bd-press-logs-page">
+          {{ t('bd.pressLogsPage', { page: page + 1, pages: pageCount, total }) }}
+        </span>
+        <button class="bd-btn" :disabled="loading || page + 1 >= pageCount" data-cy="bd-press-logs-next" @click="gotoPage(page + 1)">
+          {{ t('bd.pressLogsNext') }}
+        </button>
+        <span class="bd-pl-spacer"></span>
+        <button class="bd-btn bd-dng" :disabled="loading || !items.length" data-cy="bd-press-logs-clear" @click="clearLogs">
           {{ t('bd.pressLogsClear') }}
         </button>
       </div>
@@ -164,13 +170,14 @@ const pressType = ref('')
 const success = ref('')
 const deviceId = ref('')
 const limit = ref(50)
+const page = ref(0)
 
 const title = computed(() => {
   if (effActionType.value) return t('bd.actionLogsTitle', { type: effActionType.value })
   if (effLabel.value) return t('bd.pressLogsTitleBtn', { name: effLabel.value })
   return t('bd.pressLogsTitle')
 })
-const hasMore = computed(() => items.value.length < total.value)
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / Math.max(1, limit.value))))
 
 const shortId = (v: unknown): string => {
   const s = String(v ?? '')
@@ -229,13 +236,14 @@ const fetchList = async (offset: number): Promise<{ items: PressLog[]; total: nu
   }
 }
 
-const reload = async () => {
+const fetchPage = async (p: number): Promise<void> => {
   loading.value = true
   error.value = ''
   try {
-    const data = await fetchList(0)
+    const data = await fetchList(p * limit.value)
     items.value = data.items
     total.value = data.total
+    page.value = Math.min(p, Math.max(0, Math.ceil(data.total / Math.max(1, limit.value)) - 1))
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     items.value = []
@@ -245,19 +253,13 @@ const reload = async () => {
   }
 }
 
-const loadMore = async () => {
-  if (loading.value || !hasMore.value) return
-  loading.value = true
-  error.value = ''
-  try {
-    const data = await fetchList(items.value.length)
-    items.value = [...items.value, ...data.items]
-    total.value = data.total
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
+const reload = async () => {
+  await fetchPage(page.value)
+}
+
+const gotoPage = async (p: number) => {
+  page.value = Math.max(0, p)
+  await fetchPage(page.value)
 }
 
 const clearLogs = async () => {
@@ -280,7 +282,8 @@ const clearLogs = async () => {
       signal: AbortSignal.timeout(30000),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    await reload()
+    page.value = 0
+    await fetchPage(0)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -299,7 +302,8 @@ const show = async (overrides?: {
     if ('buttonLabel' in overrides) effLabel.value = overrides.buttonLabel ?? null
   }
   dialog.value?.showModal()
-  await reload()
+  page.value = 0
+  await fetchPage(0)
 }
 const close = () => {
   dialog.value?.close()
@@ -345,9 +349,34 @@ defineExpose({ show, close })
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
+  align-items: end;
 }
 .bd-pl-filters .bd-fld {
   margin: 0;
+}
+/* La columna de acciones no lleva etiqueta: se alinea abajo con los inputs
+   (sin el antiguo apaño de `&nbsp;`, que descuadraba alturas y baselines). */
+.bd-pl-actions {
+  display: flex;
+  align-items: flex-end;
+  min-height: 100%;
+}
+.bd-pl-actions .bd-btn {
+  width: 100%;
+}
+.bd-pl-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.bd-pl-page {
+  font-size: 12px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.bd-pl-spacer {
+  flex: 1;
 }
 .bd-pl-table {
   width: 100%;

@@ -32,6 +32,19 @@ export interface EngineDeps {
   pageName: () => string
   pageId: () => string
   executing: { value: number[] }
+  /**
+   * Reporte best-effort de acciones `local.*` al daemon (POST /press-logs):
+   * se ejecutan en el cliente y nunca llegan al daemon, pero también son
+   * actividad de la tecla y Registros no debe tener agujeros. Las remotas
+   * NO se reportan aquí (el daemon ya las registra al ejecutarlas).
+   */
+  reportPress?: (info: {
+    actionType: string
+    success: boolean
+    error?: string | null
+    durationMs?: number | null
+    ctx: Record<string, any>
+  }) => void
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -64,6 +77,21 @@ export function createKeyEngine(deps: EngineDeps) {
 
   async function perform(o: any, ctx: Record<string, any>): Promise<void> {
     const E = env()
+    const t0 = Date.now()
+    let localType: string | null =
+      typeof o?.type === 'string' && o.type.startsWith('local.') ? o.type : null
+    const report = (success: boolean, error?: unknown) => {
+      if (!localType) return
+      try {
+        deps.reportPress?.({
+          actionType: localType,
+          success,
+          error: error == null ? null : String((error as any)?.message ?? error).slice(0, 500),
+          durationMs: Date.now() - t0,
+          ctx,
+        })
+      } catch { /* best-effort: el press ya se ejecutó */ }
+    }
     try {
       switch (o?.type) {
         case 'local.set-var': {
@@ -71,6 +99,7 @@ export function createKeyEngine(deps: EngineDeps) {
           if (!name) throw new Error('Elige una variable')
           if (!getVar(name)) throw new Error(`Variable desconocida «${name}»`)
           setVarValue(name, ev(String(o?.parameters?.expr ?? ''), E))
+          report(true)
           break
         }
         case 'local.toggle-var': {
@@ -78,17 +107,21 @@ export function createKeyEngine(deps: EngineDeps) {
           if (!name) throw new Error('Elige una variable')
           if (!getVar(name)) throw new Error(`Variable desconocida «${name}»`)
           toggleVar(name)
+          report(true)
           break
         }
         case 'local.toast': {
           deps.toast(intp(String(o?.parameters?.text ?? ''), E) || '(mensaje vacío)')
+          report(true)
           break
         }
         default: {
+          localType = null
           await deps.execRemote({ ...o, parameters: interpParams(o?.parameters ?? {}, E) }, ctx)
         }
       }
     } catch (e: any) {
+      report(false, e)
       deps.toast(`Error: ${e?.message ?? e}`)
     }
   }

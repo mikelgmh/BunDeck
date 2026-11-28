@@ -13,6 +13,7 @@ const CLAIM = claimDataDir('ld-press-logs-test-');
 const TMP = CLAIM.dir;
 
 import { initDatabase, getDatabase, DatabaseService } from '../db';
+import { handlePressLogs } from '../api/press-logs';
 
 let db: DatabaseService;
 
@@ -179,5 +180,56 @@ describe('button_press_logs: clear y prune', () => {
     const deleted = db.prunePressLogs(10000, 30);
     expect(deleted).toBe(1);
     expect(db.listPressLogs({}).items[0].buttonId).toBe('new');
+  });
+});
+
+describe('press-logs: POST /api/v1/press-logs (baliza del cliente)', () => {
+  const callPost = (body: any) =>
+    handlePressLogs(
+      { json: async () => body } as any,
+      {
+        url: new URL('http://x/api/v1/press-logs'),
+        method: 'POST',
+        path: '/api/v1/press-logs',
+        db,
+      } as any,
+    ) as Promise<Response | null>;
+
+  it('registra la acción local y se lista por botón+tipo', async () => {
+    db.clearPressLogs();
+    const res = await callPost({
+      buttonId: 'blocal', pageId: 'p1', position: 3, pressType: 'press',
+      deviceId: 'dev-1', source: 'web', actionType: 'local.toast',
+      success: true, durationMs: 4,
+    });
+    expect(res?.status).toBe(200);
+    expect(await res?.json()).toEqual({ ok: true });
+    const listed = db.listPressLogs({ buttonId: 'blocal', actionType: 'local.toast' });
+    expect(listed.total).toBe(1);
+    // pressType legado normalizado en escritura.
+    expect(listed.items[0].pressType).toBe('short');
+    expect(listed.items[0].deviceId).toBe('dev-1');
+    expect(listed.items[0].runId).toBeNull();
+  });
+
+  it('registra el fallo local con su error', async () => {
+    db.clearPressLogs();
+    const res = await callPost({ buttonId: 'blocal', actionType: 'local.set-var', success: false, error: 'Elige una variable' });
+    expect(res?.status).toBe(200);
+    const listed = db.listPressLogs({ buttonId: 'blocal', success: false });
+    expect(listed.total).toBe(1);
+    expect(listed.items[0].error).toBe('Elige una variable');
+  });
+
+  it('400 sin buttonId/actionType y con JSON inválido', async () => {
+    const noBtn = await callPost({ actionType: 'local.toast' });
+    expect(noBtn?.status).toBe(400);
+    const noType = await callPost({ buttonId: 'b' });
+    expect(noType?.status).toBe(400);
+    const badJson = await handlePressLogs(
+      { json: async () => { throw new Error('boom'); } } as any,
+      { url: new URL('http://x/api/v1/press-logs'), method: 'POST', path: '/api/v1/press-logs', db } as any,
+    ) as Response | null;
+    expect(badJson?.status).toBe(400);
   });
 });

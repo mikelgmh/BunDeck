@@ -133,23 +133,54 @@ describe('PressLogsDialog', () => {
     wrapper.unmount()
   })
 
-  it('pagina con «Cargar más» usando offset', async () => {
-    getPayload = { items: [LOG_A, LOG_B], total: 3 }
+  it('pagina con anterior/siguiente usando offset y muestra el indicador', async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ({ ...LOG_A, id: `p1-${i}`, ts: 1764000000000 + i }))
+    const page2 = [{ ...LOG_C, ts: 1764000099999 }]
+    getPayload = { items: page1, total: 120 }
     const wrapper = mountDialog({ actionType: 'shell.exec' })
     await (wrapper.vm as any).show()
     await flushPromises()
 
     expect(lastUrls[0]).toContain('/actions/logs')
     expect(lastUrls[0]).toContain('actionType=shell.exec')
+    expect(lastUrls[0]).toContain('offset=0')
     // Título de acción con el tipo.
     expect(wrapper.text()).toContain('shell.exec')
+    // Indicador de página: 1 de 3 (120 / 50).
+    expect(wrapper.find('[data-cy="bd-press-logs-page"]').text()).toContain('120')
+    expect(wrapper.find('[data-cy="bd-press-logs-prev"]').attributes('disabled')).toBeDefined()
 
-    getPayload = { items: [LOG_C], total: 3 }
-    await wrapper.find('[data-cy="bd-press-logs-more"]').trigger('click')
+    // Siguiente pide la página 1 (offset=limit 50).
+    getPayload = { items: page2, total: 120 }
+    await wrapper.find('[data-cy="bd-press-logs-next"]').trigger('click')
     await flushPromises()
 
-    expect(lastUrls[lastUrls.length - 1]).toContain('offset=2')
-    expect(wrapper.findAll('[data-cy="bd-press-log-item"]')).toHaveLength(3)
+    expect(lastUrls[lastUrls.length - 1]).toContain('offset=50')
+    expect(wrapper.findAll('[data-cy="bd-press-log-item"]')).toHaveLength(1)
+
+    // Anterior vuelve a la página 0.
+    getPayload = { items: page1, total: 120 }
+    await wrapper.find('[data-cy="bd-press-logs-prev"]').trigger('click')
+    await flushPromises()
+
+    expect(lastUrls[lastUrls.length - 1]).toContain('offset=0')
+    expect(wrapper.findAll('[data-cy="bd-press-log-item"]')).toHaveLength(50)
+    wrapper.unmount()
+  })
+
+  it('cambiar el límite reinicia a la primera página', async () => {
+    getPayload = { items: [LOG_A, LOG_B], total: 3 }
+    const wrapper = mountDialog({ buttonId: 'b1' })
+    await (wrapper.vm as any).show()
+    await flushPromises()
+
+    const limitSel = wrapper.find('[data-cy="bd-press-logs-limit"]')
+    await limitSel.setValue('20')
+    await flushPromises()
+
+    const last = lastUrls[lastUrls.length - 1]
+    expect(last).toContain('limit=20')
+    expect(last).toContain('offset=0')
     wrapper.unmount()
   })
 
@@ -160,8 +191,7 @@ describe('PressLogsDialog', () => {
     await flushPromises()
 
     getPayload = { items: [], total: 0 }
-    const clearBtn = wrapper.findAll('button.bd-dng').at(-1)!
-    await clearBtn.trigger('click')
+    await wrapper.find('[data-cy="bd-press-logs-clear"]').trigger('click')
     await flushPromises()
 
     expect(confirmSpy).toHaveBeenCalled()
@@ -178,8 +208,7 @@ describe('PressLogsDialog', () => {
     await flushPromises()
 
     const calls = fetchMock.mock.calls.length
-    const clearBtn = wrapper.findAll('button.bd-dng').at(-1)!
-    await clearBtn.trigger('click')
+    await wrapper.find('[data-cy="bd-press-logs-clear"]').trigger('click')
     await flushPromises()
 
     expect(fetchMock.mock.calls.length).toBe(calls)
@@ -227,7 +256,7 @@ describe('PressLogsDialog', () => {
     await flushPromises()
 
     getPayload = { items: [], total: 0 }
-    await wrapper.findAll('button.bd-dng').at(-1)!.trigger('click')
+    await wrapper.find('[data-cy="bd-press-logs-clear"]').trigger('click')
     await flushPromises()
 
     const dels = lastUrls.filter((u, i) => lastInits[i]?.method === 'DELETE')
