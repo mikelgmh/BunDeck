@@ -103,21 +103,81 @@ fn oldest_component_version(daemon: &str) -> String {
     }
 }
 
+// ---- Pestaña Ajustes: I/O contra el daemon (siempre en hilo de fondo) ----
+
+/// Ajustes leídos del daemon; todo `None` = API caída (manda la caché).
+struct RemoteSettings {
+    lang: Option<String>,
+    autostart: Option<bool>,
+    start_minimized: Option<bool>,
+}
+
+fn settings_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(1500))
+        .timeout_read(Duration::from_millis(1500))
+        .timeout_write(Duration::from_millis(1500))
+        .build()
+}
+
+fn get_daemon_setting(agent: &ureq::Agent, key: &str) -> Option<String> {
+    let url = format!(
+        "http://127.0.0.1:{}/api/v1/settings?key={key}",
+        monitor::api_port()
+    );
+    let body = agent.get(&url).call().ok()?;
+    let v: serde_json::Value = body.into_json().ok()?;
+    v.get("value")?.as_str().map(str::to_string)
+}
+
+fn fetch_remote_settings() -> RemoteSettings {
+    let agent = settings_agent();
+    let lang = get_daemon_setting(&agent, "ui.language")
+        .and_then(|raw| strings::Lang::from_code(raw.trim()).map(|l| l.code().to_string()));
+    let autostart =
+        get_daemon_setting(&agent, autostart::AUTOSTART_KEY).map(|raw| autostart::parse_setting(&raw));
+    let start_minimized = get_daemon_setting(&agent, autostart::START_MINIMIZED_KEY)
+        .map(|raw| autostart::parse_start_minimized(&raw));
+    RemoteSettings {
+        lang,
+        autostart,
+        start_minimized,
+    }
+}
+
+fn post_daemon_setting(key: &str, value: &str) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{}/api/v1/settings", monitor::api_port());
+    let body = settings_agent()
+        .post(&url)
+        .set("Content-Type", "application/json")
+        .send_json(serde_json::json!({ "key": key, "value": value }))
+        .map_err(|e| e.to_string())?;
+    if (200..300).contains(&body.status()) {
+        Ok(())
+    } else {
+        Err(format!("HTTP {}", body.status()))
+    }
+}
+
 #[cfg(windows)]
-fn acquire_single_instance() -> Option<instance::InstanceLock> {
+fn acquire_single_instance(interactive: bool) -> Option<instance::InstanceLock> {
     let lock = match instance::InstanceLock::acquire() {
         Ok(lock) => lock,
         Err(error) => {
-            let text_wide = strings::wide_format("dlg.check_fail", &[("error", &error.to_string())]);
-            let caption = strings::wide("dlg.app_title");
-            unsafe {
-                let _ = MessageBoxW(
-                    None,
-                    windows::core::PCWSTR(text_wide.as_ptr()),
-                    windows::core::PCWSTR(caption.as_ptr()),
-                    windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR
-                        | MB_SETFOREGROUND,
-                );
+            if interactive {
+                let text_wide = strings::wide_format("dlg.check_fail", &[("error", &error.to_string())]);
+                let caption = strings::wide("dlg.app_title");
+                unsafe {
+                    let _ = MessageBoxW(
+                        None,
+                        windows::core::PCWSTR(text_wide.as_ptr()),
+                        windows::core::PCWSTR(caption.as_ptr()),
+                        windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR
+                            | MB_SETFOREGROUND,
+                    );
+                }
+            } else {
+                eprintln!("[launcher] no se pudo comprobar la instancia: {error}");
             }
             return None;
         }
@@ -141,7 +201,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
                 Err(_) => {}
             }
         }
-        show_instance_message(strings::get("dlg.meta_unreadable"), false);
+        show_instance_message(strings::get("dlg.meta_unreadable"), false, interactive);
         return None;
     };
     // La metadata puede ser stale (PID muerto o reutilizado por otro
@@ -160,7 +220,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
                 Err(_) => {}
             }
         }
-        show_instance_message(strings::get("dlg.meta_stale"), false);
+        show_instance_message(strings::get("dlg.meta_stale"), false, interactive);
         return None;
     }
     if existing.pid == std::process::id() || !is_launcher_process(existing.pid) {
@@ -168,7 +228,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
             "Rechazado reemplazar PID {}: no parece launcher BunDeck.",
             existing.pid
         ));
-        show_instance_message(strings::get("dlg.not_launcher"), false);
+        show_instance_message(strings::get("dlg.not_launcher"), false, interactive);
         return None;
     }
     let question = strings::format(
@@ -178,7 +238,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
             ("pid", &existing.pid.to_string()),
         ],
     );
-    if !show_instance_message(&question, true) {
+    if !show_instance_message(&question, true, interactive) {
         return None;
     }
 
@@ -193,7 +253,7 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
     // actualizado (el Restart del update lo quiere conservar).
     let _ = monitor::shutdown_daemon();
     if !terminate_existing_instance(existing.pid, false) {
-        show_instance_message(strings::get("dlg.could_not_close"), false);
+        show_instance_message(strings::get("dlg.could_not_close"), false, interactive);
         return None;
     }
     drop(lock);
@@ -206,12 +266,17 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    show_instance_message(strings::get("dlg.lock_timeout"), false);
+    show_instance_message(strings::get("dlg.lock_timeout"), false, interactive);
     None
 }
 
 #[cfg(windows)]
-fn show_instance_message(text: &str, ask_yes_no: bool) -> bool {
+fn show_instance_message(text: &str, ask_yes_no: bool, interactive: bool) -> bool {
+    if !interactive {
+        // Arranque minimizado: sin diálogos modales (log + salida silenciosa).
+        eprintln!("[launcher] {text}");
+        return false;
+    }
     let text_wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
     let caption_yes_no = strings::wide("dlg.already_open");
     let caption_info = strings::wide("dlg.app_title");
@@ -279,7 +344,7 @@ fn is_launcher_process(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-fn prepare_existing_server() {
+fn prepare_existing_server(interactive: bool) {
     let snapshot = monitor::snapshot(false);
     let api_up = snapshot.api.state == State::Ok;
     let is_dev = snapshot.frontend.state == State::Ok && snapshot.frontend.detail == ":4321";
@@ -310,33 +375,33 @@ fn prepare_existing_server() {
             ("mode", mode),
         ],
     );
-    if !show_instance_message(&question, true) {
+    if !show_instance_message(&question, true, interactive) {
         return;
     }
 
     if api_up {
         if !monitor::shutdown_daemon() {
-            show_instance_message(strings::get("dlg.server_keep"), false);
+            show_instance_message(strings::get("dlg.server_keep"), false, interactive);
             return;
         }
         monitor::wait_for_api_down();
         if monitor::snapshot(false).api.state == State::Ok {
-            show_instance_message(strings::get("dlg.server_still_up"), false);
+            show_instance_message(strings::get("dlg.server_still_up"), false, interactive);
             return;
         }
     }
 
     if is_dev {
         let Some(pid) = process_listening_on(4321) else {
-            show_instance_message(strings::get("dlg.dev_no_astro"), false);
+            show_instance_message(strings::get("dlg.dev_no_astro"), false, interactive);
             return;
         };
         if !is_bundeck_dev_process(pid) {
-            show_instance_message(strings::get("dlg.dev_not_bundeck"), false);
+            show_instance_message(strings::get("dlg.dev_not_bundeck"), false, interactive);
             return;
         }
         if pid != std::process::id() && !terminate_existing_instance(pid, true) {
-            show_instance_message(strings::get("dlg.dev_no_close"), false);
+            show_instance_message(strings::get("dlg.dev_no_close"), false, interactive);
             return;
         }
     }
@@ -387,7 +452,7 @@ fn process_listening_on(port: u16) -> Option<u32> {
 }
 
 #[cfg(not(windows))]
-fn acquire_single_instance() -> Option<instance::InstanceLock> {
+fn acquire_single_instance(_interactive: bool) -> Option<instance::InstanceLock> {
     match instance::InstanceLock::acquire() {
         Ok(lock) if lock.is_owner() => Some(lock),
         Ok(_) => {
@@ -407,10 +472,11 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
 static TRAY_TX: std::sync::OnceLock<std::sync::mpsc::Sender<TrayEvent>> =
     std::sync::OnceLock::new();
 
-/// Pestañas del panel: estado/acciones y registro a pantalla completa.
+/// Pestañas del panel: estado/acciones, ajustes y registro a pantalla completa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Status,
+    Settings,
     Log,
 }
 
@@ -438,6 +504,16 @@ struct LauncherView {
     launcher_pending_restart: bool,
     /// El usuario pidió arrancar: el bucle reintenta hasta que la API suba.
     pending_start: bool,
+    /// Pestaña Ajustes: idioma (`ui.language`, se aplica al momento).
+    settings_lang: String,
+    /// Pestaña Ajustes: `system.autostart` (interruptor del SO).
+    settings_autostart: bool,
+    /// Pestaña Ajustes: `system.start_minimized` (default ON).
+    settings_minimized: bool,
+    /// La última lectura vino de la caché local (daemon caído).
+    settings_offline: bool,
+    /// Nota de la última escritura (guardado / error).
+    settings_note: Option<String>,
     /// PNG del logo para la cabecera (None = cuadrado ámbar de reserva).
     logo: Option<PathBuf>,
     /// Aviso persistente de Spotify: `requestedAt` ya atendido (navegador
@@ -470,6 +546,18 @@ enum BackgroundEvent {
         installed: Option<String>,
         boot: Vec<String>,
         pending_start: bool,
+    },
+    /// Preferencias de la pestaña Ajustes (hilo de fondo; `None` = la API
+    /// no respondió para esa clave y manda la caché local).
+    SettingsLoaded {
+        lang: Option<String>,
+        autostart: Option<bool>,
+        start_minimized: Option<bool>,
+    },
+    /// Resultado de guardar un ajuste desde la pestaña Ajustes.
+    SettingsSaved {
+        ok: bool,
+        detail: String,
     },
     /// El sondeo abrió el navegador para un login-request de Spotify.
     SpotifyLogin { requested_at: String },
@@ -514,6 +602,11 @@ impl LauncherView {
             last_applied: None,
             launcher_pending_restart: false,
             pending_start: false,
+            settings_lang: strings::effective().code().to_string(),
+            settings_autostart: false,
+            settings_minimized: true,
+            settings_offline: false,
+            settings_note: None,
             logo: None,
             spotify_notice: None,
             background_tx,
@@ -559,6 +652,17 @@ impl LauncherView {
             last_applied: None,
             launcher_pending_restart: false,
             pending_start: false,
+            // Estado inicial desde la caché local: si el daemon está caído,
+            // la pestaña Ajustes muestra lo último guardado (no vacíos).
+            settings_lang: strings::effective().code().to_string(),
+            settings_autostart: autostart::load_cached_startup()
+                .map(|p| p.autostart)
+                .unwrap_or(false),
+            settings_minimized: autostart::load_cached_startup()
+                .map(|p| p.start_minimized)
+                .unwrap_or(true),
+            settings_offline: false,
+            settings_note: None,
             logo: monitor::logo_path(),
             spotify_notice: None,
             background_tx,
@@ -567,6 +671,17 @@ impl LauncherView {
             #[cfg(windows)]
             last_chrome_click: None,
         };
+        // La lectura de ajustes vive en un hilo de fondo (patrón
+        // `check_updates`): nunca bloquea el hilo de la interfaz.
+        let settings_tx = view.background_tx.clone();
+        std::thread::spawn(move || {
+            let loaded = fetch_remote_settings();
+            let _ = settings_tx.send(BackgroundEvent::SettingsLoaded {
+                lang: loaded.lang,
+                autostart: loaded.autostart,
+                start_minimized: loaded.start_minimized,
+            });
+        });
         view.start_polling(cx);
         view
     }
@@ -812,6 +927,34 @@ impl LauncherView {
                     result,
                     latest_fallback,
                 } => self.finish_update_check(installed, result, latest_fallback),
+                BackgroundEvent::SettingsLoaded {
+                    lang,
+                    autostart,
+                    start_minimized,
+                } => {
+                    if lang.is_none() && autostart.is_none() && start_minimized.is_none() {
+                        // API caída: se mantienen los valores de la caché
+                        // local (estado inicial de `new`) y se avisa.
+                        self.settings_offline = true;
+                    } else {
+                        self.settings_offline = false;
+                        if let Some(code) = lang {
+                            self.settings_lang = code;
+                        }
+                        if let Some(on) = autostart {
+                            self.settings_autostart = on;
+                        }
+                        if let Some(min) = start_minimized {
+                            self.settings_minimized = min;
+                        }
+                    }
+                }
+                BackgroundEvent::SettingsSaved { ok, detail } => {
+                    self.settings_note = Some(detail);
+                    if !ok {
+                        self.settings_offline = true;
+                    }
+                }
             }
         }
         self.truncate_log();
@@ -882,6 +1025,94 @@ impl LauncherView {
         self.pending_start = true;
         let _ = self.monitor_tx.send(MonitorCommand::Restart);
         self.log.push("Reinicio solicitado: apagando y volviendo a arrancar…".to_string());
+        self.truncate_log();
+    }
+
+    // ---- Pestaña Ajustes (POST en hilo de fondo + persist local) ----
+
+    /// Idioma: POST `ui.language` al daemon; al guardar, se aplica al
+    /// momento y se persiste en `launcher-lang` (ver `strings.rs`).
+    fn set_settings_language(&mut self, code: &str) {
+        let Some(lang) = strings::Lang::from_code(code) else {
+            return;
+        };
+        self.settings_lang = lang.code().to_string();
+        self.settings_note = None;
+        let tx = self.background_tx.clone();
+        let code = lang.code().to_string();
+        std::thread::spawn(move || {
+            let res = post_daemon_setting("ui.language", &code);
+            match res {
+                Ok(()) => {
+                    strings::set_runtime(lang);
+                    let _ = tx.send(BackgroundEvent::SettingsSaved {
+                        ok: true,
+                        detail: strings::get_in(lang, "set.saved").to_string(),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BackgroundEvent::SettingsSaved {
+                        ok: false,
+                        detail: format!("{} ({e})", strings::get_in(lang, "set.save_failed")),
+                    });
+                }
+            }
+        });
+        self.truncate_log();
+    }
+
+    /// Autostart: POST `system.autostart` + caché local (fallback del
+    /// sondeo cuando la API no responde).
+    fn toggle_settings_autostart(&mut self) {
+        let next = !self.settings_autostart;
+        self.settings_autostart = next;
+        self.settings_note = None;
+        let tx = self.background_tx.clone();
+        std::thread::spawn(move || {
+            let mut prefs = autostart::load_cached_startup()
+                .unwrap_or(autostart::StartupPrefs::new(false, true));
+            prefs.autostart = next;
+            let res = post_daemon_setting(
+                autostart::AUTOSTART_KEY,
+                if next { "true" } else { "false" },
+            );
+            // La caché se actualiza igual: es el fallback del sondeo y de
+            // esta misma pestaña cuando el daemon está caído.
+            autostart::save_cached_startup(prefs);
+            let _ = tx.send(BackgroundEvent::SettingsSaved {
+                ok: res.is_ok(),
+                detail: match res {
+                    Ok(()) => strings::get("set.saved").to_string(),
+                    Err(e) => format!("{} ({e})", strings::get("set.save_failed")),
+                },
+            });
+        });
+        self.truncate_log();
+    }
+
+    /// Iniciar minimizado: POST `system.start_minimized` + caché local.
+    fn toggle_settings_minimized(&mut self) {
+        let next = !self.settings_minimized;
+        self.settings_minimized = next;
+        self.settings_note = None;
+        let tx = self.background_tx.clone();
+        std::thread::spawn(move || {
+            let mut prefs = autostart::load_cached_startup()
+                .unwrap_or(autostart::StartupPrefs::new(false, true));
+            prefs.start_minimized = next;
+            let res = post_daemon_setting(
+                autostart::START_MINIMIZED_KEY,
+                if next { "true" } else { "false" },
+            );
+            autostart::save_cached_startup(prefs);
+            let _ = tx.send(BackgroundEvent::SettingsSaved {
+                ok: res.is_ok(),
+                detail: match res {
+                    Ok(()) => strings::get("set.saved").to_string(),
+                    Err(e) => format!("{} ({e})", strings::get("set.save_failed")),
+                },
+            });
+        });
         self.truncate_log();
     }
 
@@ -1356,6 +1587,79 @@ fn section_label(text: &str) -> impl IntoElement {
         .child(text.to_string())
 }
 
+/// Fila de ajuste con interruptor (pestaña Ajustes): título + pista a la
+/// izquierda, pastilla Activado/Desactivado a la derecha (toda la fila
+/// alterna al hacer clic).
+fn settings_switch_row(
+    id: &'static str,
+    title: &str,
+    hint: &str,
+    on: bool,
+    on_toggle: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .p_3()
+        .rounded_xl()
+        .bg(theme::surface())
+        .border_1()
+        .border_color(theme::line())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme::primary_text())
+                        .child(title.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::muted_text())
+                        .child(hint.to_string()),
+                ),
+        )
+        .child(
+            div()
+                .debug_selector(move || id.to_string())
+                .id(id)
+                .text_center()
+                .text_sm()
+                .px_3()
+                .py_2()
+                .rounded_lg()
+                .border_1()
+                .border_color(if on {
+                    theme::accent()
+                } else {
+                    theme::line()
+                })
+                .text_color(if on {
+                    theme::primary_text()
+                } else {
+                    theme::muted_text()
+                })
+                .cursor_pointer()
+                .hover(|s| s.border_color(theme::secondary_text()))
+                .on_click(on_toggle)
+                .child(
+                    if on {
+                        strings::get("set.on")
+                    } else {
+                        strings::get("set.off")
+                    }
+                    .to_string(),
+                ),
+        )
+}
+
 fn service_row(name: &str, snap: &monitor::ServiceSnapshot) -> impl IntoElement {
     div()
         .flex()
@@ -1570,6 +1874,33 @@ impl Render for LauncherView {
                                 cx.notify();
                             }))
                             .child(strings::get("tab.log").to_string()),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "tab-settings".to_string())
+                            .id("tab-settings")
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .px_3()
+                            .py_2()
+                            .border_b_2()
+                            .border_color(if tab == Tab::Settings {
+                                theme::accent()
+                            } else {
+                                theme::transparent()
+                            })
+                            .text_color(if tab == Tab::Settings {
+                                theme::primary_text()
+                            } else {
+                                theme::muted_text()
+                            })
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme::raised()))
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.tab = Tab::Settings;
+                                cx.notify();
+                            }))
+                            .child(strings::get("tab.settings").to_string()),
                     ),
             )
             .child(if tab == Tab::Status {
@@ -1912,6 +2243,154 @@ impl Render for LauncherView {
                             .child(strings::get("btn.dashboard").to_string()),
                     )
                     .into_any_element()
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Settings {
+                section_label(strings::get("sec.settings")).into_any_element()
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Settings {
+                let lang_es = self.settings_lang == "es";
+                let lang_en = self.settings_lang == "en";
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_xl()
+                    .bg(theme::surface())
+                    .border_1()
+                    .border_color(theme::line())
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme::primary_text())
+                            .child(strings::get("set.language").to_string()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme::muted_text())
+                            .child(strings::get("set.language_hint").to_string()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .debug_selector(|| "set-lang-es".to_string())
+                                    .id("set-lang-es")
+                                    .flex_1()
+                                    .text_center()
+                                    .text_sm()
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(if lang_es {
+                                        theme::accent()
+                                    } else {
+                                        theme::line()
+                                    })
+                                    .text_color(if lang_es {
+                                        theme::primary_text()
+                                    } else {
+                                        theme::muted_text()
+                                    })
+                                    .cursor_pointer()
+                                    .hover(|s| s.border_color(theme::secondary_text()))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.set_settings_language("es");
+                                        cx.notify();
+                                    }))
+                                    .child(strings::get("set.opt_es").to_string()),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| "set-lang-en".to_string())
+                                    .id("set-lang-en")
+                                    .flex_1()
+                                    .text_center()
+                                    .text_sm()
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(if lang_en {
+                                        theme::accent()
+                                    } else {
+                                        theme::line()
+                                    })
+                                    .text_color(if lang_en {
+                                        theme::primary_text()
+                                    } else {
+                                        theme::muted_text()
+                                    })
+                                    .cursor_pointer()
+                                    .hover(|s| s.border_color(theme::secondary_text()))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.set_settings_language("en");
+                                        cx.notify();
+                                    }))
+                                    .child(strings::get("set.opt_en").to_string()),
+                            )
+                            .into_any_element(),
+                    )
+                    .into_any_element()
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Settings {
+                settings_switch_row(
+                    "set-autostart",
+                    strings::get("set.autostart"),
+                    strings::get("set.autostart_hint"),
+                    self.settings_autostart,
+                    cx.listener(|view, _, _, cx| {
+                        view.toggle_settings_autostart();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Settings {
+                settings_switch_row(
+                    "set-minimized",
+                    strings::get("set.start_minimized"),
+                    strings::get("set.start_minimized_hint"),
+                    self.settings_minimized,
+                    cx.listener(|view, _, _, cx| {
+                        view.toggle_settings_minimized();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            } else {
+                div().hidden().into_any_element()
+            })
+            .child(if tab == Tab::Settings {
+                let note = self.settings_note.clone().unwrap_or_default();
+                let offline = self.settings_offline && self.settings_note.is_none();
+                let text = if offline {
+                    strings::get("set.offline").to_string()
+                } else {
+                    note
+                };
+                if text.is_empty() {
+                    div().hidden().into_any_element()
+                } else {
+                    div()
+                        .text_xs()
+                        .text_color(theme::muted_text())
+                        .child(text)
+                        .into_any_element()
+                }
             } else {
                 div().hidden().into_any_element()
             })
@@ -2531,14 +3010,33 @@ fn pending_update_for_startup() -> Option<String> {
     Some(pending)
 }
 
+/// ¿Arranque minimizado? El autostart del SO registra el exe con el flag
+/// `--minimized` cuando `system.start_minimized` está activo: en ese modo
+/// solo se ancla + tray (sin ventana visible, sin diálogos modales, sin
+/// abrir el navegador en el camino de boot).
+pub fn boot_minimized(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == autostart::MINIMIZED_FLAG)
+}
+
 fn main() {
+    // Flag `--minimized` (lo pone el autostart del SO cuando
+    // `system.start_minimized` está activo): sin ventana visible, sin
+    // diálogos modales de instancia/servidor (log + salida silenciosa) y
+    // sin abrir el navegador en el camino de boot.
+    let minimized = boot_minimized(&std::env::args().collect::<Vec<_>>());
+    let interactive = !minimized;
     // El mutex se mantiene durante toda la vida del launcher. Se comparte
     // entre instalaciones y DEV_MODE para impedir dos paneles/daemons a la vez.
-    let Some(_instance_lock) = acquire_single_instance() else {
+    let Some(_instance_lock) = acquire_single_instance(interactive) else {
+        if minimized {
+            eprintln!("[launcher] otra instancia en marcha; salida silenciosa (minimized).");
+        }
         return;
     };
     #[cfg(windows)]
-    prepare_existing_server();
+    if interactive {
+        prepare_existing_server(interactive);
+    }
     // Atajos globales (hilo dedicado; no bloquea el arranque ni la UI).
     shortcuts::start_shortcuts();
     // Las actualizaciones se descargan y aplican con la app abierta. Si el
@@ -2564,7 +3062,7 @@ fn main() {
         }
     }
 
-    Application::new().run(|cx: &mut App| {
+    Application::new().run(move |cx: &mut App| {
         #[cfg(windows)]
         {
             let (rx, ctl) = tray::start_tray();
@@ -2592,8 +3090,13 @@ fn main() {
                     |_, cx| cx.new(|_| AnchorView),
                 )
                 .expect("no se pudo abrir la ventana ancla del launcher");
-            // Primera ventana visible.
-            show_launcher(cx, &state);
+            // Primera ventana visible (salvo arranque minimizado: solo
+            // ancla + tray, sin ventana ni navegador en el camino de boot).
+            if interactive {
+                show_launcher(cx, &state);
+            } else {
+                eprintln!("[launcher] arranque minimizado: solo tray.");
+            }
             // Bucle de eventos del tray (~10 Hz) en el hilo principal.
             let pump = state.clone();
             cx.spawn(async move |async_cx| {
@@ -2626,11 +3129,14 @@ fn main() {
         }
         #[cfg(not(windows))]
         {
+            // En arranque minimizado la ventana nace oculta (el tray no
+            // existe fuera de Windows: el proceso queda anclado sin mostrar).
             let bounds = Bounds::centered(None, size(px(440.0), px(860.0)), cx);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(400.0), px(600.0))),
+                    show: !minimized,
                     titlebar: Some(gpui::TitlebarOptions {
                         title: Some(strings::get("ui.window_title").into()),
                         ..Default::default()
@@ -2719,5 +3225,95 @@ mod tests {
             assert!(!view.restart_requested);
             assert!(view.log.iter().any(|l| l.contains("actualizador del launcher")));
         });
+    }
+
+    #[test]
+    fn minimized_flag_solo_con_arg_exact() {
+        let bin = "bundeck-launcher".to_string();
+        assert!(!boot_minimized(&[bin.clone()]));
+        assert!(boot_minimized(&[
+            bin.clone(),
+            autostart::MINIMIZED_FLAG.to_string()
+        ]));
+        // Prefijos o asignaciones no valen: el SO registra el flag exacto.
+        assert!(!boot_minimized(&[bin.clone(), "--minimized=yes".to_string()]));
+        assert!(!boot_minimized(&[bin, "--Minimized".to_string()]));
+    }
+
+    #[gpui::test]
+    fn settings_tab_muestra_toggles_y_alternan(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| LauncherView::new_for_test());
+        cx.refresh().expect("schedule initial render");
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("tab-settings").is_some());
+
+        let tab = cx.debug_bounds("tab-settings").expect("settings tab");
+        cx.simulate_click(tab.center(), Modifiers::none());
+        cx.refresh().expect("render settings tab");
+        cx.run_until_parked();
+
+        view.update(cx, |view, _| assert_eq!(view.tab, Tab::Settings));
+        assert!(cx.debug_bounds("set-autostart").is_some());
+        assert!(cx.debug_bounds("set-minimized").is_some());
+        assert!(cx.debug_bounds("set-lang-es").is_some());
+
+        // El toggle es optimista: cambia al instante aunque el POST falle.
+        let sw = cx.debug_bounds("set-autostart").expect("autostart switch");
+        cx.simulate_click(sw.center(), Modifiers::none());
+        cx.refresh().expect("render after toggle");
+        cx.run_until_parked();
+        view.update(cx, |view, _| assert!(view.settings_autostart));
+    }
+
+    #[gpui::test]
+    fn settings_con_daemon_caido_usa_cache_local(cx: &mut TestAppContext) {
+        // `new` arranca desde `launcher-startup.json` cuando la API no
+        // responde: aquí se reproduce con un data dir temporal.
+        let prev = std::env::var("BUNDECK_DATA_DIR").ok();
+        let dir = std::env::temp_dir().join(format!(
+            "ld-settings-cache-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::env::set_var("BUNDECK_DATA_DIR", &dir);
+        autostart::save_cached_startup(autostart::StartupPrefs::new(true, false));
+        assert_eq!(
+            autostart::load_cached_startup(),
+            Some(autostart::StartupPrefs::new(true, false))
+        );
+
+        let (view, cx) = cx.add_window_view(|_, _| LauncherView::new_for_test());
+        cx.run_until_parked();
+        // Estado inicial desde la caché (como hace `new` sin daemon).
+        view.update(cx, |view, _| {
+            if let Some(cached) = autostart::load_cached_startup() {
+                view.settings_autostart = cached.autostart;
+                view.settings_minimized = cached.start_minimized;
+            }
+        });
+        // La API no responde a ninguna clave: se conserva la caché y se
+        // marca offline (sin tocar el SO: el sondeo no hace nada sin prefs).
+        view.update(cx, |view, cx| {
+            let _ = view.background_tx.send(BackgroundEvent::SettingsLoaded {
+                lang: None,
+                autostart: None,
+                start_minimized: None,
+            });
+            view.consume_background_events();
+            cx.notify();
+        });
+        view.update(cx, |view, _| {
+            assert!(view.settings_autostart);
+            assert!(!view.settings_minimized);
+            assert!(view.settings_offline);
+        });
+
+        match prev {
+            Some(v) => std::env::set_var("BUNDECK_DATA_DIR", v),
+            None => std::env::remove_var("BUNDECK_DATA_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

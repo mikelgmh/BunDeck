@@ -555,6 +555,9 @@ export async function initDatabase() {
     // Preferencia de arranque con el sistema (ver system-autostart.ts):
     // la web la edita, el launcher Rust la aplica en el SO.
     { key: 'system.autostart', value: 'false' },
+    // Iniciar minimizado (solo tray) cuando arranca por autostart.
+    // Default ON: el arranque automático no debe robar la ventana.
+    { key: 'system.start_minimized', value: 'true' },
     // Retención/activación de logs por pulsación (migración 10).
     { key: 'logs.press_enabled', value: 'true' },
     { key: 'logs.press_keep_max', value: '10000' },
@@ -1202,6 +1205,8 @@ export async function resetDatabaseToDefaults(): Promise<FactoryResetResult> {
       { key: 'api.port', value: '3001' },
       { key: 'ws.port', value: '3003' },
       { key: 'security.cors_origins', value: 'http://localhost:4321,http://127.0.0.1:4321' },
+      { key: 'system.autostart', value: 'false' },
+      { key: 'system.start_minimized', value: 'true' },
       { key: 'current.profile_id', value: '' },
       { key: 'current.page_id', value: '' }
     ];

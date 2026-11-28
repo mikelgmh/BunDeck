@@ -60,6 +60,11 @@
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="autostartEnabled" :disabled="autostartLoading" :aria-label="t('bd.startWithSystem')" @change="toggleAutostart(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
         </div>
         <p v-if="autostartError" class="bd-err" role="alert">{{ autostartError }}</p>
+        <div class="bd-srow" data-setting="start-minimized">
+          <div><b>{{ t('bd.startMinimized') }}</b><p>{{ t('bd.startMinimizedHint') }}</p></div>
+          <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="startMinimizedEnabled" :disabled="startMinimizedLoading" :aria-label="t('bd.startMinimized')" @change="toggleStartMinimized(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
+        </div>
+        <p v-if="startMinimizedError" class="bd-err" role="alert">{{ startMinimizedError }}</p>
         <div class="bd-srow" data-setting="autoswitch">
           <div><b>{{ t('bd.autoSwitch') }}</b><p>{{ t('bd.autoSwitchHint') }}</p></div>
           <div class="bd-ctl"><label class="bd-sw"><input type="checkbox" :checked="autoCfg.enabled" :aria-label="t('bd.autoSwitch')" @change="toggleAutoSwitch(($event.target as HTMLInputElement).checked)" /><span></span></label></div>
@@ -600,6 +605,7 @@ import {
   type DeviceIdleAction,
 } from '../../composables/useDeviceDisplay'
 import { loadAutostart, saveAutostart } from '../../composables/useAutostart'
+import { loadStartMinimized, saveStartMinimized } from '../../composables/useStartMinimized'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl } from '../../composables/useTunnel'
 import {
   fetchDetectedProfiles, importDetectedProfiles, importStreamDeckFile, summarizeImportPlan,
@@ -715,6 +721,7 @@ const searchIndex = computed<SearchEntry[]>(() => {
     ...navItems.value.map((n) => L(n.id, `sec-${n.id}`, n.label)),
     // General
     L('general', 'autostart', t('bd.startWithSystem'), t('bd.startWithSystemHint')),
+    L('general', 'start-minimized', t('bd.startMinimized'), t('bd.startMinimizedHint')),
     L('general', 'autoswitch', t('bd.autoSwitch'), t('bd.autoSwitchHint')),
     // Dispositivos
     L('devices', 'device', t('bd.streamdeckDevice'), t('bd.streamdeckDeviceHint')),
@@ -965,6 +972,39 @@ const toggleAutostart = async (on: boolean) => {
     emit('notify', `${t('bd.autostartError')}: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     autostartLoading.value = false
+  }
+}
+
+// Iniciar minimizado: setting real `system.start_minimized` del daemon
+// (default ON: el arranque automático no debe robar la ventana). Lo aplica
+// el launcher Rust registrando el flag `--minimized` en el SO.
+const startMinimizedEnabled = ref(true)
+const startMinimizedLoading = ref(false)
+const startMinimizedError = ref('')
+const loadStartMinimizedState = async () => {
+  startMinimizedLoading.value = true
+  startMinimizedError.value = ''
+  try {
+    startMinimizedEnabled.value = await loadStartMinimized(apiBase())
+  } catch {
+    // Sin daemon: se mantiene el default ON (checked) y se avisa.
+    startMinimizedEnabled.value = true
+    startMinimizedError.value = t('bd.startMinimizedError')
+  } finally {
+    startMinimizedLoading.value = false
+  }
+}
+const toggleStartMinimized = async (on: boolean) => {
+  startMinimizedLoading.value = true
+  startMinimizedError.value = ''
+  try {
+    await saveStartMinimized(apiBase(), on)
+    startMinimizedEnabled.value = on
+  } catch (error) {
+    startMinimizedError.value = t('bd.startMinimizedError')
+    emit('notify', `${t('bd.startMinimizedError')}: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    startMinimizedLoading.value = false
   }
 }
 
@@ -1417,6 +1457,7 @@ const show = (at?: Section, pluginTab?: PluginsTab) => {
     loadDevices()
     loadStatus().then(() => loadHwDisplay()).catch(() => {})
     loadAutostartState().catch(() => {})
+    loadStartMinimizedState().catch(() => {})
   })
   loadVersion()
 }

@@ -139,16 +139,32 @@ fn persist_lang_file(lang: Lang) {
 
 static OVERRIDE: OnceLock<Lang> = OnceLock::new();
 static RESOLVED: OnceLock<Lang> = OnceLock::new();
+/// Idioma fijado en caliente desde la pestaña Ajustes (gana al resuelto
+/// pero no al `OVERRIDE` de tests). Se persiste en `launcher-lang`.
+static RUNTIME: std::sync::RwLock<Option<Lang>> = std::sync::RwLock::new(None);
 
 /// Fija el idioma a mano (tests). No toca disco ni red.
 pub fn set_override(lang: Lang) {
     let _ = OVERRIDE.set(lang);
 }
 
-/// Idioma efectivo, resuelto una vez: daemon → fichero local → SO.
+/// Fija el idioma en caliente (pestaña Ajustes del launcher): se aplica al
+/// momento y se persiste para el próximo arranque.
+pub fn set_runtime(lang: Lang) {
+    if let Ok(mut slot) = RUNTIME.write() {
+        *slot = Some(lang);
+    }
+    persist_lang_file(lang);
+}
+
+/// Idioma efectivo, resuelto una vez: override (tests) → runtime (ajustes)
+/// → daemon → fichero local → SO.
 pub fn effective() -> Lang {
     if let Some(lang) = OVERRIDE.get() {
         return *lang;
+    }
+    if let Some(lang) = RUNTIME.read().ok().and_then(|slot| *slot) {
+        return lang;
     }
     *RESOLVED.get_or_init(|| {
         if let Some(lang) = daemon_language() {
@@ -198,6 +214,40 @@ pub fn get_in(lang: Lang, key: &str) -> &'static str {
         (Lang::Es, "tab.status") => "Estado",
         (Lang::En, "tab.log") => "Log",
         (Lang::Es, "tab.log") => "Registro",
+        (Lang::En, "tab.settings") => "Settings",
+        (Lang::Es, "tab.settings") => "Ajustes",
+        (Lang::En, "sec.settings") => "SETTINGS",
+        (Lang::Es, "sec.settings") => "AJUSTES",
+        (Lang::En, "set.language") => "Language",
+        (Lang::Es, "set.language") => "Idioma",
+        (Lang::En, "set.language_hint") => "Interface language. Applies immediately.",
+        (Lang::Es, "set.language_hint") => "Idioma de la interfaz. Se aplica al momento.",
+        (Lang::En, "set.opt_en") => "English",
+        (Lang::Es, "set.opt_en") => "Inglés",
+        (Lang::En, "set.opt_es") => "Spanish",
+        (Lang::Es, "set.opt_es") => "Español",
+        (Lang::En, "set.autostart") => "Start with the system",
+        (Lang::Es, "set.autostart") => "Iniciar con el sistema",
+        (Lang::En, "set.autostart_hint") => "Open BunDeck when you turn on your computer.",
+        (Lang::Es, "set.autostart_hint") => "Abre BunDeck al encender el ordenador.",
+        (Lang::En, "set.start_minimized") => "Start minimized",
+        (Lang::Es, "set.start_minimized") => "Iniciar minimizado",
+        (Lang::En, "set.start_minimized_hint") => {
+            "When starting automatically, keep only the tray icon (no window)."
+        }
+        (Lang::Es, "set.start_minimized_hint") => {
+            "En el arranque automático, dejar solo el icono del tray (sin ventana)."
+        }
+        (Lang::En, "set.on") => "On",
+        (Lang::Es, "set.on") => "Activado",
+        (Lang::En, "set.off") => "Off",
+        (Lang::Es, "set.off") => "Desactivado",
+        (Lang::En, "set.saved") => "Setting saved.",
+        (Lang::Es, "set.saved") => "Ajuste guardado.",
+        (Lang::En, "set.save_failed") => "Could not save the setting.",
+        (Lang::Es, "set.save_failed") => "No se pudo guardar el ajuste.",
+        (Lang::En, "set.offline") => "Daemon offline: showing the locally stored value.",
+        (Lang::Es, "set.offline") => "Daemon sin conexión: se muestra el valor guardado localmente.",
         (Lang::En, "sec.services") => "SERVICES",
         (Lang::Es, "sec.services") => "SERVICIOS",
         (_, "sec.daemon") => "DAEMON",
@@ -402,6 +452,21 @@ mod tests {
             "ui.window_title",
             "tab.status",
             "tab.log",
+            "tab.settings",
+            "sec.settings",
+            "set.language",
+            "set.language_hint",
+            "set.opt_en",
+            "set.opt_es",
+            "set.autostart",
+            "set.autostart_hint",
+            "set.start_minimized",
+            "set.start_minimized_hint",
+            "set.on",
+            "set.off",
+            "set.saved",
+            "set.save_failed",
+            "set.offline",
             "sec.services",
             "sec.daemon",
             "svc.api",

@@ -71,6 +71,28 @@ en `<data>/backups/db-<ts>/`. Ninguno de esos datos se elimina al actualizar.
 - `GET /api/v1/version/check` y `POST /api/v1/update` → `501 Gone`
   (el update lo hace el launcher, no la API).
 
+## Autostart + inicio minimizado (gobernados por el daemon)
+
+- Settings del daemon (tabla `settings`, solo `DatabaseService`):
+  `system.autostart` (seed `false`) e `system.start_minimized` (seed `true`,
+  default ON). La web los edita (Ajustes → General) con POST
+  `/api/v1/settings` normalizado a `'true'/'false'`; el POST emite
+  `settings.changed` (topic `settings`).
+- El launcher los sondea cada 2 s (`sync_from_daemon`) y los aplica al SO.
+  Si la API no responde, usa la caché local `launcher-startup.json`
+  (junto a `launcher-update.log`) y no toca nada del SO.
+- **Se mantiene Run (HKCU\…\Run), NO Task Scheduler**: Run respeta el flag
+  `--minimized` que el launcher registra cuando `system.start_minimized`
+  está activo (arranque sin ventana: solo ancla + tray), no pide elevación
+  y no exige tarea logon ni salvedades UAC. El Scheduler solo añadiría
+  fricción sin ningún beneficio para un arranque por usuario.
+- El flag `--minimized` al arrancar significa: sin ventana visible, sin
+  diálogos modales de instancia/servidor (log + salida silenciosa) y sin
+  abrir el navegador en el camino de boot. La pestaña **Ajustes** del panel
+  expone idioma (`ui.language`, se aplica al momento), autostart y
+  minimizado, con I/O en hilo de fondo y valores iniciales desde la caché
+  local si el daemon está caído.
+
 ## CI / releases
 
 - `build` (matriz 3 OS): daemon + CLI + launcher + updater + web-dist →

@@ -331,10 +331,11 @@ export const handleSystem: ApiHandler = async (_req, { url, method, path, db, se
         return jsonResponse({ error: 'key and value required' }, 400);
       }
 
-      // `system.autostart`: normalizar a 'true'/'false' para que la web
-      // (JSON.stringify) y el launcher Rust (parseo tolerante) siempre se
-      // entiendan. Ver daemon/src/system-autostart.ts.
-      if (key === 'system.autostart') {
+      // `system.autostart` / `system.start_minimized`: normalizar a
+      // 'true'/'false' para que la web (JSON.stringify) y el launcher Rust
+      // (parseo tolerante) siempre se entiendan. Ver
+      // daemon/src/system-autostart.ts.
+      if (key === 'system.autostart' || key === 'system.start_minimized') {
         const { parseAutostart, formatAutostart } = await import('../system-autostart');
         value = formatAutostart(parseAutostart(typeof value === 'string' ? value : JSON.stringify(value)));
       }

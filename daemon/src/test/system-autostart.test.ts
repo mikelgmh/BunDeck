@@ -14,10 +14,14 @@ fs.mkdirSync(path.join(TMP, 'plugins'), { recursive: true });
 import { initDatabase, DatabaseService } from '../db';
 import {
   AUTOSTART_KEY,
+  START_MINIMIZED_KEY,
   parseAutostart,
+  parseStartMinimized,
   formatAutostart,
   readAutostart,
   writeAutostart,
+  readStartMinimized,
+  writeStartMinimized,
 } from '../system-autostart';
 
 let db: DatabaseService;
@@ -88,5 +92,45 @@ describe('system.autostart: persistencia en settings', () => {
     expect(readAutostart(db)).toBe(false);
     // Dejar la DB como estaba.
     writeAutostart(db, false);
+  });
+});
+
+describe('system.start_minimized: persistencia en settings', () => {
+  it('la semilla por defecto es true (o ausente bajo el mock de suite → true)', () => {
+    const raw = db.getSetting(START_MINIMIZED_KEY);
+    expect(raw === null || raw === 'true').toBe(true);
+    // Con semilla presente la lectura es true.
+    db.setSetting(START_MINIMIZED_KEY, 'true');
+    expect(readStartMinimized(db)).toBe(true);
+  });
+
+  it('ausente → true (nunca robar la ventana en arranque automático)', () => {
+    db.deleteSetting(START_MINIMIZED_KEY);
+    expect(readStartMinimized(db)).toBe(true);
+    expect(parseStartMinimized(null)).toBe(true);
+    expect(parseStartMinimized(undefined)).toBe(true);
+    expect(parseStartMinimized('')).toBe(true);
+    expect(parseStartMinimized('basura')).toBe(true);
+    expect(parseStartMinimized('false')).toBe(false);
+    expect(parseStartMinimized('0')).toBe(false);
+    expect(parseStartMinimized('off')).toBe(false);
+    db.setSetting(START_MINIMIZED_KEY, 'basura');
+    expect(readStartMinimized(db)).toBe(true);
+    db.setSetting(START_MINIMIZED_KEY, '1');
+    expect(readStartMinimized(db)).toBe(true);
+    db.setSetting(START_MINIMIZED_KEY, 'false');
+    expect(readStartMinimized(db)).toBe(false);
+    // Dejar la DB como estaba (default ON).
+    writeStartMinimized(db, true);
+  });
+
+  it('get/set roundtrip', () => {
+    writeStartMinimized(db, false);
+    expect(db.getSetting(START_MINIMIZED_KEY)).toBe('false');
+    expect(readStartMinimized(db)).toBe(false);
+
+    writeStartMinimized(db, true);
+    expect(db.getSetting(START_MINIMIZED_KEY)).toBe('true');
+    expect(readStartMinimized(db)).toBe(true);
   });
 });
