@@ -41,6 +41,7 @@ Source: "dist\bundeck-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\bundeck-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\bundeck-launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\bundeck-updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\bundeck-spotify-auth.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\active.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\web-dist\*"; DestDir: "{app}\web-dist"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -10,9 +10,10 @@
 //! - Botones: Abrir panel (navegador), Iniciar/Detener/Reiniciar y ocultar
 //!   la ventana al tray. "Salir" solo está en el menú del tray.
 //!   Si Spotify pide login (POST /api/v1/plugins/spotify/login-request
-//!   desde cualquier UI, incluida la remota por túnel), abre el navegador
-//!   del sistema una vez y avisa en el panel hasta que se complete o se
-//!   descarte (ver `monitor::spotify_login_pending`).
+//!   desde cualquier UI, incluida la remota por túnel), abre la ventana de
+//!   login controlada por la app (`bundeck-spotify-auth`, webview con
+//!   sniffer que captura el token solo) una vez y avisa en el panel hasta
+//!   que se complete o se descarte (ver `monitor::spotify_login_pending`).
 //! - Estilo: tokens de `theme.rs`, espejo manual del tema bundeck
 //!   (`web/src/styles/bundeck.css`, dark + acento amarillo).
 //! - Ventana sin marco nativo (`appears_transparent`): la barra de
@@ -907,13 +908,13 @@ impl LauncherView {
                 }
                 BackgroundEvent::Log(message) => self.log.push(message),
                 BackgroundEvent::SpotifyLogin { requested_at } => {
-                    // El sondeo ya abrió el navegador del sistema para este
+                    // El sondeo ya abrió la ventana de login para este
                     // login-request: avisar en el panel hasta que se complete
                     // o el usuario lo descarte.
                     if self.spotify_notice.as_deref() != Some(requested_at.as_str()) {
                         self.spotify_notice = Some(requested_at);
                         self.log.push(
-                            "Spotify necesita conexión: se abrió el navegador en este equipo; inicia sesión y el acceso se completará solo.".to_string(),
+                            "Spotify necesita conexión: se abrió la ventana de login en este equipo; inicia sesión y el acceso se completará solo.".to_string(),
                         );
                     }
                 }
@@ -972,12 +973,11 @@ impl LauncherView {
         self.truncate_log();
     }
 
-    /// Botón Reabrir del aviso de Spotify (por si se cerró el navegador).
+    /// Botón Reabrir del aviso de Spotify (por si se cerró la ventana de login).
     fn reopen_spotify(&mut self) {
-        const URL: &str = "https://open.spotify.com";
-        self.log.push(format!("Abriendo {URL} …"));
-        if let Err(e) = open::that(URL) {
-            self.log.push(format!("No se pudo abrir el navegador: {e}"));
+        self.log.push("Abriendo ventana de login de Spotify …".to_string());
+        if !monitor::open_spotify_auth_window() {
+            self.log.push("No se pudo abrir la ventana de login.".to_string());
         }
         self.truncate_log();
     }
@@ -1498,16 +1498,19 @@ fn start_monitor_thread(
             }
             // Apertura bajo demanda de Spotify: cualquier UI (incluida la
             // remota por túnel) crea el login-request con POST; el launcher,
-            // que siempre corre en el host en prod, abre el navegador del
-            // sistema UNA vez por `requestedAt` cuando no hay host Electrobun
-            // vivo. Con host vivo no se hace nada: el flujo dev automático
-            // (su propio poll + BrowserWindow) sigue mandando.
+            // que siempre corre en el host en prod, abre la ventana de login
+            // controlada por la app (`bundeck-spotify-auth`, webview con
+            // sniffer de tokens) UNA vez por `requestedAt` cuando no hay
+            // host Electrobun vivo. Con host vivo no se hace nada: el flujo
+            // dev automático (su propio poll + BrowserWindow) sigue mandando.
+            // Si el helper no está disponible, se recurre al navegador del
+            // sistema (sin sniffer: el token no se captura solo).
             if snapshot.api.state == State::Ok {
                 match monitor::spotify_login_pending() {
                     Some(requested_at) => {
                         let already = spotify_served.as_deref() == Some(requested_at.as_str());
                         if !already && !monitor::host_alive() {
-                            if open::that("https://open.spotify.com").is_ok() {
+                            if monitor::open_spotify_auth_window() {
                                 spotify_served = Some(requested_at.clone());
                                 if events
                                     .send(BackgroundEvent::SpotifyLogin { requested_at })
@@ -1517,7 +1520,7 @@ fn start_monitor_thread(
                                 }
                             } else if events
                                 .send(BackgroundEvent::Log(
-                                    "Spotify necesita conexión pero no se pudo abrir el navegador en este equipo.".to_string(),
+                                    "Spotify necesita conexión pero no se pudo abrir la ventana de login en este equipo.".to_string(),
                                 ))
                                 .is_err()
                             {

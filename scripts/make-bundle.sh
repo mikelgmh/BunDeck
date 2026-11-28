@@ -3,7 +3,8 @@
 # Uso: ./scripts/make-bundle.sh <version> <target>
 #   target: windows-x64 | linux-x64 | darwin-x64
 # Requiere que dist/ contenga: bundeck-daemon*, bundeck-cli*,
-# bundeck-launcher*, bundeck-updater* y web-dist/.
+# bundeck-launcher*, bundeck-updater*, bundeck-spotify-auth* (opcional,
+# con fallback al navegador) y web-dist/.
 set -e
 VER="${1:?falta version}"
 TARGET="${2:?falta target}"

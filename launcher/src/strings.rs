@@ -309,10 +309,10 @@ pub fn get_in(lang: Lang, key: &str) -> &'static str {
         (Lang::En, "panel.url") => "Panel: {url}",
         (Lang::Es, "panel.url") => "Panel: {url}",
         (Lang::En, "spotify.notice") => {
-            "Spotify needs connection: the browser was opened on this computer; sign in and access will complete on its own."
+            "Spotify needs connection: the login window was opened on this computer; sign in and access will complete on its own."
         }
         (Lang::Es, "spotify.notice") => {
-            "Spotify necesita conexión: se abrió el navegador en este equipo; inicia sesión y el acceso se completará solo."
+            "Spotify necesita conexión: se abrió la ventana de login en este equipo; inicia sesión y el acceso se completará solo."
         }
         // Diálogos de instancia única (Win32).
         (Lang::En, "dlg.check_fail") => "Could not check whether BunDeck is already open:\n\n{error}",

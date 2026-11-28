@@ -61,6 +61,7 @@ if command -v cargo &> /dev/null; then
     (cd launcher && cargo build --release)
     cp launcher/target/release/bundeck-launcher dist/ 2>/dev/null || cp launcher/target/release/bundeck-launcher.exe dist/ 2>/dev/null || echo "⚠️ Launcher compilado pero no copiado a dist/"
     cp launcher/target/release/bundeck-updater dist/ 2>/dev/null || cp launcher/target/release/bundeck-updater.exe dist/ 2>/dev/null || echo "⚠️ Updater compilado pero no copiado a dist/"
+    cp launcher/target/release/bundeck-spotify-auth dist/ 2>/dev/null || cp launcher/target/release/bundeck-spotify-auth.exe dist/ 2>/dev/null || echo "⚠️ Spotify-auth compilado pero no copiado a dist (el login usará el navegador del sistema)"
 else
     echo "⚠️ cargo no encontrado: se omite el launcher (instala Rust o usa bun run dev:launcher)"
 fi

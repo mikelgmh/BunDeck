@@ -563,6 +563,53 @@ pub fn spotify_dismiss_login() -> bool {
     agent.delete(&url).call().is_ok()
 }
 
+/// Ventana de login de Spotify controlada por la app.
+///
+/// Lanza el helper `bundeck-spotify-auth[.exe]` (webview con sniffer que
+/// publica en `token-capture` y se cierra solo) junto al launcher/instalado.
+/// Devuelve true si se pudo lanzar. Si el helper no existe (instalación
+/// antigua sin él), recurre al navegador del sistema como último recurso
+/// (sin captura automática: el usuario pega el token a mano).
+pub fn open_spotify_auth_window() -> bool {
+    if spawn_spotify_auth_helper() {
+        return true;
+    }
+    open::that("https://open.spotify.com").is_ok()
+}
+
+/// Localiza el helper de login de Spotify: junto al exe actual (instalado o
+/// `target/{release,debug}` en dev). None si no está (instalación antigua).
+fn find_spotify_auth_helper() -> Option<std::path::PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    for name in ["bundeck-spotify-auth.exe", "bundeck-spotify-auth"] {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Lanza el helper detached (no bloquea el sondeo). True si se lanzó.
+fn spawn_spotify_auth_helper() -> bool {
+    let helper = match find_spotify_auth_helper() {
+        Some(h) => h,
+        None => return false,
+    };
+    let port = api_port().to_string();
+    match std::process::Command::new(&helper)
+        .arg("--api-port")
+        .arg(&port)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
 /// Daemon compilado: `versions/<activa>/` (gestionado) o plano junto al
 /// launcher (legacy, layout de installer.iss: todo en {app}).
 fn find_installed_daemon() -> Option<std::path::PathBuf> {

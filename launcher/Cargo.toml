@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "bundeck-updater"
 path = "src/updater_bin.rs"
 
+[[bin]]
+name = "bundeck-spotify-auth"
+path = "src/spotify_auth_bin.rs"
+
 [dependencies]
 gpui = "0.2"
 ureq = { version = "2.10", features = ["json"] }
@@ -25,6 +29,8 @@ zip = "2"
 ed25519-dalek = "2"
 # HWND de la ventana GPUI (drag/maximizar nativos en la titlebar propia).
 raw-window-handle = "0.6"
+wry = "0.58"
+tao = "0.38"
 
 [dev-dependencies]
 gpui = { version = "0.2", features = ["test-support"] }
