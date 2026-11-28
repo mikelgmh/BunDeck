@@ -322,8 +322,13 @@ pub fn is_process_alive(pid: u32) -> bool {
 }
 
 /// ¿Sigue vivo el proceso `pid`? (Unix: kill(pid, 0)).
+/// OJO: pid 0 no es "el proceso 0" sino el grupo de procesos: kill(0,0)
+/// tiene éxito siempre y diría "vivo". Se trata como muerto.
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
     unix_lock::is_process_alive(pid)
 }
 

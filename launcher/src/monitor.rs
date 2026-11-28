@@ -760,6 +760,17 @@ mod tests {
         saved: Vec<(&'static str, Option<String>)>,
     }
 
+    /// Los tests que tocan PORT/WS_PORT/FRONTEND_PORT comparten el env del
+    /// proceso y corren en hilos paralelos: sin este candado se pisan los
+    /// puertos y `stack_down` ve el stack del otro test (caído).
+    static PORT_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_port_env() -> std::sync::MutexGuard<'static, ()> {
+        PORT_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
     impl PortEnvGuard {
         fn set(api: u16, ws: u16, front: u16) -> Self {
             let saved = ["PORT", "WS_PORT", "FRONTEND_PORT"]
@@ -793,6 +804,32 @@ mod tests {
         TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
     }
 
+    /// Espera a que los 3 puertos acepten conexiones (los hilos del stack
+    /// falso bindean de forma asíncrona: sin esto el primer snapshot puede
+    /// sondear antes del bind y ver "caído" — flake visto en Windows CI).
+    /// Manda un GET mínimo para no atascar al servidor falso en su
+    /// read-timeout de 500ms.
+    fn wait_for_ports(api: u16, ws: u16, front: u16) {
+        use std::io::{Read, Write};
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        for port in [api, ws, front] {
+            while std::time::Instant::now() < deadline {
+                let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+                match TcpStream::connect_timeout(&addr, Duration::from_millis(100)) {
+                    Ok(mut stream) => {
+                        let _ = stream
+                            .set_read_timeout(Some(Duration::from_millis(500)));
+                        let _ = stream.write_all(b"GET /health HTTP/1.0\r\n\r\n");
+                        let mut buf = [0u8; 64];
+                        let _ = stream.read(&mut buf);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        }
+    }
+
     /// Sirve "stack levantado" en los 3 puertos durante `serve_for`: HTTP 200
     /// mínimo en API y frontend, TCP abierto en WS. Al expirar, los hilos
     /// sueltan los listeners y el stack cae solo (sin señalización).
@@ -817,10 +854,28 @@ mod tests {
                             if http {
                                 use std::io::{Read, Write};
                                 let mut stream = stream;
-                                let mut buf = [0u8; 1024];
-                                let _ = stream
-                                    .set_read_timeout(Some(Duration::from_millis(500)));
-                                let _ = stream.read(&mut buf);
+                                // Leer hasta fin de cabeceras: responder tras
+                                // una sola lectura corta la petición a medias
+                                // y el cliente ve RST (fallo visto en Windows).
+                                let _ = stream.set_read_timeout(Some(
+                                    Duration::from_millis(1500),
+                                ));
+                                let mut buf = Vec::new();
+                                let mut chunk = [0u8; 1024];
+                                loop {
+                                    match stream.read(&mut chunk) {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            buf.extend_from_slice(&chunk[..n]);
+                                            if buf.windows(4).any(|w| w == b"\r\n\r\n")
+                                                || buf.len() >= 8192
+                                            {
+                                                break;
+                                            }
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
                                 let _ = stream.write_all(
                                     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
                                 );
@@ -849,6 +904,7 @@ mod tests {
             eprintln!("skip: hay dev-stack en :4321");
             return;
         }
+        let _lock = lock_port_env();
         let _env = PortEnvGuard::set(pick_free_port(), pick_free_port(), pick_free_port());
         assert!(stack_down());
     }
@@ -859,9 +915,13 @@ mod tests {
             eprintln!("skip: hay dev-stack en :4321");
             return;
         }
+        let _lock = lock_port_env();
         let (api, ws, front) = (pick_free_port(), pick_free_port(), pick_free_port());
         let _env = PortEnvGuard::set(api, ws, front);
         let workers = serve_fake_stack(api, ws, front, Duration::from_secs(3));
+        // Los hilos bindean de forma asíncrona: esperar a que acepten antes
+        // de afirmar que el stack está levantado (flake en Windows CI).
+        wait_for_ports(api, ws, front);
         // El stack falso responde: no está caído.
         assert!(!stack_down());
         // Al expirar el serveo los puertos caen: wait_for_stack_down vuelve
