@@ -275,6 +275,11 @@ mod win32 {
     use windows::Win32::Foundation::HANDLE;
 
     pub const ERROR_ALREADY_EXISTS: u32 = 183;
+    pub const STILL_ACTIVE: u32 = 259;
+    // SYNCHRONIZE (para esperar) + PROCESS_QUERY_LIMITED_INFORMATION (para
+    // consultar la salida sin necesitar permisos de depuración).
+    pub const SYNCHRONIZE: u32 = 0x0010_0000;
+    pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -285,7 +290,41 @@ mod win32 {
         ) -> HANDLE;
         pub fn GetLastError() -> u32;
         pub fn ReleaseMutex(mutex: HANDLE) -> i32;
+        pub fn OpenProcess(desired_access: u32, inherit: i32, pid: u32) -> HANDLE;
+        pub fn GetExitCodeProcess(process: HANDLE, exit_code: *mut u32) -> i32;
     }
+}
+
+/// ¿Sigue vivo el proceso `pid`? En Windows abre el proceso sin privilegios
+/// especiales: si no se puede abrir por PID inexistente está muerto; si se
+/// abre pero su exit code ya no es STILL_ACTIVE, también. Un fallo de acceso
+/// (proceso de otro usuario) se considera vivo para no matar PIDs ajenos.
+#[cfg(windows)]
+pub fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        let handle = win32::OpenProcess(
+            win32::SYNCHRONIZE | win32::PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            pid,
+        );
+        if handle.0.is_null() {
+            return false;
+        }
+        let mut code: u32 = 0;
+        let ok = win32::GetExitCodeProcess(handle, &mut code as *mut u32);
+        // NOLINT: CloseHandle ya está importado donde se usa; aquí solo lectura.
+        windows::Win32::Foundation::CloseHandle(handle).ok();
+        ok != 0 && code == win32::STILL_ACTIVE
+    }
+}
+
+/// ¿Sigue vivo el proceso `pid`? (Unix: kill(pid, 0)).
+#[cfg(unix)]
+pub fn is_process_alive(pid: u32) -> bool {
+    unix_lock::is_process_alive(pid)
 }
 
 #[cfg(unix)]
@@ -438,7 +477,13 @@ fn read_file_metadata_with_retry(path: &std::path::Path) -> Option<InstanceMetad
 fn read_metadata_with_retry(path: &std::path::Path) -> Option<InstanceMetadata> {
     for _ in 0..50 {
         if let Some(metadata) = read_metadata(path) {
-            return Some(metadata);
+            // Sin chequeo de vida, un fichero stale de un crash mostraba un
+            // diálogo "ya hay instancia (PID muerto)" y el taskkill posterior
+            // podía alcanzar a un PID reutilizado por otro programa.
+            if is_process_alive(metadata.pid) {
+                return Some(metadata);
+            }
+            return None;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -476,6 +521,35 @@ impl std::error::Error for InstanceLockError {}
 #[cfg(test)]
 mod tests {
     use super::{InstanceLock, InstanceMode};
+
+    #[test]
+    fn process_liveness_basics() {
+        // El proceso propio vive; el PID 0 y el máximo no.
+        assert!(super::is_process_alive(std::process::id()));
+        assert!(!super::is_process_alive(0));
+        assert!(!super::is_process_alive(u32::MAX));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stale_metadata_is_ignored() {
+        let dir = std::env::temp_dir().join(format!(
+            "bundeck-instance-stale-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("instance-stale.txt");
+        // PID casi seguro muerto: antes se mostraba el diálogo "ya hay
+        // instancia" y el taskkill podía alcanzar un PID reutilizado.
+        std::fs::write(&path, "4294967295\nproduction\n").unwrap();
+        assert!(!super::is_process_alive(u32::MAX));
+        assert!(super::read_metadata_with_retry(&path).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[cfg(windows)]
     #[test]

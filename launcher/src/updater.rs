@@ -829,7 +829,15 @@ pub fn apply_staged(log: &mut dyn FnMut(String), version: &str) -> Result<(), St
 
     log("Deteniendo daemon actual…".to_string());
     let _ = super::monitor::shutdown_daemon();
-    super::monitor::wait_for_api_down();
+    // Orden estricto: no se toca active.json hasta que TODO el stack
+    // (API + WS + frontend embebido) esté caído. Antes solo se esperaba
+    // /health 4s y el frontal podía seguir sirviendo el bundle viejo.
+    super::monitor::wait_for_stack_down();
+    if !super::monitor::stack_down() {
+        log("Aviso: algún servicio sigue respondiendo; sigo de todos modos.".to_string());
+    } else {
+        log("Stack detenido (API + WS + frontend caídos).".to_string());
+    }
 
     log(format!("Activando versión {version}…"));
 

@@ -93,5 +93,25 @@ en `<data>/backups/db-<ts>/`. Ninguno de esos datos se elimina al actualizar.
    `MANIFEST_URL`… (hoy la URL es fija; para E2E local, edita temporalmente
    `MANIFEST_URL` en `updater.rs` o usa `libredeck-cli update` contra
    `BUNDECK_INSTALL_DIR` con un bundle real renombrado).
-3. `cargo test --bins` (versiones, manifiesto, layout) +
+3. `cargo test --bins` (versiones, manifiesto, layout, liveness de
+   instancia, matching CSV de PIDs, `stack_down`/`wait_for_stack_down`) +
    `bun test` en `daemon/` y `cli/`.
+
+### Checklist de regresión (bug "ya hay instancia" tras actualizar)
+
+- **Self-update con launcher nuevo**: tras aplicar, el helper debe esperar
+  al mutex libre (`wait_for_single_instance_free`) antes de relanzar. Si al
+  abrir aparece "Ya hay BunDeck abierto", mirar `launcher-update.log`:
+  debe mostrar `Stack detenido` → `handoff` → `Esperando al launcher` →
+  `relanzar`, sin `taskkill`.
+- **Sin `/T` sobre el launcher**: reemplazar la instancia desde el diálogo
+  ya no mata el árbol (el daemon actualizado sobrevive). Solo el Astro-dev
+  huérfano de `:4321` usa `/T`.
+- **Metadata stale**: matar el launcher a la brava y reabrir no debe ofrecer
+  matar un PID muerto/reutilizado (el diálogo solo sale si el PID vive y su
+  línea de comandos es `*-launcher`).
+- **Salir cierra todo**: tras "Salir" del tray, nada debe escuchar en
+  `:3001/:3003/:3002` (`wait_for_stack_down` + `stack_down` en el log).
+  En dev, `:4321` (Astro) puede seguir: es proceso aparte, no del daemon.
+- **Sin pestañas fantasma**: con `BUNDECK_MANAGED=1` el daemon ya no hace
+  auto-open; cada apply no debe abrir pestañas nuevas.

@@ -7,7 +7,13 @@
 //! Puertos por defecto (daemon/src/config.ts): API 3001, WS 3003, Frontend 3002.
 
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+
+/// Mientras el apply del update está activo, el hilo monitor no debe spawnear
+/// daemons por su cuenta: competiría con el cambio de `active.json`
+/// (carrera viejo/nuevo). Lo activa `finish_apply`, lo libera el propio apply.
+pub static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -258,6 +264,9 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
                 .env("DEV_MODE", std::env::var("DEV_MODE").unwrap_or("false".into()))
                 // Gestionado por el launcher: sin supervisión ajena.
                 .env("BUNDECK_MANAGED", "1")
+                // El panel lo abre el launcher ("Panel web"); el daemon no
+                // debe abrir pestañas solo (y menos una por cada apply).
+                .env("BUNDECK_NO_AUTO_OPEN", "1")
                 // Panel LAN/QR en dev: opt-in explícito (daemon por defecto loopback).
                 .env("BUNDECK_BIND_LAN", "1")
                 .stdin(std::process::Stdio::null())
@@ -286,6 +295,8 @@ pub fn ensure_daemon_spawned() -> (Vec<String>, bool) {
             .stderr(std::process::Stdio::null())
             // Gestionado por el launcher: sin supervisión ajena.
             .env("BUNDECK_MANAGED", "1")
+            // Sin auto-open del daemon (lo abre el launcher a petición).
+            .env("BUNDECK_NO_AUTO_OPEN", "1")
             // Instalado con panel LAN: opt-in explícito (daemon por defecto loopback).
             .env("BUNDECK_BIND_LAN", "1");
         #[cfg(windows)]
@@ -337,18 +348,45 @@ fn post_ok_with_agent(agent: &ureq::Agent, url: &str) -> bool {
 }
 
 /// Espera a que termine el daemon tras aceptar el apagado.
+/// Timeout amplio (20s): el apagado del daemon es diferido 2s y con
+/// keep-alives del frontend embebido el cierre puede tardar.
 pub fn wait_for_api_down() {
+    wait_for_api_down_secs(20);
+}
+
+fn wait_for_api_down_secs(secs: u64) {
     let url = format!("http://127.0.0.1:{}/health", api_port());
     let agent: ureq::Agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_millis(500))
         .timeout_read(Duration::from_millis(500))
         .timeout_write(Duration::from_millis(500))
         .build();
-    for _ in 0..10 {
+    let tries = secs.saturating_mul(10).max(10);
+    for _ in 0..tries {
         if agent.get(&url).call().is_err() {
             return;
         }
-        std::thread::sleep(Duration::from_millis(400));
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// ¿Sigue algo del stack levantado (API, WS o frontend embebido/Astro)?
+/// Un solo snapshot (no tres): las tres sondas ya van dentro.
+pub fn stack_down() -> bool {
+    let snap = snapshot(false);
+    snap.api.state == State::Down
+        && snap.ws.state == State::Down
+        && snap.frontend.state == State::Down
+}
+
+/// Espera a que TODO el stack caiga (no solo /health): el apply no debe
+/// cambiar `active.json` con el frontend embebido aún sirviendo.
+pub fn wait_for_stack_down() {
+    for _ in 0..200 {
+        if stack_down() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -700,5 +738,140 @@ mod tests {
         assert_eq!(probe.state, State::Down);
         assert_eq!(probe.detail, ":4569");
         worker.join().expect("fake daemon completed");
+    }
+
+    /// El flag del apply nace apagado: el monitor solo pausa spawns mientras
+    /// un apply real lo levanta (ver finish_apply en main.rs).
+    #[test]
+    fn update_flag_is_off_by_default() {
+        use std::sync::atomic::Ordering;
+        assert!(!UPDATE_IN_PROGRESS.load(Ordering::SeqCst));
+    }
+
+    fn pick_free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("bind ephemeral port")
+            .local_addr()
+            .expect("read ephemeral port")
+            .port()
+    }
+
+    struct PortEnvGuard {
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl PortEnvGuard {
+        fn set(api: u16, ws: u16, front: u16) -> Self {
+            let saved = ["PORT", "WS_PORT", "FRONTEND_PORT"]
+                .iter()
+                .map(|k| (*k, std::env::var(k).ok()))
+                .collect();
+            // Estos tests son los únicos que tocan estos envs y restauran
+            // al salir (aun con panic, vía Drop).
+            std::env::set_var("PORT", api.to_string());
+            std::env::set_var("WS_PORT", ws.to_string());
+            std::env::set_var("FRONTEND_PORT", front.to_string());
+            Self { saved }
+        }
+    }
+
+    impl Drop for PortEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.saved.drain(..) {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    /// La sonda de frontend siempre prueba :4321 primero (Astro dev). Si hay
+    /// un dev-stack levantado, estos tests se saltan: no pueden aislarse.
+    fn dev_frontend_busy() -> bool {
+        let addr: SocketAddr = "127.0.0.1:4321".parse().expect("loopback 4321");
+        TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
+    }
+
+    /// Sirve "stack levantado" en los 3 puertos durante `serve_for`: HTTP 200
+    /// mínimo en API y frontend, TCP abierto en WS. Al expirar, los hilos
+    /// sueltan los listeners y el stack cae solo (sin señalización).
+    fn serve_fake_stack(
+        api: u16,
+        ws: u16,
+        front: u16,
+        serve_for: Duration,
+    ) -> Vec<std::thread::JoinHandle<()>> {
+        fn serve(port: u16, http: bool, serve_for: Duration) -> std::thread::JoinHandle<()> {
+            std::thread::spawn(move || {
+                let listener = std::net::TcpListener::bind(("127.0.0.1", port))
+                    .expect("bind fake stack port");
+                listener
+                    .set_nonblocking(true)
+                    .expect("nonblocking fake listener");
+                let deadline = std::time::Instant::now() + serve_for;
+                while std::time::Instant::now() < deadline {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            let _ = stream.set_nonblocking(false);
+                            if http {
+                                use std::io::{Read, Write};
+                                let mut stream = stream;
+                                let mut buf = [0u8; 1024];
+                                let _ = stream
+                                    .set_read_timeout(Some(Duration::from_millis(500)));
+                                let _ = stream.read(&mut buf);
+                                let _ = stream.write_all(
+                                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                                );
+                            }
+                            // WS: basta con aceptar; el connect ya es Ok.
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        Err(_) => break,
+                    }
+                }
+                // Al salir se suelta el listener: el puerto queda caído.
+            })
+        }
+        vec![
+            serve(api, true, serve_for),
+            serve(ws, false, serve_for),
+            serve(front, true, serve_for),
+        ]
+    }
+
+    #[test]
+    fn stack_down_when_nothing_listens() {
+        if dev_frontend_busy() {
+            eprintln!("skip: hay dev-stack en :4321");
+            return;
+        }
+        let _env = PortEnvGuard::set(pick_free_port(), pick_free_port(), pick_free_port());
+        assert!(stack_down());
+    }
+
+    #[test]
+    fn stack_down_transitions_from_up_to_down() {
+        if dev_frontend_busy() {
+            eprintln!("skip: hay dev-stack en :4321");
+            return;
+        }
+        let (api, ws, front) = (pick_free_port(), pick_free_port(), pick_free_port());
+        let _env = PortEnvGuard::set(api, ws, front);
+        let workers = serve_fake_stack(api, ws, front, Duration::from_secs(3));
+        // El stack falso responde: no está caído.
+        assert!(!stack_down());
+        // Al expirar el serveo los puertos caen: wait_for_stack_down vuelve
+        // solo (y rápido tras la caída, no tras 20s de timeout).
+        let start = std::time::Instant::now();
+        wait_for_stack_down();
+        assert!(start.elapsed() < Duration::from_secs(20));
+        assert!(stack_down());
+        for w in workers {
+            w.join().expect("fake stack thread finished");
+        }
     }
 }

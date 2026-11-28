@@ -20,6 +20,20 @@ import { stopServers, requestShutdown, abortStartup, installSignalHandlers } fro
 
 import fs from 'fs';
 
+/**
+ * ¿Debe el daemon abrir el navegador solo al arrancar?
+ * No cuando lo gestiona el launcher (BUNDECK_MANAGED=1, el panel lo abre el
+ * usuario desde "Panel web") ni durante un apply (BUNDECK_NO_AUTO_OPEN=1,
+ * que pone el launcher al spawnear: una pestaña por update era el síntoma
+ * de "el front se queda levantado"/se duplica).
+ */
+export function shouldAutoOpenBrowser(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (DEV_MODE) return false;
+  const managed = env.BUNDECK_MANAGED === '1' || env.LIBREDECK_MANAGED === '1';
+  const noAutoOpen = env.BUNDECK_NO_AUTO_OPEN === '1' || env.LIBREDECK_NO_AUTO_OPEN === '1';
+  return !managed && !noAutoOpen;
+}
+
 class LibreDeckDaemon {
   private httpServer?: any;
   private frontendServer?: any;
@@ -360,8 +374,11 @@ class LibreDeckDaemon {
     console.log(`🩺 Health: http://localhost:${PORT}/health`);
 
     // Abrir navegador automáticamente solo en producción (siempre localhost;
-    // el bind LAN opt-in no cambia: solo afecta a la URL abierta, no a la escucha)
-    if (!DEV_MODE) {
+    // el bind LAN opt-in no cambia: solo afecta a la URL abierta, no a la escucha).
+    // El launcher es el dueño del ciclo de vida: cuando el daemon lo spawnea
+    // él (BUNDECK_MANAGED=1) o durante un apply (BUNDECK_NO_AUTO_OPEN=1), no
+    // abre pestañas solo — el panel lo abre el usuario desde el launcher.
+    if (shouldAutoOpenBrowser()) {
       const { spawn } = require('child_process');
       try {
         spawn('cmd', ['/c', 'start', '', `http://localhost:${FRONTEND_PORT}`], { detached: true, stdio: 'ignore', windowsHide: true } as any).unref?.();

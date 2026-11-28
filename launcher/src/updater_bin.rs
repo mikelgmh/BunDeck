@@ -41,15 +41,79 @@ fn arg(name: &str) -> Option<String> {
 
 #[cfg(windows)]
 fn pid_alive(pid: u32) -> bool {
-    // Sin dependencias: tasklist filtrado por PID.
+    // Esperar por handle del proceso, no por texto de tasklist: el matching
+    // por subcadena daba falsos positivos/negativos y alargaba o acortaba mal
+    // la espera, relanzando el panel sobre el mutex aún ocupado.
+    unsafe extern "system" {
+        fn OpenProcess(desired_access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+        fn GetExitCodeProcess(process: *mut std::ffi::c_void, exit_code: *mut u32) -> i32;
+        fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+    }
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        let handle = OpenProcess(
+            SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            pid,
+        );
+        if handle.is_null() {
+            // Sin handle: o murió, o es de otro usuario (se considera vivo
+            // para no pisarlo).
+            return tasklist_contains_pid(pid);
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code as *mut u32);
+        CloseHandle(handle);
+        ok != 0 && code == STILL_ACTIVE
+    }
+}
+
+#[cfg(windows)]
+fn tasklist_contains_pid(pid: u32) -> bool {
+    // Fallback cuando OpenProcess falla por permisos: CSV evita el matching
+    // por subcadena ("123" dentro de "1123").
+    let needle = format!("\"{pid}\"");
     std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
-        .map(|o| {
-            let s = String::from_utf8_lossy(&o.stdout);
-            s.contains(&pid.to_string())
+        .map(|o| csv_contains_pid(&String::from_utf8_lossy(&o.stdout), pid, &needle))
+        .unwrap_or(true)
+}
+
+/// ¿Menciona la salida CSV de tasklist a este PID exacto (entre comillas)?
+/// Función pura para poder testearla sin spawnear procesos.
+#[cfg(windows)]
+fn csv_contains_pid(output: &str, _pid: u32, needle: &str) -> bool {
+    output.lines().any(|line| {
+        // Cada fila CSV cita los campos: "Image Name","PID",...
+        line.split("\",\"").any(|field| {
+            let field = field.trim_matches('"');
+            field == needle.trim_matches('"')
         })
-        .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    /// El matching ingenuo por subcadena confundía PID 123 con 1123 y
+    /// alargaba/acortaba la espera del helper, relanzando el panel sobre el
+    /// mutex aún ocupado ("ya hay instancia" tras actualizar).
+    #[cfg(windows)]
+    #[test]
+    fn csv_matching_avoids_pid_substrings() {
+        let row_123 = "\"bundeck-launcher.exe\",\"123\",\"Console\",\"1\",\"10.000 K\"";
+        let row_1123 = "\"other.exe\",\"1123\",\"Console\",\"1\",\"10.000 K\"";
+        assert!(super::csv_contains_pid(row_123, 123, "\"123\""));
+        assert!(!super::csv_contains_pid(row_1123, 123, "\"123\""));
+        assert!(!super::csv_contains_pid("", 123, "\"123\""));
+        let both = format!("{row_1123}\n{row_123}");
+        assert!(super::csv_contains_pid(&both, 123, "\"123\""));
+    }
 }
 
 #[cfg(not(windows))]
@@ -60,6 +124,52 @@ fn pid_alive(pid: u32) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// Espera a que el mutex de instancia única quede libre antes de relanzar.
+/// Mismo nombre que en instance.rs: Local\BunDeck.Launcher.SingleInstance.
+fn wait_for_single_instance_free() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        unsafe extern "system" {
+            fn CreateMutexW(
+                attrs: *const std::ffi::c_void,
+                owner: i32,
+                name: *const u16,
+            ) -> *mut std::ffi::c_void;
+            fn GetLastError() -> u32;
+            fn ReleaseMutex(mutex: *mut std::ffi::c_void) -> i32;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        const ERROR_ALREADY_EXISTS: u32 = 183;
+        let name: Vec<u16> = std::ffi::OsStr::new(r"Local\BunDeck.Launcher.SingleInstance")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        for _ in 0..50 {
+            unsafe {
+                let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+                if handle.is_null() {
+                    return;
+                }
+                let owned = GetLastError() != ERROR_ALREADY_EXISTS;
+                // Si lo creamos nosotros, soltarlo al instante: solo sondeo.
+                if owned {
+                    ReleaseMutex(handle);
+                }
+                CloseHandle(handle);
+                if owned {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::thread::sleep(Duration::from_secs(1));
+    }
 }
 
 fn main() {
@@ -90,6 +200,10 @@ fn main() {
         log(&root, &format!("El launcher PID {pid} sigue activo; no se reemplazará."));
         return;
     }
+    // El mutex de instancia única se libera al morir el proceso, pero con un
+    // pequeño retardo. Sin esta espera, el panel relanzado veía el mutex
+    // ocupado y mostraba "ya hay instancia" sobre sí mismo.
+    wait_for_single_instance_free();
     // Copia con reintentos (Windows libera el bloqueo con retardo).
     let mut last_err = String::new();
     for attempt in 0..20 {

@@ -126,6 +126,20 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
     }
 
     let Some(existing) = lock.existing_instance().cloned() else {
+        // Sin metadata legible no se puede matar nada con seguridad: el mutex
+        // puede estar en manos de un arranque a medias (p. ej. el helper del
+        // self-update acaba de relanzar). Espera breve y reintenta antes de
+        // rendirse, sin taskkill a ciegas.
+        persist_update_log("Lock ocupado sin metadata legible; esperando al dueño real.");
+        drop(lock);
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(200));
+            match instance::InstanceLock::acquire() {
+                Ok(next) if next.is_owner() => return Some(next),
+                Ok(next) => drop(next),
+                Err(_) => {}
+            }
+        }
         show_instance_message(
             "Ya hay otra instancia de BunDeck abierta, pero no pude leer sus datos. \
              Espera unos segundos e inténtalo de nuevo.",
@@ -133,6 +147,41 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
         );
         return None;
     };
+    // La metadata puede ser stale (PID muerto o reutilizado por otro
+    // programa): nunca taskkill sin comprobar vida + que sea launcher.
+    if !instance::is_process_alive(existing.pid) {
+        persist_update_log(&format!(
+            "Metadata stale: PID {} no vivo; esperando liberación del mutex.",
+            existing.pid
+        ));
+        drop(lock);
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(200));
+            match instance::InstanceLock::acquire() {
+                Ok(next) if next.is_owner() => return Some(next),
+                Ok(next) => drop(next),
+                Err(_) => {}
+            }
+        }
+        show_instance_message(
+            "BunDeck parecía abierto pero su proceso ya no existe. \
+             Si persiste, espera unos segundos e inténtalo de nuevo.",
+            false,
+        );
+        return None;
+    }
+    if existing.pid == std::process::id() || !is_launcher_process(existing.pid) {
+        persist_update_log(&format!(
+            "Rechazado reemplazar PID {}: no parece launcher BunDeck.",
+            existing.pid
+        ));
+        show_instance_message(
+            "Ya hay BunDeck abierto, pero no pude confirmar que el proceso sea el panel. \
+             No lo cerraré por seguridad; ciérralo desde el tray (Salir) e inténtalo de nuevo.",
+            false,
+        );
+        return None;
+    }
     let question = format!(
         "Ya hay BunDeck abierto en modo {} (PID {}).\n\n\
          ¿Quieres cerrarlo y arrancar esta instancia?\n\
@@ -151,8 +200,10 @@ fn acquire_single_instance() -> Option<instance::InstanceLock> {
     ));
     // Best-effort: pedir al daemon que cierre limpio antes de terminar el
     // launcher. La confirmación explícita autoriza el fallback a taskkill.
+    // OJO: sin /T a propósito — /T mataba también al daemon recién
+    // actualizado (el Restart del update lo quiere conservar).
     let _ = monitor::shutdown_daemon();
-    if !terminate_existing_instance(existing.pid) {
+    if !terminate_existing_instance(existing.pid, false) {
         show_instance_message(
             "No se pudo cerrar la instancia anterior. BunDeck seguirá abierto en su lugar.",
             false,
@@ -202,13 +253,43 @@ fn show_instance_message(text: &str, ask_yes_no: bool) -> bool {
 }
 
 #[cfg(windows)]
-fn terminate_existing_instance(pid: u32) -> bool {
+fn terminate_existing_instance(pid: u32, kill_tree: bool) -> bool {
     use std::os::windows::process::CommandExt;
+    // Sin /T por defecto: /T mataba el árbol del launcher viejo, incluido el
+    // daemon recién actualizado que el flujo Restart quiere conservar.
+    // Solo Astro-dev (huerfano a propósito) usa kill_tree = true.
+    let mut args = vec!["/PID".to_string(), pid.to_string(), "/F".to_string()];
+    if kill_tree {
+        args.push("/T".to_string());
+    }
     std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(&args)
         .creation_flags(0x08000000)
         .output()
         .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// ¿El PID parece el panel launcher (no un PID reutilizado)? Comprueba la
+/// línea de comandos: debe mencionar bundeck-launcher / libredeck-launcher.
+#[cfg(windows)]
+fn is_launcher_process(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    let filter = format!("ProcessId = {pid}");
+    let script = format!(
+        "$p=Get-CimInstance Win32_Process -Filter '{filter}'; \
+         if ($p -and $p.CommandLine -match '(?i)bundeck-launcher|libredeck-launcher') {{ 'yes' }}"
+    );
+    std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ])
+        .creation_flags(0x08000000)
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "yes")
         .unwrap_or(false)
 }
 
@@ -275,7 +356,7 @@ fn prepare_existing_server() {
             );
             return;
         }
-        if pid != std::process::id() && !terminate_existing_instance(pid) {
+        if pid != std::process::id() && !terminate_existing_instance(pid, true) {
             show_instance_message(
                 "Se detuvo el daemon, pero no se pudo cerrar el servidor de desarrollo en :4321. \
                  El panel seguirá disponible y usará los servicios que respondan.",
@@ -395,6 +476,8 @@ struct LauncherView {
     auto_update_initialized: bool,
     next_auto_update_check: Instant,
     restart_after_update: bool,
+    /// Handoff al helper ya lanzado (no relanzar en cada tick de 250ms).
+    restart_requested: bool,
     /// Último clic en la barra de título (doble clic = maximizar/restaurar).
     #[cfg(windows)]
     last_chrome_click: Option<Instant>,
@@ -449,6 +532,7 @@ impl LauncherView {
             auto_update_initialized: false,
             next_auto_update_check: Instant::now() + Duration::from_secs(6 * 60 * 60),
             restart_after_update: false,
+            restart_requested: false,
             last_applied: None,
             launcher_pending_restart: false,
             pending_start: false,
@@ -493,6 +577,7 @@ impl LauncherView {
             auto_update_initialized: false,
             next_auto_update_check: Instant::now(),
             restart_after_update: false,
+            restart_requested: false,
             last_applied: None,
             launcher_pending_restart: false,
             pending_start: false,
@@ -594,8 +679,10 @@ impl LauncherView {
                                             persist_update_log(&message);
                                             view.log.push(message);
                                             if view.restart_after_update {
-                                                let should_quit = view.restart_for_self_update();
+                                                // Idempotente: marcar antes de lanzar el helper para
+                                                // que el siguiente tick (250ms) no relance otro.
                                                 view.restart_after_update = false;
+                                                let should_quit = view.restart_for_self_update();
                                                 if should_quit {
                                                     restart_app_for_update(cx);
                                                 }
@@ -1078,6 +1165,7 @@ impl LauncherView {
     /// resultado y, si el launcher cambió, ofrece reiniciar vía helper.
     fn finish_apply(&mut self, ver: &str) {
         self.update_applying = true;
+        monitor::UPDATE_IN_PROGRESS.store(true, std::sync::atomic::Ordering::SeqCst);
         self.log.push(format!("Aplicando BunDeck {ver}…"));
         self.truncate_log();
         if let Ok(mut p) = self.update_progress.lock() {
@@ -1092,6 +1180,9 @@ impl LauncherView {
         std::thread::spawn(move || {
             let mut lines: Vec<String> = Vec::new();
             let res = updater::apply_staged(&mut |s| lines.push(s), &ver);
+            // Se libera aquí: a partir de ahora el monitor puede volver a
+            // spawnear con la active.json ya cambiada.
+            monitor::UPDATE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
             let root = updater::install_root();
             if let Ok(mut p) = progress.lock() {
                 p.apply_log = lines;
@@ -1118,8 +1209,13 @@ impl LauncherView {
         let Some(ver) = self.last_applied.clone() else {
             return false;
         };
+        // Un solo handoff por versión aplicada: el helper ya está en camino.
+        if self.restart_requested {
+            return true;
+        }
         match updater::handoff_self_update(&ver) {
             Ok(()) => {
+                self.restart_requested = true;
                 self.log
                     .push("El launcher se actualizará al salir.".to_string());
                 self.truncate_log();
@@ -1158,7 +1254,10 @@ fn start_monitor_thread(
         let mut spotify_served: Option<String> = None;
 
         loop {
-            let boot = if initial || pending_start {
+            // Durante el apply del update el único que spawnea es el propio
+            // apply (usa active.json ya cambiada). El monitor solo observa.
+            let updating = monitor::UPDATE_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst);
+            let boot = if (initial || pending_start) && !updating {
                 let (lines, was_spawned) = monitor::ensure_daemon_spawned();
                 if initial {
                     pending_start = was_spawned;
@@ -2037,11 +2136,26 @@ fn handle_tray(cx: &mut App, state: &Rc<RefCell<LauncherState>>, ev: TrayEvent) 
             }
         }
         TrayEvent::Quit => {
-            // "Salir" apaga todo: pide al daemon que se detenga (muere en
-            // ~2s) y luego cierra el launcher. Antes solo cerraba la ventana
-            // y los servicios seguían arrancados.
+            // "Salir" apaga todo: pide al daemon que se detenga y verifica
+            // en un hilo aparte que el stack caiga de verdad (antes el
+            // frontal embebido parecía "quedarse levantado" porque nadie lo
+            // comprobaba). La UI se cierra al instante; el log queda en
+            // launcher-update.log.
             if monitor::shutdown_daemon() {
                 eprintln!("[launcher] apagado del daemon solicitado.");
+                persist_update_log("Apagado solicitado desde Salir.");
+                std::thread::spawn(|| {
+                    monitor::wait_for_stack_down();
+                    if monitor::stack_down() {
+                        persist_update_log("Stack detenido tras Salir.");
+                    } else {
+                        persist_update_log(
+                            "AVISO: tras Salir, algún servicio sigue respondiendo.",
+                        );
+                    }
+                });
+            } else {
+                persist_update_log("Salir sin daemon que apagar.");
             }
             if let Some(tray) = state.borrow_mut().tray.take() {
                 tray.shutdown();
@@ -2603,5 +2717,27 @@ mod tests {
 
         view.update(cx, |view, _| assert_eq!(view.tab, Tab::Log));
         assert!(cx.debug_bounds("clear-log").is_some());
+    }
+
+    #[gpui::test]
+    fn restart_handoff_is_single_shot(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| LauncherView::new_for_test());
+        cx.run_until_parked();
+
+        // Sin versión aplicada no hay nada que reiniciar y no se marca nada.
+        view.update(cx, |view, _| {
+            assert!(view.restart_for_self_update() == false);
+            assert!(!view.restart_requested);
+        });
+
+        // Con versión aplicada pero sin helper disponible (en test no hay
+        // staged real), el handoff falla y NO debe marcarse como pedido:
+        // el siguiente tick puede reintentar en vez de cerrar el panel.
+        view.update(cx, |view, _| {
+            view.last_applied = Some("9.9.9-nope".to_string());
+            assert!(view.restart_for_self_update() == false);
+            assert!(!view.restart_requested);
+            assert!(view.log.iter().any(|l| l.contains("actualizador del launcher")));
+        });
     }
 }
