@@ -234,28 +234,41 @@ describe('waiting: handleUiFetch (sin servidor)', () => {
 });
 
 describe('waiting: renderTunnelGonePage', () => {
-  test('ES: titulos/cuerpos localizados y enlace al escaner, sin reload', () => {
-    for (const reason of ['invalid-token', 'expired', 'daemon-offline'] as const) {
+  test('ES: titulos/cuerpos localizados y enlace al escaner; sin auto-reload salvo daemon-offline', () => {
+    for (const reason of ['invalid-token', 'expired'] as const) {
       const html = renderTunnelGonePage(reason, 'es');
       expect(html).toContain(`data-tunnel-gone="${reason}"`);
       expect(html).toContain('href="/#escanear-qr"');
       expect(html).toContain('Escanear un QR nuevo');
+      // Definitivos: la sesión no va a resucitar → sin poll ni reload.
       expect(html).not.toContain('location.reload()');
+      expect(html).not.toContain('tunnel-retry-note');
       expect(html).not.toContain('Recargar');
     }
+    // daemon-offline = reintentable: poll con backoff y recarga al volver 200,
+    // con parada ante 401 expired/invalid-token. Nunca expone el token.
+    const retry = renderTunnelGonePage('daemon-offline', 'es');
+    expect(retry).toContain('data-tunnel-gone="daemon-offline"');
+    expect(retry).toContain('tunnel-retry-note');
+    expect(retry).toContain('location.reload()');
+    expect(retry).toContain('expired');
     expect(renderTunnelGonePage('invalid-token', 'es')).toContain('Sesión no válida');
     expect(renderTunnelGonePage('expired', 'es')).toContain('Sesión caducada');
     expect(renderTunnelGonePage('daemon-offline', 'es')).toContain('Equipo sin conexión');
   });
 
-  test('EN: enlace al escaner, sin reload', () => {
-    for (const reason of ['invalid-token', 'expired', 'daemon-offline'] as const) {
+  test('EN: enlace al escaner; sin auto-reload salvo daemon-offline', () => {
+    for (const reason of ['invalid-token', 'expired'] as const) {
       const html = renderTunnelGonePage(reason, 'en');
       expect(html).toContain(`data-tunnel-gone="${reason}"`);
       expect(html).toContain('href="/#escanear-qr"');
       expect(html).toContain('Scan a new QR');
       expect(html).not.toContain('location.reload()');
+      expect(html).not.toContain('tunnel-retry-note');
     }
+    const retry = renderTunnelGonePage('daemon-offline', 'en');
+    expect(retry).toContain('tunnel-retry-note');
+    expect(retry).toContain('location.reload()');
     expect(renderTunnelGonePage('invalid-token', 'en')).toContain('Invalid session');
     expect(renderTunnelGonePage('expired', 'en')).toContain('Session expired');
     expect(renderTunnelGonePage('daemon-offline', 'en')).toContain('Host offline');

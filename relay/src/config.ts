@@ -33,6 +33,16 @@ export interface RelayConfig {
   claimBurstPerHour: number;
   /** Ventana de gracia tras rotar: el token viejo sigue válido este tiempo (def 5 min). */
   rotateGraceMs: number;
+  /**
+   * Ventana de gracia para tokens desconocidos tras arrancar (def 90 s):
+   * un `/t/<token>/` o `/s/<sid>/` que no existe en memoria PERO el relay
+   * acaba de arrancar (redespliegue con base vacía/efímera) responde
+   * `502 daemon-offline` + `Retry-After` (reintentable) en vez de 401
+   * definitivo. Cubre el tiempo que tarda el daemon en reconectar y
+   * re-emitir `ui-rebind` (backoff 1s→30s). Pasada la ventana, desconocido =
+   * 401 `invalid-token` (pedir QR nuevo). 0 = desactivar (solo tests).
+   */
+  unknownTokenGraceMs: number;
 }
 
 export const VERSION = '0.2.0';
@@ -92,5 +102,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     claimPerDay: parseLimit(env.RELAY_CLAIM_PER_DAY, 200),
     claimBurstPerHour: parseLimit(env.RELAY_CLAIM_BURST_PER_HOUR, 50),
     rotateGraceMs: parseLimit(env.RELAY_ROTATE_GRACE_MS, 5 * 60_000),
+    unknownTokenGraceMs: parseLimit(env.RELAY_UNKNOWN_TOKEN_GRACE_MS, 90_000),
   };
 }

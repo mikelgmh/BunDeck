@@ -185,6 +185,44 @@ Openship-ready: respeta `$PORT`, expone `HEALTHCHECK /health`.
 Dominio previsto: `relay.bundeck.app` → reverse proxy TLS → `wss://` a este servicio
 (el relay no termina TLS por sí mismo; `wss` lo pone el proxy).
 
+### Despliegue a prueba de pérdida (volumen persistente)
+
+El relay guarda devices + sesiones del túnel en SQLite (`relay.db` en
+`DATA_DIR`, por defecto `/data` en el contenedor). Sin volumen persistente
+cada redespliegue de openship arranca con la base vacía y TODAS las
+sesiones `/t/<token>/` y `/s/<sid>/` mueren con 401 hasta que cada daemon
+reconecte y re-anuncie (`ui-rebind`, backoff 1s→30s).
+
+Checklist del despliegue en openship (el repo no gobierna ese panel: se
+configura en la UI de openship para el servicio del relay):
+
+1. **Volumen persistente** montado en `/data` (el `Dockerfile` ya declara
+   `VOLUME ["/data"]` y `ENV DATA_DIR=/data`; en openship añade un volume
+   persistente en ese path, no almacenamiento efímero).
+2. `TRUST_PROXY=1` (detrás del proxy de openship, para rate-limit por IP real).
+3. `RELAY_TOKEN` (+ `RELAY_PROVISION_TOKEN` si usas auto-provisión).
+4. Verifica tras cada redespliegue: `GET /health` → `{ok:true, …,
+   storage:"persistent", graceActive:true}`. Si `storage` es
+   `"fallback-tmp"` o `"memory"`, el volumen NO está montado o no es
+   escribible (el arranque lo grita como `[FATAL almacenamiento]` en logs:
+   revisa permisos — contenedor corre como `USER bun`, puede necesitar
+   `chown 65532` o `fsGroup` en el volumen).
+
+Defensas en profundidad (por si el volumen falla igualmente):
+
+- **Persistencia SQLite** (`src/store.ts` + `tunnelPersist` en `index.ts`):
+  las sesiones sobreviven al reinicio; el relay las rehidrata al arrancar.
+- **Ventana de gracia** (`RELAY_UNKNOWN_TOKEN_GRACE_MS`, def 90 s):
+  token/sid desconocido recién arrancado → `502 daemon-offline` +
+  `Retry-After` (reintentable) en vez de 401 definitivo.
+- **Auto-reintento del front** (tarjeta `tunnel-gone` + `renderTunnelGonePage`
+  con `daemon-offline`): poll con backoff y recarga sola al volver 200;
+  `expired`/`invalid-token` no reintentan (pedir QR nuevo).
+
+Decisión de persistencia: SQLite en volumen basta (un solo writer, tráfico
+modesto de sesiones; ver `src/store.ts`). Postgres/Mongo solo si algún día
+hay multi-réplica real con writers concurrentes: hoy sería sobrediseño.
+
 ## Túnel inverso (exponer la web del daemon en internet)
 
 El relay también actúa como salida a internet del daemon (estilo ngrok):

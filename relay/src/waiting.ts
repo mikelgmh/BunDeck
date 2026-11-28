@@ -606,6 +606,43 @@ const TUNNEL_GONE: Record<TunnelGoneReason, Record<WaitingLang, { title: string;
 export function renderTunnelGonePage(reason: TunnelGoneReason, lang: WaitingLang): string {
   const t = TUNNEL_GONE[reason] ?? TUNNEL_GONE['invalid-token'];
   const s = t[lang] ?? t.es;
+  // Auto-reintento solo para daemon-offline (sesión conocida pero daemon
+  // reconectando, o token desconocido en ventana de gracia): poll con
+  // backoff al mismo path (JSON) y recarga sola al volver 200. Un 401
+  // expired/invalid-token detiene el poll (pedir QR nuevo). Con
+  // invalid-token/expired no hay poll: la sesión no va a resucitar.
+  const retryScript =
+    reason === 'daemon-offline'
+      ? `<script>
+(function(){
+try{
+var attempts=0;
+var maxAttempts=20;
+var stopped=false;
+var note=document.getElementById('tunnel-retry-note');
+function waitMs(n){var arr=[2000,3000,5000,8000,13000,20000];return arr[Math.min(n,arr.length-1)];}
+function tick(){
+if(stopped)return;
+attempts++;
+fetch(location.pathname+location.search,{headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'}).then(function(res){
+if(res.status===200){location.reload();return;}
+return res.json().catch(function(){return {};}).then(function(body){
+var err=body&&typeof body.error==='string'?body.error:'';
+if(res.status===401&&(err==='expired'||err==='invalid-token')){stopped=true;if(note)note.hidden=true;return;}
+if(attempts>=maxAttempts){stopped=true;if(note)note.hidden=true;return;}
+setTimeout(tick,waitMs(attempts));
+});
+}).catch(function(){
+if(attempts>=maxAttempts){stopped=true;if(note)note.hidden=true;return;}
+setTimeout(tick,waitMs(attempts));
+});
+}
+setTimeout(tick,2000);
+window.addEventListener('pagehide',function(){stopped=true;});
+}catch(e){}
+})();
+</script>`
+      : '';
   return `<!doctype html>
 <html lang="${lang}">
 <head>
@@ -622,14 +659,17 @@ h1{font-size:22px;margin:8px 0}
 p{margin:8px 0}
 button{cursor:pointer;border:0;border-radius:10px;padding:10px 22px;font-weight:700;background:#334155;color:#e2e8f0;margin-top:10px}
 a.btn{display:inline-block;text-decoration:none;cursor:pointer;border:0;border-radius:10px;padding:10px 22px;font-weight:700;background:#334155;color:#e2e8f0;margin-top:10px}
+.retry{font-size:13px;opacity:.8}
 </style>
 </head>
 <body data-tunnel-gone="${esc(reason)}">
 <div class="wrap"><div class="card">
 <h1>${esc(reason === 'daemon-offline' ? '📡' : '🔒')} ${esc(s.title)}</h1>
 <p>${esc(s.body)}</p>
+${reason === 'daemon-offline' ? `<p class="retry" id="tunnel-retry-note" data-cy="tunnel-retrying">${esc(lang === 'en' ? 'Retrying automatically… the page reloads when the host is back.' : 'Reintentando automáticamente… la página se recarga cuando vuelva el equipo.')}</p>` : ''}
 <div><a class="btn" href="/#escanear-qr">${esc(s.scanAgain)}</a></div>
 </div></div>
+${retryScript}
 </body>
 </html>`;
 }

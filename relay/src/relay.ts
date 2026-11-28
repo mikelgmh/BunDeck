@@ -115,6 +115,14 @@ export interface RelayServerOptions {
   httpTimeoutMs?: number;
   /** Persistencia opcional de sesiones del túnel (SQLite: sobreviven al reinicio). */
   tunnelPersist?: TunnelSessionPersist | null;
+  /**
+   * Ventana de gracia para tokens desconocidos tras arrancar (def 0 = off).
+   * Producción la activa vía RELAY_UNKNOWN_TOKEN_GRACE_MS (def 90 s, ver
+   * config.ts): un token/sid que no existe en memoria recién arrancado
+   * responde 502 daemon-offline + Retry-After (el daemon aún no re-anunció
+   * con ui-rebind) en vez de 401.
+   */
+  unknownTokenGraceMs?: number;
   /** App de Discord del maintainer para el proxy OAuth (secret NUNCA expuesto). */
   discordClientId?: string;
   discordClientSecret?: string;
@@ -226,6 +234,12 @@ export class RelayServer {
   private deviceSockets = new Map<string, Set<AnyWs>>();
   readonly tunnel: TunnelState;
   private readonly httpTimeoutMs: number;
+  /**
+   * Ventana de gracia post-arranque para tokens desconocidos.
+   * 0 = desactivada (defecto en librería/tests; producción la activa vía
+   * RELAY_UNKNOWN_TOKEN_GRACE_MS con def 90 s desde config.ts).
+   */
+  private readonly unknownTokenGraceMs: number;
 
   constructor(private opts: RelayServerOptions) {
     const legacy = opts.rateLimitPerMin;
@@ -258,6 +272,46 @@ export class RelayServer {
       /* noop */
     }
     this.httpTimeoutMs = opts.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
+    this.unknownTokenGraceMs = opts.unknownTokenGraceMs ?? 0;
+  }
+
+  /**
+   * ¿Estamos en ventana de gracia post-arranque? Un token/sid desconocido
+   * justo tras un redespliegue casi seguro es "el daemon aún no re-anunció
+   * con ui-rebind" (backoff 1s→30s), no "sesión revocada". En esa ventana
+   * se responde 502 daemon-offline + Retry-After (reintentable) en vez del
+   * 401 definitivo que mandaría al usuario a pedir un QR nuevo.
+   */
+  private withinUnknownTokenGrace(): boolean {
+    if (!(this.unknownTokenGraceMs > 0)) return false;
+    try {
+      return this.now() - this.startedAt < this.unknownTokenGraceMs;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Segundos restantes de gracia (para `Retry-After`; mín 1). */
+  private graceRetryAfterSec(): number {
+    try {
+      const left = this.unknownTokenGraceMs - (this.now() - this.startedAt);
+      return Math.max(1, Math.ceil(left / 1000));
+    } catch {
+      return 5;
+    }
+  }
+
+  /**
+   * Respuesta para token/sid desconocido: 502 daemon-offline + Retry-After
+   * en ventana de gracia, 401 invalid-token pasado ese tiempo.
+   * Devuelve `{ status, error }` para JSON, y el caller elige la página
+   * HTML amable vía `tunnelGone()` cuando es navegación.
+   */
+  private unknownTokenResponse(): { status: 502 | 401; error: 'daemon-offline' | 'invalid-token'; retryAfterSec: number | null } {
+    if (this.withinUnknownTokenGrace()) {
+      return { status: 502, error: 'daemon-offline', retryAfterSec: this.graceRetryAfterSec() };
+    }
+    return { status: 401, error: 'invalid-token', retryAfterSec: null };
   }
 
   /** Compat: expone el limiter de datos para tests antiguos. */
@@ -409,11 +463,16 @@ export class RelayServer {
     }
 
     if (url.pathname === '/health' && req.method === 'GET') {
+      // `storage` + `graceActive`: verificación post-redespliegue sin
+      // exponer rutas ni secretos (solo modo y segundos restantes).
+      const store = this.opts.store as unknown as { storageMode?: string; storageDir?: string };
       return Response.json({
         ok: true,
         service: 'libredeck-relay',
         version: this.opts.version ?? '0.1.0',
         uptime: Math.floor((this.now() - this.startedAt) / 1000),
+        ...(typeof store?.storageMode === 'string' ? { storage: store.storageMode } : {}),
+        graceActive: this.withinUnknownTokenGrace(),
       });
     }
 
@@ -774,7 +833,10 @@ export class RelayServer {
   private handleTunnelFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
     const m = /^\/t\/([^/]+)([\s\S]*)$/.exec(url.pathname);
-    if (!m) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!m) {
+      const g = this.unknownTokenResponse();
+      return this.tunnelGone(req, g.error, g.status, g.retryAfterSec) ?? this.tunnelJsonError(g.error, g.status, g.retryAfterSec);
+    }
     const token = m[1];
     const rest = m[2]; // '' o '/…'
     const upgrade = (req.headers.get('upgrade') ?? '').toLowerCase();
@@ -782,7 +844,16 @@ export class RelayServer {
     if (upgrade.includes('websocket')) {
       if (rest !== '/ws') return Response.json({ error: 'not-found' }, { status: 404 });
       const sess = this.tunnel.sessions.get(token);
-      if (!sess) return Response.json({ error: 'invalid-token' }, { status: 401 });
+      if (!sess) {
+        // Gracia post-arranque: el daemon aún no re-anunció (ui-rebind).
+        // Se responde 502 + Retry-After (reintentable) en vez de 401
+        // definitivo; el front distingue y auto-reintenta.
+        if (this.withinUnknownTokenGrace()) {
+          const ra = this.graceRetryAfterSec();
+          return Response.json({ error: 'daemon-offline', retryAfter: ra }, { status: 502, headers: { 'retry-after': String(ra) } });
+        }
+        return Response.json({ error: 'invalid-token' }, { status: 401 });
+      }
       if (sess.exp !== 0 && sess.exp <= this.now()) {
         this.tunnel.expireSession(token);
         return Response.json({ error: 'expired' }, { status: 401 });
@@ -805,10 +876,16 @@ export class RelayServer {
   private handleSidFetch(req: Request, server: Server<WsData>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
     const m = /^\/s\/([^/]+)([\s\S]*)$/.exec(url.pathname);
-    if (!m) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!m) {
+      const g = this.unknownTokenResponse();
+      return this.tunnelGone(req, g.error, g.status, g.retryAfterSec) ?? this.tunnelJsonError(g.error, g.status, g.retryAfterSec);
+    }
     const sid = m[1];
     const rest = m[2]; // '' o '/…'
-    if (!isValidSid(sid)) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!isValidSid(sid)) {
+      const g = this.unknownTokenResponse();
+      return this.tunnelGone(req, g.error, g.status, g.retryAfterSec) ?? this.tunnelJsonError(g.error, g.status, g.retryAfterSec);
+    }
     const upgrade = (req.headers.get('upgrade') ?? '').toLowerCase();
 
     // Claim del ticket -> cookie HttpOnly.
@@ -892,7 +969,10 @@ export class RelayServer {
   /** Proxy HTTP split-token: valida cookie y reescribe con prefijo `/s/<sid>`. */
   private async handleSidProxy(req: Request, sid: string, rest: string, search: string, cookieSecret: string | null): Promise<Response> {
     const sess = this.tunnel.sidSessions.get(sid);
-    if (!sess) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!sess) {
+      const g = this.unknownTokenResponse();
+      return this.tunnelGone(req, g.error, g.status, g.retryAfterSec) ?? this.tunnelJsonError(g.error, g.status, g.retryAfterSec);
+    }
     if (!this.tunnel.validateSid(sid, cookieSecret)) {
       if (sess.exp !== 0 && sess.exp <= this.now()) {
         this.tunnel.expireSidSession(sid);
@@ -905,7 +985,9 @@ export class RelayServer {
       return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
     }
     const daemon = this.tunnel.devices.get(sess.deviceId);
-    if (!daemon) return this.tunnelGone(req, 'daemon-offline', 502) ?? Response.json({ error: 'daemon-offline' }, { status: 502 });
+    if (!daemon) {
+      return this.tunnelGone(req, 'daemon-offline', 502, 5) ?? this.tunnelJsonError('daemon-offline', 502, 5);
+    }
 
     const headers: Record<string, string> = {};
     req.headers.forEach((v, k) => {
@@ -979,25 +1061,39 @@ export class RelayServer {
    * daemon caído. Sustituye al JSON crudo (`{"error":"invalid-token"}`) que
    * veía el usuario al recargar. Devuelve `null` si no es navegación de
    * página (API/XHR/assets/WS siguen recibiendo JSON).
+   * En `daemon-offline` añade `Retry-After` (el front auto-reintenta).
    */
-  private tunnelGone(req: Request, reason: TunnelGoneReason, status: number): Response | null {
+  private tunnelGone(req: Request, reason: TunnelGoneReason, status: number, retryAfterSec?: number | null): Response | null {
     if (req.method !== 'GET' || !wantsHtmlPage(req)) return null;
-    return new Response(renderTunnelGonePage(reason, waitingLang(req)), {
-      status,
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-    });
+    const headers: Record<string, string> = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' };
+    if (status === 502 && retryAfterSec != null) headers['retry-after'] = String(retryAfterSec);
+    return new Response(renderTunnelGonePage(reason, waitingLang(req)), { status, headers });
+  }
+
+  /** JSON de error con `Retry-After` opcional (ventana de gracia). */
+  private tunnelJsonError(error: string, status: number, retryAfterSec?: number | null): Response {
+    const headers: Record<string, string> = {};
+    if (retryAfterSec != null) headers['retry-after'] = String(retryAfterSec);
+    return Response.json({ error }, { status, headers });
   }
 
   /** Proxy HTTP tuneleado: inyecta `http-req` al daemon y espera `http-res`. */
   private async handleTunnelProxy(req: Request, token: string, rest: string, search: string): Promise<Response> {
     const sess = this.tunnel.sessions.get(token);
-    if (!sess) return this.tunnelGone(req, 'invalid-token', 401) ?? Response.json({ error: 'invalid-token' }, { status: 401 });
+    if (!sess) {
+      const g = this.unknownTokenResponse();
+      return this.tunnelGone(req, g.error, g.status, g.retryAfterSec) ?? this.tunnelJsonError(g.error, g.status, g.retryAfterSec);
+    }
     if (sess.exp !== 0 && sess.exp <= this.now()) {
       this.tunnel.expireSession(token);
       return this.tunnelGone(req, 'expired', 401) ?? Response.json({ error: 'expired' }, { status: 401 });
     }
     const daemon = this.tunnel.devices.get(sess.deviceId);
-    if (!daemon) return this.tunnelGone(req, 'daemon-offline', 502) ?? Response.json({ error: 'daemon-offline' }, { status: 502 });
+    if (!daemon) {
+      // Sesión conocida pero daemon caído/reconectando: reintentable.
+      // Retry-After corto para que el front haga poll en vez de pedir QR nuevo.
+      return this.tunnelGone(req, 'daemon-offline', 502, 5) ?? this.tunnelJsonError('daemon-offline', 502, 5);
+    }
 
     const headers: Record<string, string> = {};
     req.headers.forEach((v, k) => {
@@ -1356,10 +1452,21 @@ export class RelayServer {
     const legacy = this.tunnel.sessions.get(br.token);
     const sess = legacy ?? this.tunnel.sidSessions.get(br.token);
     if (!sess || (sess.exp !== 0 && sess.exp <= this.now())) {
-      if (legacy) this.tunnel.expireSession(br.token);
-      else this.tunnel.expireSidSession(br.token);
+      if (sess) {
+        // Caducada de verdad: 4401 definitivo (pedir QR nuevo).
+        if (legacy) this.tunnel.expireSession(br.token);
+        else this.tunnel.expireSidSession(br.token);
+        try {
+          ws.close(4401, 'expired');
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      // Desconocida en ventana de gracia: el daemon aún no re-anunció
+      // (ui-rebind). 1013 = reintentable; pasada la gracia, 4401 definitivo.
       try {
-        ws.close(4401, 'expired');
+        ws.close(this.withinUnknownTokenGrace() ? 1013 : 4401, this.withinUnknownTokenGrace() ? 'daemon offline, retry' : 'invalid token');
       } catch {
         /* noop */
       }

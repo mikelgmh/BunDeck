@@ -1,5 +1,10 @@
 import { ref, computed, nextTick } from 'vue'
 import { getTunnelToken, tunnelApiBase, tunnelConfigUrl, tunnelWsUrl } from './useTunnel'
+import {
+  tunnelRetryDelayMs,
+  classifyTunnelError,
+  TUNNEL_RETRY_MAX,
+} from '../utils/tunnelRetry'
 import { rtcFetchIfConnected, getRtcSingleton } from './useRemoteRtc'
 import {
   parseLanInviteFromUrl, stripLanInviteFromUrl, parseRelayFallbackFromUrl,
@@ -203,11 +208,87 @@ export function useStreamDeck() {
   // "Sesión no válida". Se limpia al primer API ok.
   type TunnelSessionInvalid = 'invalid-token' | 'expired' | 'daemon-offline' | null
   const tunnelSessionInvalid = ref<'invalid-token' | 'expired' | 'daemon-offline' | null>(null)
+  // Auto-reintento solo para daemon-offline (reintentable): poll con backoff
+  // a /config por el túnel y recarga sola al volver 200. expired/invalid-token
+  // son definitivos (pedir QR nuevo) y NO reintentan.
+  const tunnelRetryAttempts = ref(0)
+  const tunnelRetrying = ref(false)
+  let tunnelRetryTimer: ReturnType<typeof setTimeout> | null = null
+  const stopTunnelRetry = () => {
+    if (tunnelRetryTimer) {
+      clearTimeout(tunnelRetryTimer)
+      tunnelRetryTimer = null
+    }
+    tunnelRetrying.value = false
+  }
+  const tunnelRetryTick = async () => {
+    tunnelRetryTimer = null
+    const token = getTunnelToken()
+    if (!token || tunnelSessionInvalid.value !== 'daemon-offline') {
+      stopTunnelRetry()
+      return
+    }
+    if (tunnelRetryAttempts.value >= TUNNEL_RETRY_MAX) {
+      stopTunnelRetry()
+      return
+    }
+    tunnelRetryAttempts.value += 1
+    try {
+      const res = await fetch(tunnelConfigUrl(token), {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10000),
+      })
+      if (res.ok) {
+        // El daemon volvió (re-anunció con ui-rebind): recarga a la sesión.
+        stopTunnelRetry()
+        tunnelSessionInvalid.value = null
+        try {
+          window.location.reload()
+        } catch {
+          /* sin window: tests */
+        }
+        return
+      }
+      // 401 expired/invalid-token = definitivo: deja de reintentar y muestra
+      // la tarjeta de "pedir QR nuevo" en vez del spinner de reintento.
+      if (res.status === 401) {
+        let err = ''
+        try {
+          const j = (await res.json()) as any
+          err = String(j?.error ?? '')
+        } catch {
+          /* cuerpo no-JSON */
+        }
+        if (classifyTunnelError(res.status, err) === 'qr-new') {
+          tunnelSessionInvalid.value = (err === 'expired' ? 'expired' : 'invalid-token') as NonNullable<TunnelSessionInvalid>
+          stopTunnelRetry()
+          return
+        }
+      }
+    } catch {
+      // Sin red / timeout: se sigue reintentando con backoff.
+    }
+    const delay = tunnelRetryDelayMs(tunnelRetryAttempts.value + 1)
+    tunnelRetryTimer = setTimeout(() => void tunnelRetryTick(), delay)
+  }
+  const startTunnelRetry = () => {
+    stopTunnelRetry()
+    tunnelRetryAttempts.value = 0
+    tunnelRetrying.value = true
+    tunnelRetryTimer = setTimeout(() => void tunnelRetryTick(), tunnelRetryDelayMs(1))
+  }
   const markTunnelGone = (detail: string, status: number): void => {
     if (!getTunnelToken()) return
     if (status !== 401 && status !== 502 && status !== 403) return
     const m = /invalid-token|daemon-offline|expired/.exec(detail)
-    if (m) tunnelSessionInvalid.value = m[0] as NonNullable<TunnelSessionInvalid>
+    if (!m) return
+    const next = m[0] as NonNullable<TunnelSessionInvalid>
+    tunnelSessionInvalid.value = next
+    // Solo daemon-offline auto-reintenta; el resto pide QR nuevo.
+    if (next === 'daemon-offline') startTunnelRetry()
+    else stopTunnelRetry()
   }
 
   // Flag to prevent infinite loops when receiving page change broadcasts
@@ -592,7 +673,10 @@ export function useStreamDeck() {
       if (getTunnelToken()) markTunnelGone(detail, response.status)
       throw new Error(detail || `API Error: ${response.status}`)
     }
-    if (getTunnelToken() && tunnelSessionInvalid.value) tunnelSessionInvalid.value = null
+    if (getTunnelToken() && tunnelSessionInvalid.value) {
+      tunnelSessionInvalid.value = null
+      stopTunnelRetry()
+    }
 
     return response.json()
   }
@@ -2908,6 +2992,7 @@ export function useStreamDeck() {
       reloadTimer = null
     }
     reloadPending.clear()
+    stopTunnelRetry()
     stopDynamicUpdates()
   }
 
@@ -3285,6 +3370,9 @@ export function useStreamDeck() {
 
     // Túnel del relay: sesión muerta (reinicio/caducidad/daemon caído)
     tunnelSessionInvalid,
+    // Auto-reintento de daemon-offline (poll a /config + recarga sola)
+    tunnelRetrying,
+    tunnelRetryAttempts,
 
     // URLs
     API_BASE,

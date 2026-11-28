@@ -22,6 +22,19 @@ console.log(
 );
 
 const store = new DeviceStore(config.dataDir);
+// ALERTA DURA de almacenamiento: un fallback efímero (tmpdir/:memory:)
+// invalida TODAS las sesiones en el próximo redespliegue aunque el
+// restore/rebind funcione. Grita en el arranque, no sigue en silencio.
+if (store.storageMode !== 'persistent') {
+  console.error(
+    `[relay][FATAL almacenamiento] DATA_DIR=${config.dataDir} NO es persistente ` +
+      `(modo=${store.storageMode}, real=${store.storageDir}). ` +
+      `Monta un volumen persistente en /data (ver README "Despliegue a prueba de pérdida"). ` +
+      `Sin volumen, cada redespliegue = sesiones inválidas.`,
+  );
+} else {
+  console.log(`[relay] almacenamiento persistente en ${store.storageDir} (relay.db).`);
+}
 const pairing = new PairingStore(PAIRING_TTL_MS);
 const relay = new RelayServer({
   token: config.token,
@@ -29,6 +42,7 @@ const relay = new RelayServer({
   claimPerDay: config.claimPerDay,
   claimBurstPerHour: config.claimBurstPerHour,
   rotateGraceMs: config.rotateGraceMs,
+  unknownTokenGraceMs: config.unknownTokenGraceMs,
   dataDir: config.dataDir,
   rateLimitT: config.rateLimitT,
   rateLimitUi: config.rateLimitUi,
@@ -77,7 +91,8 @@ setUiPageHandler((urlCode: string, req: Request) => {
 console.log(
   `[relay] listening on 0.0.0.0:${server.port}` +
     (config.domain ? ` (domain: ${config.domain})` : '') +
-    ` data=${config.dataDir}`,
+    ` data=${config.dataDir} storage=${store.storageMode}` +
+    ` unknownTokenGrace=${config.unknownTokenGraceMs}ms`,
 );
 
 // Limpieza periódica de códigos expirados (best-effort, no bloquea).

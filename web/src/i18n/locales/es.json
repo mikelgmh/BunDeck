@@ -932,6 +932,7 @@
         "tunnelGoneTitle": "Sesión no válida",
         "tunnelGoneMsg": "Esta sesión ya no existe: el equipo anfitrión puede haberse reiniciado o estar sin conexión. Al reconectar se restaura sola; si no, pide un QR nuevo al anfitrión.",
         "tunnelGoneHint": "Pulsa Reintentar para recargar. Si el equipo sigue sin conexión, espera unos segundos y vuelve a intentarlo.",
+        "tunnelGoneRetrying": "Reintentando automáticamente… (intento {n}). La página se recarga sola cuando vuelva el equipo.",
         "lanInviteTitle": "Invitación para la red local",
         "lanInviteHint": "El QR y el enlace llevan la misma invitación (un solo uso, caduca en 15 min). Quien lo abra podrá controlar este BunDeck; revócalo cuando termines.",
         "lanInviteGenerate": "Generar invitación",

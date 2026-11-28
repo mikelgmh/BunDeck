@@ -932,6 +932,7 @@
         "tunnelGoneTitle": "Invalid session",
         "tunnelGoneMsg": "This session no longer exists: the host machine may have restarted or be offline. It restores itself on reconnect; otherwise ask the host for a new QR code.",
         "tunnelGoneHint": "Press Retry to reload. If the machine is still offline, wait a few seconds and try again.",
+        "tunnelGoneRetrying": "Retrying automatically… (attempt {n}). The page reloads on its own when the host is back.",
         "lanInviteTitle": "Local network invitation",
         "lanInviteHint": "The QR and the link carry the same invitation (single use, expires in 15 min). Whoever opens it can control this BunDeck; revoke it when done.",
         "lanInviteGenerate": "Generate invitation",

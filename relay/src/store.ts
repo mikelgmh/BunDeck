@@ -28,16 +28,39 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_tunnel_sessions_device ON tunnel_sessions (device_id);
 `;
 
+export type TunnelStorageMode = 'persistent' | 'fallback-tmp' | 'memory';
+
 /**
  * Persistencia mínima (convención daemon/src/db.ts: bun:sqlite,
  * columnas JSON/TEXT, upsert explícito). Solo identidad pública:
  * id + pubKey + name + lastSeen. JAMÁS claves privadas.
+ *
+ * DECISIÓN DE PERSISTENCIA (documentada aquí porque es el punto que
+ * decide si un redespliegue mata las sesiones):
+ * - Carga: 1 writer (el propio relay), tráfico modesto (devices +
+ *   sesiones tunnel con upsert/prune esporádicos, sin lecturas calientes).
+ * - SQLite en volumen persistente (/data) BASTA y es lo correcto: cero
+ *   dependencias, backup = copiar relay.db, ACID local, sin concurrencia
+ *   multi-réplica (el relay es single-instance tras el proxy).
+ * - Postgres/Mongo solo si algún día hay multi-réplica real con writers
+ *   concurrentes o >10k sesiones/s: hoy sería sobrediseño (operación,
+ *   latencia de red y secretos extra a cambio de nada).
+ * - Lo que SÍ es crítico: que DATA_DIR apunte a almacenamiento persistente.
+ *   Con base efímera (tmpdir/:memory:) cada redespliegue pierde devices y
+ *   sesiones aunque el código de restore/rebind sea correcto.
  */
 export class DeviceStore {
   private db: Database;
+  /** Dónde vive realmente la BD (puede diferir de dataDir si hubo fallback). */
+  readonly storageDir: string;
+  /** `persistent` = DATA_DIR escribible; otros = EFÍMERO (ver alerta en arranque). */
+  readonly storageMode: TunnelStorageMode;
 
   constructor(dataDir: string, filename = 'relay.db') {
-    this.db = openDatabaseWithFallback(dataDir, filename);
+    const opened = openDatabaseWithFallback(dataDir, filename);
+    this.db = opened.db;
+    this.storageDir = opened.dir;
+    this.storageMode = opened.mode;
     this.db.exec(SCHEMA);
     try {
       const cols = this.db.prepare('PRAGMA table_info(tunnel_sessions)').all() as Array<{ name?: string }>;
@@ -147,8 +170,17 @@ export class DeviceStore {
  * directorio temporal escribible en vez de tumbar el relay. El registro de
  * dispositivos es mínimo y se re-puebla con cada `register`, así que la
  * degradación es preferible al crash-loop. Nunca lanza.
+ *
+ * El fallback es EFÍMERO por diseño (tmpdir/:memory: no sobreviven al
+ * redespliegue): quien arranca DEBE gritarlo (ver index.ts) y el operador
+ * DEBE montar un volumen persistente en DATA_DIR (ver README "Despliegue
+ * a prueba de pérdida"). El modo se expone en `storageMode`/`storageDir`
+ * para logs, /health y tests.
  */
-function openDatabaseWithFallback(dataDir: string, filename: string): Database {
+export function openDatabaseWithFallback(
+  dataDir: string,
+  filename: string,
+): { db: Database; dir: string; mode: TunnelStorageMode } {
   const tryOpen = (dir: string): Database | null => {
     try {
       mkdirSync(dir, { recursive: true });
@@ -159,17 +191,21 @@ function openDatabaseWithFallback(dataDir: string, filename: string): Database {
     }
   };
   const primary = tryOpen(dataDir);
-  if (primary) return primary;
+  if (primary) return { db: primary, dir: dataDir, mode: 'persistent' };
   const fallbackDir = join(tmpdir(), 'libredeck-relay');
   const fallback = tryOpen(fallbackDir);
   if (fallback) {
-    console.warn(
-      `[relay] ${dataDir} no es escribible, usando almacenamiento efímero en ${fallbackDir}. ` +
-        `Revisa los permisos del volumen.`,
+    console.error(
+      `[relay][FATAL almacenamiento] ${dataDir} no es escribible, usando almacenamiento EFÍMERO en ${fallbackDir}. ` +
+        `Las sesiones/devices SE PERDERÁN en el próximo redespliegue. ` +
+        `Monta un volumen persistente en DATA_DIR y revisa permisos (chown 65532 o fsGroup).`,
     );
-    return fallback;
+    return { db: fallback, dir: fallbackDir, mode: 'fallback-tmp' };
   }
   // Último recurso: SQLite en memoria (sin persistencia entre reinicios).
-  console.warn('[relay] sin directorio escribible, usando SQLite en memoria.');
-  return new Database(':memory:');
+  console.error(
+    '[relay][FATAL almacenamiento] sin directorio escribible, usando SQLite EN MEMORIA (efímera). ' +
+      'Todo se perderá al reiniciar. Monta un volumen persistente en DATA_DIR.',
+  );
+  return { db: new Database(':memory:'), dir: ':memory:', mode: 'memory' };
 }

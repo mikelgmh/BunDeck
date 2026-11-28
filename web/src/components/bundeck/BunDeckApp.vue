@@ -39,6 +39,9 @@
         <h1>{{ tunnelSessionInvalid === 'daemon-offline' ? '📡' : '🔒' }} {{ t('bd.tunnelGoneTitle') }}</h1>
         <p>{{ t('bd.tunnelGoneMsg') }}</p>
         <p class="bd-hint">{{ t('bd.tunnelGoneHint') }}</p>
+        <p v-if="tunnelSessionInvalid === 'daemon-offline' && tunnelRetrying" class="bd-hint" data-cy="tunnel-retrying">
+          {{ t('bd.tunnelGoneRetrying', { n: tunnelRetryAttempts }) }}
+        </p>
         <button class="bd-btn bd-pri" type="button" @click="() => location.reload()">{{ t('bd.reload') }}</button>
       </div>
     </div>
@@ -841,6 +844,8 @@ const {
   lanDenied, redeemLanInviteFromUrl,
   lanRelayFallback,
   tunnelSessionInvalid,
+  tunnelRetrying,
+  tunnelRetryAttempts,
   installProgress, clearInstallProgress
 } = useStreamDeck()
 

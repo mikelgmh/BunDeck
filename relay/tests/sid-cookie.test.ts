@@ -342,10 +342,12 @@ describe('split-token /s/<sid>/ + cookie', () => {
     srv.onTunnelBridgeOpen({ close: (c: number, r: string) => { closed = { code: c, reason: r }; } }, { id: 'ws-sid-1', token: SID, deviceId: 'daemon-1' });
     expect(closed).toBeNull();
     expect(srv.tunnel.getBridge('ws-sid-1')).toBeDefined();
-    // Sid desconocido: 4401 'expired' (no cuelga, no registra).
+    // Sid desconocido: 4401 'invalid token' definitivo (gracia desactivada
+    // en tests; en producción con gracia activa sería 1013 reintentable).
+    // No cuelga ni registra el puente.
     closed = null;
     srv.onTunnelBridgeOpen({ close: (c: number, r: string) => { closed = { code: c, reason: r }; } }, { id: 'ws-sid-2', token: 'ff'.repeat(16), deviceId: 'daemon-1' });
-    expect(closed).toEqual({ code: 4401, reason: 'expired' });
+    expect(closed).toEqual({ code: 4401, reason: 'invalid token' });
     expect(srv.tunnel.getBridge('ws-sid-2')).toBeUndefined();
   });
 });
