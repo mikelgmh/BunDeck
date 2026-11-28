@@ -22,7 +22,7 @@
     "@julusian/jpeg-turbo": "^3.0.1",
     "@napi-rs/canvas": "^1.2.0",
     "adm-zip": "^0.6.0",
-    "chokidar": "^5.0.0",
+    "chokidar": "^6.0.0",
     "lucide": "^1.44.0",
     "mime-types": "^3.0.2",
     "simple-icons": "^16.38.1",
