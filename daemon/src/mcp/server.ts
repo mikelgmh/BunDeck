@@ -29,7 +29,7 @@ import { safeAssetName } from '../http/key-images';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
 export const MCP_SERVER_NAME = 'libredeck';
-export const MCP_SERVER_VERSION = '2.2.0';
+export const MCP_SERVER_VERSION = '2.3.0';
 
 export interface McpAuth {
   tokenId: string;
@@ -104,7 +104,14 @@ const TOOL_DEFS: ToolDef[] = [
     name: 'list_actions',
     description: 'Lista todas las acciones disponibles (plugins cargados) con sus schemas de parámetros.',
     scope: 'actions.read',
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        locale: S('string', "'es' o 'en' para nombre/descripción localizados (opcional, por defecto 'en')"),
+        surface: S('string', "Filtrar por superficie: 'control' solo controles interactivos (opcional)"),
+        plugin_id: S('string', 'Solo acciones de este plugin (opcional)'),
+      },
+    },
   },
   {
     name: 'execute_action',
@@ -331,7 +338,7 @@ const TOOL_DEFS: ToolDef[] = [
       type: 'object',
       properties: {
         id: S('string'),
-        patch: S('object', 'Campos de data a fusionar: label, textTop, textBottom, fontSize, icon, emoji, backgroundColor, textColor'),
+        patch: S('object', 'Campos de data a fusionar: label, textTop, textBottom, fontSize, icon, iconImage, backgroundImage, emoji, backgroundColor, textColor, showTitle, dynamicValue, badge'),
         position: S('number', 'Nueva posición (opcional)'),
         page_id: S('string', 'Mover a otra página (opcional)'),
         x: S('number', 'Columna en modo libre (opcional)'), y: S('number', 'Fila en modo libre (opcional)'),
@@ -1153,6 +1160,284 @@ const TOOL_DEFS: ToolDef[] = [
       properties: { limit: S('number', 'Máx. entradas, 1-500 (opcional)'), level: S('string', 'Filtrar por nivel (opcional)') },
     },
   },
+  // ---- Aspecto de botones (iconos/badges/contadores + looks condicionales) ----
+  {
+    name: 'get_button_appearance',
+    description: 'Aspecto de un botón: datos crudos (label, textos, iconos, colores, badge, dynamicValue, looks) y, con resolve:true, apariencia efectiva (looks + {{vars}} aplicados).',
+    scope: 'buttons.read',
+    inputSchema: {
+      type: 'object',
+      properties: { id: S('string'), resolve: S('boolean', 'true = incluye apariencia efectiva resuelta (opcional)') },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'set_button_appearance',
+    description: 'Fija el aspecto de un botón: appearance fusiona label, textTop, textBottom, fontSize, icon, iconImage, backgroundImage, emoji, backgroundColor, textColor, showTitle, dynamicValue, badge; looks sustituye las apariencias condicionales [{cond, t, i, c, bg}].',
+    scope: 'buttons.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: S('string'),
+        appearance: S('object', 'Campos de aspecto a fusionar (al menos uno)'),
+        looks: S('array', 'Apariencias condicionales (opcional, sustituye las actuales; [] las borra)'),
+      },
+      required: ['id'],
+    },
+  },
+  // ---- Controles y superficies (modo libre) ----
+  {
+    name: 'list_controls',
+    description: "Lista las acciones-control (surface 'control': poseen la superficie de la tecla en modo libre, p. ej. volumen) con su componente visual. Sin filtro devuelve también el resto de superficies para comparar.",
+    scope: 'actions.read',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin_id: S('string', 'Solo controles de este plugin (opcional)'),
+        only_controls: S('boolean', 'true (defecto) = solo surface control; false = todas las acciones con su superficie'),
+      },
+    },
+  },
+  {
+    name: 'get_plugin_action',
+    description: 'Detalle localizado de una acción por su type (p. ej. audio-mixer.volume-control): nombre/descripción en locale, schema, surface/component, states, variables expuestas y opciones dinámicas.',
+    scope: 'actions.read',
+    inputSchema: {
+      type: 'object',
+      properties: { type: S('string'), locale: S('string', "'es' o 'en' (opcional, por defecto 'en')") },
+      required: ['type'],
+    },
+  },
+  {
+    name: 'get_action_options',
+    description: 'Resuelve las opciones dinámicas (optionsFrom) de un campo: ejecuta la sourceAction del MISMO plugin y devuelve {options}. Solo lectura pensada para rellenar selects.',
+    scope: 'actions.execute',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin_id: S('string'), action_id: S('string', 'Id corto dentro del plugin'),
+        field: S('string', 'Campo a rellenar (opcional, por defecto el declarado)'),
+        params: S('object', 'Parámetros a reenviar (whitelist forwardParams, opcional)'),
+      },
+      required: ['plugin_id', 'action_id'],
+    },
+  },
+  {
+    name: 'list_plugin_widgets',
+    description: 'Widgets básicos declarados por los plugins (kind text/progress/list/gauge/toggle + sourceAction). Sin plugin_id devuelve los de todos.',
+    scope: 'plugins.read',
+    inputSchema: { type: 'object', properties: { plugin_id: S('string', 'Opcional') } },
+  },
+  // ---- Webhooks LAN ----
+  {
+    name: 'list_webhooks',
+    description: 'Lista los webhooks LAN (gestión local; el disparo HTTP vive solo en LAN). Por seguridad los tokens se ocultan salvo includeTokens:true.',
+    scope: 'webhooks.read',
+    inputSchema: { type: 'object', properties: { includeTokens: S('boolean', 'Incluir tokens (opcional, por defecto false)') } },
+  },
+  {
+    name: 'get_webhook',
+    description: 'Detalle de un webhook por id (incluye token y método; el token NUNCA se registra en logs).',
+    scope: 'webhooks.read',
+    inputSchema: { type: 'object', properties: { id: S('string') }, required: ['id'] },
+  },
+  {
+    name: 'create_webhook',
+    description: 'Crea un webhook LAN (máx. 32 acciones; cada acción necesita type). Devuelve el registro con su token: forma la URL POST /api/v1/webhooks/<token>.',
+    scope: 'webhooks.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: S('string'), method: S('string', 'GET|POST|PUT|PATCH|DELETE (opcional, defecto POST)'),
+        enabled: S('boolean', 'Opcional, defecto true'), actions: S('array', 'Lista de {type, parameters} (opcional)'),
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'update_webhook',
+    description: 'Actualiza nombre/método/estado/acciones de un webhook.',
+    scope: 'webhooks.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: S('string'), name: S('string'), method: S('string', 'GET|POST|PUT|PATCH|DELETE'),
+        enabled: S('boolean'), actions: S('array', 'Lista de {type, parameters} (sustituye)'),
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_webhook',
+    description: 'Elimina un webhook (destructivo: exige confirm:true). Sin undo propio: guarda inversa para deshacer.',
+    scope: 'webhooks.write',
+    inputSchema: {
+      type: 'object',
+      properties: { id: S('string'), confirm: S('boolean', 'Obligatorio (true)') },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'regenerate_webhook_token',
+    description: 'Regenera el token (credencial) de un webhook. El anterior queda invalidado al instante.',
+    scope: 'webhooks.write',
+    inputSchema: { type: 'object', properties: { id: S('string') }, required: ['id'] },
+  },
+  {
+    name: 'test_webhook',
+    description: 'Dispara manualmente un webhook (ejecuta sus acciones aunque esté deshabilitado, como el botón Probar de la UI). Acciones sensibles exigen confirm:true. Sin undo, prohibido en batch.',
+    scope: 'webhooks.write',
+    inputSchema: {
+      type: 'object',
+      properties: { id: S('string'), confirm: S('boolean', 'Obligatorio (true) si hay acciones sensibles') },
+      required: ['id'],
+    },
+  },
+  // ---- Registros por pulsación (paginados) ----
+  {
+    name: 'list_press_logs',
+    description: 'Registros por pulsación × acción, paginados: filtros combinables buttonId/actionType/deviceId/success/pressType/since/until + limit (máx. 500)/offset. Devuelve {items, total, limit, offset}. El historial sobrevive al botón.',
+    scope: 'presslogs.read',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        buttonId: S('string'), actionType: S('string'), deviceId: S('string'),
+        success: S('boolean'), pressType: S('string'), since: S('number', 'ms epoch'), until: S('number', 'ms epoch'),
+        limit: S('number', 'Máx. 500 (opcional, defecto 50)'), offset: S('number', 'Opcional, defecto 0'),
+      },
+    },
+  },
+  {
+    name: 'clear_press_logs',
+    description: 'Borra registros por filtros (sin filtros = todo; before = ms epoch para podar antiguos). Destructivo: exige confirm:true. Sin undo, prohibido en batch.',
+    scope: 'presslogs.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        buttonId: S('string'), actionType: S('string'), before: S('number', 'Borra anteriores a este ms epoch'),
+        confirm: S('boolean', 'Obligatorio (true)'),
+      },
+    },
+  },
+  // ---- Pantalla por dispositivo (brillo/dim/idle) ----
+  {
+    name: 'get_device_display',
+    description: 'Ajustes de pantalla de un dispositivo (brightness, dimAfterSec, idleMinutes, idleAction). Sin device usa el deck conectado (o la sesión local).',
+    scope: 'devices.read',
+    inputSchema: { type: 'object', properties: { device: S('string', 'Id de dispositivo (opcional)') } },
+  },
+  {
+    name: 'set_device_display',
+    description: 'Guarda ajustes de pantalla (brillo 0-100, dimAfterSec, idleMinutes, idleAction off|dim|clock) para un dispositivo y los aplica en vivo si es el conectado.',
+    scope: 'devices.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        device: S('string', 'Id de dispositivo (opcional)'),
+        brightness: S('number', '0-100 (opcional)'), dimAfterSec: S('number', 'Segundos sin pulsar antes de atenuar, 0 = nunca (opcional)'),
+        idleMinutes: S('number', 'Minutos sin pulsar antes del reposo, 0 = nunca (opcional)'),
+        idleAction: S('string', "'off'|'dim'|'clock' (opcional)"),
+      },
+    },
+  },
+  // ---- Preferencias de app (autostart, minimizado, idioma) ----
+  {
+    name: 'get_app_preferences',
+    description: 'Preferencias de la app: autostart (arranque con el sistema), start_minimized (solo tray al arrancar), language (es/en) y appearance, tal como las guarda el daemon en settings.',
+    scope: 'settings.read',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_app_preferences',
+    description: 'Fija preferencias: autostart/start_minimized (booleanos, normalizados como la API) y language (es/en). Solo toca las claves indicadas.',
+    scope: 'settings.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        autostart: S('boolean'), start_minimized: S('boolean'), language: S('string', "'es' o 'en'"),
+      },
+    },
+  },
+  // ---- Catálogo / Elgato / atajos / sesiones / grid ----
+  {
+    name: 'get_catalog_plugin',
+    description: 'Detalle de una entrada del catálogo offline (+ estado installed/enabled/installedVersion y compatibilidad con esta versión).',
+    scope: 'system.read',
+    inputSchema: { type: 'object', properties: { id: S('string') }, required: ['id'] },
+  },
+  {
+    name: 'get_elgato_state',
+    description: 'Estado visual Elgato (setTitle/setImage/setState por contexto) de un plugin importado.',
+    scope: 'plugins.read',
+    inputSchema: {
+      type: 'object',
+      properties: { plugin_id: S('string'), action: S('string', 'Acción (opcional)') },
+      required: ['plugin_id'],
+    },
+  },
+  {
+    name: 'list_shortcuts',
+    description: 'Atajos globales conocidos (el launcher los registra con RegisterHotKey): ids, cuáles son solo-UI y ventana first-wins.',
+    scope: 'shortcuts.read',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'trigger_shortcut',
+    description: 'Dispara un atajo global (next-profile/prev-profile/mute-all/toggle-panels/toggle-kiosk) con la misma regla anti-doble-ejecución que la API. Sin undo, prohibido en batch.',
+    scope: 'shortcuts.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: S('string'), source: S('string', 'Origen (opcional)'), executionId: S('string', 'Id de ejecución para dedup (opcional)'),
+        notifyOnly: S('boolean', 'true = solo difundir a clientes, sin ejecutar (opcional)'),
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'close_session',
+    description: 'Cierra la sesión persistida de un dispositivo (y desvincula su dispositivo lógico si es de navegador). Sin undo, prohibido en batch.',
+    scope: 'sessions.write',
+    inputSchema: { type: 'object', properties: { device_id: S('string') }, required: ['device_id'] },
+  },
+  {
+    name: 'get_page_context',
+    description: 'Contexto compuesto de una página (evita N llamadas): {page, buttons, assignments del perfil, pageVersion}.',
+    scope: 'pages.read',
+    inputSchema: { type: 'object', properties: { id: S('string') }, required: ['id'] },
+  },
+  // ---- Variables: listado con scope + actualización parcial + expuestas ----
+  {
+    name: 'list_scoped_variables',
+    description: 'Variables tipadas del store con filtro de scope (global/widget/script/automation + scopeId). Sin scope devuelve todas.',
+    scope: 'variables.read',
+    inputSchema: {
+      type: 'object',
+      properties: { scope: S('string', 'Opcional'), scopeId: S('string', 'Opcional') },
+    },
+  },
+  {
+    name: 'update_scoped_variable',
+    description: 'Actualización parcial de una variable tipada (como PUT /variables/:name): value, type (retype), bindings y unavailable, con scope/scopeId.',
+    scope: 'variables.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: S('string'), value: S(['string', 'number', 'boolean', 'object'] as any, 'Nuevo valor (opcional)'),
+        type: S('string', 'text|numeric|bool|color (opcional)'),
+        unavailable: S('boolean', 'Marcar como no disponible (opcional)'),
+        bindings: S('object', 'Bindings read/write o null (opcional)'),
+        scope: S('string'), scopeId: S('string'),
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_exposed_variables',
+    description: 'Variables de estado que las acciones exponen al ejecutarse (discordMuted, obsStreaming, …) con su valor en vivo del store global (best-effort).',
+    scope: 'variables.read',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 /** Scopes que implican escritura (auditoría en logs). */
@@ -1162,6 +1447,7 @@ const WRITE_SCOPES = new Set([
   'widgets.write', 'flows.write', 'automations.write', 'variables.write',
   'backups.write', 'assets.write', 'system.write',
   'batch.write', 'history.write',
+  'webhooks.write', 'presslogs.write', 'shortcuts.write',
 ]);
 
 /** Prefijos de acciones sensibles: exigen confirmación explícita. */
@@ -1242,6 +1528,48 @@ function layoutMode(v: any): 'classic' | 'gridstack' {
   if (v !== 'classic' && v !== 'gridstack') throw new Error(`layout_mode debe ser 'classic' o 'gridstack'`);
   return v;
 }
+
+/** Valida el método HTTP de un webhook (GET|POST|PUT|PATCH|DELETE). */
+function webhookMethod(v: any): string {
+  const m = String(v ?? 'POST').toUpperCase();
+  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(m)) {
+    throw new Error(`method inválido (usa GET|POST|PUT|PATCH|DELETE)`);
+  }
+  return m;
+}
+
+/** Valida name/method/actions de create/update_webhook (espejo de api/webhooks.ts). */
+function validateWebhookArgs(args: any, tool: string): void {
+  if (args?.name !== undefined && !String(args.name).trim()) throw new Error(`'${tool}': name inválido`);
+  if (args?.method !== undefined) webhookMethod(args.method);
+  if (args?.actions !== undefined) {
+    if (!Array.isArray(args.actions)) throw new Error(`'${tool}': actions debe ser un array`);
+    if (args.actions.length > 32) throw new Error(`'${tool}': demasiadas acciones (máx 32)`);
+    for (const a of args.actions) {
+      if (!a || typeof a !== 'object' || typeof (a as any).type !== 'string' || !(a as any).type) {
+        throw new Error(`'${tool}': cada acción necesita type (string no vacío)`);
+      }
+    }
+  }
+}
+
+/** Valida looks condicionales [{cond, t, i, c, bg}] (espejo de KeyLookLike). */
+function validateLooks(looks: any, tool: string): void {
+  if (!Array.isArray(looks)) throw new Error(`'${tool}': looks debe ser un array`);
+  for (const l of looks) {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) throw new Error(`'${tool}': cada look debe ser un objeto {cond, t?, i?, c?, bg?}`);
+    if (typeof (l as any).cond !== 'string' || !(l as any).cond.trim()) {
+      throw new Error(`'${tool}': cada look necesita cond (string no vacío)`);
+    }
+  }
+}
+
+/** Campos de aspecto fusionables en un botón (superconjunto del patch legacy). */
+const APPEARANCE_FIELDS = [
+  'label', 'textTop', 'textBottom', 'fontSize',
+  'icon', 'iconImage', 'backgroundImage', 'emoji',
+  'backgroundColor', 'textColor', 'showTitle', 'dynamicValue', 'badge',
+] as const;
 
 /** Aplica layoutMode dentro de page.data (fuente canónica: data.layoutMode). */
 function withLayoutMode(data: any, mode: 'classic' | 'gridstack' | undefined): any {
@@ -1622,8 +1950,7 @@ async function applyInverse(inverse: { tool: string; arguments: any; batch?: any
     case 'delete_flow_script': {
       (ctx.actionRunner as any)?.deleteFlowScript?.(String(a.id));
       return { success: true, scriptId: a.id };
-    }
-    case '__restore_flow_script': {
+    }    case '__restore_flow_script': {
       const r = ctx.actionRunner as any;
       if (typeof r?.saveFlowScript !== 'function' || typeof r?.deleteFlowScript !== 'function') {
         throw new Error('Motor sin flow-scripts (método no disponible)');
@@ -1647,6 +1974,35 @@ async function applyInverse(inverse: { tool: string; arguments: any; batch?: any
       }
       return { success: true, name: a.name };
     }
+    case 'delete_webhook': db.deleteWebhook(a.id); return { success: true, webhookId: a.id };
+    case '__restore_webhook': {
+      const { webhook } = a;
+      if (!db.getWebhook(webhook.id)) {
+        db.createWebhook({
+          id: webhook.id, name: webhook.name, token: webhook.token,
+          method: webhook.method, enabled: webhook.enabled, actions: webhook.actions ?? [],
+        });
+      } else {
+        db.updateWebhook(webhook.id, {
+          name: webhook.name, method: webhook.method, enabled: webhook.enabled, actions: webhook.actions ?? [],
+        });
+        db.regenerateWebhookToken(webhook.id, webhook.token);
+      }
+      return { success: true, webhookId: webhook.id };
+    }
+    case '__restore_webhook_token': {
+      db.regenerateWebhookToken(a.id, a.token);
+      return { success: true, webhookId: a.id };
+    }
+    case '__restore_display': {
+      for (const [key, value] of Object.entries(a.settings ?? {})) {
+        db.setSetting(String(key), String(value));
+      }
+      if (a.hadMissing && Array.isArray(a.hadMissing)) {
+        for (const key of a.hadMissing) db.deleteSetting(String(key));
+      }
+      return { success: true, device: a.device };
+    }
     default:
       throw new Error(`Inversa no soportada: ${inverse.tool}`);
   }
@@ -1661,8 +2017,9 @@ const BATCH_DENY = new Set([
   'install_plugin', 'install_plugin_from_git', 'update_plugin', 'uninstall_plugin',
   'reload_plugin', 'rollback_plugin', 'enable_plugin', 'disable_plugin',
   'get_plugin_settings', 'save_plugin_settings',
-  'navigate', 'set_session_view',
+  'navigate', 'set_session_view', 'close_session',
   'restore_backup', 'delete_asset', 'cancel_job',
+  'test_webhook', 'clear_press_logs', 'trigger_shortcut', 'get_action_options',
   'execute_batch', 'get_history', 'undo_last', 'clear_history',
 ]);
 
@@ -1835,6 +2192,41 @@ function preflightBatchOp(name: string, args: any, ctx: McpContext): void {
       break;
     }
     case 'set_flow_var': need('name'); if (args.value === undefined) throw new Error(`'${name}': value requerido`); break;
+    case 'get_button_appearance': need('id'); if (!db.getButton(args.id)) throw new Error('Botón no encontrado'); break;
+    case 'set_button_appearance': {
+      need('id'); if (!db.getButton(args.id)) throw new Error('Botón no encontrado');
+      if (args?.appearance !== undefined && (typeof args.appearance !== 'object' || args.appearance === null || Array.isArray(args.appearance))) {
+        throw new Error(`'${name}': appearance debe ser un objeto`);
+      }
+      if (args?.looks !== undefined) validateLooks(args.looks, name);
+      break;
+    }
+    case 'create_webhook': {
+      need('name'); validateWebhookArgs(args, name);
+      break;
+    }
+    case 'update_webhook': case 'delete_webhook': case 'regenerate_webhook_token': case 'get_webhook': {
+      need('id'); if (!db.getWebhook(args.id)) throw new Error('Webhook no encontrado');
+      if (name === 'update_webhook') validateWebhookArgs(args, name);
+      break;
+    }
+    case 'get_device_display': case 'set_device_display': case 'get_page_context': case 'get_catalog_plugin':
+    case 'get_elgato_state': case 'get_plugin_action': case 'close_session': case 'list_press_logs':
+      if (['get_page_context', 'get_catalog_plugin', 'get_elgato_state', 'get_plugin_action', 'close_session'].includes(name)) {
+        if (name === 'get_page_context') { need('id'); if (!db.getPage(args.id)) throw new Error('Página no encontrada'); }
+        if (name === 'close_session') need('device_id');
+        if (name === 'get_plugin_action') need('type');
+        if (name === 'get_elgato_state') need('plugin_id');
+        if (name === 'get_catalog_plugin') need('id');
+      }
+      break;
+    case 'update_scoped_variable': need('name'); break;
+    case 'set_app_preferences': {
+      if (args?.language !== undefined && !['es', 'en'].includes(String(args.language))) {
+        throw new Error(`'${name}': language debe ser 'es' o 'en'`);
+      }
+      break;
+    }
     case 'set_setting': need('key'); if (args.value === undefined) throw new Error('value requerido'); break;
     case 'export_backup': {
       if (args?.sections !== undefined && !Array.isArray(args.sections)) throw new Error(`'${name}': sections debe ser un array`);
@@ -1868,13 +2260,31 @@ async function callTool(name: string, args: any, ctx: McpContext) {
   switch (name) {
     // ---- acciones ----
     case 'list_actions': {
-      const actions = Array.from(pluginLoader.getPluginActions().entries()).map(([fullId, a]: any) => ({
-        type: fullId,
-        name: a.name ?? fullId,
-        description: a.description ?? '',
-        schema: a.schema ?? null,
-      }));
-      return { actions };
+      const { localizeActionField } = await import('../plugins/plugin-i18n');
+      const locale = typeof args?.locale === 'string' && args.locale ? args.locale : 'en';
+      const surfaceFilter = typeof args?.surface === 'string' && args.surface ? args.surface : null;
+      const pluginFilter = typeof args?.plugin_id === 'string' && args.plugin_id ? args.plugin_id : null;
+      const actions = Array.from(pluginLoader.getPluginActions().entries())
+        .filter(([fullId, a]: any) => {
+          if (pluginFilter && !String(fullId).startsWith(`${pluginFilter}.`) && String(fullId) !== pluginFilter) return false;
+          if (surfaceFilter && (a as any)?.surface !== surfaceFilter) return false;
+          return true;
+        })
+        .map(([fullId, a]: any) => ({
+          type: fullId,
+          name: (() => { try { return localizeActionField(a, 'name', locale, a.name ?? fullId); } catch { return a.name ?? fullId; } })(),
+          description: (() => { try { return localizeActionField(a, 'description', locale, a.description ?? ''); } catch { return a.description ?? ''; } })(),
+          schema: a.schema ?? null,
+          surface: (a as any)?.surface ?? 'execute',
+          component: (a as any)?.component ?? null,
+          dynamic: !!(a as any)?.dynamic,
+          freeModeOnly: !!(a as any)?.freeModeOnly,
+          states: (a as any)?.states ?? null,
+          variables: (a as any)?.variables ?? null,
+          optionsFrom: (a as any)?.optionsFrom ?? null,
+          i18n: (a as any)?.i18n ?? null,
+        }));
+      return { locale, actions };
     }
     case 'execute_action': {
       const type = args?.type;
@@ -2239,7 +2649,7 @@ async function callTool(name: string, args: any, ctx: McpContext) {
       let data = existing.data;
       if (args?.patch !== undefined) {
         if (!args.patch || typeof args.patch !== 'object') throw new Error('patch debe ser un objeto');
-        const ALLOWED = ['label', 'textTop', 'textBottom', 'fontSize', 'icon', 'emoji', 'backgroundColor', 'textColor'];
+        const ALLOWED = ['label', 'textTop', 'textBottom', 'fontSize', 'icon', 'iconImage', 'backgroundImage', 'emoji', 'backgroundColor', 'textColor', 'showTitle', 'dynamicValue', 'badge'];
         const patch: any = {};
         for (const k of ALLOWED) if (args.patch[k] !== undefined) patch[k] = args.patch[k];
         data = { ...(parseData(data)), ...patch };
@@ -2923,6 +3333,531 @@ async function callTool(name: string, args: any, ctx: McpContext) {
     case 'get_logs': {
       const limit = Math.min(Math.max(Number(args?.limit ?? 100), 1), 500);
       return { logs: db.getLogs(limit, args?.level) };
+    }
+    // ---- aspecto de botones ----
+    case 'get_button_appearance': {
+      const id = reqStr(args, 'id');
+      const b = db.getButton(id);
+      if (!b) throw new Error('Botón no encontrado');
+      const data = parseData((b as any).data);
+      const appearance: any = {};
+      for (const k of APPEARANCE_FIELDS) if ((data as any)[k] !== undefined) appearance[k] = (data as any)[k];
+      const out: any = { buttonId: id, appearance, looks: Array.isArray((data as any).looks) ? (data as any).looks : [] };
+      if (args?.resolve === true) {
+        try {
+          const { resolveKeyDisplay, getDaemonDisplayEnv } = await import('../hw-driver/key-display');
+          const page = db.getPage((b as any).page_id);
+          const profile = page ? db.getProfile((page as any).profile_id) : null;
+          const env = getDaemonDisplayEnv(
+            (profile as any)?.name ?? '', (page as any)?.name ?? '',
+          );
+          out.resolved = resolveKeyDisplay({ ...(data as any) }, env);
+        } catch (e) {
+          out.resolved = null;
+          out.resolveError = e instanceof Error ? e.message : String(e);
+        }
+      }
+      return out;
+    }
+    case 'set_button_appearance': {
+      const id = reqStr(args, 'id');
+      const existing = db.getButton(id);
+      if (!existing) throw new Error('Botón no encontrado');
+      const prevData = structuredClone(parseData(existing.data));
+      const data = { ...parseData(existing.data) };
+      const appearance = args?.appearance;
+      if (appearance !== undefined) {
+        if (!appearance || typeof appearance !== 'object' || Array.isArray(appearance)) {
+          throw new Error('appearance debe ser un objeto');
+        }
+        let touched = false;
+        for (const k of APPEARANCE_FIELDS) {
+          if ((appearance as any)[k] !== undefined) { (data as any)[k] = (appearance as any)[k]; touched = true; }
+        }
+        if (args?.looks === undefined && !touched) throw new Error('appearance vacío: indica al menos un campo de aspecto o looks');
+      }
+      if (args?.looks !== undefined) {
+        validateLooks(args.looks, 'set_button_appearance');
+        (data as any).looks = args.looks;
+      }
+      db.updateButton(id, data);
+      const updated = db.getButton(id);
+      ctx.ws?.broadcastButtonUpdate(id, updated);
+      repaint(ctx, existing.page_id);
+      recordInverse(ctx, 'set_button_appearance', `aspecto del botón ${id}`, {
+        tool: '__restore_button_data', arguments: { button_id: id, data: prevData },
+      });
+      return { button: updated };
+    }
+    // ---- controles y superficies ----
+    case 'list_controls': {
+      const onlyControls = args?.only_controls !== false;
+      const pluginFilter = typeof args?.plugin_id === 'string' && args.plugin_id ? args.plugin_id : null;
+      const controls = Array.from(pluginLoader.getPluginActions().entries())
+        .filter(([fullId, a]: any) => {
+          if (pluginFilter && !String(fullId).startsWith(`${pluginFilter}.`)) return false;
+          if (onlyControls && (a as any)?.surface !== 'control') return false;
+          return true;
+        })
+        .map(([fullId, a]: any) => ({
+          type: fullId,
+          name: (a as any)?.name ?? fullId,
+          description: (a as any)?.description ?? '',
+          surface: (a as any)?.surface ?? 'execute',
+          component: (a as any)?.component ?? null,
+          dynamic: !!(a as any)?.dynamic,
+          freeModeOnly: !!(a as any)?.freeModeOnly,
+          pollMs: (a as any)?.pollMs ?? null,
+        }));
+      const widgets: any[] = [];
+      try {
+        const detailed = pluginLoader.listDetailed() as any[];
+        for (const p of detailed) {
+          const manifest = (p as any)?.manifest ?? null;
+          const defs = Array.isArray(manifest?.widgets) ? manifest.widgets : [];
+          if (pluginFilter && p?.id !== pluginFilter) continue;
+          for (const w of defs) widgets.push({ pluginId: p?.id ?? null, ...w });
+        }
+      } catch { /* best-effort */ }
+      return { onlyControls, controls, widgets };
+    }
+    case 'get_plugin_action': {
+      const type = reqStr(args, 'type');
+      const a = (pluginLoader as any)?.getAction?.(type) ?? pluginLoader.getPluginActions().get(type);
+      if (!a) throw new Error(`Tipo de acción desconocido: ${type} (usa list_actions para ver los disponibles)`);
+      const locale = typeof args?.locale === 'string' && args.locale ? args.locale : 'en';
+      let name = (a as any)?.name ?? type;
+      let description = (a as any)?.description ?? '';
+      try {
+        const { localizeActionField } = await import('../plugins/plugin-i18n');
+        name = localizeActionField(a, 'name', locale, name);
+        description = localizeActionField(a, 'description', locale, description);
+      } catch { /* sin i18n: valores base */ }
+      return {
+        type, locale, name, description,
+        schema: (a as any)?.schema ?? null,
+        surface: (a as any)?.surface ?? 'execute',
+        component: (a as any)?.component ?? null,
+        dynamic: !!(a as any)?.dynamic,
+        freeModeOnly: !!(a as any)?.freeModeOnly,
+        pollMs: (a as any)?.pollMs ?? null,
+        timeoutMs: (a as any)?.timeoutMs ?? null,
+        cooldownMs: (a as any)?.cooldownMs ?? null,
+        states: (a as any)?.states ?? null,
+        variables: (a as any)?.variables ?? null,
+        optionsFrom: (a as any)?.optionsFrom ?? null,
+        i18n: (a as any)?.i18n ?? null,
+      };
+    }
+    case 'get_action_options': {
+      // Espejo de POST /api/v1/plugins/action-options: solo se ejecuta la
+      // sourceAction declarada por el MISMO plugin, nunca una arbitraria.
+      const pluginId = reqStr(args, 'plugin_id');
+      const actionId = reqStr(args, 'action_id');
+      const plugin = (pluginLoader as any)?.getPlugin?.(pluginId);
+      if (!plugin || !plugin.enabled) throw new Error(`Plugin no disponible: ${pluginId}`);
+      const manifest = (plugin as any)?.manifest ?? {};
+      const action = (manifest.actions ?? []).find((x: any) => x?.id === actionId);
+      const optionsFrom = (action as any)?.optionsFrom;
+      if (!optionsFrom?.sourceAction || !optionsFrom?.field) {
+        throw new Error(`La acción ${pluginId}.${actionId} no declara opciones dinámicas`);
+      }
+      const field = typeof args?.field === 'string' && args.field ? args.field : optionsFrom.field;
+      if (field !== optionsFrom.field) throw new Error(`Campo no válido: ${field} (se esperaba ${optionsFrom.field})`);
+      const forward: Record<string, any> = {};
+      const src = String(optionsFrom.sourceAction);
+      if (Array.isArray(optionsFrom.forwardParams)) {
+        for (const k of optionsFrom.forwardParams) {
+          const v = (args?.params ?? {})[k];
+          if (v !== undefined && v !== null && v !== '') forward[k] = v;
+        }
+      } else {
+        Object.assign(forward, args?.params ?? {});
+      }
+      const res = await actionRunner.executeAction(
+        { type: `${manifest.id}.${src}`, parameters: forward, timeout: 20000 },
+        { timestamp: Date.now(), pressType: 'short', quiet: true } as any
+      );
+      if (!res.success) {
+        return { success: false, pluginId, actionId, field: optionsFrom.field, error: res.error ?? 'No se pudieron obtener las opciones' };
+      }
+      const raw = (res.result as any)?.options;
+      const options = (Array.isArray(raw) ? raw : [])
+        .filter((o: any) => o && o.value !== undefined)
+        .map((o: any) => ({ ...o, value: String(o.value), label: String(o.label ?? o.value) }));
+      return { success: true, pluginId, actionId, field: optionsFrom.field, options, count: options.length };
+    }
+    case 'list_plugin_widgets': {
+      const pluginFilter = typeof args?.plugin_id === 'string' && args.plugin_id ? args.plugin_id : null;
+      const widgets: any[] = [];
+      const detailed = pluginLoader.listDetailed() as any[];
+      for (const p of detailed) {
+        if (pluginFilter && p?.id !== pluginFilter) continue;
+        const manifest = (p as any)?.manifest ?? null;
+        const defs = Array.isArray(manifest?.widgets) ? manifest.widgets : [];
+        for (const w of defs) widgets.push({ pluginId: p?.id ?? null, ...w });
+      }
+      if (pluginFilter && !detailed.some((p: any) => p?.id === pluginFilter)) {
+        throw new Error(`Plugin no encontrado: ${pluginFilter}`);
+      }
+      return { widgets };
+    }
+    // ---- webhooks LAN ----
+    case 'list_webhooks': {
+      const include = args?.includeTokens === true;
+      const hooks = db.listWebhooks().map((w) => (include ? w : { ...w, token: null, tokenHidden: true }));
+      return { webhooks: hooks };
+    }
+    case 'get_webhook': {
+      const w = db.getWebhook(reqStr(args, 'id'));
+      if (!w) throw new Error('Webhook no encontrado');
+      return {
+        webhook: { ...w, urlPath: `/api/v1/webhooks/${w.token}`, note: 'El token NUNCA se registra en logs; la URL completa solo existe en LAN' },
+      };
+    }
+    case 'create_webhook': {
+      const wname = reqStr(args, 'name');
+      validateWebhookArgs(args, 'create_webhook');
+      const newId = randomUUID();
+      const { randomBytes } = await import('node:crypto');
+      const created = db.createWebhook({
+        id: newId,
+        name: wname.slice(0, 120),
+        token: randomBytes(32).toString('hex'),
+        method: args?.method !== undefined ? webhookMethod(args.method) : 'POST',
+        enabled: args?.enabled === false ? 0 : 1,
+        actions: Array.isArray(args?.actions) ? args.actions : [],
+      });
+      try { (ctx.ws as any)?.broadcast?.('webhook.created', { id: created.id, name: created.name, ts: Date.now() }, 'webhooks'); } catch { /* noop */ }
+      recordInverse(ctx, 'create_webhook', `crear webhook ${created.name}`, {
+        tool: 'delete_webhook', arguments: { id: created.id },
+      });
+      return { webhook: created };
+    }
+    case 'update_webhook': {
+      const id = reqStr(args, 'id');
+      const prev = db.getWebhook(id);
+      if (!prev) throw new Error('Webhook no encontrado');
+      validateWebhookArgs(args, 'update_webhook');
+      const patch: any = {};
+      if (args?.name !== undefined) patch.name = String(args.name).trim().slice(0, 120);
+      if (args?.method !== undefined) patch.method = webhookMethod(args.method);
+      if (args?.enabled !== undefined) patch.enabled = args.enabled ? 1 : 0;
+      if (args?.actions !== undefined) patch.actions = args.actions;
+      const updated = db.updateWebhook(id, patch);
+      try { (ctx.ws as any)?.broadcast?.('webhook.updated', { id: updated.id, name: updated.name, ts: Date.now() }, 'webhooks'); } catch { /* noop */ }
+      recordInverse(ctx, 'update_webhook', `actualizar webhook ${id}`, {
+        tool: 'update_webhook',
+        arguments: { id, name: prev.name, method: prev.method, enabled: prev.enabled === 1, actions: prev.actions },
+      });
+      return { webhook: updated };
+    }
+    case 'delete_webhook': {
+      if (ctx.auth && args?.confirm !== true) {
+        throw new Error('delete_webhook es destructivo: confirma con { confirm: true }.');
+      }
+      const id = reqStr(args, 'id');
+      const prev = db.getWebhook(id);
+      if (!prev) throw new Error('Webhook no encontrado');
+      db.deleteWebhook(id);
+      try { (ctx.ws as any)?.broadcast?.('webhook.deleted', { id, ts: Date.now() }, 'webhooks'); } catch { /* noop */ }
+      recordInverse(ctx, 'delete_webhook', `eliminar webhook ${id}`, {
+        tool: '__restore_webhook', arguments: { webhook: prev },
+      });
+      return { success: true, webhookId: id };
+    }
+    case 'regenerate_webhook_token': {
+      const id = reqStr(args, 'id');
+      const prev = db.getWebhook(id);
+      if (!prev) throw new Error('Webhook no encontrado');
+      const { randomBytes } = await import('node:crypto');
+      const next = db.regenerateWebhookToken(id, randomBytes(32).toString('hex'));
+      try { (ctx.ws as any)?.broadcast?.('webhook.updated', { id: next.id, name: next.name, ts: Date.now() }, 'webhooks'); } catch { /* noop */ }
+      recordInverse(ctx, 'regenerate_webhook_token', `regenerar token de ${id}`, {
+        tool: '__restore_webhook_token', arguments: { id, token: (prev as any).token },
+      });
+      return { webhook: next };
+    }
+    case 'test_webhook': {
+      const id = reqStr(args, 'id');
+      const webhook = db.getWebhook(id);
+      if (!webhook) throw new Error('Webhook no encontrado');
+      const acts = Array.isArray((webhook as any).actions) ? (webhook as any).actions : [];
+      requireBatchConfirmIfSensitive(ctx, acts, args, `El webhook ${id}`);
+      const results: any[] = [];
+      let executed = 0;
+      let failed = 0;
+      for (const action of acts) {
+        try {
+          const r = await actionRunner.executeAction(action, { source: 'webhook', webhookId: id, timestamp: Date.now() } as any);
+          results.push({ type: action?.type ?? 'unknown', success: r?.success !== false });
+          if (r?.success !== false) executed++;
+          else failed++;
+        } catch (e) {
+          results.push({ type: action?.type ?? 'unknown', success: false, error: e instanceof Error ? e.message : String(e) });
+          failed++;
+        }
+      }
+      try { db.recordWebhookTrigger(id); } catch { /* noop */ }
+      try {
+        (ctx.ws as any)?.broadcast?.('webhook.triggered', { id, name: (webhook as any).name, via: 'mcp-test', executed, failed, ts: Date.now() }, 'webhooks');
+      } catch { /* noop */ }
+      return { ok: true, id, executed, failed, results };
+    }
+    // ---- registros por pulsación ----
+    case 'list_press_logs': {
+      const filters: any = { limit: args?.limit ?? 50, offset: args?.offset ?? 0 };
+      for (const k of ['buttonId', 'actionType', 'deviceId', 'pressType'] as const) {
+        if (args?.[k] !== undefined && args[k] !== null && args[k] !== '') filters[k] = String(args[k]);
+      }
+      if (args?.success !== undefined) {
+        if (typeof args.success !== 'boolean') throw new Error('success debe ser boolean');
+        filters.success = args.success;
+      }
+      for (const k of ['since', 'until'] as const) {
+        if (args?.[k] !== undefined && args[k] !== null) {
+          const n = Number(args[k]);
+          if (!Number.isFinite(n)) throw new Error(`${k} debe ser numérico (ms epoch)`);
+          filters[k] = n;
+        }
+      }
+      // Misma validación que la API (api/press-logs.ts): limit 0..500.
+      const limit = Math.floor(Number(filters.limit));
+      if (!Number.isFinite(limit) || limit < 0 || limit > 500) throw new Error('limit debe estar entre 0 y 500');
+      filters.limit = limit;
+      const offset = Math.floor(Number(filters.offset));
+      if (!Number.isFinite(offset) || offset < 0) throw new Error('offset debe ser numérico (>= 0)');
+      filters.offset = offset;
+      const { items, total } = db.listPressLogs(filters);
+      return { items, total, limit: filters.limit, offset: filters.offset };
+    }
+    case 'clear_press_logs': {
+      if (ctx.auth && args?.confirm !== true) {
+        throw new Error('clear_press_logs es destructivo: confirma con { confirm: true }.');
+      }
+      const filt: any = {};
+      if (args?.buttonId) filt.buttonId = String(args.buttonId);
+      if (args?.actionType) filt.actionType = String(args.actionType);
+      if (args?.before !== undefined && args.before !== null) {
+        const n = Number(args.before);
+        if (!Number.isFinite(n)) throw new Error('before debe ser numérico (ms epoch)');
+        filt.before = n;
+      }
+      return { deleted: db.clearPressLogs(filt) };
+    }
+    // ---- pantalla por dispositivo ----
+    case 'get_device_display': {
+      const { streamDeckDriver: drv } = await import('../hw-driver/streamdeck-driver');
+      const device = typeof args?.device === 'string' && args.device ? args.device : drv.getDisplayDeviceId();
+      try {
+        return { device, ...drv.getDisplaySettings(device, db) };
+      } catch (e) {
+        throw new Error(`No se pudo leer la pantalla de ${device}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    case 'set_device_display': {
+      const { streamDeckDriver: drv } = await import('../hw-driver/streamdeck-driver');
+      const { displaySettingKey } = await import('../hw-driver/device-display');
+      const device = typeof args?.device === 'string' && args.device ? args.device : drv.getDisplayDeviceId();
+      const patch: any = {};
+      for (const k of ['brightness', 'dimAfterSec', 'idleMinutes', 'idleAction'] as const) {
+        if (args?.[k] !== undefined) patch[k] = args[k];
+      }
+      if (Object.keys(patch).length === 0) throw new Error('nada que actualizar: indica brightness, dimAfterSec, idleMinutes o idleAction');
+      const prevSettings = (() => {
+        try { return drv.getDisplaySettings(device, db); } catch { return null; }
+      })();
+      const prevRaw: Record<string, string | null> = {};
+      const hadMissing: string[] = [];
+      for (const k of ['brightness', 'dimAfterSec', 'idleMinutes', 'idleAction'] as const) {
+        const key = displaySettingKey(device, k);
+        const v = db.getSetting(key);
+        if (v === null) hadMissing.push(key);
+        else prevRaw[key] = v;
+      }
+      let settings: any;
+      try {
+        settings = await drv.setDisplaySettings(patch, device, db);
+      } catch (e) {
+        throw new Error(e instanceof Error ? e.message : String(e));
+      }
+      try { (ctx.ws as any)?.broadcast?.('device.display', { device, ...settings }, 'devices'); } catch { /* noop */ }
+      recordInverse(ctx, 'set_device_display', `pantalla de ${device}`, {
+        tool: '__restore_display', arguments: { device, settings: prevRaw, hadMissing },
+      });
+      void prevSettings;
+      return { device, ...settings };
+    }
+    // ---- preferencias de app ----
+    case 'get_app_preferences': {
+      const autostartRaw = db.getSetting('system.autostart');
+      const startMinRaw = db.getSetting('system.start_minimized');
+      const language = db.getSetting('ui.language');
+      const appearance = db.getSetting('ui.appearance');
+      return {
+        autostart: autostartRaw === null ? null : autostartRaw === 'true',
+        start_minimized: startMinRaw === null ? null : startMinRaw === 'true',
+        language: language ?? null,
+        appearance: appearance ?? null,
+        raw: { 'system.autostart': autostartRaw, 'system.start_minimized': startMinRaw, 'ui.language': language, 'ui.appearance': appearance },
+      };
+    }
+    case 'set_app_preferences': {
+      const prev: Record<string, string | null> = {
+        'system.autostart': db.getSetting('system.autostart'),
+        'system.start_minimized': db.getSetting('system.start_minimized'),
+        'ui.language': db.getSetting('ui.language'),
+      };
+      const out: any = {};
+      const { parseAutostart, formatAutostart } = await import('../system-autostart');
+      if (args?.autostart !== undefined) {
+        if (typeof args.autostart !== 'boolean') throw new Error('autostart debe ser boolean');
+        const v = formatAutostart(parseAutostart(args.autostart));
+        db.setSetting('system.autostart', v);
+        out.autostart = v === 'true';
+      }
+      if (args?.start_minimized !== undefined) {
+        if (typeof args.start_minimized !== 'boolean') throw new Error('start_minimized debe ser boolean');
+        const v = formatAutostart(parseAutostart(args.start_minimized));
+        db.setSetting('system.start_minimized', v);
+        out.start_minimized = v === 'true';
+      }
+      if (args?.language !== undefined) {
+        const lang = String(args.language);
+        if (!['es', 'en'].includes(lang)) throw new Error(`language debe ser 'es' o 'en'`);
+        db.setSetting('ui.language', lang);
+        out.language = lang;
+      }
+      if (Object.keys(out).length === 0) throw new Error('nada que actualizar: indica autostart, start_minimized o language');
+      try {
+        for (const [k, v] of Object.entries(out)) {
+          (ctx.ws as any)?.broadcast?.('settings.changed', { key: k === 'start_minimized' ? 'system.start_minimized' : k === 'autostart' ? 'system.autostart' : 'ui.language', value: String(v) }, 'settings');
+        }
+      } catch { /* noop */ }
+      const batch = Object.entries(prev)
+        .filter(([k]) => {
+          if (k === 'system.autostart') return args?.autostart !== undefined;
+          if (k === 'system.start_minimized') return args?.start_minimized !== undefined;
+          return args?.language !== undefined;
+        })
+        .map(([key, value]) => ({
+          tool: '__restore_setting', arguments: { key, hadValue: value !== null, value },
+        }));
+      recordInverse(ctx, 'set_app_preferences', 'preferencias de app', { tool: '__batch', arguments: {}, batch });
+      return out;
+    }
+    // ---- catálogo / Elgato / atajos / sesiones / grid ----
+    case 'get_catalog_plugin': {
+      const id = reqStr(args, 'id');
+      const { getCatalogEntry, isCompatible } = await import('../catalog');
+      const { getVersion: gv } = await import('../version');
+      const entry = getCatalogEntry(id);
+      if (!entry) throw new Error(`Sin entrada en el catálogo: ${id}`);
+      const appVersion = gv();
+      let extra: any = {};
+      try {
+        const rec = db.getPlugin(id) as any;
+        extra = rec
+          ? { installed: true, enabled: Number(rec.enabled) === 1, installedVersion: rec.version ?? null }
+          : { installed: false, enabled: false, installedVersion: null };
+      } catch { extra = { installed: false, enabled: false, installedVersion: null }; }
+      return { ...entry, compatible: isCompatible(entry, appVersion), ...extra };
+    }
+    case 'get_elgato_state': {
+      const pluginId = reqStr(args, 'plugin_id');
+      try {
+        const state = await pluginLoader.getElgatoState(pluginId, typeof args?.action === 'string' ? args.action : undefined);
+        return state;
+      } catch (e) {
+        throw new Error(e instanceof Error ? e.message : String(e));
+      }
+    }
+    case 'list_shortcuts': {
+      const { SHORTCUT_IDS } = await import('../api/shortcuts');
+      return { ids: [...SHORTCUT_IDS], uiOnly: ['toggle-panels', 'toggle-kiosk'], firstWinsMs: 800 };
+    }
+    case 'trigger_shortcut': {
+      // Reutiliza el handler REST (misma regla anti-doble-ejecución y
+      // broadcasts): se invoca con un Request sintético.
+      const { handleShortcuts } = await import('../api/shortcuts');
+      const body: any = { ...(args ?? {}) };
+      const req = new Request('http://localhost/api/v1/shortcuts/trigger', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const res = await handleShortcuts(req, {
+        url: new URL(req.url), method: 'POST', path: '/api/v1/shortcuts/trigger', db, services: { wsManager: ctx.ws, actionRunner: ctx.actionRunner },
+      } as any);
+      if (!res) throw new Error('Atajo no gestionado');
+      const payload = await res.json().catch(() => ({}));
+      if (res.status >= 400) throw new Error((payload as any)?.error ?? `Atajo fallido (HTTP ${res.status})`);
+      return payload;
+    }
+    case 'close_session': {
+      const deviceId = reqStr(args, 'device_id');
+      const { isHardwareDeviceId } = await import('../devices');
+      const { unbindDevice } = await import('../remote/device-bindings');
+      if (!db.getDeviceSession(deviceId)) {
+        const views: any[] = (ctx.ws as any)?.getSessions?.() ?? [];
+        if (!views.some((v) => v.deviceId === deviceId)) throw new Error('Sesión no encontrada');
+      }
+      db.deleteDeviceSession(deviceId);
+      try {
+        if (db.getDevice(deviceId) && !isHardwareDeviceId(deviceId)) db.deleteDevice(deviceId);
+      } catch { /* noop */ }
+      try { unbindDevice(db, deviceId); } catch { /* noop */ }
+      return { success: true, deviceId };
+    }
+    case 'get_page_context': {
+      const id = reqStr(args, 'id');
+      const page = db.getPage(id) as any;
+      if (!page) throw new Error('Página no encontrada');
+      const buttons = db.getButtonsByPage(id);
+      let assignments: Record<string, string> = {};
+      try { assignments = db.getAssignments(page.profile_id); } catch { /* mejor esfuerzo */ }
+      return { page: pageOut(page), buttons, assignments, pageVersion: Date.now() };
+    }
+    // ---- variables: listado con scope + update parcial + expuestas ----
+    case 'list_scoped_variables': {
+      const store = getVariableStore();
+      const list = args?.scope ? store.resolved(args.scope, args?.scopeId) : store.list();
+      return { variables: list.map(varToJSON) };
+    }
+    case 'update_scoped_variable': {
+      const vname = reqStr(args, 'name');
+      const store = getVariableStore();
+      const addr = { scope: args?.scope, scopeId: args?.scopeId };
+      const cur = store.require(vname, args?.scope, args?.scopeId);
+      const prev = JSON.parse(JSON.stringify(cur));
+      let def = cur;
+      if (args?.type !== undefined && args.type !== def.type) {
+        def = await store.retype(vname, args.type, { ...addr, source: 'mcp' });
+      }
+      if (args?.bindings !== undefined) def = await store.setBindings(vname, args.bindings ?? null, addr);
+      if (args?.value !== undefined) def = await store.set(vname, args.value, { ...addr, source: 'mcp' });
+      if (args?.unavailable !== undefined && !!args.unavailable !== def.unavailable) {
+        def = await store.setUnavailable(vname, !!args.unavailable, addr);
+      }
+      recordInverse(ctx, 'update_scoped_variable', `actualizar variable tipada ${vname}`, {
+        tool: '__restore_scoped_variable',
+        arguments: { name: vname, scope: def.scope, scopeId: def.scopeId, prev },
+      });
+      return { variable: varToJSON(def) };
+    }
+    case 'list_exposed_variables': {
+      const { EXPOSED_ACTION_VARS } = await import('../variables/exposed');
+      const store = getVariableStore();
+      const out: any[] = [];
+      for (const [action, decls] of Object.entries(EXPOSED_ACTION_VARS)) {
+        for (const d of decls as any[]) {
+          let value: unknown = null;
+          try {
+            const cur = store.get((d as any).name, 'global', '');
+            value = cur ? (cur as any).value : null;
+          } catch { value = null; }
+          out.push({ ...(d as any), action, value });
+        }
+      }
+      return { variables: out };
     }
     // ---- widgets ----
     case 'list_widgets':

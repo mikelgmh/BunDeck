@@ -44,6 +44,13 @@ export const MCP_SCOPES: McpScopeDef[] = [
   { id: 'batch.write', group: 'system' },
   { id: 'history.read', group: 'system' },
   { id: 'history.write', group: 'system' },
+  // Webhooks LAN, registros por pulsación y atajos globales.
+  { id: 'webhooks.read', group: 'webhooks' },
+  { id: 'webhooks.write', group: 'webhooks' },
+  { id: 'presslogs.read', group: 'presslogs' },
+  { id: 'presslogs.write', group: 'presslogs' },
+  { id: 'shortcuts.read', group: 'shortcuts' },
+  { id: 'shortcuts.write', group: 'shortcuts' },
   // Dispositivos lógicos, asignaciones y sesiones (grupos propios).
   { id: 'devices.read', group: 'devices' },
   { id: 'devices.write', group: 'devices' },

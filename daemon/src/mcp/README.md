@@ -38,6 +38,14 @@ Toda mutación queda auditada en `logs` (`mcp:<tool>`).
 | Acciones del botón | `add_button_action`, `update_button_action`, `remove_button_action`, `reorder_button_actions` |
 | Plugins | `get_plugin_template`, `validate_manifest`, `install_plugin` (+ legacy `install_plugin_from_git`), `list_plugins`, `get_plugin`, `enable_plugin`, `disable_plugin`, `reload_plugin`, `rollback_plugin`, `update_plugin`, `uninstall_plugin`, `get_plugin_settings`, `save_plugin_settings` |
 | Ajustes/logs | `list_settings`, `get_setting`, `set_setting`, `get_logs` |
+| Aspecto | `get_button_appearance` (crudo + `resolve:true` efectivo), `set_button_appearance` (appearance + `looks` condicionales) |
+| Controles/superficies | `list_controls` (surface `control` + widgets), `get_plugin_action` (detalle localizado: schema, surface/component, states, variables, optionsFrom), `get_action_options` (opciones dinámicas), `list_plugin_widgets` + `list_actions` (filtros `locale`/`surface`/`plugin_id`, superficie por acción) |
+| Webhooks LAN | `list_webhooks` (tokens ocultos salvo `includeTokens:true`), `get_webhook`, `create_webhook`, `update_webhook`, `delete_webhook` (confirm:true, con undo), `regenerate_webhook_token`, `test_webhook` (ejecuta; sensibles exigen confirm, sin undo, no batch) |
+| Registros | `list_press_logs` (filtros + `limit` máx. 500/`offset` + `total`), `clear_press_logs` (confirm:true, sin undo, no batch) |
+| Pantalla/dispositivos | `get_device_display`, `set_device_display` (brightness/dimAfterSec/idleMinutes/idleAction, con undo) |
+| Preferencias app | `get_app_preferences`, `set_app_preferences` (autostart/start_minimized/language es·en, con undo) |
+| Catálogo/Elgato/atajos/sesiones/grid | `get_catalog_plugin`, `get_elgato_state`, `list_shortcuts`, `trigger_shortcut` (misma anti-doble-ejecución que la API, no batch), `close_session` (no batch), `get_page_context` (page+buttons+assignments+pageVersion) |
+| Variables extra | `list_scoped_variables` (filtro scope/scopeId), `update_scoped_variable` (parcial: value/type/bindings/unavailable), `list_exposed_variables` (estado en vivo) |
 | Backups | `export_backup` (sections), `export_profile_backup`, `validate_backup`, `restore_backup` (confirm:true, sin undo, no batch) |
 | Assets | `list_assets`, `delete_asset` (confirm:true, sin undo, no batch) |
 | Sistema | `get_version`, `get_system_metrics` (ligero, degradado honesto), `get_network_ips`, `list_jobs`, `cancel_job` (sin undo, no batch), `list_catalog` (offline) |
