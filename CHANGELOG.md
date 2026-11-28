@@ -1,3 +1,11 @@
+# [1.26.0](https://github.com/mikelgmh/BunDeck/compare/v1.25.2...v1.26.0) (2026-11-28)
+
+
+### Features
+
+* **i18n,display:** ingles por defecto con autodeteccion + dim desactivado por defecto ([ed7832d](https://github.com/mikelgmh/BunDeck/commit/ed7832dc7d63af682c6fa7745d7ce13a607902c0))
+* **startup:** autostart + pestana Ajustes + iniciar minimizado por defecto ([1a5ccca](https://github.com/mikelgmh/BunDeck/commit/1a5cccac9e069f89b7055fad86d8e2ab7b85048e))
+
 ## [1.25.2](https://github.com/mikelgmh/BunDeck/compare/v1.25.1...v1.25.2) (2026-11-28)
 
 
