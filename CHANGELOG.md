@@ -1,3 +1,20 @@
+# [1.28.0](https://github.com/mikelgmh/BunDeck/compare/v1.27.0...v1.28.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **logs:** registros por boton/accion + paginacion y UX rehecha ([325fac6](https://github.com/mikelgmh/BunDeck/commit/325fac68c29540773711ba687b5b5b2f98c80dd4))
+* **relay:** sesiones sobreviven al redespliegue + auto-reintento ([3e2ddde](https://github.com/mikelgmh/BunDeck/commit/3e2ddded6fdd8e878ac84228e29e57c56ba92bb8))
+* **spotify:** acciones usan el token del plugin, no campo propio ([f583906](https://github.com/mikelgmh/BunDeck/commit/f58390651be0bd264334e5431f4b76f728505a98))
+* **spotify:** captura via fetch-res + POST con timeouts y errores visibles ([d70cf70](https://github.com/mikelgmh/BunDeck/commit/d70cf70c6264a6600c7c3d1e6771add0fb5c7b38))
+* **web:** re-sync de apariencia tras reconexion WS ([a5f6892](https://github.com/mikelgmh/BunDeck/commit/a5f68926bb65fb06761f605cc5dc648e145ed1d9))
+
+
+### Features
+
+* **mcp:** 28 tools nuevas hasta v2.3.0 (aspecto, controles, webhooks, press-logs, display, prefs, catalogo, grid, variables) ([d726ed4](https://github.com/mikelgmh/BunDeck/commit/d726ed49a4abfdc5878b7433c167a95fed16c0de))
+* **webhooks:** endpoints LAN con token que ejecutan listas de acciones ([67b7967](https://github.com/mikelgmh/BunDeck/commit/67b7967eb6092413de85b6cf1ffd12a9c25955ff))
+
 # [1.27.0](https://github.com/mikelgmh/BunDeck/compare/v1.26.0...v1.27.0) (2026-11-28)
 
 
