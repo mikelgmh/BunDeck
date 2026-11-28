@@ -560,18 +560,10 @@ const connectOAuth = async () => {
     } catch {
       /* sin authorizeUrl (Spotify): el host abre el Web Player */
     }
-    // Sin Electrobun en prod no hay BrowserWindow del host: abrir el Web
-    // Player en una pestaña como respaldo (el launcher también lo abre en
-    // el host cuando no hay host vivo; duplicar la apertura es inofensivo
-    // frente a no abrir nada). Si el popup se bloquea, queda el enlace.
-    if (!isDiscordOauth.value && !loginAuthorizeUrl.value) {
-      try {
-        window.open('https://open.spotify.com', '_blank', 'noopener')
-      } catch {
-        /* popup bloqueado: queda el enlace visible */
-      }
-    }
-    // Poll: el host abre la ventana y el sniffer POSTea token-capture.
+    // La ventana de login la abre el launcher (helper bundeck-spotify-auth,
+    // una vez por login-request). La web NO auto-abre pestañas: si el
+    // helper falta o el popup se bloquea, queda el enlace manual visible.
+    // Poll: el helper abre la ventana y el sniffer POSTea token-capture.
     const started = Date.now()
     const gen = loginGen
     await new Promise<void>((resolve, reject) => {
